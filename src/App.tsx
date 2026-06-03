@@ -1,0 +1,38 @@
+import { useQuery } from "@tanstack/react-query";
+import { RepoSidebar } from "./components/RepoSidebar";
+import { RepoView } from "./components/RepoView";
+import { ReviewView } from "./components/ReviewView";
+import { api } from "./lib/api";
+import { useUIStore } from "./store";
+
+function App() {
+  const activeRepoId = useUIStore((s) => s.activeRepoId);
+  const activeReviewId = useUIStore((s) => s.activeReviewId);
+  const reposQuery = useQuery({
+    queryKey: ["repositories"],
+    queryFn: api.listRepositories,
+  });
+  const activeRepo = reposQuery.data?.find((r) => r.id === activeRepoId) ?? null;
+
+  let main;
+  if (activeReviewId != null) {
+    main = <ReviewView reviewId={activeReviewId} />;
+  } else if (activeRepo) {
+    main = <RepoView repo={activeRepo} />;
+  } else {
+    main = (
+      <section className="main-panel empty">
+        <p className="muted">Select or add a repository to begin.</p>
+      </section>
+    );
+  }
+
+  return (
+    <div className="layout">
+      <RepoSidebar />
+      {main}
+    </div>
+  );
+}
+
+export default App;
