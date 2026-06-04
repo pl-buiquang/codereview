@@ -125,3 +125,143 @@ pub fn diff(path: &Path, base: &str, head: &str, three_dot: bool) -> AppResult<S
     };
     run_git(path, &["diff", "--no-color", &range])
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::process::Command;
+    use tempfile::TempDir;
+
+    // ---- pure parsing -----------------------------------------------------
+
+    #[test]
+    fn parse_owner_repo_ssh() {
+        let r = parse_owner_repo("git@github.com:owner/repo.git");
+        assert_eq!(r.owner.as_deref(), Some("owner"));
+        assert_eq!(r.name.as_deref(), Some("repo"));
+    }
+
+    #[test]
+    fn parse_owner_repo_https() {
+        let r = parse_owner_repo("https://github.com/some-org/some-repo.git");
+        assert_eq!(r.owner.as_deref(), Some("some-org"));
+        assert_eq!(r.name.as_deref(), Some("some-repo"));
+    }
+
+    #[test]
+    fn parse_owner_repo_https_without_git_suffix() {
+        let r = parse_owner_repo("https://github.com/a/b");
+        assert_eq!(r.owner.as_deref(), Some("a"));
+        assert_eq!(r.name.as_deref(), Some("b"));
+    }
+
+    #[test]
+    fn parse_owner_repo_trims_whitespace_and_trailing_newline() {
+        let r = parse_owner_repo("  git@github.com:owner/repo.git\n");
+        assert_eq!(r.owner.as_deref(), Some("owner"));
+        assert_eq!(r.name.as_deref(), Some("repo"));
+    }
+
+    #[test]
+    fn parse_owner_repo_non_github_falls_back_to_last_two_segments() {
+        let r = parse_owner_repo("https://gitlab.com/group/project.git");
+        assert_eq!(r.owner.as_deref(), Some("group"));
+        assert_eq!(r.name.as_deref(), Some("project"));
+    }
+
+    #[test]
+    fn parse_owner_repo_garbage_yields_none() {
+        let r = parse_owner_repo("not-a-url");
+        assert!(r.owner.is_none());
+        assert!(r.name.is_none());
+    }
+
+    // ---- integration against a real temporary git repo --------------------
+
+    fn git(dir: &Path, args: &[&str]) {
+        let status = Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(args)
+            .output()
+            .expect("spawn git");
+        assert!(
+            status.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&status.stderr)
+        );
+    }
+
+    /// Build a repo with a `main` branch (one commit) and a `feature` branch
+    /// that adds a line, so diffs/branches are deterministic.
+    fn fixture_repo() -> TempDir {
+        let dir = TempDir::new().unwrap();
+        let p = dir.path();
+        git(p, &["init", "-q", "-b", "main"]);
+        git(p, &["config", "user.email", "test@example.com"]);
+        git(p, &["config", "user.name", "Test"]);
+        fs::write(p.join("file.txt"), "line1\nline2\n").unwrap();
+        git(p, &["add", "."]);
+        git(p, &["commit", "-q", "-m", "initial"]);
+
+        git(p, &["checkout", "-q", "-b", "feature"]);
+        fs::write(p.join("file.txt"), "line1\nline2\nline3\n").unwrap();
+        git(p, &["commit", "-q", "-am", "add line3"]);
+        git(p, &["checkout", "-q", "main"]);
+        dir
+    }
+
+    #[test]
+    fn is_git_repo_true_for_repo_false_otherwise() {
+        let repo = fixture_repo();
+        assert!(is_git_repo(repo.path()));
+
+        let empty = TempDir::new().unwrap();
+        assert!(!is_git_repo(empty.path()));
+    }
+
+    #[test]
+    fn rev_parse_returns_a_sha() {
+        let repo = fixture_repo();
+        let sha = rev_parse(repo.path(), "main").unwrap();
+        assert_eq!(sha.len(), 40, "expected full sha, got {sha:?}");
+        assert!(sha.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn list_branches_includes_local_heads() {
+        let repo = fixture_repo();
+        let names: Vec<String> = list_branches(repo.path())
+            .unwrap()
+            .into_iter()
+            .map(|b| b.name)
+            .collect();
+        assert!(names.contains(&"main".to_string()), "got {names:?}");
+        assert!(names.contains(&"feature".to_string()), "got {names:?}");
+        // No symbolic HEAD pointers leak through.
+        assert!(!names.iter().any(|n| n.ends_with("/HEAD")));
+    }
+
+    #[test]
+    fn diff_shows_added_line() {
+        let repo = fixture_repo();
+        let out = diff(repo.path(), "main", "feature", false).unwrap();
+        assert!(out.contains("+line3"), "diff was: {out}");
+        assert!(out.contains("file.txt"));
+    }
+
+    #[test]
+    fn diff_empty_when_no_changes() {
+        let repo = fixture_repo();
+        let out = diff(repo.path(), "main", "main", false).unwrap();
+        assert!(out.trim().is_empty(), "expected empty diff, got: {out}");
+    }
+
+    #[test]
+    fn run_git_surfaces_error_on_bad_ref() {
+        let repo = fixture_repo();
+        let err = rev_parse(repo.path(), "no-such-ref").unwrap_err();
+        assert!(matches!(err, AppError::Git(_)));
+    }
+}

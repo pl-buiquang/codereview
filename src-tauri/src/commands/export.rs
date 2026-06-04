@@ -44,3 +44,69 @@ pub fn export_review(
     )?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::open_memory;
+    use crate::error::AppError;
+
+    /// Seed a minimal repo → local target → draft review, returning the review id.
+    fn seed_review(conn: &rusqlite::Connection) -> i64 {
+        conn.execute(
+            "INSERT INTO repository (path, remote_owner, remote_name, added_at)
+             VALUES ('/repo', 'owner', 'name', 'now')",
+            [],
+        )
+        .unwrap();
+        let repo_id = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO target (repo_id, kind, title, base_ref, head_ref, created_at)
+             VALUES (?1, 'local', 'main...feature', 'main', 'feature', 'now')",
+            params![repo_id],
+        )
+        .unwrap();
+        let target_id = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO review (target_id, body, status, created_at, updated_at)
+             VALUES (?1, 'A summary', 'draft', 'now', 'now')",
+            params![target_id],
+        )
+        .unwrap();
+        conn.last_insert_rowid()
+    }
+
+    #[test]
+    fn render_markdown_format() {
+        let conn = open_memory();
+        let id = seed_review(&conn);
+        let out = render(&conn, id, "markdown").unwrap();
+        assert!(out.starts_with("# Review: main...feature"));
+        assert!(out.contains("Repo: owner/name"));
+    }
+
+    #[test]
+    fn render_md_alias_works() {
+        let conn = open_memory();
+        let id = seed_review(&conn);
+        assert!(render(&conn, id, "md").is_ok());
+    }
+
+    #[test]
+    fn render_json_format() {
+        let conn = open_memory();
+        let id = seed_review(&conn);
+        let out = render(&conn, id, "json").unwrap();
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["repo"], "owner/name");
+        assert_eq!(v["summary"], "A summary");
+    }
+
+    #[test]
+    fn render_unknown_format_errors() {
+        let conn = open_memory();
+        let id = seed_review(&conn);
+        let err = render(&conn, id, "yaml").unwrap_err();
+        assert!(matches!(err, AppError::Other(_)));
+    }
+}

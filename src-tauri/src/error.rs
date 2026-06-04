@@ -33,3 +33,31 @@ impl Serialize for AppError {
 }
 
 pub type AppResult<T> = Result<T, AppError>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn serializes_to_plain_string() {
+        let err = AppError::Other("boom".into());
+        let json = serde_json::to_string(&err).unwrap();
+        assert_eq!(json, "\"boom\"");
+    }
+
+    #[test]
+    fn display_includes_category_prefix() {
+        assert_eq!(
+            AppError::NotARepo("/tmp/x".into()).to_string(),
+            "not a git repository: /tmp/x"
+        );
+        assert_eq!(AppError::Git("bad ref".into()).to_string(), "git error: bad ref");
+        assert_eq!(AppError::Gh("nope".into()).to_string(), "gh error: nope");
+    }
+
+    #[test]
+    fn rusqlite_error_converts_via_from() {
+        let app: AppError = rusqlite::Error::QueryReturnedNoRows.into();
+        assert!(matches!(app, AppError::Db(_)));
+    }
+}

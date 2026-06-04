@@ -95,3 +95,145 @@ pub fn render_json(detail: &ReviewDetail, repo_label: &str) -> String {
 
     serde_json::to_string_pretty(&value).unwrap_or_else(|_| "{}".into())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::models::{Comment, Review, Target};
+
+    fn target() -> Target {
+        Target {
+            id: 1,
+            repo_id: 1,
+            kind: "github_pr".into(),
+            github_pr_number: Some(42),
+            title: "Improve thing".into(),
+            base_ref: "main".into(),
+            head_ref: "feature".into(),
+            base_sha: Some("abcdef1234567890".into()),
+            head_sha: Some("1234567890abcdef".into()),
+            three_dot: true,
+            created_at: "2026-01-01T00:00:00Z".into(),
+        }
+    }
+
+    fn review() -> Review {
+        Review {
+            id: 1,
+            target_id: 1,
+            body: "Looks good overall.".into(),
+            event: Some("approve".into()),
+            status: "draft".into(),
+            published_at: None,
+            github_review_id: None,
+            last_exported_at: None,
+            created_at: "2026-01-01T00:00:00Z".into(),
+            updated_at: "2026-01-01T00:00:00Z".into(),
+        }
+    }
+
+    fn comment(line: i64, start_line: Option<i64>) -> Comment {
+        Comment {
+            id: 1,
+            review_id: 1,
+            file_path: "src/main.rs".into(),
+            side: "RIGHT".into(),
+            line,
+            start_line,
+            diff_hunk: Some("@@ -1,2 +1,3 @@\n line1\n+line3".into()),
+            body: "Consider renaming this.".into(),
+            parent_id: None,
+            anchored_head_sha: None,
+            github_comment_id: None,
+            created_at: "2026-01-01T00:00:00Z".into(),
+            updated_at: "2026-01-01T00:00:00Z".into(),
+        }
+    }
+
+    fn detail(comments: Vec<Comment>) -> ReviewDetail {
+        ReviewDetail {
+            review: review(),
+            target: target(),
+            repo_path: "/repo".into(),
+            comments,
+        }
+    }
+
+    #[test]
+    fn short_sha_truncates_to_eight() {
+        assert_eq!(short_sha(&Some("1234567890abcdef".into())), "12345678");
+    }
+
+    #[test]
+    fn short_sha_handles_short_input_and_none() {
+        assert_eq!(short_sha(&Some("abc".into())), "abc");
+        assert_eq!(short_sha(&None), "?");
+    }
+
+    #[test]
+    fn markdown_includes_header_verdict_summary_and_comment() {
+        let md = render_markdown(&detail(vec![comment(3, None)]), "owner/repo");
+        assert!(md.contains("# Review: Improve thing"));
+        assert!(md.contains("Repo: owner/repo · Base: main (abcdef12) → Head: feature (12345678)"));
+        assert!(md.contains("Verdict: approve"));
+        assert!(md.contains("Status: draft"));
+        assert!(md.contains("## Summary"));
+        assert!(md.contains("Looks good overall."));
+        assert!(md.contains("### src/main.rs:3 (RIGHT)"));
+        assert!(md.contains("```diff"));
+        assert!(md.contains("Consider renaming this."));
+    }
+
+    #[test]
+    fn markdown_renders_multiline_range_location() {
+        let md = render_markdown(&detail(vec![comment(5, Some(3))]), "owner/repo");
+        assert!(md.contains("### src/main.rs:3-5 (RIGHT)"), "got: {md}");
+    }
+
+    #[test]
+    fn markdown_single_line_when_start_equals_line() {
+        let md = render_markdown(&detail(vec![comment(5, Some(5))]), "owner/repo");
+        assert!(md.contains("### src/main.rs:5 (RIGHT)"));
+        assert!(!md.contains("5-5"));
+    }
+
+    #[test]
+    fn markdown_omits_summary_when_body_blank() {
+        let mut d = detail(vec![]);
+        d.review.body = "   ".into();
+        let md = render_markdown(&d, "owner/repo");
+        assert!(!md.contains("## Summary"));
+        assert!(!md.contains("## Comments"));
+    }
+
+    #[test]
+    fn markdown_omits_verdict_when_none() {
+        let mut d = detail(vec![]);
+        d.review.event = None;
+        let md = render_markdown(&d, "owner/repo");
+        assert!(!md.contains("Verdict:"));
+    }
+
+    #[test]
+    fn json_is_valid_and_carries_fields() {
+        let json = render_json(&detail(vec![comment(5, Some(3))]), "owner/repo");
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["title"], "Improve thing");
+        assert_eq!(v["repo"], "owner/repo");
+        assert_eq!(v["kind"], "github_pr");
+        assert_eq!(v["github_pr_number"], 42);
+        assert_eq!(v["verdict"], "approve");
+        assert_eq!(v["status"], "draft");
+        assert_eq!(v["comments"][0]["file"], "src/main.rs");
+        assert_eq!(v["comments"][0]["line"], 5);
+        assert_eq!(v["comments"][0]["start_line"], 3);
+        assert_eq!(v["comments"][0]["side"], "RIGHT");
+    }
+
+    #[test]
+    fn json_null_start_line_preserved() {
+        let json = render_json(&detail(vec![comment(5, None)]), "owner/repo");
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(v["comments"][0]["start_line"].is_null());
+    }
+}
