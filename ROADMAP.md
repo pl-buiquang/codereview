@@ -9,6 +9,19 @@ with inline & multi-line comments, Markdown/JSON export, and GitHub publish via 
 
 ---
 
+## Known bugs
+
+- **"Viewed" state not saved** — the per-file viewed/collapsed state is ephemeral and is lost on
+  reopen. Persist it per (review, file). See the "Persist 'viewed' state" item under §2.
+- **Window size/position not preserved** — the app opens at the default geometry on every
+  launch; persist and restore window size/position (e.g. the Tauri window-state plugin, or save
+  to the config/SQLite).
+- **Undefined comment behavior when a branch/PR updates** — when `target.head_sha` advances (new
+  commits pushed, branch force-updated, PR rebased), it's unclear and untested what happens to
+  existing comments: they may silently become "orphans" or land on the wrong lines. Decide the
+  intended behavior (re-anchor vs. flag as stale) and implement it. See §4 (comment anchoring &
+  staleness).
+
 ## 1. Finish the started polish
 
 - **Settings screen** — git/`gh` binary paths, default merge-base (three-dot) on/off, theme
@@ -18,7 +31,9 @@ with inline & multi-line comments, Markdown/JSON export, and GitHub publish via 
   absolute paths, and surface a clear error + manual override if missing. (Dev mode is fine
   today; this only bites packaged builds.)
 - **Replace `alert()` / `confirm()`** — currently used for errors and delete confirmation. Add
-  a small toast/notification system and an in-app confirm dialog for consistent UX.
+  a small toast/notification system and an in-app confirm dialog for consistent UX. The confirm
+  dialog should gate every destructive / exit action: **remove repo**, **delete review**, and
+  **publish review** (publish is irreversible — it locks the review).
 - **App icons & metadata** — replace the default Tauri icons; set product name/description in
   `tauri.conf.json` bundle metadata.
 
@@ -35,10 +50,18 @@ with inline & multi-line comments, Markdown/JSON export, and GitHub publish via 
 - **In-review file tree / jump list** — a sidebar of changed files with comment counts and
   "viewed" state to jump around large diffs.
 - **Persist "viewed" state** — currently ephemeral per render; store per (review, file) so it
-  survives reopening, and show "N of M files viewed".
-- **Diff context expansion** — `react-diff-view` supports expanding collapsed/unchanged lines
-  (`useSourceExpansion` / `expandFromRawCode`); wire it up so comments can be placed on context
-  the diff didn't include.
+  survives reopening, and show "N of M files viewed". (See Known bugs.)
+- **Open the file from the diff** — click a file (or line) to open it. _v1:_ open in the user's
+  default editor (`tauri-plugin-opener`, already a dependency). _v2:_ open in a right-hand
+  slide-out pane with full-file syntax highlighting and the inline comment system still working
+  on the full file (not just the diff hunks).
+- **Diff context expansion (extend code before/after)** — `react-diff-view` supports expanding
+  collapsed/unchanged lines (`useSourceExpansion` / `expandFromRawCode`); wire it up so the user
+  can extend a hunk with the lines before/after it and place comments on context the diff didn't
+  include.
+- **Syntax-highlight mode within the diff** — let the user pick/override the highlighting
+  language for a diff (and toggle highlighting on/off), independent of the file extension — useful
+  for extensionless files or embedded languages.
 - **Word-level intra-line highlighting** — `markEdits` from `react-diff-view`.
 
 ## 3. GitHub integration depth
