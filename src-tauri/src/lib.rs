@@ -4,6 +4,7 @@ mod error;
 mod export;
 mod gh;
 mod git;
+mod path_env;
 
 use std::sync::Mutex;
 
@@ -13,6 +14,8 @@ use db::Db;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    path_env::ensure_login_path();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
