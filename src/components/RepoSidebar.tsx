@@ -1,5 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, pickFolder } from "../lib/api";
+import { toast } from "../lib/toast";
+import { confirmDialog } from "../lib/confirm";
 import { useUIStore } from "../store";
 import type { Repository } from "../lib/types";
 
@@ -29,7 +31,7 @@ export function RepoSidebar() {
       queryClient.invalidateQueries({ queryKey: ["repositories"] });
       if (repo) setActiveRepo(repo.id);
     },
-    onError: (err) => alert(`Could not add repository:\n${String(err)}`),
+    onError: (err) => toast.error(`Could not add repository:\n${String(err)}`),
   });
 
   const removeRepo = useMutation({
@@ -75,9 +77,16 @@ export function RepoSidebar() {
             <button
               className="btn-icon"
               title="Remove repository"
-              onClick={(e) => {
+              onClick={async (e) => {
                 e.stopPropagation();
-                if (confirm(`Remove ${repoLabel(repo)} from codereview?`)) {
+                if (
+                  await confirmDialog({
+                    title: "Remove repository",
+                    message: `Remove ${repoLabel(repo)} from codereview?`,
+                    confirmLabel: "Remove",
+                    danger: true,
+                  })
+                ) {
                   removeRepo.mutate(repo.id);
                 }
               }}

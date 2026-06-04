@@ -18,6 +18,10 @@ vi.mock("../lib/api", () => ({
   pickFolder: () => pickFolder(),
 }));
 
+// The remove flow now uses the in-app confirm dialog instead of window.confirm.
+const confirmDialog = vi.fn();
+vi.mock("../lib/confirm", () => ({ confirmDialog: (...a: unknown[]) => confirmDialog(...a) }));
+
 import { RepoSidebar } from "./RepoSidebar";
 import { useUIStore } from "../store";
 import type { Repository } from "../lib/types";
@@ -96,7 +100,7 @@ describe("RepoSidebar", () => {
 
   it("removes a repo after the user confirms", async () => {
     const user = userEvent.setup();
-    vi.spyOn(window, "confirm").mockReturnValue(true);
+    confirmDialog.mockResolvedValue(true);
     removeRepository.mockResolvedValue(undefined);
     listRepositories.mockResolvedValue([repo({ id: 5, remote_owner: "a", remote_name: "b" })]);
     renderSidebar();
@@ -109,12 +113,13 @@ describe("RepoSidebar", () => {
 
   it("does not remove when the user cancels the confirm dialog", async () => {
     const user = userEvent.setup();
-    vi.spyOn(window, "confirm").mockReturnValue(false);
+    confirmDialog.mockResolvedValue(false);
     listRepositories.mockResolvedValue([repo({ id: 5, remote_owner: "a", remote_name: "b" })]);
     renderSidebar();
 
     await screen.findByText("a/b");
     await user.click(screen.getByTitle("Remove repository"));
+    await waitFor(() => expect(confirmDialog).toHaveBeenCalled());
     expect(removeRepository).not.toHaveBeenCalled();
   });
 });

@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ViewType } from "react-diff-view";
 import { api } from "../lib/api";
+import { toast } from "../lib/toast";
+import { confirmDialog } from "../lib/confirm";
 import { DiffViewer } from "./DiffViewer";
 import { useUIStore } from "../store";
 import type { PrSummary, Repository, ReviewSummary } from "../lib/types";
@@ -65,8 +67,15 @@ export function RepoView({ repo }: { repo: Repository }) {
               key={r.review.id}
               summary={r}
               onOpen={() => openReview(r.review.id)}
-              onDelete={() => {
-                if (confirm("Delete this review and all its comments?"))
+              onDelete={async () => {
+                if (
+                  await confirmDialog({
+                    title: "Delete review",
+                    message: "Delete this review and all its comments?",
+                    confirmLabel: "Delete",
+                    danger: true,
+                  })
+                )
                   deleteReview.mutate(r.review.id);
               }}
             />
@@ -121,7 +130,7 @@ function BranchCompare({ repo }: { repo: Repository }) {
       queryClient.invalidateQueries({ queryKey: ["reviews", repo.id] });
       openReview(review.id);
     },
-    onError: (e) => alert(String(e)),
+    onError: (e) => toast.error(String(e)),
   });
 
   const canCompare = base !== "" && head !== "" && base !== head;
@@ -209,7 +218,7 @@ function PrList({ repo, onOpen }: { repo: Repository; onOpen: (id: number) => vo
       queryClient.invalidateQueries({ queryKey: ["reviews", repo.id] });
       onOpen(review.id);
     },
-    onError: (e) => alert(String(e)),
+    onError: (e) => toast.error(String(e)),
   });
 
   if (authQuery.isLoading) return <p className="muted">Checking GitHub auth…</p>;

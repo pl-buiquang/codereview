@@ -9,6 +9,8 @@ import {
   type ViewType,
 } from "react-diff-view";
 import { api, pickSavePath } from "../lib/api";
+import { toast } from "../lib/toast";
+import { confirmDialog } from "../lib/confirm";
 import { changeKeyOf, fileDisplayPath, indexFile, tokenizeFile } from "../lib/diff";
 import { useDebouncedCallback } from "../lib/useDebouncedCallback";
 import { useUIStore } from "../store";
@@ -126,7 +128,7 @@ function ReviewHeader({
     api
       .updateReview(review.id, nextBody, nextEvent)
       .then(onSaved)
-      .catch((e) => alert(String(e)));
+      .catch((e) => toast.error(String(e)));
   }, 400);
 
   const deleteReview = useMutation({
@@ -142,9 +144,9 @@ function ReviewHeader({
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["review", review.id] });
       queryClient.invalidateQueries({ queryKey: ["reviews"] });
-      alert("Review published to GitHub.");
+      toast.success("Review published to GitHub.");
     },
-    onError: (e) => alert(`Publish failed:\n${String(e)}`),
+    onError: (e) => toast.error(`Publish failed:\n${String(e)}`),
   });
 
   const isPr = target.kind === "github_pr";
@@ -183,8 +185,15 @@ function ReviewHeader({
                 ? "Already published — cannot publish again"
                 : "Post this review to the GitHub PR"
             }
-            onClick={() => {
-              if (confirm("Publish this review to the GitHub PR? This cannot be undone."))
+            onClick={async () => {
+              if (
+                await confirmDialog({
+                  title: "Publish review",
+                  message: "Publish this review to the GitHub PR? This cannot be undone.",
+                  confirmLabel: "Publish",
+                  danger: true,
+                })
+              )
                 publishReview.mutate();
             }}
           >
@@ -193,8 +202,16 @@ function ReviewHeader({
         )}
         <button
           className="btn-danger"
-          onClick={() => {
-            if (confirm("Delete this review and all its comments?")) deleteReview.mutate();
+          onClick={async () => {
+            if (
+              await confirmDialog({
+                title: "Delete review",
+                message: "Delete this review and all its comments?",
+                confirmLabel: "Delete",
+                danger: true,
+              })
+            )
+              deleteReview.mutate();
           }}
         >
           Delete
@@ -570,7 +587,7 @@ function CommentItem({
     api
       .updateComment(comment.id, text)
       .then(onSaved)
-      .catch((e) => alert(String(e)));
+      .catch((e) => toast.error(String(e)));
   }, 400);
 
   return (
@@ -667,10 +684,10 @@ function ExportModal({
     try {
       await api.exportReview(reviewId, path, format);
       onExported();
-      alert(`Exported to ${path}`);
+      toast.success(`Exported to ${path}`);
       onClose();
     } catch (e) {
-      alert(String(e));
+      toast.error(String(e));
     }
   };
 

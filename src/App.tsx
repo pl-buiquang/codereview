@@ -2,6 +2,8 @@ import { useQuery } from "@tanstack/react-query";
 import { RepoSidebar } from "./components/RepoSidebar";
 import { RepoView } from "./components/RepoView";
 import { ReviewView } from "./components/ReviewView";
+import { Toaster } from "./components/Toaster";
+import { ConfirmDialog } from "./components/ConfirmDialog";
 import { api } from "./lib/api";
 import { useUIStore } from "./store";
 
@@ -31,6 +33,8 @@ function App() {
     <div className="layout">
       <RepoSidebar />
       {main}
+      <Toaster />
+      <ConfirmDialog />
     </div>
   );
 }
