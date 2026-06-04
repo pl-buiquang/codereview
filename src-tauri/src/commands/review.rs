@@ -267,11 +267,20 @@ pub(crate) fn load_detail(conn: &Connection, review_id: i64) -> AppResult<Review
             .collect::<rusqlite::Result<_>>()?;
         rows
     };
+    let viewed_files: Vec<String> = {
+        let mut stmt = conn
+            .prepare("SELECT file_path FROM file_view_state WHERE review_id = ?1 AND viewed = 1")?;
+        let rows = stmt
+            .query_map(params![review_id], |r| r.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
+        rows
+    };
     Ok(ReviewDetail {
         review,
         target,
         repo_path,
         comments,
+        viewed_files,
     })
 }
 
@@ -280,6 +289,26 @@ pub(crate) fn load_detail(conn: &Connection, review_id: i64) -> AppResult<Review
 pub fn get_review(review_id: i64, db: State<Db>) -> AppResult<ReviewDetail> {
     let conn = db.0.lock().unwrap();
     load_detail(&conn, review_id)
+}
+
+/// Persist the per-file "viewed"/collapsed toggle. This is UI state rather than
+/// review content, so it is allowed even on published (locked) reviews.
+#[tauri::command]
+pub fn set_file_viewed(
+    review_id: i64,
+    file_path: String,
+    viewed: bool,
+    db: State<Db>,
+) -> AppResult<()> {
+    let conn = db.0.lock().unwrap();
+    conn.execute(
+        "INSERT INTO file_view_state (review_id, file_path, viewed, updated_at)
+         VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(review_id, file_path)
+         DO UPDATE SET viewed = excluded.viewed, updated_at = excluded.updated_at",
+        params![review_id, file_path, viewed as i64, now()],
+    )?;
+    Ok(())
 }
 
 /// Autosave the review summary and/or verdict. Pass `event = ""` to clear the verdict.
@@ -685,6 +714,7 @@ mod tests {
             },
             repo_path: "/repo".into(),
             comments,
+            viewed_files: vec![],
         }
     }
 

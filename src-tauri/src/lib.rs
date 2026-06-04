@@ -38,6 +38,7 @@ pub fn run() {
             commands::review::create_review,
             commands::review::list_reviews,
             commands::review::get_review,
+            commands::review::set_file_viewed,
             commands::review::update_review,
             commands::review::delete_review,
             commands::review::add_comment,

@@ -156,6 +156,7 @@ mod tests {
             target: target(),
             repo_path: "/repo".into(),
             comments,
+            viewed_files: vec![],
         }
     }
 

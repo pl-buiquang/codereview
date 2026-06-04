@@ -330,7 +330,7 @@ function FileReview({
   const { metaByKey, keyByAnchor } = useMemo(() => indexFile(file), [file]);
   const tokens = useMemo(() => tokenizeFile(file), [file]);
   const [selection, setSelection] = useState<Selection | null>(null);
-  const [viewed, setViewed] = useState(false);
+  const [viewed, setViewed] = useState(() => detail.viewed_files.includes(path));
 
   // Group this file's comments by the change key they anchor to.
   const { commentsByKey, orphans } = useMemo(() => {
@@ -442,7 +442,17 @@ function FileReview({
           <span className="add">+{add}</span>
           <span className="del">−{del}</span>
           <label className="viewed-toggle" title="Collapse this file">
-            <input type="checkbox" checked={viewed} onChange={(e) => setViewed(e.target.checked)} />
+            <input
+              type="checkbox"
+              checked={viewed}
+              onChange={(e) => {
+                const v = e.target.checked;
+                setViewed(v);
+                api
+                  .setFileViewed(detail.review.id, path, v)
+                  .catch((err) => toast.error(String(err)));
+              }}
+            />
             Viewed
           </label>
         </span>

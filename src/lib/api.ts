@@ -34,6 +34,8 @@ export const api = {
     invoke<ReviewSummary[]>("list_reviews", { repoId }),
   getReview: (reviewId: number) =>
     invoke<ReviewDetail>("get_review", { reviewId }),
+  setFileViewed: (reviewId: number, filePath: string, viewed: boolean) =>
+    invoke<void>("set_file_viewed", { reviewId, filePath, viewed }),
   reviewDiff: (reviewId: number) => invoke<string>("review_diff", { reviewId }),
   updateReview: (reviewId: number, body?: string, event?: string) =>
     invoke<void>("update_review", { reviewId, body, event }),

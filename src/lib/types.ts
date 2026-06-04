@@ -64,6 +64,7 @@ export interface ReviewDetail {
   target: Target;
   repo_path: string;
   comments: Comment[];
+  viewed_files: string[];
 }
 
 export interface ReviewSummary {

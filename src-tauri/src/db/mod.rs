@@ -13,7 +13,10 @@ pub struct Db(pub Mutex<Connection>);
 
 /// Ordered list of migration SQL scripts. The current schema version is stored
 /// in SQLite's `user_version` pragma; on open we apply any scripts beyond it.
-const MIGRATIONS: &[&str] = &[include_str!("migrations/0001_init.sql")];
+const MIGRATIONS: &[&str] = &[
+    include_str!("migrations/0001_init.sql"),
+    include_str!("migrations/0002_file_view_state.sql"),
+];
 
 pub fn open(path: &Path) -> AppResult<Connection> {
     let conn = Connection::open(path)?;

@@ -133,6 +133,8 @@ pub struct ReviewDetail {
     pub target: Target,
     pub repo_path: String,
     pub comments: Vec<Comment>,
+    /// File paths the user has marked "viewed" (collapsed) for this review.
+    pub viewed_files: Vec<String>,
 }
 
 /// Row for the global Reviews list.
