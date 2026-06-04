@@ -420,6 +420,7 @@ function FileReview({
     widgets[key] = (
       <LineWidget
         comments={commentsByKey.get(key) ?? []}
+        headSha={detail.target.head_sha}
         composerOpen={!!composerOpen}
         rangeLabel={rangeLabel}
         readOnly={readOnly}
@@ -465,6 +466,7 @@ function FileReview({
           widgets={widgets}
           selectedChanges={selectedChanges}
           orphans={orphans}
+          headSha={detail.target.head_sha}
           readOnly={readOnly}
           onLineClick={onLineClick}
           onSaving={onSaving}
@@ -483,6 +485,7 @@ function FileBody({
   widgets,
   selectedChanges,
   orphans,
+  headSha,
   readOnly,
   onLineClick,
   onSaving,
@@ -495,6 +498,7 @@ function FileBody({
   widgets: Record<string, React.ReactNode>;
   selectedChanges: string[];
   orphans: Comment[];
+  headSha: string | null;
   readOnly: boolean;
   onLineClick: (args: { change: ChangeData | null }, event: React.MouseEvent) => void;
   onSaving: () => void;
@@ -512,6 +516,7 @@ function FileBody({
             <CommentItem
               key={c.id}
               comment={c}
+              headSha={headSha}
               readOnly={readOnly}
               onSaving={onSaving}
               onSaved={onSaved}
@@ -542,6 +547,7 @@ function FileBody({
 
 function LineWidget({
   comments,
+  headSha,
   composerOpen,
   rangeLabel,
   readOnly,
@@ -552,6 +558,7 @@ function LineWidget({
   onCommentsChanged,
 }: {
   comments: Comment[];
+  headSha: string | null;
   composerOpen: boolean;
   rangeLabel?: string;
   readOnly: boolean;
@@ -567,6 +574,7 @@ function LineWidget({
         <CommentItem
           key={c.id}
           comment={c}
+          headSha={headSha}
           readOnly={readOnly}
           onSaving={onSaving}
           onSaved={onSaved}
@@ -582,12 +590,14 @@ function LineWidget({
 
 function CommentItem({
   comment,
+  headSha,
   readOnly,
   onSaving,
   onSaved,
   onCommentsChanged,
 }: {
   comment: Comment;
+  headSha: string | null;
   readOnly: boolean;
   onSaving: () => void;
   onSaved: () => void;
@@ -602,8 +612,27 @@ function CommentItem({
       .catch((e) => toast.error(String(e)));
   }, 400);
 
+  // The comment was anchored to a head that has since moved, so its line may no
+  // longer point at the code it was written against. Flag it rather than
+  // silently mislanding it (real re-anchoring is future work — see ROADMAP §2).
+  const outdated =
+    !!comment.anchored_head_sha &&
+    !!headSha &&
+    comment.anchored_head_sha !== headSha;
+
   return (
     <div className="comment-item">
+      {outdated && (
+        <span
+          className="stale-badge"
+          title={`Anchored to ${comment.anchored_head_sha!.slice(
+            0,
+            7,
+          )}, but the head has since moved — this comment may no longer line up with the code.`}
+        >
+          outdated · {comment.anchored_head_sha!.slice(0, 7)}
+        </span>
+      )}
       <textarea
         value={body}
         disabled={readOnly}
