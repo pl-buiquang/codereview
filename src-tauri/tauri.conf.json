@@ -24,6 +24,11 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "category": "DeveloperTool",
+    "copyright": "Copyright © 2026 Paul Bui-Quang",
+    "shortDescription": "Local PR & branch-diff review",
+    "longDescription": "codereview is a local desktop app for reviewing GitHub pull requests and local branch diffs, with inline comments, autosaved drafts, Markdown/JSON export, and publish-to-GitHub via the gh CLI.",
+    "publisher": "Paul Bui-Quang",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
