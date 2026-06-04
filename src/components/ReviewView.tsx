@@ -13,6 +13,7 @@ import { toast } from "../lib/toast";
 import { confirmDialog } from "../lib/confirm";
 import { changeKeyOf, fileDisplayPath, indexFile, tokenizeFile } from "../lib/diff";
 import { useDebouncedCallback } from "../lib/useDebouncedCallback";
+import { useSettingsStore } from "../lib/settings";
 import { useUIStore } from "../store";
 import type { Comment, ReviewDetail, ReviewEvent, Side } from "../lib/types";
 
@@ -27,7 +28,8 @@ const VERDICTS: { value: ReviewEvent; label: string }[] = [
 export function ReviewView({ reviewId }: { reviewId: number }) {
   const queryClient = useQueryClient();
   const closeReview = useUIStore((s) => s.closeReview);
-  const [viewType, setViewType] = useState<ViewType>("split");
+  const defaultViewType = useSettingsStore((s) => s.defaultViewType);
+  const [viewType, setViewType] = useState<ViewType>(defaultViewType);
   const [saveState, setSaveState] = useState<SaveState>("saved");
 
   const detailQuery = useQuery({

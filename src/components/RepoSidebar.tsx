@@ -14,7 +14,7 @@ function repoLabel(repo: Repository): string {
 
 export function RepoSidebar() {
   const queryClient = useQueryClient();
-  const { activeRepoId, setActiveRepo } = useUIStore();
+  const { activeRepoId, setActiveRepo, openSettings } = useUIStore();
 
   const reposQuery = useQuery({
     queryKey: ["repositories"],
@@ -48,13 +48,18 @@ export function RepoSidebar() {
     <aside className="sidebar">
       <div className="sidebar-header">
         <span className="app-title">codereview</span>
-        <button
-          className="btn-primary"
-          onClick={() => addRepo.mutate()}
-          disabled={addRepo.isPending}
-        >
-          {addRepo.isPending ? "Adding…" : "+ Add repo"}
-        </button>
+        <div className="sidebar-header-actions">
+          <button
+            className="btn-primary"
+            onClick={() => addRepo.mutate()}
+            disabled={addRepo.isPending}
+          >
+            {addRepo.isPending ? "Adding…" : "+ Add repo"}
+          </button>
+          <button className="btn-icon" title="Settings" onClick={openSettings}>
+            ⚙
+          </button>
+        </div>
       </div>
 
       <nav className="repo-list">

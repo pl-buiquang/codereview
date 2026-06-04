@@ -6,9 +6,22 @@
   --muted: #8b949e;
   --accent: #2f81f7;
   --danger: #f85149;
+  --diff-font-size: 12.5px;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica,
     Arial, sans-serif;
   font-size: 14px;
+}
+
+/* Light theme — applied via `data-theme="light"` on <html>. */
+:root[data-theme="light"] {
+  --bg: #ffffff;
+  --bg-elev: #f6f8fa;
+  --border: #d0d7de;
+  --text: #1f2328;
+  --muted: #656d76;
+  --accent: #0969da;
+  --danger: #cf222e;
+  color-scheme: light;
 }
 
 * {
@@ -258,7 +271,7 @@ button:hover {
   background: var(--bg);
   color: var(--text);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 12.5px;
+  font-size: var(--diff-font-size, 12.5px);
 }
 .diff-gutter {
   color: var(--muted);
@@ -607,7 +620,7 @@ td.diff-code {
   border-radius: 6px;
   padding: 12px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 12.5px;
+  font-size: var(--diff-font-size, 12.5px);
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -673,4 +686,55 @@ td.diff-code {
   color: var(--muted);
   white-space: pre-wrap;
   line-height: 1.5;
+}
+
+/* --- Sidebar header actions ---------------------------------------------- */
+.sidebar-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* --- Settings screen ------------------------------------------------------ */
+.settings-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.settings-body {
+  padding: 16px 20px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  max-width: 640px;
+}
+.settings-group {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.settings-group h3 {
+  margin: 0 0 4px;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.settings-control {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.settings-value {
+  min-width: 44px;
+  text-align: right;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
 }

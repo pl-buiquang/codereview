@@ -4,6 +4,7 @@ import type { ViewType } from "react-diff-view";
 import { api } from "../lib/api";
 import { toast } from "../lib/toast";
 import { confirmDialog } from "../lib/confirm";
+import { useSettingsStore } from "../lib/settings";
 import { DiffViewer } from "./DiffViewer";
 import { useUIStore } from "../store";
 import type { PrSummary, Repository, ReviewSummary } from "../lib/types";
@@ -100,10 +101,12 @@ function BranchCompare({ repo }: { repo: Repository }) {
     [branchesQuery.data],
   );
 
+  const defaultThreeDot = useSettingsStore((s) => s.defaultThreeDot);
+  const defaultViewType = useSettingsStore((s) => s.defaultViewType);
   const [base, setBase] = useState("");
   const [head, setHead] = useState("");
-  const [threeDot, setThreeDot] = useState(true);
-  const [viewType, setViewType] = useState<ViewType>("split");
+  const [threeDot, setThreeDot] = useState(defaultThreeDot);
+  const [viewType, setViewType] = useState<ViewType>(defaultViewType);
   const [comparison, setComparison] = useState<Comparison | null>(null);
 
   useEffect(() => {

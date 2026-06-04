@@ -3,7 +3,7 @@ import { useUIStore } from "./store";
 
 describe("useUIStore", () => {
   beforeEach(() => {
-    useUIStore.setState({ activeRepoId: null, activeReviewId: null });
+    useUIStore.setState({ activeRepoId: null, activeReviewId: null, settingsOpen: false });
   });
 
   it("starts with nothing selected", () => {
@@ -32,5 +32,22 @@ describe("useUIStore", () => {
     const s = useUIStore.getState();
     expect(s.activeReviewId).toBeNull();
     expect(s.activeRepoId).toBe(5);
+  });
+
+  it("openSettings / closeSettings toggle the settings flag", () => {
+    useUIStore.getState().openSettings();
+    expect(useUIStore.getState().settingsOpen).toBe(true);
+    useUIStore.getState().closeSettings();
+    expect(useUIStore.getState().settingsOpen).toBe(false);
+  });
+
+  it("navigating away closes settings", () => {
+    useUIStore.getState().openSettings();
+    useUIStore.getState().setActiveRepo(1);
+    expect(useUIStore.getState().settingsOpen).toBe(false);
+
+    useUIStore.getState().openSettings();
+    useUIStore.getState().openReview(7);
+    expect(useUIStore.getState().settingsOpen).toBe(false);
   });
 });
