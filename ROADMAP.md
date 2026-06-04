@@ -22,20 +22,22 @@ with inline & multi-line comments, Markdown/JSON export, and GitHub publish via 
   intended behavior (re-anchor vs. flag as stale) and implement it. See §4 (comment anchoring &
   staleness).
 
-## 1. Finish the started polish
+## 1. Finish the started polish — ✅ done
 
-- **Settings screen** — git/`gh` binary paths, default merge-base (three-dot) on/off, theme
-  (light/dark), diff font size, default split/unified. Persist in SQLite or a config file.
-- **GUI `PATH` resolution** — packaged GUI apps (especially macOS `.app`) launch with a minimal
-  `PATH`, so `git`/`gh` may not resolve. Probe a login shell / `which` at startup, cache the
-  absolute paths, and surface a clear error + manual override if missing. (Dev mode is fine
-  today; this only bites packaged builds.)
-- **Replace `alert()` / `confirm()`** — currently used for errors and delete confirmation. Add
-  a small toast/notification system and an in-app confirm dialog for consistent UX. The confirm
-  dialog should gate every destructive / exit action: **remove repo**, **delete review**, and
-  **publish review** (publish is irreversible — it locks the review).
-- **App icons & metadata** — replace the default Tauri icons; set product name/description in
-  `tauri.conf.json` bundle metadata.
+This section is complete (see git history):
+
+- **Settings screen** — ✅ a persisted Settings screen (gear in the sidebar) for theme
+  (dark/light/system), diff font size, and default split/unified + three-dot. Stored in a
+  persisted Zustand store (`lib/settings.ts`); theme via `data-theme` on `<html>`.
+- **GUI `PATH` resolution** — ✅ `tools.rs` resolves absolute `git`/`gh` paths after PATH repair
+  and caches them; `run_git`/`run_gh` spawn the resolved path; a Settings **Environment** panel
+  surfaces detected paths + `gh` auth with clear errors. _Deferred:_ a manual binary-path
+  override (detect-only for now — re-open if a user needs it).
+- **Replace `alert()` / `confirm()`** — ✅ in-app toast system + promise-based confirm dialog;
+  destructive actions (remove repo, delete review, publish review) are gated by the dialog.
+- **App icons & metadata** — ✅ custom icon set via `tauri icon`; real `Cargo.toml`
+  description/authors and `tauri.conf.json` bundle metadata (category/copyright/descriptions/
+  publisher).
 
 ## 2. Review experience
 
