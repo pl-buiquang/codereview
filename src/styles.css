@@ -738,3 +738,22 @@ td.diff-code {
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
+
+/* --- Settings: environment panel ----------------------------------------- */
+.env-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.env-path {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  color: var(--muted);
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.env-ok {
+  color: #3fb950;
+}

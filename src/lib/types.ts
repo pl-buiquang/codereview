@@ -83,3 +83,9 @@ export interface PrSummary {
   createdAt: string;
   url: string;
 }
+
+export interface ToolEnv {
+  git: string | null;
+  gh: string | null;
+  gh_authed: boolean;
+}

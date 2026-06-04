@@ -72,6 +72,9 @@ describe("api command wrappers", () => {
     await api.ghAuthStatus();
     expect(invoke).toHaveBeenCalledWith("gh_auth_status");
 
+    await api.checkEnvironment();
+    expect(invoke).toHaveBeenCalledWith("check_environment");
+
     await api.listPrs("/repo");
     expect(invoke).toHaveBeenCalledWith("list_prs", { repoPath: "/repo" });
 

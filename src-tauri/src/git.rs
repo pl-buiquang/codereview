@@ -7,7 +7,7 @@ use crate::error::{AppError, AppResult};
 
 /// Run a git command inside `repo` and return stdout on success.
 pub fn run_git(repo: &Path, args: &[&str]) -> AppResult<String> {
-    let output = Command::new("git")
+    let output = Command::new(crate::tools::git_bin())
         .arg("-C")
         .arg(repo)
         .args(args)

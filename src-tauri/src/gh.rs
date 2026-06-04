@@ -9,7 +9,7 @@ use crate::error::{AppError, AppResult};
 /// Run a `gh` command with the repo as the working directory (so `gh` resolves
 /// the GitHub repo from its `origin` remote). Returns stdout on success.
 pub fn run_gh(repo: &Path, args: &[&str]) -> AppResult<String> {
-    let output = Command::new("gh")
+    let output = Command::new(crate::tools::gh_bin())
         .current_dir(repo)
         .args(args)
         .output()
@@ -24,7 +24,7 @@ pub fn run_gh(repo: &Path, args: &[&str]) -> AppResult<String> {
 
 /// Run a `gh` command feeding `input` to its stdin (used for `gh api --input -`).
 pub fn run_gh_stdin(repo: &Path, args: &[&str], input: &str) -> AppResult<String> {
-    let mut child = Command::new("gh")
+    let mut child = Command::new(crate::tools::gh_bin())
         .current_dir(repo)
         .args(args)
         .stdin(Stdio::piped())
@@ -72,7 +72,7 @@ pub fn post_review(
 }
 
 pub fn auth_status() -> bool {
-    Command::new("gh")
+    Command::new(crate::tools::gh_bin())
         .args(["auth", "status"])
         .output()
         .map(|o| o.status.success())

@@ -1,11 +1,73 @@
+import { useQuery } from "@tanstack/react-query";
 import { useUIStore } from "../store";
 import { useSettingsStore, type Theme } from "../lib/settings";
+import { api } from "../lib/api";
+import type { ToolEnv } from "../lib/types";
 
 const THEMES: { value: Theme; label: string }[] = [
   { value: "dark", label: "Dark" },
   { value: "light", label: "Light" },
   { value: "system", label: "System" },
 ];
+
+function EnvironmentPanel() {
+  const envQuery = useQuery({ queryKey: ["environment"], queryFn: api.checkEnvironment });
+
+  if (envQuery.isLoading) return <p className="muted">Checking tools…</p>;
+  if (envQuery.isError || !envQuery.data)
+    return <p className="error">Could not check environment: {String(envQuery.error)}</p>;
+
+  const env: ToolEnv = envQuery.data;
+  return (
+    <div className="env-rows">
+      <ToolRow
+        label="git"
+        value={env.git}
+        missingHint="Not found on PATH — install git and reopen the app."
+      />
+      <ToolRow
+        label="gh"
+        value={env.gh}
+        missingHint="Not found on PATH — install the GitHub CLI to list/publish PRs."
+      />
+      <div className="settings-row">
+        <span>GitHub auth</span>
+        {env.gh == null ? (
+          <span className="muted">—</span>
+        ) : env.gh_authed ? (
+          <span className="env-ok">Authenticated</span>
+        ) : (
+          <span className="error">
+            Not authenticated — run <code>gh auth login</code>.
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ToolRow({
+  label,
+  value,
+  missingHint,
+}: {
+  label: string;
+  value: string | null;
+  missingHint: string;
+}) {
+  return (
+    <div className="settings-row">
+      <span>{label}</span>
+      {value ? (
+        <code className="env-path" title={value}>
+          {value}
+        </code>
+      ) : (
+        <span className="error">{missingHint}</span>
+      )}
+    </div>
+  );
+}
 
 export function SettingsView() {
   const closeSettings = useUIStore((s) => s.closeSettings);
@@ -81,6 +143,11 @@ export function SettingsView() {
               onChange={(e) => setDefaultThreeDot(e.target.checked)}
             />
           </label>
+        </section>
+
+        <section className="settings-group">
+          <h3>Environment</h3>
+          <EnvironmentPanel />
         </section>
       </div>
     </section>

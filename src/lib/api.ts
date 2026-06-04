@@ -10,6 +10,7 @@ import type {
   ReviewEvent,
   ReviewSummary,
   Side,
+  ToolEnv,
 } from "./types";
 
 export const api = {
@@ -41,6 +42,7 @@ export const api = {
 
   // GitHub
   ghAuthStatus: () => invoke<boolean>("gh_auth_status"),
+  checkEnvironment: () => invoke<ToolEnv>("check_environment"),
   listPrs: (repoPath: string) => invoke<PrSummary[]>("list_prs", { repoPath }),
   createReviewForPr: (repoId: number, repoPath: string, prNumber: number) =>
     invoke<Review>("create_review_for_pr", { repoId, repoPath, prNumber }),

@@ -5,6 +5,7 @@ mod export;
 mod gh;
 mod git;
 mod path_env;
+mod tools;
 
 use std::sync::Mutex;
 
@@ -15,6 +16,7 @@ use db::Db;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     path_env::ensure_login_path();
+    tools::init();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -48,6 +50,7 @@ pub fn run() {
             commands::export::export_review,
             commands::gh::gh_auth_status,
             commands::gh::list_prs,
+            commands::gh::check_environment,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
