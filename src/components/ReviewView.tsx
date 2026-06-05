@@ -12,7 +12,6 @@ import {
   type HunkData,
   type ViewType,
 } from "react-diff-view";
-import { openPath } from "@tauri-apps/plugin-opener";
 import { api, pickSavePath } from "../lib/api";
 import { toast } from "../lib/toast";
 import { confirmDialog } from "../lib/confirm";
@@ -355,7 +354,7 @@ function FileReview({
     if (isDeleted) return;
     const fullPath = `${detail.repo_path}/${path}`;
     try {
-      await openPath(fullPath);
+      await api.openInDefaultApp(fullPath);
     } catch (err) {
       toast.error(`Could not open file:\n${String(err)}`);
     }

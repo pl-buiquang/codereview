@@ -1,3 +1,4 @@
+pub mod editor;
 pub mod export;
 pub mod gh;
 pub mod repo;

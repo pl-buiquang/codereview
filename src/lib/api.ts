@@ -39,6 +39,8 @@ export const api = {
   reviewDiff: (reviewId: number) => invoke<string>("review_diff", { reviewId }),
   fileSource: (reviewId: number, filePath: string, side: Side) =>
     invoke<string>("file_source", { reviewId, filePath, side }),
+  openInDefaultApp: (path: string) =>
+    invoke<void>("open_in_default_app", { path }),
   updateReview: (reviewId: number, body?: string, event?: string) =>
     invoke<void>("update_review", { reviewId, body, event }),
   deleteReview: (reviewId: number) =>
