@@ -10,6 +10,7 @@ import {
   indexFile,
   changeKeyOf,
   countChanges,
+  hunkContextSnippet,
 } from "./diff";
 
 describe("languageForPath", () => {
@@ -116,6 +117,52 @@ Binary files a/logo.png and b/logo.png differ
 `,
     );
     expect(countChanges(file)).toEqual({ add: 0, del: 0 });
+  });
+});
+
+const CONTEXT_DIFF = `diff --git a/f.ts b/f.ts
+index 0000000..1111111 100644
+--- a/f.ts
++++ b/f.ts
+@@ -1,7 +1,7 @@
+ line1
+ line2
+ line3
+-old4
++new4
+ line5
+ line6
+ line7
+`;
+
+describe("hunkContextSnippet", () => {
+  it("pads the selection with surrounding context lines", () => {
+    const [file] = parseDiff(CONTEXT_DIFF);
+    // Comment on the inserted line (RIGHT, new line 4), one line of context.
+    const lines = hunkContextSnippet(file.hunks[0], "RIGHT", 4, 4, 1).split("\n");
+    expect(lines[0]).toContain("@@ -1,7 +1,7 @@");
+    expect(lines.slice(1)).toEqual(["-old4", "+new4", " line5"]);
+  });
+
+  it("does not reach beyond the requested context window", () => {
+    const [file] = parseDiff(CONTEXT_DIFF);
+    const snippet = hunkContextSnippet(file.hunks[0], "RIGHT", 4, 4, 1);
+    expect(snippet).not.toContain("line2");
+    expect(snippet).not.toContain("line7");
+  });
+
+  it("clamps the window to the hunk bounds", () => {
+    const [file] = parseDiff(CONTEXT_DIFF);
+    const snippet = hunkContextSnippet(file.hunks[0], "RIGHT", 4, 4, 99);
+    expect(snippet).toContain(" line1");
+    expect(snippet).toContain(" line7");
+  });
+
+  it("falls back to the bare header when the selection isn't in the hunk", () => {
+    const [file] = parseDiff(CONTEXT_DIFF);
+    const snippet = hunkContextSnippet(file.hunks[0], "RIGHT", 999, 999, 3);
+    expect(snippet).toContain("@@ -1,7 +1,7 @@");
+    expect(snippet.split("\n")).toHaveLength(1);
   });
 });
 

@@ -61,8 +61,6 @@ with inline & multi-line comments, Markdown/JSON export, and GitHub publish via 
 
 ## 4. Export
 
-- **Richer hunk context** — include a few surrounding lines (not just the commented line) in the
-  exported diff block, so an AI sees more context.
 - **Export templates** — let the user customize the Markdown format; add a "copy to clipboard"
   option and "export all reviews for this repo".
 - **Round-trip** — define the Markdown/JSON format precisely and support re-importing an

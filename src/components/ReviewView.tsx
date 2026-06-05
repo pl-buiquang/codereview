@@ -19,6 +19,7 @@ import {
   changeKeyOf,
   countChanges,
   fileDisplayPath,
+  hunkContextSnippet,
   indexFile,
   tokenizeFile,
 } from "../lib/diff";
@@ -526,11 +527,20 @@ function FileReview({
 
   const submitSelectionComment = async (text: string) => {
     if (!selection || !range) return;
-    const inRange = [...metaByKey.values()]
-      .filter((m) => m.side === selection.side && m.line >= range.lo && m.line <= range.hi)
-      .sort((a, b) => a.line - b.line);
     const header = metaByKey.get(selection.focusKey)?.hunk ?? "";
-    const diffHunk = [header, ...inRange.map((m) => m.lineText)].join("\n");
+    // Store the surrounding hunk lines (not just the commented ones) so the
+    // export diff block carries context. Fall back to the bare selected lines if
+    // the focus hunk can't be located.
+    const focusHunk = hunks.find((h) => h.content === header);
+    const diffHunk = focusHunk
+      ? hunkContextSnippet(focusHunk, selection.side, range.lo, range.hi)
+      : [
+          header,
+          ...[...metaByKey.values()]
+            .filter((m) => m.side === selection.side && m.line >= range.lo && m.line <= range.hi)
+            .sort((a, b) => a.line - b.line)
+            .map((m) => m.lineText),
+        ].join("\n");
     onSaving();
     await api.addComment({
       reviewId: detail.review.id,

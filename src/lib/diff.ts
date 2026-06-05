@@ -116,6 +116,54 @@ export function changeKeyOf(change: ChangeData): string {
   return getChangeKey(change);
 }
 
+const CONTEXT_LINES = 3;
+
+/** The line number a change occupies on `side`, or null if it has no presence
+ *  there (an insert has no LEFT line; a delete has no RIGHT line). */
+function changeLineForSide(change: ChangeData, side: Side): number | null {
+  if (change.type === "normal") {
+    return side === "LEFT" ? change.oldLineNumber : change.newLineNumber;
+  }
+  if (change.type === "insert") return side === "RIGHT" ? change.lineNumber : null;
+  return side === "LEFT" ? change.lineNumber : null; // delete
+}
+
+/** Render a parsed change back to its unified-diff line (" "/"+"/"-" prefix). */
+function changeToDiffLine(change: ChangeData): string {
+  const sign = change.type === "insert" ? "+" : change.type === "delete" ? "-" : " ";
+  return `${sign}${change.content}`;
+}
+
+/**
+ * A diff snippet for export: the hunk header plus the changes covering the
+ * [lo, hi] selection on `side`, padded with up to `context` surrounding lines on
+ * each end so a reader (or an AI) sees context, not just the commented line.
+ * Falls back to the header alone if the selection isn't found in this hunk.
+ */
+export function hunkContextSnippet(
+  hunk: HunkData,
+  side: Side,
+  lo: number,
+  hi: number,
+  context = CONTEXT_LINES,
+): string {
+  const { changes } = hunk;
+  let first = -1;
+  let last = -1;
+  changes.forEach((c, i) => {
+    const n = changeLineForSide(c, side);
+    if (n != null && n >= lo && n <= hi) {
+      if (first === -1) first = i;
+      last = i;
+    }
+  });
+  if (first === -1) return hunk.content;
+  const start = Math.max(0, first - context);
+  const end = Math.min(changes.length - 1, last + context);
+  const lines = changes.slice(start, end + 1).map(changeToDiffLine);
+  return [hunk.content, ...lines].join("\n");
+}
+
 /**
  * Build a synthetic single-file diff where the entire `source` is one hunk of
  * `normal` (unchanged) lines. Feeding this to `<Diff>`/`tokenizeFile`/`indexFile`
