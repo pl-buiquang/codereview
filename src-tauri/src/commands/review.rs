@@ -191,6 +191,33 @@ pub fn review_diff(review_id: i64, db: State<Db>) -> AppResult<String> {
     }
 }
 
+/// Full source of one side of a file, used to reveal collapsed context between
+/// hunks. Only local targets are supported in v1; GitHub PR targets are rejected
+/// (the frontend disables expansion and surfaces this message).
+#[tauri::command]
+pub fn file_source(
+    review_id: i64,
+    file_path: String,
+    side: String,
+    db: State<Db>,
+) -> AppResult<String> {
+    let conn = db.0.lock().unwrap();
+    let detail = load_detail(&conn, review_id)?;
+    if detail.target.kind != "local" {
+        return Err(AppError::Other(
+            "context expansion is only available for local reviews (v1)".into(),
+        ));
+    }
+    let sha = match side.as_str() {
+        "LEFT" => detail.target.base_sha.as_deref(),
+        "RIGHT" => detail.target.head_sha.as_deref(),
+        other => return Err(AppError::Other(format!("invalid side: {other}"))),
+    };
+    let sha = sha
+        .ok_or_else(|| AppError::Other("this side has no source (file added or deleted)".into()))?;
+    git::show_file(std::path::Path::new(&detail.repo_path), sha, &file_path)
+}
+
 /// All reviews (optionally filtered to one repo), newest first, for the Reviews list.
 #[tauri::command]
 pub fn list_reviews(repo_id: Option<i64>, db: State<Db>) -> AppResult<Vec<ReviewSummary>> {
