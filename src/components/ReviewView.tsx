@@ -1,11 +1,15 @@
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  Decoration,
   Diff,
   Hunk,
+  expandFromRawCode,
+  getCollapsedLinesCountBetween,
   parseDiff,
   type ChangeData,
   type FileData,
+  type HunkData,
   type ViewType,
 } from "react-diff-view";
 import { openPath } from "@tauri-apps/plugin-opener";
@@ -26,6 +30,8 @@ import { useUIStore } from "../store";
 import type { Comment, ReviewDetail, ReviewEvent, Side } from "../lib/types";
 
 type SaveState = "idle" | "saving" | "saved";
+
+const EXPAND_CHUNK = 20;
 
 const VERDICTS: { value: ReviewEvent; label: string }[] = [
   { value: "comment", label: "Comment" },
@@ -354,8 +360,57 @@ function FileReview({
       toast.error(`Could not open file:\n${String(err)}`);
     }
   };
-  const { metaByKey, keyByAnchor } = useMemo(() => indexFile(file), [file]);
-  const tokens = useMemo(() => tokenizeFile(file), [file]);
+
+  // Hunks the user has expanded sit alongside the parsed ones; this state feeds
+  // BOTH rendering and anchoring so revealed lines are clickable/commentable.
+  // Ephemeral by design — reparsing (a new diff) resets it.
+  const [hunks, setHunks] = useState<HunkData[]>(file.hunks);
+  useEffect(() => setHunks(file.hunks), [file]);
+  const [rawSource, setRawSource] = useState<string | null>(null);
+  const [expanding, setExpanding] = useState(false);
+  const [expandError, setExpandError] = useState<string | null>(null);
+
+  // react-diff-view's expansion math works in OLD/LEFT line numbers, so the raw
+  // source must be the base file. Added/deleted/binary files have no usable base
+  // side; GitHub PR targets are rejected server-side (v1 — see file_source).
+  const canExpand =
+    detail.target.kind === "local" &&
+    file.type !== "add" &&
+    file.type !== "delete" &&
+    !file.isBinary;
+
+  const ensureSource = useCallback(async (): Promise<string | null> => {
+    if (rawSource != null) return rawSource;
+    setExpanding(true);
+    try {
+      const src = await api.fileSource(detail.review.id, file.oldPath, "LEFT");
+      setRawSource(src);
+      return src;
+    } catch (e) {
+      setExpandError(String(e));
+      return null;
+    } finally {
+      setExpanding(false);
+    }
+  }, [rawSource, detail.review.id, file.oldPath]);
+
+  const expandBetween = useCallback(
+    async (prev: HunkData, next: HunkData, n: number) => {
+      const src = await ensureSource();
+      if (src == null) return;
+      const gapStart = prev.oldStart + prev.oldLines;
+      const gapEnd = gapStart + getCollapsedLinesCountBetween(prev, next);
+      const end = Math.min(gapStart + n, gapEnd);
+      setHunks((h) => expandFromRawCode(h, src, gapStart, end));
+    },
+    [ensureSource],
+  );
+
+  const { metaByKey, keyByAnchor } = useMemo(
+    () => indexFile({ ...file, hunks }),
+    [file, hunks],
+  );
+  const tokens = useMemo(() => tokenizeFile({ ...file, hunks }), [file, hunks]);
   const [selection, setSelection] = useState<Selection | null>(null);
   const viewed = detail.viewed_files.includes(path);
   const [fileComposerOpen, setFileComposerOpen] = useState(false);
@@ -564,6 +619,7 @@ function FileReview({
       {viewed ? null : (
         <FileBody
           file={file}
+          hunks={hunks}
           viewType={viewType}
           tokens={tokens}
           widgets={widgets}
@@ -571,6 +627,10 @@ function FileReview({
           orphans={orphans}
           headSha={detail.target.head_sha}
           readOnly={readOnly}
+          canExpand={canExpand}
+          expanding={expanding}
+          expandError={expandError}
+          onExpandBetween={expandBetween}
           onLineClick={onLineClick}
           onSaving={onSaving}
           onSaved={onSaved}
@@ -583,6 +643,7 @@ function FileReview({
 
 function FileBody({
   file,
+  hunks,
   viewType,
   tokens,
   widgets,
@@ -590,12 +651,17 @@ function FileBody({
   orphans,
   headSha,
   readOnly,
+  canExpand,
+  expanding,
+  expandError,
+  onExpandBetween,
   onLineClick,
   onSaving,
   onSaved,
   onCommentsChanged,
 }: {
   file: FileData;
+  hunks: HunkData[];
   viewType: ViewType;
   tokens: ReturnType<typeof tokenizeFile>;
   widgets: Record<string, React.ReactNode>;
@@ -603,6 +669,10 @@ function FileBody({
   orphans: Comment[];
   headSha: string | null;
   readOnly: boolean;
+  canExpand: boolean;
+  expanding: boolean;
+  expandError: string | null;
+  onExpandBetween: (prev: HunkData, next: HunkData, n: number) => void;
   onLineClick: (args: { change: ChangeData | null }, event: React.MouseEvent) => void;
   onSaving: () => void;
   onSaved: () => void;
@@ -610,6 +680,11 @@ function FileBody({
 }) {
   return (
     <>
+      {expandError && (
+        <p className="muted expand-error-note">
+          Context expansion unavailable: {expandError}
+        </p>
+      )}
       {orphans.length > 0 && (
         <div className="orphan-comments">
           <p className="muted">
@@ -634,17 +709,71 @@ function FileBody({
         <Diff
           viewType={viewType}
           diffType={file.type}
-          hunks={file.hunks}
+          hunks={hunks}
           tokens={tokens}
           widgets={widgets}
           selectedChanges={selectedChanges}
           gutterEvents={{ onClick: onLineClick }}
           codeEvents={{ onClick: onLineClick }}
         >
-          {(hunks) => hunks.map((hunk) => <Hunk key={hunk.content} hunk={hunk} />)}
+          {(renderedHunks) =>
+            renderedHunks.flatMap((hunk, i) => {
+              // v1: only the gaps BETWEEN hunks get an expander; leading and
+              // trailing collapsed blocks (expand-to-top/bottom) are v1.1.
+              const prev = i === 0 ? null : renderedHunks[i - 1];
+              const collapsed = getCollapsedLinesCountBetween(prev, hunk);
+              const rows: React.ReactElement[] = [];
+              if (canExpand && prev != null && collapsed > 0) {
+                rows.push(
+                  <Decoration key={`exp-${hunk.content}`} className="diff-expander">
+                    <ExpandControl
+                      count={collapsed}
+                      busy={expanding}
+                      onExpandChunk={() => onExpandBetween(prev, hunk, EXPAND_CHUNK)}
+                      onExpandAll={() => onExpandBetween(prev, hunk, collapsed)}
+                    />
+                  </Decoration>,
+                );
+              }
+              rows.push(<Hunk key={hunk.content} hunk={hunk} />);
+              return rows;
+            })
+          }
         </Diff>
       )}
     </>
+  );
+}
+
+function ExpandControl({
+  count,
+  busy,
+  onExpandChunk,
+  onExpandAll,
+}: {
+  count: number;
+  busy: boolean;
+  onExpandChunk: () => void;
+  onExpandAll: () => void;
+}) {
+  return (
+    <div className="expand-control">
+      {busy ? (
+        <span className="muted">Expanding…</span>
+      ) : (
+        <>
+          <span className="expand-label">⋯ {count} hidden lines</span>
+          {count > EXPAND_CHUNK && (
+            <button className="expand-btn" onClick={onExpandChunk} disabled={busy}>
+              {EXPAND_CHUNK} lines
+            </button>
+          )}
+          <button className="expand-btn" onClick={onExpandAll} disabled={busy}>
+            all
+          </button>
+        </>
+      )}
+    </div>
   );
 }
 

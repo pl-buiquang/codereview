@@ -37,6 +37,8 @@ export const api = {
   setFileViewed: (reviewId: number, filePath: string, viewed: boolean) =>
     invoke<void>("set_file_viewed", { reviewId, filePath, viewed }),
   reviewDiff: (reviewId: number) => invoke<string>("review_diff", { reviewId }),
+  fileSource: (reviewId: number, filePath: string, side: Side) =>
+    invoke<string>("file_source", { reviewId, filePath, side }),
   updateReview: (reviewId: number, body?: string, event?: string) =>
     invoke<void>("update_review", { reviewId, body, event }),
   deleteReview: (reviewId: number) =>

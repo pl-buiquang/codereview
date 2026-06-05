@@ -115,6 +115,12 @@ pub fn rev_parse(path: &Path, rev: &str) -> AppResult<String> {
     Ok(run_git(path, &["rev-parse", rev])?.trim().to_string())
 }
 
+/// Full contents of `file_path` as of `sha` (`git show <sha>:<file_path>`),
+/// used to reveal collapsed context lines around a diff.
+pub fn show_file(path: &Path, sha: &str, file_path: &str) -> AppResult<String> {
+    run_git(path, &["show", &format!("{sha}:{file_path}")])
+}
+
 /// Unified diff between two refs. `three_dot` uses the merge-base (GitHub PR
 /// semantics); otherwise a plain two-dot diff.
 pub fn diff(path: &Path, base: &str, head: &str, three_dot: bool) -> AppResult<String> {
@@ -262,6 +268,23 @@ mod tests {
     fn run_git_surfaces_error_on_bad_ref() {
         let repo = fixture_repo();
         let err = rev_parse(repo.path(), "no-such-ref").unwrap_err();
+        assert!(matches!(err, AppError::Git(_)));
+    }
+
+    #[test]
+    fn show_file_returns_contents_at_ref() {
+        let repo = fixture_repo();
+        let out = show_file(repo.path(), "main", "file.txt").unwrap();
+        assert_eq!(out, "line1\nline2\n");
+
+        let feature = show_file(repo.path(), "feature", "file.txt").unwrap();
+        assert_eq!(feature, "line1\nline2\nline3\n");
+    }
+
+    #[test]
+    fn show_file_errors_on_missing_path() {
+        let repo = fixture_repo();
+        let err = show_file(repo.path(), "main", "no-such-file.txt").unwrap_err();
         assert!(matches!(err, AppError::Git(_)));
     }
 }

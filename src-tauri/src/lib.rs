@@ -57,6 +57,7 @@ pub fn run() {
             commands::review::delete_comment,
             commands::review::create_review_for_pr,
             commands::review::review_diff,
+            commands::review::file_source,
             commands::review::publish_review,
             commands::export::preview_review,
             commands::export::export_review,
