@@ -883,3 +883,83 @@ td.diff-code {
 .env-ok {
   color: #3fb950;
 }
+
+/* --- In-review file jump list --------------------------------------------- */
+.review-body {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+.diff-area {
+  flex: 1;
+  min-width: 0;
+}
+.jump-list {
+  position: sticky;
+  top: 0;
+  flex: 0 0 240px;
+  max-height: calc(100vh - 200px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.jump-list-header {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  padding: 4px 8px;
+}
+.jump-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.jump-row:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+.jump-row.active {
+  background: rgba(47, 129, 247, 0.15);
+}
+.jump-row.viewed {
+  color: var(--muted);
+}
+.jump-path {
+  direction: rtl;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+.jump-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  font-size: 12px;
+}
+.jump-meta .add {
+  color: #3fb950;
+}
+.jump-meta .del {
+  color: var(--danger);
+}
+.jump-badge {
+  font-size: 11px;
+  padding: 0 7px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
