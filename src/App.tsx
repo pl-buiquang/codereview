@@ -23,10 +23,13 @@ function App() {
     queryFn: api.listRepositories,
   });
   const repos = reposQuery.data;
+  const reposFetching = reposQuery.isFetching;
 
   // Drop repo/review tabs whose repository was removed in a previous session.
+  // Only act on a settled list — acting mid-fetch would race a just-added repo
+  // (whose tab is opened optimistically before the refetch lands).
   useEffect(() => {
-    if (!repos) return;
+    if (!repos || reposFetching) return;
     const ids = new Set(repos.map((r) => r.id));
     for (const tab of tabs) {
       if (
@@ -37,14 +40,26 @@ function App() {
         closeTab(tab.id);
       }
     }
-  }, [repos, tabs, closeTab]);
+  }, [repos, reposFetching, tabs, closeTab]);
 
   const activeTab = tabs.find((t) => t.id === activeTabId) ?? tabs[0];
 
   return (
     <div className="app-shell">
       <TabBar />
-      <div className="tab-content">{renderTab(activeTab, repos)}</div>
+      <div className="tab-content">
+        {/* Keep every tab mounted (hidden when inactive) so switching is instant
+            and each tab keeps its scroll position and component state. */}
+        {tabs.map((tab) => (
+          <div
+            key={tab.id}
+            className="tab-pane"
+            style={tab.id === activeTab.id ? undefined : { display: "none" }}
+          >
+            {renderTab(tab, repos)}
+          </div>
+        ))}
+      </div>
       <Toaster />
       <ConfirmDialog />
     </div>

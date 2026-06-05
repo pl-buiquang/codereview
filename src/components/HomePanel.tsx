@@ -30,8 +30,17 @@ export function HomePanel() {
       return api.addRepository(path);
     },
     onSuccess: (repo) => {
+      if (repo) {
+        // Seed the cache before opening the tab: App's cleanup effect closes
+        // repo/review tabs whose repoId isn't in ["repositories"], so the new
+        // tab would be killed if we opened it against the stale (pre-refetch)
+        // list — landing the user back on the previously active tab.
+        queryClient.setQueryData<Repository[]>(["repositories"], (old) =>
+          old ? (old.some((r) => r.id === repo.id) ? old : [...old, repo]) : [repo],
+        );
+        openRepoTab(repo.id);
+      }
       queryClient.invalidateQueries({ queryKey: ["repositories"] });
-      if (repo) openRepoTab(repo.id);
     },
     onError: (err) => toast.error(`Could not add repository:\n${String(err)}`),
   });
