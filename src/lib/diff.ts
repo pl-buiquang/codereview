@@ -2,6 +2,17 @@ import { getChangeKey, tokenize, type ChangeData, type FileData } from "react-di
 import { refractor } from "refractor";
 import type { Side } from "./types";
 
+// react-diff-view@3 treats refractor.highlight()'s return value as an array of
+// hast children, but refractor@5 wraps them in a root node ({type:'root',
+// children:[...]}). Left as-is, tokenize() throws on the non-array and all
+// highlighting silently falls back to plain text. Unwrap .children to restore
+// the v4 shape tokenize() expects.
+const refractorCompat = {
+  ...refractor,
+  highlight: (value: string, language: string) =>
+    refractor.highlight(value, language).children,
+} as unknown as typeof refractor;
+
 const EXT_LANG: Record<string, string> = {
   js: "javascript", mjs: "javascript", cjs: "javascript", jsx: "javascript",
   ts: "typescript", tsx: "typescript", json: "json", md: "markdown", markdown: "markdown",
@@ -23,7 +34,7 @@ export function tokenizeFile(file: FileData) {
   const language = languageForPath(fileDisplayPath(file));
   if (!language) return undefined;
   try {
-    return tokenize(file.hunks, { highlight: true, refractor, language });
+    return tokenize(file.hunks, { highlight: true, refractor: refractorCompat, language });
   } catch {
     return undefined;
   }
