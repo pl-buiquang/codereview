@@ -47,7 +47,7 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
   const [viewType, setViewType] = useState<ViewType>(defaultViewType);
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [filePanePath, setFilePanePath] = useState<string | null>(null);
-  const panelRef = useRef<HTMLElement>(null);
+  const diffAreaRef = useRef<HTMLDivElement>(null);
 
   const detailQuery = useQuery({
     queryKey: ["review", reviewId],
@@ -72,7 +72,7 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
   const readOnly = detail.review.status === "published";
 
   return (
-    <section className="main-panel review-panel" ref={panelRef}>
+    <section className="main-panel review-panel">
       <ReviewHeader
         detail={detail}
         saveState={saveState}
@@ -88,8 +88,8 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
       />
 
       <div className="review-body">
-        <FileJumpList reviewId={reviewId} scrollRootRef={panelRef} />
-        <div className="diff-area">
+        <FileJumpList reviewId={reviewId} scrollRootRef={diffAreaRef} />
+        <div className="diff-area" ref={diffAreaRef}>
           {!readOnly && (
             <p className="hint muted">
               Click a line to comment · shift-click another line on the same side to select a range.
