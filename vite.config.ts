@@ -3,6 +3,10 @@ import react from "@vitejs/plugin-react";
 
 // @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
+// @ts-expect-error process is a nodejs global
+const port = Number(process.env.VITE_PORT) || 1420;
+// @ts-expect-error process is a nodejs global
+const hmrPort = Number(process.env.VITE_HMR_PORT) || 1421;
 
 // https://vite.dev/config/
 export default defineConfig(async () => ({
@@ -14,14 +18,14 @@ export default defineConfig(async () => ({
   clearScreen: false,
   // 2. tauri expects a fixed port, fail if that port is not available
   server: {
-    port: 1420,
+    port,
     strictPort: true,
     host: host || false,
     hmr: host
       ? {
           protocol: "ws",
           host,
-          port: 1421,
+          port: hmrPort,
         }
       : undefined,
     watch: {

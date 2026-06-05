@@ -24,9 +24,18 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .setup(|app| {
-            let dir = app.path().app_data_dir()?;
-            std::fs::create_dir_all(&dir)?;
-            let conn = db::open(&dir.join("codereview.db"))?;
+            let db_path = match std::env::var_os("CODEREVIEW_DB") {
+                Some(p) => std::path::PathBuf::from(p),
+                None => {
+                    let dir = app.path().app_data_dir()?;
+                    std::fs::create_dir_all(&dir)?;
+                    dir.join("codereview.db")
+                }
+            };
+            if let Some(parent) = db_path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            let conn = db::open(&db_path)?;
             app.manage(Db(Mutex::new(conn)));
             Ok(())
         })
