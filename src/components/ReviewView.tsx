@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Diff,
@@ -11,7 +11,14 @@ import {
 import { api, pickSavePath } from "../lib/api";
 import { toast } from "../lib/toast";
 import { confirmDialog } from "../lib/confirm";
-import { changeKeyOf, fileDisplayPath, indexFile, tokenizeFile } from "../lib/diff";
+import {
+  changeKeyOf,
+  countChanges,
+  fileDisplayPath,
+  indexFile,
+  tokenizeFile,
+} from "../lib/diff";
+import { FileJumpList } from "./FileJumpList";
 import { useDebouncedCallback } from "../lib/useDebouncedCallback";
 import { useSettingsStore } from "../lib/settings";
 import { useUIStore } from "../store";
@@ -31,6 +38,7 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
   const defaultViewType = useSettingsStore((s) => s.defaultViewType);
   const [viewType, setViewType] = useState<ViewType>(defaultViewType);
   const [saveState, setSaveState] = useState<SaveState>("saved");
+  const panelRef = useRef<HTMLElement>(null);
 
   const detailQuery = useQuery({
     queryKey: ["review", reviewId],
@@ -55,7 +63,7 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
   const readOnly = detail.review.status === "published";
 
   return (
-    <section className="main-panel review-panel">
+    <section className="main-panel review-panel" ref={panelRef}>
       <ReviewHeader
         detail={detail}
         saveState={saveState}
@@ -70,30 +78,33 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
         }}
       />
 
-      <div className="diff-area">
-        {!readOnly && (
-          <p className="hint muted">
-            Click a line to comment · shift-click another line on the same side to select a range.
-          </p>
-        )}
-        {diffQuery.isLoading && <p className="muted">Loading diff…</p>}
-        {diffQuery.isError && <p className="error">Diff failed: {String(diffQuery.error)}</p>}
-        {diffQuery.data != null && (
-          <ReviewDiff
-            diffText={diffQuery.data}
-            viewType={viewType}
-            detail={detail}
-            readOnly={readOnly}
-            onSaving={() => setSaveState("saving")}
-            onSaved={() => {
-              setSaveState("saved");
-              queryClient.invalidateQueries({ queryKey: ["review", reviewId] });
-            }}
-            onCommentsChanged={() =>
-              queryClient.invalidateQueries({ queryKey: ["review", reviewId] })
-            }
-          />
-        )}
+      <div className="review-body">
+        <FileJumpList reviewId={reviewId} scrollRootRef={panelRef} />
+        <div className="diff-area">
+          {!readOnly && (
+            <p className="hint muted">
+              Click a line to comment · shift-click another line on the same side to select a range.
+            </p>
+          )}
+          {diffQuery.isLoading && <p className="muted">Loading diff…</p>}
+          {diffQuery.isError && <p className="error">Diff failed: {String(diffQuery.error)}</p>}
+          {diffQuery.data != null && (
+            <ReviewDiff
+              diffText={diffQuery.data}
+              viewType={viewType}
+              detail={detail}
+              readOnly={readOnly}
+              onSaving={() => setSaveState("saving")}
+              onSaved={() => {
+                setSaveState("saved");
+                queryClient.invalidateQueries({ queryKey: ["review", reviewId] });
+              }}
+              onCommentsChanged={() =>
+                queryClient.invalidateQueries({ queryKey: ["review", reviewId] })
+              }
+            />
+          )}
+        </div>
       </div>
     </section>
   );
@@ -289,6 +300,7 @@ function ReviewDiff({
       {files.map((file, index) => (
         <FileReview
           key={`${file.oldRevision}-${file.newRevision}-${index}`}
+          index={index}
           file={file}
           viewType={viewType}
           detail={detail}
@@ -310,6 +322,7 @@ interface Selection {
 }
 
 function FileReview({
+  index,
   file,
   viewType,
   detail,
@@ -318,6 +331,7 @@ function FileReview({
   onSaved,
   onCommentsChanged,
 }: {
+  index: number;
   file: FileData;
   viewType: ViewType;
   detail: ReviewDetail;
@@ -326,12 +340,38 @@ function FileReview({
   onSaved: () => void;
   onCommentsChanged: () => void;
 }) {
+  const queryClient = useQueryClient();
+  const reviewId = detail.review.id;
   const path = fileDisplayPath(file);
   const { metaByKey, keyByAnchor } = useMemo(() => indexFile(file), [file]);
   const tokens = useMemo(() => tokenizeFile(file), [file]);
   const [selection, setSelection] = useState<Selection | null>(null);
-  const [viewed, setViewed] = useState(() => detail.viewed_files.includes(path));
+  const viewed = detail.viewed_files.includes(path);
   const [fileComposerOpen, setFileComposerOpen] = useState(false);
+
+  const setViewed = useMutation({
+    mutationFn: (v: boolean) => api.setFileViewed(reviewId, path, v),
+    onMutate: async (v: boolean) => {
+      const key = ["review", reviewId];
+      await queryClient.cancelQueries({ queryKey: key });
+      const prev = queryClient.getQueryData<ReviewDetail>(key);
+      queryClient.setQueryData<ReviewDetail>(key, (old) =>
+        old
+          ? {
+              ...old,
+              viewed_files: v
+                ? [...old.viewed_files, path]
+                : old.viewed_files.filter((p) => p !== path),
+            }
+          : old,
+      );
+      return { prev };
+    },
+    onError: (err, _v, ctx) => {
+      if (ctx?.prev) queryClient.setQueryData(["review", reviewId], ctx.prev);
+      toast.error(String(err));
+    },
+  });
 
   // Comments attached to the whole file rather than a specific line.
   const fileComments = useMemo(
@@ -451,7 +491,7 @@ function FileReview({
   const { add, del } = useMemo(() => countChanges(file), [file]);
 
   return (
-    <div className="diff-file">
+    <div className="diff-file" id={`file-${index}`}>
       <div className="diff-file-header">
         <span className="file-path">{path}</span>
         <span className="diff-stats">
@@ -470,13 +510,7 @@ function FileReview({
             <input
               type="checkbox"
               checked={viewed}
-              onChange={(e) => {
-                const v = e.target.checked;
-                setViewed(v);
-                api
-                  .setFileViewed(detail.review.id, path, v)
-                  .catch((err) => toast.error(String(err)));
-              }}
+              onChange={(e) => setViewed.mutate(e.target.checked)}
             />
             Viewed
           </label>
@@ -801,16 +835,4 @@ function ExportModal({
       </div>
     </div>
   );
-}
-
-function countChanges(file: FileData): { add: number; del: number } {
-  let add = 0;
-  let del = 0;
-  for (const hunk of file.hunks) {
-    for (const change of hunk.changes) {
-      if (change.type === "insert") add++;
-      else if (change.type === "delete") del++;
-    }
-  }
-  return { add, del };
 }
