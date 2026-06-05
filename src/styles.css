@@ -824,6 +824,17 @@ td.diff-code {
   min-height: 0;
   overflow: auto;
 }
+/* The pane shows a single (head) file, so react-diff-view's unified view renders
+   two identical line-number gutters. Collapse the redundant old-side one to zero
+   width WITHOUT removing the cell — removing it would shift the remaining cells
+   into react-diff-view's fixed <colgroup> and squash the code into a gutter
+   column. font-size:0 drops the line number's width so the column auto-collapses. */
+.file-view-pane td.diff-gutter:first-child {
+  width: 0;
+  padding: 0;
+  border: 0;
+  font-size: 0;
+}
 /* Discreet bar marking lines added/modified on the head side. */
 .file-view-pane tr.diff-line.changed-line td.diff-code {
   box-shadow: inset 2px 0 0 #3fb950;
