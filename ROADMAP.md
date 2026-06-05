@@ -11,6 +11,8 @@ with inline & multi-line comments, Markdown/JSON export, and GitHub publish via 
 
 ## 1. Review experience
 
+_Some §1 items have been promoted to full specs — see [`specs/`](specs/)._
+
 - **Threaded replies** — the `comment.parent_id` column already exists but is unused. Render
   replies under a root comment and let the user reply, like a GitHub thread.
 - **Resolve / unresolve threads** — mark a comment thread resolved; collapse resolved threads.
@@ -19,19 +21,6 @@ with inline & multi-line comments, Markdown/JSON export, and GitHub publish via 
 - **Suggested changes** — GitHub-style ```suggestion blocks that publish as suggestions.
 - **Keyboard navigation** — next/prev file, next/prev comment, `c` to comment on the focused
   line, `j`/`k` movement.
-- **In-review file tree / jump list** — a sidebar of changed files with comment counts and
-  "viewed" state to jump around large diffs.
-- **Open the file from the diff** — click a file (or line) to open it. _v1:_ open in the user's
-  default editor (`tauri-plugin-opener`, already a dependency). _v2:_ open in a right-hand
-  slide-out pane with full-file syntax highlighting and the inline comment system still working
-  on the full file (not just the diff hunks).
-- **Diff context expansion (extend code before/after)** — `react-diff-view` supports expanding
-  collapsed/unchanged lines (`useSourceExpansion` / `expandFromRawCode`); wire it up so the user
-  can extend a hunk with the lines before/after it and place comments on context the diff didn't
-  include.
-- **Syntax-highlight mode within the diff** — let the user pick/override the highlighting
-  language for a diff (and toggle highlighting on/off), independent of the file extension — useful
-  for extensionless files or embedded languages.
 - **Word-level intra-line highlighting** — `markEdits` from `react-diff-view`.
 
 ## 2. Comment anchoring & staleness
