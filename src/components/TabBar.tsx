@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { useUIStore, type Tab } from "../store";
@@ -28,6 +29,11 @@ function TabItem({ tab, repos }: { tab: Tab; repos: Repository[] }) {
   const activeTabId = useUIStore((s) => s.activeTabId);
   const setActiveTab = useUIStore((s) => s.setActiveTab);
   const closeTab = useUIStore((s) => s.closeTab);
+  const moveTab = useUIStore((s) => s.moveTab);
+  const [dragOver, setDragOver] = useState(false);
+
+  // The home tab is pinned: it can't be dragged or accept a drop before it.
+  const draggable = tab.kind !== "home";
 
   const reviewQuery = useQuery({
     queryKey: ["review", tab.reviewId],
@@ -49,9 +55,29 @@ function TabItem({ tab, repos }: { tab: Tab; repos: Repository[] }) {
 
   return (
     <div
-      className={`tab tab-${tab.kind} ${tab.id === activeTabId ? "active" : ""}`}
+      className={`tab tab-${tab.kind} ${tab.id === activeTabId ? "active" : ""} ${
+        dragOver ? "drag-over" : ""
+      }`}
       onClick={() => setActiveTab(tab.id)}
       title={label}
+      draggable={draggable}
+      onDragStart={(e) => {
+        e.dataTransfer.setData("text/plain", tab.id);
+        e.dataTransfer.effectAllowed = "move";
+      }}
+      onDragOver={(e) => {
+        if (tab.kind === "home") return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+        setDragOver(true);
+      }}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={(e) => {
+        e.preventDefault();
+        setDragOver(false);
+        const fromId = e.dataTransfer.getData("text/plain");
+        if (fromId) moveTab(fromId, tab.id);
+      }}
     >
       {tab.kind === "home" ? <HomeIcon /> : <span className="tab-label">{label}</span>}
       {tab.kind !== "home" && (

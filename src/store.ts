@@ -24,6 +24,7 @@ interface UIState {
   closeSettings: () => void;
   closeTab: (id: string) => void;
   setActiveTab: (id: string) => void;
+  moveTab: (fromId: string, toId: string) => void;
 }
 
 function upsertTab(tabs: Tab[], tab: Tab): Tab[] {
@@ -88,6 +89,20 @@ export const useUIStore = create<UIState>()(
       closeTab: (id) => set((s) => closeTabReducer(s, id)),
 
       setActiveTab: (id) => set({ activeTabId: id }),
+
+      // Reorder by dropping `fromId` onto `toId`. The home tab is pinned first:
+      // it never moves and nothing can be placed before it.
+      moveTab: (fromId, toId) =>
+        set((s) => {
+          if (fromId === toId || fromId === HOME_TAB.id) return {};
+          const from = s.tabs.findIndex((t) => t.id === fromId);
+          if (from === -1 || !s.tabs.some((t) => t.id === toId)) return {};
+          const tabs = [...s.tabs];
+          const [moved] = tabs.splice(from, 1);
+          const target = tabs.findIndex((t) => t.id === toId);
+          tabs.splice(Math.max(1, target), 0, moved);
+          return { tabs };
+        }),
     }),
     {
       name: "codereview-ui",
