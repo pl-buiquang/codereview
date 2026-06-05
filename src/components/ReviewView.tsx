@@ -8,6 +8,7 @@ import {
   type FileData,
   type ViewType,
 } from "react-diff-view";
+import { openPath } from "@tauri-apps/plugin-opener";
 import { api, pickSavePath } from "../lib/api";
 import { toast } from "../lib/toast";
 import { confirmDialog } from "../lib/confirm";
@@ -327,6 +328,16 @@ function FileReview({
   onCommentsChanged: () => void;
 }) {
   const path = fileDisplayPath(file);
+  const isDeleted = file.type === "delete";
+  const openInDefaultApp = async () => {
+    if (isDeleted) return;
+    const fullPath = `${detail.repo_path}/${path}`;
+    try {
+      await openPath(fullPath);
+    } catch (err) {
+      toast.error(`Could not open file:\n${String(err)}`);
+    }
+  };
   const { metaByKey, keyByAnchor } = useMemo(() => indexFile(file), [file]);
   const tokens = useMemo(() => tokenizeFile(file), [file]);
   const [selection, setSelection] = useState<Selection | null>(null);
@@ -466,6 +477,18 @@ function FileReview({
               💬 Comment on file
             </button>
           )}
+          <button
+            className="open-file-btn"
+            title={
+              isDeleted
+                ? "File was deleted; no working copy to open"
+                : "Open working copy in default app"
+            }
+            disabled={isDeleted}
+            onClick={openInDefaultApp}
+          >
+            Open
+          </button>
           <label className="viewed-toggle" title="Collapse this file">
             <input
               type="checkbox"

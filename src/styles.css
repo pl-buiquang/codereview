@@ -362,6 +362,24 @@ button:hover {
   color: var(--text);
   border-color: var(--accent);
 }
+.open-file-btn {
+  margin-left: 8px;
+  padding: 2px 8px;
+  font-size: 12px;
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.open-file-btn:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--accent);
+}
+.open-file-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
 .file-comments {
   padding: 8px 12px;
   background: rgba(47, 129, 247, 0.06);
