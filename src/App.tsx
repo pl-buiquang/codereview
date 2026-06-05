@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { memo, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { TabBar } from "./components/TabBar";
 import { HomePanel } from "./components/HomePanel";
@@ -10,12 +10,10 @@ import { SettingsView } from "./components/SettingsView";
 import { api } from "./lib/api";
 import { useApplySettings } from "./lib/useApplySettings";
 import { useUIStore, type Tab } from "./store";
-import type { Repository } from "./lib/types";
 
 function App() {
   useApplySettings();
   const tabs = useUIStore((s) => s.tabs);
-  const activeTabId = useUIStore((s) => s.activeTabId);
   const closeTab = useUIStore((s) => s.closeTab);
 
   const reposQuery = useQuery({
@@ -42,38 +40,62 @@ function App() {
     }
   }, [repos, reposFetching, tabs, closeTab]);
 
-  const activeTab = tabs.find((t) => t.id === activeTabId) ?? tabs[0];
-
   return (
     <div className="app-shell">
       <TabBar />
-      <div className="tab-content">
-        {/* Keep every tab mounted (hidden when inactive) so switching is instant
-            and each tab keeps its scroll position and component state. */}
-        {tabs.map((tab) => (
-          <div
-            key={tab.id}
-            className="tab-pane"
-            style={tab.id === activeTab.id ? undefined : { display: "none" }}
-          >
-            {renderTab(tab, repos)}
-          </div>
-        ))}
-      </div>
+      <TabPanes />
       <Toaster />
       <ConfirmDialog />
     </div>
   );
 }
 
-function renderTab(tab: Tab, repos: Repository[] | undefined) {
+// Keep every tab mounted (hidden when inactive) so switching preserves each
+// tab's scroll position and component state. Subscribing to `tabs` (not the
+// active id) keeps this list from re-rendering on a switch; only the two panes
+// whose `active` prop flips re-render, and their heavy content is memoized.
+function TabPanes() {
+  const tabs = useUIStore((s) => s.tabs);
+  const activeTabId = useUIStore((s) => s.activeTabId);
+  const activeId = tabs.some((t) => t.id === activeTabId) ? activeTabId : tabs[0]?.id;
+  return (
+    <div className="tab-content">
+      {tabs.map((tab) => (
+        <TabPane key={tab.id} tab={tab} active={tab.id === activeId} />
+      ))}
+    </div>
+  );
+}
+
+// Visibility (the `active` flag) is split from content so a tab switch only
+// toggles this wrapper's `display` — TabContent, memoized on the stable `tab`
+// object, never re-renders, so the diff subtree is left untouched.
+const TabPane = memo(function TabPane({ tab, active }: { tab: Tab; active: boolean }) {
+  return (
+    <div className="tab-pane" style={active ? undefined : { display: "none" }}>
+      <TabContent tab={tab} />
+    </div>
+  );
+});
+
+const TabContent = memo(function TabContent({ tab }: { tab: Tab }) {
   if (tab.kind === "home") return <HomePanel />;
   if (tab.kind === "settings") return <SettingsView />;
   if (tab.kind === "review" && tab.reviewId != null) {
     return <ReviewView key={tab.reviewId} reviewId={tab.reviewId} />;
   }
+  return <RepoPane repoId={tab.repoId} />;
+});
 
-  const repo = repos?.find((r) => r.id === tab.repoId);
+// Looks up its own repo rather than taking it from App, so the pane doesn't
+// depend on App's repos query (whose identity changes on every refetch would
+// otherwise defeat TabContent's memo).
+function RepoPane({ repoId }: { repoId?: number }) {
+  const { data: repos } = useQuery({
+    queryKey: ["repositories"],
+    queryFn: api.listRepositories,
+  });
+  const repo = repos?.find((r) => r.id === repoId);
   if (!repo) {
     return (
       <section className="main-panel empty">
