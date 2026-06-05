@@ -91,16 +91,20 @@ export const useUIStore = create<UIState>()(
       setActiveTab: (id) => set({ activeTabId: id }),
 
       // Reorder by dropping `fromId` onto `toId`. The home tab is pinned first:
-      // it never moves and nothing can be placed before it.
+      // it never moves and nothing can be dropped onto or before it.
       moveTab: (fromId, toId) =>
         set((s) => {
-          if (fromId === toId || fromId === HOME_TAB.id) return {};
+          if (fromId === toId || fromId === HOME_TAB.id || toId === HOME_TAB.id) return {};
           const from = s.tabs.findIndex((t) => t.id === fromId);
-          if (from === -1 || !s.tabs.some((t) => t.id === toId)) return {};
+          const to = s.tabs.findIndex((t) => t.id === toId);
+          if (from === -1 || to === -1) return {};
           const tabs = [...s.tabs];
           const [moved] = tabs.splice(from, 1);
+          // Removing the source shifts every later index down by one, so when
+          // dragging rightward the target now sits where the source was — insert
+          // AFTER it to actually move past it; leftward inserts before it.
           const target = tabs.findIndex((t) => t.id === toId);
-          tabs.splice(Math.max(1, target), 0, moved);
+          tabs.splice(from < to ? target + 1 : target, 0, moved);
           return { tabs };
         }),
     }),

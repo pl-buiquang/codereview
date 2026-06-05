@@ -95,4 +95,47 @@ describe("useUIStore", () => {
     useUIStore.getState().closeSettings();
     expect(useUIStore.getState().tabs.some((t) => t.id === "settings")).toBe(false);
   });
+
+  describe("moveTab", () => {
+    const order = () => useUIStore.getState().tabs.map((t) => t.id);
+    const seed = () =>
+      useUIStore.setState({
+        tabs: [
+          { id: "home", kind: "home" },
+          { id: "repo-1", kind: "repo", repoId: 1 },
+          { id: "repo-2", kind: "repo", repoId: 2 },
+          { id: "repo-3", kind: "repo", repoId: 3 },
+        ],
+        activeTabId: "home",
+      });
+
+    beforeEach(seed);
+
+    it("moves a tab leftward, before the drop target", () => {
+      useUIStore.getState().moveTab("repo-3", "repo-1");
+      expect(order()).toEqual(["home", "repo-3", "repo-1", "repo-2"]);
+    });
+
+    it("moves a tab rightward, after the drop target", () => {
+      useUIStore.getState().moveTab("repo-1", "repo-3");
+      expect(order()).toEqual(["home", "repo-2", "repo-3", "repo-1"]);
+    });
+
+    it("moves a tab one slot to the right (onto its neighbor)", () => {
+      useUIStore.getState().moveTab("repo-1", "repo-2");
+      expect(order()).toEqual(["home", "repo-2", "repo-1", "repo-3"]);
+    });
+
+    it("never places a tab before the pinned home tab", () => {
+      useUIStore.getState().moveTab("repo-2", "home");
+      expect(order()[0]).toBe("home");
+    });
+
+    it("ignores no-op and invalid moves", () => {
+      useUIStore.getState().moveTab("repo-1", "repo-1");
+      useUIStore.getState().moveTab("home", "repo-1");
+      useUIStore.getState().moveTab("repo-9", "repo-1");
+      expect(order()).toEqual(["home", "repo-1", "repo-2", "repo-3"]);
+    });
+  });
 });
