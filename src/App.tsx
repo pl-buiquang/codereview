@@ -58,9 +58,14 @@ function TabPanes() {
   const tabs = useUIStore((s) => s.tabs);
   const activeTabId = useUIStore((s) => s.activeTabId);
   const activeId = tabs.some((t) => t.id === activeTabId) ? activeTabId : tabs[0]?.id;
+  // Render panes in a stable id-sorted order, decoupled from the tab-bar order.
+  // Only `display` decides which pane shows, so the order here is invisible — but
+  // keeping it stable means reordering tabs never moves these heavy mounted diff
+  // subtrees in the DOM, which is what made a drag-drop feel laggy.
+  const panes = [...tabs].sort((a, b) => a.id.localeCompare(b.id));
   return (
     <div className="tab-content">
-      {tabs.map((tab) => (
+      {panes.map((tab) => (
         <TabPane key={tab.id} tab={tab} active={tab.id === activeId} />
       ))}
     </div>

@@ -149,9 +149,14 @@ button:hover {
 .tab-label {
   overflow: hidden;
   text-overflow: ellipsis;
+  /* Let drag events pass through to the tab so crossing the label doesn't fire
+     spurious dragleave/dragover churn while reordering. Clicks still hit the
+     parent tab (which carries the onClick and the tooltip). */
+  pointer-events: none;
 }
 .home-icon {
   display: block;
+  pointer-events: none;
 }
 .tab-close {
   border: none;
