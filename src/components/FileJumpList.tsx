@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type RefObject } from "react";
+import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { parseDiff } from "react-diff-view";
 import { api } from "../lib/api";
@@ -58,39 +58,85 @@ export function FileJumpList({
   );
 
   const [activeIndex, setActiveIndex] = useState(0);
+  // A click selects a file outright and "locks" auto-selection: the scrollspy is
+  // muted while the click-triggered smooth scroll plays out, then released once
+  // scrolling goes quiet — without re-picking — so the chosen file stays selected
+  // until the user actually scrolls again. (Otherwise the smooth scroll, or the
+  // bottom-of-view fallback, would immediately steal the selection back — which
+  // is why a trailing file that already fits on screen couldn't stay selected.)
+  const lockedRef = useRef(false);
+  const releaseTimerRef = useRef(0);
 
+  // Track the active file from scroll position, scoping every `#file-N` lookup
+  // to this review's own scroll panel. Other mounted review tabs render the same
+  // `file-N` ids, so a document-wide getElementById would resolve to whichever
+  // tab is first in the DOM (often a display:none one) — which is why the jump
+  // list reacted on one tab and went dead on the others. A scrollspy (rather than
+  // an IntersectionObserver band) also lets the last file win: a short trailing
+  // file can never scroll far enough up to trip an observer trigger zone.
   useEffect(() => {
-    if (files.length === 0) return;
     const root = scrollRootRef.current;
-    const observed: Element[] = [];
-    const visible = new Set<number>();
+    if (!root || files.length === 0) return;
 
-    const observer = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          const idx = Number((entry.target as HTMLElement).dataset.fileIndex);
-          if (entry.isIntersecting) visible.add(idx);
-          else visible.delete(idx);
-        }
-        if (visible.size > 0) setActiveIndex(Math.min(...visible));
-      },
-      { root, rootMargin: "0px 0px -70% 0px" },
-    );
+    let raf = 0;
+    const recompute = () => {
+      raf = 0;
+      if (lockedRef.current) return;
+      const trigger = root.getBoundingClientRect().top + 100;
+      let active = 0;
+      for (let i = 0; i < files.length; i++) {
+        const el = root.querySelector<HTMLElement>(`#file-${i}`);
+        if (!el) continue;
+        if (el.getBoundingClientRect().top <= trigger) active = i;
+        else break;
+      }
+      // A short trailing file can't reach the trigger line; once the panel is
+      // scrolled to the bottom, treat the last file as active.
+      if (root.scrollTop + root.clientHeight >= root.scrollHeight - 2) {
+        active = files.length - 1;
+      }
+      setActiveIndex(active);
+    };
+    const schedule = () => {
+      if (!raf) raf = requestAnimationFrame(recompute);
+    };
+    const onScroll = () => {
+      // While a manual selection holds, don't auto-pick. Each scroll event from
+      // the click's smooth scroll just pushes the release back; once scrolling
+      // has been quiet briefly, hand control back to the scrollspy as-is.
+      if (lockedRef.current) {
+        window.clearTimeout(releaseTimerRef.current);
+        releaseTimerRef.current = window.setTimeout(() => {
+          lockedRef.current = false;
+        }, 150);
+        return;
+      }
+      schedule();
+    };
 
-    for (let i = 0; i < files.length; i++) {
-      const el = document.getElementById(`file-${i}`);
-      if (!el) continue;
-      el.dataset.fileIndex = String(i);
-      observer.observe(el);
-      observed.push(el);
-    }
-
-    return () => observer.disconnect();
+    recompute();
+    root.addEventListener("scroll", onScroll, { passive: true });
+    const ro = new ResizeObserver(schedule);
+    ro.observe(root);
+    return () => {
+      root.removeEventListener("scroll", onScroll);
+      ro.disconnect();
+      if (raf) cancelAnimationFrame(raf);
+      window.clearTimeout(releaseTimerRef.current);
+    };
   }, [files.length, reviewId, scrollRootRef]);
 
   const jumpTo = (index: number) => {
-    document
-      .getElementById(`file-${index}`)
+    lockedRef.current = true;
+    // Fallback for clicking a file that's already in view: no scroll fires, so
+    // the scroll-settle handler never runs — release the lock after a beat.
+    window.clearTimeout(releaseTimerRef.current);
+    releaseTimerRef.current = window.setTimeout(() => {
+      lockedRef.current = false;
+    }, 700);
+    setActiveIndex(index);
+    scrollRootRef.current
+      ?.querySelector(`#file-${index}`)
       ?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
