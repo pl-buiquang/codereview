@@ -877,8 +877,17 @@ function CommentItem({
           className="btn-icon"
           title="Delete comment"
           onClick={async () => {
-            await api.deleteComment(comment.id);
-            onCommentsChanged();
+            if (
+              await confirmDialog({
+                title: "Delete comment",
+                message: "Delete this comment?",
+                confirmLabel: "Delete",
+                danger: true,
+              })
+            ) {
+              await api.deleteComment(comment.id);
+              onCommentsChanged();
+            }
           }}
         >
           🗑
