@@ -95,6 +95,9 @@ pub struct Comment {
     pub file_path: String,
     /// 'line' (anchored to side/line) or 'file' (attached to the whole file).
     pub subject_type: String,
+    /// 'diff' (authored against a diff hunk; publishable inline) or 'file_view'
+    /// (authored in the full-file pane; folded into the review body on publish).
+    pub origin: String,
     pub side: String,
     pub line: i64,
     pub start_line: Option<i64>,
@@ -114,6 +117,7 @@ impl Comment {
             review_id: row.get("review_id")?,
             file_path: row.get("file_path")?,
             subject_type: row.get("subject_type")?,
+            origin: row.get("origin")?,
             side: row.get("side")?,
             line: row.get("line")?,
             start_line: row.get("start_line")?,

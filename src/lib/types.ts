@@ -48,6 +48,7 @@ export interface Comment {
   review_id: number;
   file_path: string;
   subject_type: "line" | "file";
+  origin: "diff" | "file_view";
   side: Side;
   line: number;
   start_line: number | null;

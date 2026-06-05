@@ -758,6 +758,90 @@ td.diff-code {
   margin-top: 6px;
 }
 
+/* Full-file review pane (v2) */
+.view-file-btn {
+  margin-left: 8px;
+  padding: 2px 8px;
+  font-size: 12px;
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.view-file-btn:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--accent);
+}
+.view-file-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.file-view-pane {
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: 55vw;
+  max-width: 1100px;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  border-left: 1px solid var(--border);
+  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.35);
+  z-index: 50;
+  animation: file-view-pane-in 0.16s ease-out;
+}
+@keyframes file-view-pane-in {
+  from {
+    transform: translateX(16px);
+    opacity: 0.6;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+.file-view-pane-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  background: var(--bg-elev);
+  border-bottom: 1px solid var(--border);
+}
+.file-view-pane-header .file-path {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.file-view-hint {
+  font-size: 12px;
+}
+.file-view-pane-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+/* Discreet bar marking lines added/modified on the head side. */
+.file-view-pane tr.diff-line.changed-line td.diff-code {
+  box-shadow: inset 2px 0 0 #3fb950;
+}
+.origin-badge {
+  flex: none;
+  align-self: center;
+  padding: 1px 6px;
+  border-radius: 9px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--accent);
+  background: rgba(47, 129, 247, 0.14);
+  border: 1px solid rgba(47, 129, 247, 0.4);
+  cursor: help;
+}
+
 /* Modal */
 .modal-backdrop {
   position: fixed;

@@ -71,6 +71,23 @@ pub fn post_review(
     Ok(value.get("id").and_then(|v| v.as_i64()).unwrap_or_default())
 }
 
+/// Full contents of `file_path` at `git_ref` via the GitHub contents API,
+/// requesting the raw media type so the body is the file itself (not base64 JSON).
+/// Used as a fallback when a PR's commit isn't present in the local clone.
+pub fn file_at_ref(
+    repo: &Path,
+    owner: &str,
+    name: &str,
+    file_path: &str,
+    git_ref: &str,
+) -> AppResult<String> {
+    let endpoint = format!("repos/{owner}/{name}/contents/{file_path}?ref={git_ref}");
+    run_gh(
+        repo,
+        &["api", &endpoint, "-H", "Accept: application/vnd.github.raw"],
+    )
+}
+
 pub fn auth_status() -> bool {
     Command::new(crate::tools::gh_bin())
         .args(["auth", "status"])

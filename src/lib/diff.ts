@@ -1,4 +1,10 @@
-import { getChangeKey, tokenize, type ChangeData, type FileData } from "react-diff-view";
+import {
+  getChangeKey,
+  tokenize,
+  type ChangeData,
+  type FileData,
+  type HunkData,
+} from "react-diff-view";
 import { refractor } from "refractor";
 import type { Side } from "./types";
 
@@ -108,6 +114,59 @@ export function indexFile(file: FileData): {
 
 export function changeKeyOf(change: ChangeData): string {
   return getChangeKey(change);
+}
+
+/**
+ * Build a synthetic single-file diff where the entire `source` is one hunk of
+ * `normal` (unchanged) lines. Feeding this to `<Diff>`/`tokenizeFile`/`indexFile`
+ * gives the full-file pane gutters, click-to-comment, widget injection and syntax
+ * highlighting for free, while every line carries its absolute (head) number on
+ * both sides.
+ */
+export function buildFullFileFile(path: string, source: string): FileData {
+  // `git show`/the contents API append a trailing newline; drop the resulting
+  // empty final element so we don't render a phantom blank last line.
+  const lines = source.split("\n");
+  if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
+
+  const changes: ChangeData[] = lines.map((content, i) => ({
+    type: "normal",
+    isNormal: true,
+    content,
+    oldLineNumber: i + 1,
+    newLineNumber: i + 1,
+  }));
+  const hunk: HunkData = {
+    content: `@@ -1,${lines.length} +1,${lines.length} @@`,
+    oldStart: 1,
+    newStart: 1,
+    oldLines: lines.length,
+    newLines: lines.length,
+    changes,
+  };
+  return {
+    type: "modify",
+    oldPath: path,
+    newPath: path,
+    oldRevision: "",
+    newRevision: "",
+    oldEndingNewLine: true,
+    newEndingNewLine: true,
+    oldMode: "",
+    newMode: "",
+    hunks: [hunk],
+  };
+}
+
+/** Head-side line numbers that are added or modified in `file`'s diff hunks. */
+export function changedRightLines(file: FileData): Set<number> {
+  const lines = new Set<number>();
+  for (const hunk of file.hunks) {
+    for (const change of hunk.changes) {
+      if (change.type === "insert") lines.add(change.lineNumber);
+    }
+  }
+  return lines;
 }
 
 export function countChanges(file: FileData): { add: number; del: number } {

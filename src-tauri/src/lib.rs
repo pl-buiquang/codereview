@@ -53,6 +53,7 @@ pub fn run() {
             commands::review::delete_review,
             commands::review::add_comment,
             commands::review::add_file_comment,
+            commands::review::add_file_view_comment,
             commands::review::update_comment,
             commands::review::delete_comment,
             commands::review::create_review_for_pr,

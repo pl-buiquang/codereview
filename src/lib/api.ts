@@ -67,6 +67,14 @@ export const api = {
   }) => invoke<Comment>("add_comment", args),
   addFileComment: (args: { reviewId: number; filePath: string; body: string }) =>
     invoke<Comment>("add_file_comment", args),
+  addFileViewComment: (args: {
+    reviewId: number;
+    filePath: string;
+    line: number;
+    startLine?: number | null;
+    body: string;
+    anchoredHeadSha?: string | null;
+  }) => invoke<Comment>("add_file_view_comment", args),
   updateComment: (commentId: number, body: string) =>
     invoke<void>("update_comment", { commentId, body }),
   deleteComment: (commentId: number) =>

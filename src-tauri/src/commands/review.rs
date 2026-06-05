@@ -191,9 +191,10 @@ pub fn review_diff(review_id: i64, db: State<Db>) -> AppResult<String> {
     }
 }
 
-/// Full source of one side of a file, used to reveal collapsed context between
-/// hunks. Only local targets are supported in v1; GitHub PR targets are rejected
-/// (the frontend disables expansion and surfaces this message).
+/// Full source of one side of a file (LEFT→base, RIGHT→head), used to reveal
+/// collapsed context between hunks and to render the full-file review pane. Reads
+/// the local blob via `git show`; for GitHub PR targets whose commit isn't checked
+/// out locally, falls back to the GitHub contents API.
 #[tauri::command]
 pub fn file_source(
     review_id: i64,
@@ -203,11 +204,6 @@ pub fn file_source(
 ) -> AppResult<String> {
     let conn = db.0.lock().unwrap();
     let detail = load_detail(&conn, review_id)?;
-    if detail.target.kind != "local" {
-        return Err(AppError::Other(
-            "context expansion is only available for local reviews (v1)".into(),
-        ));
-    }
     let sha = match side.as_str() {
         "LEFT" => detail.target.base_sha.as_deref(),
         "RIGHT" => detail.target.head_sha.as_deref(),
@@ -215,7 +211,26 @@ pub fn file_source(
     };
     let sha = sha
         .ok_or_else(|| AppError::Other("this side has no source (file added or deleted)".into()))?;
-    git::show_file(std::path::Path::new(&detail.repo_path), sha, &file_path)
+    let repo = std::path::Path::new(&detail.repo_path);
+    // Local commit is fastest and works for local targets and PRs that are
+    // checked out; for PRs whose commit isn't local, fall back to the GitHub API.
+    match git::show_file(repo, sha, &file_path) {
+        Ok(source) => Ok(source),
+        Err(local_err) => {
+            if detail.target.kind != "github_pr" {
+                return Err(local_err);
+            }
+            let (owner, name): (Option<String>, Option<String>) = conn.query_row(
+                "SELECT remote_owner, remote_name FROM repository WHERE id = ?1",
+                params![detail.target.repo_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )?;
+            match (owner, name) {
+                (Some(owner), Some(name)) => gh::file_at_ref(repo, &owner, &name, &file_path, sha),
+                _ => Err(local_err),
+            }
+        }
+    }
 }
 
 /// All reviews (optionally filtered to one repo), newest first, for the Reviews list.
@@ -384,7 +399,7 @@ fn build_publish_payload(detail: &ReviewDetail) -> serde_json::Value {
     let comments: Vec<serde_json::Value> = detail
         .comments
         .iter()
-        .filter(|c| c.subject_type != "file")
+        .filter(|c| c.subject_type != "file" && c.origin != "file_view")
         .map(|c| {
             let mut obj = serde_json::json!({
                 "path": c.file_path,
@@ -413,26 +428,57 @@ fn build_publish_payload(detail: &ReviewDetail) -> serde_json::Value {
     payload
 }
 
-/// The review summary with any file-level comments appended as a trailing
-/// section (GitHub can't anchor them inline, so they ride along in the body).
+/// The review summary with any whole-file and full-file-pane comments appended as
+/// trailing sections. GitHub can't anchor either kind inline (file comments have
+/// no line; file-view comments may sit outside the diff), so they ride along in
+/// the body instead.
 fn body_with_file_comments(detail: &ReviewDetail) -> String {
     let mut body = detail.review.body.trim().to_string();
+
     let file_comments: Vec<&Comment> = detail
         .comments
         .iter()
         .filter(|c| c.subject_type == "file")
         .collect();
-    if file_comments.is_empty() {
-        return body;
+    if !file_comments.is_empty() {
+        if !body.is_empty() {
+            body.push_str("\n\n");
+        }
+        body.push_str("## File-level comments");
+        for c in file_comments {
+            body.push_str(&format!("\n\n**{}**\n\n{}", c.file_path, c.body.trim()));
+        }
     }
-    if !body.is_empty() {
-        body.push_str("\n\n");
+
+    let file_view_comments: Vec<&Comment> = detail
+        .comments
+        .iter()
+        .filter(|c| c.origin == "file_view")
+        .collect();
+    if !file_view_comments.is_empty() {
+        if !body.is_empty() {
+            body.push_str("\n\n");
+        }
+        body.push_str("## File-view comments");
+        let mut current = "";
+        for c in file_view_comments {
+            if c.file_path != current {
+                body.push_str(&format!("\n\n**{}**", c.file_path));
+                current = &c.file_path;
+            }
+            body.push_str(&format!("\n- {}: {}", line_label(c), c.body.trim()));
+        }
     }
-    body.push_str("## File-level comments");
-    for c in file_comments {
-        body.push_str(&format!("\n\n**{}**\n\n{}", c.file_path, c.body.trim()));
-    }
+
     body
+}
+
+/// `L5` for a single line, `L3-L5` for a multi-line range.
+fn line_label(c: &Comment) -> String {
+    match c.start_line {
+        Some(start) if start != c.line => format!("L{}-L{}", start, c.line),
+        _ => format!("L{}", c.line),
+    }
 }
 
 /// Publish a draft review to its GitHub PR via the line-based reviews API, then
@@ -536,6 +582,37 @@ pub fn add_file_comment(
         "INSERT INTO comment (review_id, file_path, subject_type, body, line, created_at, updated_at)
          VALUES (?1, ?2, 'file', ?3, 0, ?4, ?4)",
         params![review_id, file_path, body, ts],
+    )?;
+    conn.execute(
+        "UPDATE review SET updated_at = ?1 WHERE id = ?2",
+        params![ts, review_id],
+    )?;
+    get_comment(&conn, conn.last_insert_rowid())
+}
+
+/// Add a comment authored in the full-file pane, anchored to an absolute
+/// head-file line. Stored with `subject_type = 'line'`, `side = 'RIGHT'`, and
+/// `origin = 'file_view'` so publish/export fold it into the review body instead
+/// of posting it as a (possibly un-anchorable) GitHub inline comment.
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+pub fn add_file_view_comment(
+    review_id: i64,
+    file_path: String,
+    line: i64,
+    start_line: Option<i64>,
+    body: String,
+    anchored_head_sha: Option<String>,
+    db: State<Db>,
+) -> AppResult<Comment> {
+    let conn = db.0.lock().unwrap();
+    ensure_draft(&conn, review_id)?;
+    let ts = now();
+    conn.execute(
+        "INSERT INTO comment
+            (review_id, file_path, subject_type, origin, side, line, start_line, body, anchored_head_sha, created_at, updated_at)
+         VALUES (?1, ?2, 'line', 'file_view', 'RIGHT', ?3, ?4, ?5, ?6, ?7, ?7)",
+        params![review_id, file_path, line, start_line, body, anchored_head_sha, ts],
     )?;
     conn.execute(
         "UPDATE review SET updated_at = ?1 WHERE id = ?2",
@@ -804,6 +881,7 @@ mod tests {
             review_id: 1,
             file_path: "src/lib.rs".into(),
             subject_type: "line".into(),
+            origin: "diff".into(),
             side: side.into(),
             line,
             start_line,
@@ -937,5 +1015,47 @@ mod tests {
             vec![file_comment("a.rs", "note")],
         ));
         assert!(p["body"].as_str().unwrap().starts_with("## File-level comments"));
+    }
+
+    fn file_view_comment(file_path: &str, line: i64, start_line: Option<i64>, body: &str) -> Comment {
+        Comment {
+            origin: "file_view".into(),
+            file_path: file_path.into(),
+            line,
+            start_line,
+            body: body.into(),
+            ..payload_comment(line, start_line, "RIGHT")
+        }
+    }
+
+    #[test]
+    fn payload_excludes_file_view_comments_from_inline_array() {
+        let p = build_publish_payload(&detail_with(
+            None,
+            "",
+            vec![
+                payload_comment(5, None, "RIGHT"),
+                file_view_comment("src/lib.rs", 12, None, "pane note"),
+            ],
+        ));
+        assert_eq!(p["comments"].as_array().unwrap().len(), 1);
+        assert_eq!(p["comments"][0]["line"], 5);
+    }
+
+    #[test]
+    fn payload_folds_file_view_comments_into_body_with_line_label() {
+        let p = build_publish_payload(&detail_with(
+            Some("comment"),
+            "Summary text",
+            vec![
+                file_view_comment("src/lib.rs", 12, None, "single note"),
+                file_view_comment("src/lib.rs", 20, Some(18), "range note"),
+            ],
+        ));
+        let body = p["body"].as_str().unwrap();
+        assert!(body.contains("## File-view comments"));
+        assert!(body.contains("**src/lib.rs**"));
+        assert!(body.contains("- L12: single note"));
+        assert!(body.contains("- L18-L20: range note"));
     }
 }

@@ -43,6 +43,18 @@ pub fn render_markdown(detail: &ReviewDetail, repo_label: &str) -> String {
                 out.push_str("\n\n");
                 continue;
             }
+            if c.origin == "file_view" {
+                let loc = match c.start_line {
+                    Some(start) if start != c.line => {
+                        format!("{}:L{}-L{}", c.file_path, start, c.line)
+                    }
+                    _ => format!("{}:L{}", c.file_path, c.line),
+                };
+                out.push_str(&format!("### {loc} (file view)\n\n"));
+                out.push_str(c.body.trim());
+                out.push_str("\n\n");
+                continue;
+            }
             let loc = match c.start_line {
                 Some(start) if start != c.line => {
                     format!("{}:{}-{}", c.file_path, start, c.line)
@@ -76,6 +88,7 @@ pub fn render_json(detail: &ReviewDetail, repo_label: &str) -> String {
             json!({
                 "file": c.file_path,
                 "subject_type": c.subject_type,
+                "origin": c.origin,
                 "side": c.side,
                 "line": c.line,
                 "start_line": c.start_line,
@@ -145,6 +158,7 @@ mod tests {
             review_id: 1,
             file_path: "src/main.rs".into(),
             subject_type: "line".into(),
+            origin: "diff".into(),
             side: "RIGHT".into(),
             line,
             start_line,
@@ -265,6 +279,44 @@ mod tests {
         let json = render_json(&detail(vec![file_comment("note")]), "owner/repo");
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(v["comments"][0]["subject_type"], "file");
+    }
+
+    fn file_view_comment(line: i64, start_line: Option<i64>, body: &str) -> Comment {
+        Comment {
+            origin: "file_view".into(),
+            line,
+            start_line,
+            diff_hunk: None,
+            body: body.into(),
+            ..comment(line, start_line)
+        }
+    }
+
+    #[test]
+    fn markdown_renders_file_view_comment_with_line_and_no_diff() {
+        let md = render_markdown(
+            &detail(vec![file_view_comment(7, None, "pane note")]),
+            "owner/repo",
+        );
+        assert!(md.contains("### src/main.rs:L7 (file view)"), "got: {md}");
+        assert!(md.contains("pane note"));
+        assert!(!md.contains("```diff"));
+    }
+
+    #[test]
+    fn markdown_file_view_comment_renders_range() {
+        let md = render_markdown(
+            &detail(vec![file_view_comment(9, Some(7), "range note")]),
+            "owner/repo",
+        );
+        assert!(md.contains("### src/main.rs:L7-L9 (file view)"), "got: {md}");
+    }
+
+    #[test]
+    fn json_carries_origin() {
+        let json = render_json(&detail(vec![file_view_comment(7, None, "note")]), "owner/repo");
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["comments"][0]["origin"], "file_view");
     }
 
     #[test]

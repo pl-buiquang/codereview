@@ -23,6 +23,7 @@ import {
   tokenizeFile,
 } from "../lib/diff";
 import { FileJumpList } from "./FileJumpList";
+import { FileViewPane } from "./FileViewPane";
 import { useDebouncedCallback } from "../lib/useDebouncedCallback";
 import { useSettingsStore } from "../lib/settings";
 import { useUIStore } from "../store";
@@ -44,6 +45,7 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
   const defaultViewType = useSettingsStore((s) => s.defaultViewType);
   const [viewType, setViewType] = useState<ViewType>(defaultViewType);
   const [saveState, setSaveState] = useState<SaveState>("saved");
+  const [filePanePath, setFilePanePath] = useState<string | null>(null);
   const panelRef = useRef<HTMLElement>(null);
 
   const detailQuery = useQuery({
@@ -100,6 +102,7 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
               viewType={viewType}
               detail={detail}
               readOnly={readOnly}
+              onOpenFilePane={setFilePanePath}
               onSaving={() => setSaveState("saving")}
               onSaved={() => {
                 setSaveState("saved");
@@ -112,6 +115,24 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
           )}
         </div>
       </div>
+
+      {filePanePath && (
+        <FileViewPane
+          reviewId={reviewId}
+          detail={detail}
+          filePath={filePanePath}
+          readOnly={readOnly}
+          onClose={() => setFilePanePath(null)}
+          onSaving={() => setSaveState("saving")}
+          onSaved={() => {
+            setSaveState("saved");
+            queryClient.invalidateQueries({ queryKey: ["review", reviewId] });
+          }}
+          onCommentsChanged={() =>
+            queryClient.invalidateQueries({ queryKey: ["review", reviewId] })
+          }
+        />
+      )}
     </section>
   );
 }
@@ -287,6 +308,7 @@ function ReviewDiff({
   viewType,
   detail,
   readOnly,
+  onOpenFilePane,
   onSaving,
   onSaved,
   onCommentsChanged,
@@ -295,6 +317,7 @@ function ReviewDiff({
   viewType: ViewType;
   detail: ReviewDetail;
   readOnly: boolean;
+  onOpenFilePane: (path: string) => void;
   onSaving: () => void;
   onSaved: () => void;
   onCommentsChanged: () => void;
@@ -311,6 +334,7 @@ function ReviewDiff({
           viewType={viewType}
           detail={detail}
           readOnly={readOnly}
+          onOpenFilePane={onOpenFilePane}
           onSaving={onSaving}
           onSaved={onSaved}
           onCommentsChanged={onCommentsChanged}
@@ -333,6 +357,7 @@ function FileReview({
   viewType,
   detail,
   readOnly,
+  onOpenFilePane,
   onSaving,
   onSaved,
   onCommentsChanged,
@@ -342,6 +367,7 @@ function FileReview({
   viewType: ViewType;
   detail: ReviewDetail;
   readOnly: boolean;
+  onOpenFilePane: (path: string) => void;
   onSaving: () => void;
   onSaved: () => void;
   onCommentsChanged: () => void;
@@ -450,6 +476,7 @@ function FileReview({
     const orphan: Comment[] = [];
     for (const c of detail.comments) {
       if (c.file_path !== path || c.subject_type === "file") continue;
+      if (c.origin === "file_view") continue; // shown in the full-file pane, not the diff
       const key = keyByAnchor.get(`${c.side}:${c.line}`);
       if (!key) {
         orphan.push(c);
@@ -571,6 +598,20 @@ function FileReview({
               💬 Comment on file
             </button>
           )}
+          <button
+            className="view-file-btn"
+            title={
+              isDeleted
+                ? "File was deleted; no head version to view"
+                : file.isBinary
+                  ? "Binary file; nothing to view"
+                  : "View the full file and comment on any line"
+            }
+            disabled={isDeleted || file.isBinary}
+            onClick={() => onOpenFilePane(path)}
+          >
+            View file
+          </button>
           <button
             className="open-file-btn"
             title={
@@ -776,12 +817,13 @@ function ExpandControl({
   );
 }
 
-function LineWidget({
+export function LineWidget({
   comments,
   headSha,
   composerOpen,
   rangeLabel,
   readOnly,
+  showOrigin,
   onCloseComposer,
   onAdd,
   onSaving,
@@ -793,6 +835,7 @@ function LineWidget({
   composerOpen: boolean;
   rangeLabel?: string;
   readOnly: boolean;
+  showOrigin?: boolean;
   onCloseComposer: () => void;
   onAdd: (text: string) => Promise<void>;
   onSaving: () => void;
@@ -807,6 +850,7 @@ function LineWidget({
           comment={c}
           headSha={headSha}
           readOnly={readOnly}
+          showOrigin={showOrigin}
           onSaving={onSaving}
           onSaved={onSaved}
           onCommentsChanged={onCommentsChanged}
@@ -819,10 +863,11 @@ function LineWidget({
   );
 }
 
-function CommentItem({
+export function CommentItem({
   comment,
   headSha,
   readOnly,
+  showOrigin,
   onSaving,
   onSaved,
   onCommentsChanged,
@@ -830,6 +875,7 @@ function CommentItem({
   comment: Comment;
   headSha: string | null;
   readOnly: boolean;
+  showOrigin?: boolean;
   onSaving: () => void;
   onSaved: () => void;
   onCommentsChanged: () => void;
@@ -853,6 +899,14 @@ function CommentItem({
 
   return (
     <div className="comment-item">
+      {showOrigin && comment.origin === "file_view" && (
+        <span
+          className="origin-badge"
+          title="Authored in the full-file view — folds into the review summary on publish, not posted as an inline GitHub comment."
+        >
+          in summary
+        </span>
+      )}
       {outdated && (
         <span
           className="stale-badge"
@@ -897,7 +951,7 @@ function CommentItem({
   );
 }
 
-function Composer({
+export function Composer({
   onSubmit,
   onCancel,
   rangeLabel,
