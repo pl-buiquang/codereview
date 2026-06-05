@@ -402,6 +402,36 @@ button:hover {
   background: var(--bg-elev);
   color: var(--muted);
 }
+.diff-expander .diff-decoration-content {
+  background: var(--bg-elev);
+  border-top: 1px dashed var(--border);
+  border-bottom: 1px dashed var(--border);
+}
+.expand-control {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.85em;
+  color: var(--muted);
+}
+.expand-btn {
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: var(--accent);
+  text-decoration: underline;
+}
+.expand-btn:disabled {
+  cursor: default;
+  opacity: 0.6;
+  text-decoration: none;
+}
+.expand-error-note {
+  font-size: 0.85em;
+}
 /* Prism syntax tokens (dark) */
 .diff .token.comment,
 .diff .token.prolog,

@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { parseDiff } from "react-diff-view";
+import {
+  expandFromRawCode,
+  getCollapsedLinesCountBetween,
+  parseDiff,
+} from "react-diff-view";
 import {
   languageForPath,
   fileDisplayPath,
@@ -94,5 +98,77 @@ describe("indexFile", () => {
     const { metaByKey } = indexFile(file);
     const firstChange = file.hunks[0].changes[0];
     expect(metaByKey.has(changeKeyOf(firstChange))).toBe(true);
+  });
+});
+
+// Two hunks (changes at old lines 2 and 18) with a 9-line gap (old lines 6–14)
+// collapsed between them. The base (LEFT) source is the full 20-line file, which
+// is what context expansion slices.
+const TWO_HUNK_DIFF = `diff --git a/f.txt b/f.txt
+index e1fc989..368d3c3 100644
+--- a/f.txt
++++ b/f.txt
+@@ -1,5 +1,5 @@
+ b01
+-b02
++n02
+ b03
+ b04
+ b05
+@@ -15,6 +15,6 @@ b14
+ b15
+ b16
+ b17
+-b18
++n18
+ b19
+ b20
+`;
+
+const BASE_SOURCE = Array.from({ length: 20 }, (_, i) =>
+  `b${String(i + 1).padStart(2, "0")}`,
+).join("\n");
+
+describe("context expansion anchoring", () => {
+  it("makes revealed gap lines clickable and consistently anchored", () => {
+    const [file] = parseDiff(TWO_HUNK_DIFF);
+    const [h1, h2] = file.hunks;
+
+    // Gap lives in OLD/LEFT coordinates between the two hunks.
+    const collapsed = getCollapsedLinesCountBetween(h1, h2);
+    expect(collapsed).toBe(9);
+    const gapStart = h1.oldStart + h1.oldLines; // 6
+    const gapEnd = gapStart + collapsed; // 15
+
+    const expanded = expandFromRawCode(file.hunks, BASE_SOURCE, gapStart, gapEnd);
+    const { metaByKey, keyByAnchor } = indexFile({ ...file, hunks: expanded });
+
+    // The first revealed line is old line 6 = "b06"; here new line number is also
+    // 6 (the upstream change is a balanced insert/delete that keeps counts level).
+    const rightKey = keyByAnchor.get("RIGHT:6");
+    const leftKey = keyByAnchor.get("LEFT:6");
+    expect(rightKey).toBeDefined();
+    expect(leftKey).toBeDefined();
+    expect(rightKey).toBe(leftKey);
+
+    const meta = metaByKey.get(rightKey!);
+    expect(meta).toMatchObject({ side: "RIGHT", line: 6 });
+    expect(meta!.lineText).toBe(" b06");
+
+    // The whole gap is now addressable, not just its first line.
+    expect(keyByAnchor.get("RIGHT:14")).toBeDefined();
+  });
+
+  it("partial expansion only reveals N lines from the top of the gap", () => {
+    const [file] = parseDiff(TWO_HUNK_DIFF);
+    const [h1] = file.hunks;
+    const gapStart = h1.oldStart + h1.oldLines; // 6
+    const expanded = expandFromRawCode(file.hunks, BASE_SOURCE, gapStart, gapStart + 3);
+    const { keyByAnchor } = indexFile({ ...file, hunks: expanded });
+
+    // First 3 gap lines revealed (6,7,8), the rest still collapsed.
+    expect(keyByAnchor.get("RIGHT:6")).toBeDefined();
+    expect(keyByAnchor.get("RIGHT:8")).toBeDefined();
+    expect(keyByAnchor.get("RIGHT:9")).toBeUndefined();
   });
 });
