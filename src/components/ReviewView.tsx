@@ -331,13 +331,20 @@ function FileReview({
   const tokens = useMemo(() => tokenizeFile(file), [file]);
   const [selection, setSelection] = useState<Selection | null>(null);
   const [viewed, setViewed] = useState(() => detail.viewed_files.includes(path));
+  const [fileComposerOpen, setFileComposerOpen] = useState(false);
 
-  // Group this file's comments by the change key they anchor to.
+  // Comments attached to the whole file rather than a specific line.
+  const fileComments = useMemo(
+    () => detail.comments.filter((c) => c.file_path === path && c.subject_type === "file"),
+    [detail.comments, path],
+  );
+
+  // Group this file's line comments by the change key they anchor to.
   const { commentsByKey, orphans } = useMemo(() => {
     const byKey = new Map<string, Comment[]>();
     const orphan: Comment[] = [];
     for (const c of detail.comments) {
-      if (c.file_path !== path) continue;
+      if (c.file_path !== path || c.subject_type === "file") continue;
       const key = keyByAnchor.get(`${c.side}:${c.line}`);
       if (!key) {
         orphan.push(c);
@@ -408,6 +415,14 @@ function FileReview({
     onCommentsChanged();
   };
 
+  const submitFileComment = async (text: string) => {
+    onSaving();
+    await api.addFileComment({ reviewId: detail.review.id, filePath: path, body: text });
+    setFileComposerOpen(false);
+    onSaved();
+    onCommentsChanged();
+  };
+
   const widgets: Record<string, React.ReactNode> = {};
   const keys = new Set<string>(commentsByKey.keys());
   if (selection) keys.add(selection.focusKey);
@@ -442,6 +457,15 @@ function FileReview({
         <span className="diff-stats">
           <span className="add">+{add}</span>
           <span className="del">−{del}</span>
+          {!readOnly && (
+            <button
+              className="file-comment-btn"
+              title="Add a comment on the whole file"
+              onClick={() => setFileComposerOpen(true)}
+            >
+              💬 Comment on file
+            </button>
+          )}
           <label className="viewed-toggle" title="Collapse this file">
             <input
               type="checkbox"
@@ -458,6 +482,28 @@ function FileReview({
           </label>
         </span>
       </div>
+      {(fileComments.length > 0 || fileComposerOpen) && (
+        <div className="file-comments">
+          {fileComments.map((c) => (
+            <CommentItem
+              key={c.id}
+              comment={c}
+              headSha={detail.target.head_sha}
+              readOnly={readOnly}
+              onSaving={onSaving}
+              onSaved={onSaved}
+              onCommentsChanged={onCommentsChanged}
+            />
+          ))}
+          {fileComposerOpen && !readOnly && (
+            <Composer
+              onSubmit={submitFileComment}
+              onCancel={() => setFileComposerOpen(false)}
+              rangeLabel={`Whole file · ${path}`}
+            />
+          )}
+        </div>
+      )}
       {viewed ? null : (
         <FileBody
           file={file}

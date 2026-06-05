@@ -16,6 +16,7 @@ pub struct Db(pub Mutex<Connection>);
 const MIGRATIONS: &[&str] = &[
     include_str!("migrations/0001_init.sql"),
     include_str!("migrations/0002_file_view_state.sql"),
+    include_str!("migrations/0003_comment_subject_type.sql"),
 ];
 
 pub fn open(path: &Path) -> AppResult<Connection> {

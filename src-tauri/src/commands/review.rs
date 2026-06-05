@@ -339,10 +339,14 @@ pub fn update_review(
 
 /// Build the GitHub "create review" JSON payload from a loaded review detail.
 ///
-/// Maps the stored verdict to GitHub's `event` enum, projects each inline
-/// comment to `{path, side, line, body}` (adding `start_line`/`start_side` only
-/// for true multi-line ranges), and attaches the summary body and head commit
-/// when present.
+/// Maps the stored verdict to GitHub's `event` enum, projects each line comment
+/// to `{path, side, line, body}` (adding `start_line`/`start_side` only for true
+/// multi-line ranges), and attaches the summary body and head commit when
+/// present.
+///
+/// GitHub's bulk reviews API can't anchor file-level comments (each comment
+/// needs a `path` + `line`/`position`), so file comments are folded into the
+/// review body under a "File-level comments" section instead.
 fn build_publish_payload(detail: &ReviewDetail) -> serde_json::Value {
     let event = match detail.review.event.as_deref() {
         Some("approve") => "APPROVE",
@@ -353,6 +357,7 @@ fn build_publish_payload(detail: &ReviewDetail) -> serde_json::Value {
     let comments: Vec<serde_json::Value> = detail
         .comments
         .iter()
+        .filter(|c| c.subject_type != "file")
         .map(|c| {
             let mut obj = serde_json::json!({
                 "path": c.file_path,
@@ -371,13 +376,36 @@ fn build_publish_payload(detail: &ReviewDetail) -> serde_json::Value {
         .collect();
 
     let mut payload = serde_json::json!({ "event": event, "comments": comments });
-    if !detail.review.body.trim().is_empty() {
-        payload["body"] = serde_json::json!(detail.review.body);
+    let body = body_with_file_comments(detail);
+    if !body.trim().is_empty() {
+        payload["body"] = serde_json::json!(body);
     }
     if let Some(sha) = &detail.target.head_sha {
         payload["commit_id"] = serde_json::json!(sha);
     }
     payload
+}
+
+/// The review summary with any file-level comments appended as a trailing
+/// section (GitHub can't anchor them inline, so they ride along in the body).
+fn body_with_file_comments(detail: &ReviewDetail) -> String {
+    let mut body = detail.review.body.trim().to_string();
+    let file_comments: Vec<&Comment> = detail
+        .comments
+        .iter()
+        .filter(|c| c.subject_type == "file")
+        .collect();
+    if file_comments.is_empty() {
+        return body;
+    }
+    if !body.is_empty() {
+        body.push_str("\n\n");
+    }
+    body.push_str("## File-level comments");
+    for c in file_comments {
+        body.push_str(&format!("\n\n**{}**\n\n{}", c.file_path, c.body.trim()));
+    }
+    body
 }
 
 /// Publish a draft review to its GitHub PR via the line-based reviews API, then
@@ -456,6 +484,31 @@ pub fn add_comment(
             (review_id, file_path, side, line, start_line, diff_hunk, body, anchored_head_sha, created_at, updated_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)",
         params![review_id, file_path, side, line, start_line, diff_hunk, body, anchored_head_sha, ts],
+    )?;
+    conn.execute(
+        "UPDATE review SET updated_at = ?1 WHERE id = ?2",
+        params![ts, review_id],
+    )?;
+    get_comment(&conn, conn.last_insert_rowid())
+}
+
+/// Add a comment attached to a whole file rather than a specific line. Stored
+/// with `subject_type = 'file'`; side/line keep their column defaults and are
+/// ignored for these.
+#[tauri::command]
+pub fn add_file_comment(
+    review_id: i64,
+    file_path: String,
+    body: String,
+    db: State<Db>,
+) -> AppResult<Comment> {
+    let conn = db.0.lock().unwrap();
+    ensure_draft(&conn, review_id)?;
+    let ts = now();
+    conn.execute(
+        "INSERT INTO comment (review_id, file_path, subject_type, body, line, created_at, updated_at)
+         VALUES (?1, ?2, 'file', ?3, 0, ?4, ?4)",
+        params![review_id, file_path, body, ts],
     )?;
     conn.execute(
         "UPDATE review SET updated_at = ?1 WHERE id = ?2",
@@ -723,6 +776,7 @@ mod tests {
             id: 1,
             review_id: 1,
             file_path: "src/lib.rs".into(),
+            subject_type: "line".into(),
             side: side.into(),
             line,
             start_line,
@@ -806,5 +860,55 @@ mod tests {
         d.target.head_sha = None;
         let p = build_publish_payload(&d);
         assert!(p.get("commit_id").is_none());
+    }
+
+    fn file_comment(file_path: &str, body: &str) -> Comment {
+        Comment {
+            subject_type: "file".into(),
+            file_path: file_path.into(),
+            line: 0,
+            start_line: None,
+            diff_hunk: None,
+            body: body.into(),
+            ..payload_comment(0, None, "RIGHT")
+        }
+    }
+
+    #[test]
+    fn payload_excludes_file_comments_from_inline_array() {
+        let p = build_publish_payload(&detail_with(
+            None,
+            "",
+            vec![
+                payload_comment(5, None, "RIGHT"),
+                file_comment("src/lib.rs", "whole-file note"),
+            ],
+        ));
+        assert_eq!(p["comments"].as_array().unwrap().len(), 1);
+        assert_eq!(p["comments"][0]["line"], 5);
+    }
+
+    #[test]
+    fn payload_folds_file_comments_into_body() {
+        let p = build_publish_payload(&detail_with(
+            Some("comment"),
+            "Summary text",
+            vec![file_comment("src/lib.rs", "whole-file note")],
+        ));
+        let body = p["body"].as_str().unwrap();
+        assert!(body.contains("Summary text"));
+        assert!(body.contains("## File-level comments"));
+        assert!(body.contains("**src/lib.rs**"));
+        assert!(body.contains("whole-file note"));
+    }
+
+    #[test]
+    fn payload_file_comments_become_body_even_without_summary() {
+        let p = build_publish_payload(&detail_with(
+            None,
+            "",
+            vec![file_comment("a.rs", "note")],
+        ));
+        assert!(p["body"].as_str().unwrap().starts_with("## File-level comments"));
     }
 }

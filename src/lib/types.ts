@@ -47,6 +47,7 @@ export interface Comment {
   id: number;
   review_id: number;
   file_path: string;
+  subject_type: "line" | "file";
   side: Side;
   line: number;
   start_line: number | null;

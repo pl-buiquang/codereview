@@ -37,6 +37,12 @@ pub fn render_markdown(detail: &ReviewDetail, repo_label: &str) -> String {
     if !detail.comments.is_empty() {
         out.push_str("## Comments\n\n");
         for c in &detail.comments {
+            if c.subject_type == "file" {
+                out.push_str(&format!("### {} (whole file)\n\n", c.file_path));
+                out.push_str(c.body.trim());
+                out.push_str("\n\n");
+                continue;
+            }
             let loc = match c.start_line {
                 Some(start) if start != c.line => {
                     format!("{}:{}-{}", c.file_path, start, c.line)
@@ -69,6 +75,7 @@ pub fn render_json(detail: &ReviewDetail, repo_label: &str) -> String {
         .map(|c| {
             json!({
                 "file": c.file_path,
+                "subject_type": c.subject_type,
                 "side": c.side,
                 "line": c.line,
                 "start_line": c.start_line,
@@ -137,6 +144,7 @@ mod tests {
             id: 1,
             review_id: 1,
             file_path: "src/main.rs".into(),
+            subject_type: "line".into(),
             side: "RIGHT".into(),
             line,
             start_line,
@@ -229,6 +237,34 @@ mod tests {
         assert_eq!(v["comments"][0]["line"], 5);
         assert_eq!(v["comments"][0]["start_line"], 3);
         assert_eq!(v["comments"][0]["side"], "RIGHT");
+    }
+
+    fn file_comment(body: &str) -> Comment {
+        Comment {
+            subject_type: "file".into(),
+            line: 0,
+            start_line: None,
+            diff_hunk: None,
+            body: body.into(),
+            ..comment(0, None)
+        }
+    }
+
+    #[test]
+    fn markdown_renders_file_comment_as_whole_file() {
+        let md = render_markdown(&detail(vec![file_comment("Module needs a doc comment.")]), "owner/repo");
+        assert!(md.contains("### src/main.rs (whole file)"), "got: {md}");
+        assert!(md.contains("Module needs a doc comment."));
+        // No line range and no diff hunk for file-level comments.
+        assert!(!md.contains("src/main.rs:0"));
+        assert!(!md.contains("```diff"));
+    }
+
+    #[test]
+    fn json_carries_subject_type() {
+        let json = render_json(&detail(vec![file_comment("note")]), "owner/repo");
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["comments"][0]["subject_type"], "file");
     }
 
     #[test]

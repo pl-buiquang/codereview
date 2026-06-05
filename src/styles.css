@@ -265,6 +265,25 @@ button:hover {
 .binary-note {
   padding: 12px;
 }
+.file-comment-btn {
+  margin-left: 8px;
+  padding: 2px 8px;
+  font-size: 12px;
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.file-comment-btn:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+.file-comments {
+  padding: 8px 12px;
+  background: rgba(47, 129, 247, 0.06);
+  border-bottom: 1px solid var(--border);
+}
 
 /* react-diff-view dark theme overrides */
 .diff {

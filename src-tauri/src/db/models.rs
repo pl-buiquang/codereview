@@ -93,6 +93,8 @@ pub struct Comment {
     pub id: i64,
     pub review_id: i64,
     pub file_path: String,
+    /// 'line' (anchored to side/line) or 'file' (attached to the whole file).
+    pub subject_type: String,
     pub side: String,
     pub line: i64,
     pub start_line: Option<i64>,
@@ -111,6 +113,7 @@ impl Comment {
             id: row.get("id")?,
             review_id: row.get("review_id")?,
             file_path: row.get("file_path")?,
+            subject_type: row.get("subject_type")?,
             side: row.get("side")?,
             line: row.get("line")?,
             start_line: row.get("start_line")?,
