@@ -109,3 +109,15 @@ export function indexFile(file: FileData): {
 export function changeKeyOf(change: ChangeData): string {
   return getChangeKey(change);
 }
+
+export function countChanges(file: FileData): { add: number; del: number } {
+  let add = 0;
+  let del = 0;
+  for (const hunk of file.hunks) {
+    for (const change of hunk.changes) {
+      if (change.type === "insert") add++;
+      else if (change.type === "delete") del++;
+    }
+  }
+  return { add, del };
+}

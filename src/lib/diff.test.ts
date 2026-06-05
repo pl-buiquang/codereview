@@ -5,6 +5,7 @@ import {
   fileDisplayPath,
   indexFile,
   changeKeyOf,
+  countChanges,
 } from "./diff";
 
 describe("languageForPath", () => {
@@ -94,5 +95,22 @@ describe("indexFile", () => {
     const { metaByKey } = indexFile(file);
     const firstChange = file.hunks[0].changes[0];
     expect(metaByKey.has(changeKeyOf(firstChange))).toBe(true);
+  });
+});
+
+describe("countChanges", () => {
+  it("counts inserts and deletes, ignoring context lines", () => {
+    const [file] = parseDiff(SAMPLE_DIFF);
+    expect(countChanges(file)).toEqual({ add: 1, del: 1 });
+  });
+
+  it("returns zero for a binary file with no hunks", () => {
+    const [file] = parseDiff(
+      `diff --git a/logo.png b/logo.png
+index 0000000..1111111 100644
+Binary files a/logo.png and b/logo.png differ
+`,
+    );
+    expect(countChanges(file)).toEqual({ add: 0, del: 0 });
   });
 });

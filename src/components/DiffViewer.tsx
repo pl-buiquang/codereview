@@ -1,18 +1,6 @@
 import { useMemo } from "react";
 import { Diff, Hunk, parseDiff, type FileData, type ViewType } from "react-diff-view";
-import { tokenizeFile } from "../lib/diff";
-
-function countChanges(file: FileData): { add: number; del: number } {
-  let add = 0;
-  let del = 0;
-  for (const hunk of file.hunks) {
-    for (const change of hunk.changes) {
-      if (change.type === "insert") add++;
-      else if (change.type === "delete") del++;
-    }
-  }
-  return { add, del };
-}
+import { countChanges, tokenizeFile } from "../lib/diff";
 
 function filePath(file: FileData): string {
   if (file.type === "delete") return file.oldPath;
