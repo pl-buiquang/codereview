@@ -1,5 +1,10 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
-import { useSettingsStore, effectiveTheme, DEFAULT_DIFF_FONT_SIZE } from "./settings";
+import {
+  useSettingsStore,
+  effectiveTheme,
+  DEFAULT_DIFF_FONT_SIZE,
+  DEFAULT_REVIEW_TAB_COLOR,
+} from "./settings";
 
 beforeEach(() => {
   useSettingsStore.setState({
@@ -7,16 +12,18 @@ beforeEach(() => {
     diffFontSize: DEFAULT_DIFF_FONT_SIZE,
     defaultViewType: "split",
     defaultThreeDot: true,
+    reviewTabColor: DEFAULT_REVIEW_TAB_COLOR,
   });
 });
 
 describe("useSettingsStore", () => {
-  it("has sensible defaults (dark, 12.5px, split, three-dot on)", () => {
+  it("has sensible defaults (dark, 12.5px, split, three-dot on, white review tab)", () => {
     const s = useSettingsStore.getState();
     expect(s.theme).toBe("dark");
     expect(s.diffFontSize).toBe(12.5);
     expect(s.defaultViewType).toBe("split");
     expect(s.defaultThreeDot).toBe(true);
+    expect(s.reviewTabColor).toBe("#ffffff");
   });
 
   it("setters update each field", () => {
@@ -25,11 +32,13 @@ describe("useSettingsStore", () => {
     s.setDiffFontSize(16);
     s.setDefaultViewType("unified");
     s.setDefaultThreeDot(false);
+    s.setReviewTabColor("#ff8800");
     const n = useSettingsStore.getState();
     expect(n.theme).toBe("light");
     expect(n.diffFontSize).toBe(16);
     expect(n.defaultViewType).toBe("unified");
     expect(n.defaultThreeDot).toBe(false);
+    expect(n.reviewTabColor).toBe("#ff8800");
   });
 });
 

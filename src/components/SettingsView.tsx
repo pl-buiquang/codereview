@@ -75,10 +75,12 @@ export function SettingsView() {
   const diffFontSize = useSettingsStore((s) => s.diffFontSize);
   const defaultViewType = useSettingsStore((s) => s.defaultViewType);
   const defaultThreeDot = useSettingsStore((s) => s.defaultThreeDot);
+  const reviewTabColor = useSettingsStore((s) => s.reviewTabColor);
   const setTheme = useSettingsStore((s) => s.setTheme);
   const setDiffFontSize = useSettingsStore((s) => s.setDiffFontSize);
   const setDefaultViewType = useSettingsStore((s) => s.setDefaultViewType);
   const setDefaultThreeDot = useSettingsStore((s) => s.setDefaultThreeDot);
+  const setReviewTabColor = useSettingsStore((s) => s.setReviewTabColor);
 
   return (
     <section className="main-panel settings-panel">
@@ -112,6 +114,17 @@ export function SettingsView() {
                 onChange={(e) => setDiffFontSize(Number(e.target.value))}
               />
               <span className="settings-value">{diffFontSize}px</span>
+            </span>
+          </label>
+          <label className="settings-row">
+            <span>Review tab underline</span>
+            <span className="settings-control">
+              <input
+                type="color"
+                value={reviewTabColor}
+                onChange={(e) => setReviewTabColor(e.target.value)}
+              />
+              <span className="settings-value">{reviewTabColor}</span>
             </span>
           </label>
         </section>

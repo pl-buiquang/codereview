@@ -9,6 +9,7 @@ import { effectiveTheme, useSettingsStore } from "./settings";
 export function useApplySettings() {
   const theme = useSettingsStore((s) => s.theme);
   const diffFontSize = useSettingsStore((s) => s.diffFontSize);
+  const reviewTabColor = useSettingsStore((s) => s.reviewTabColor);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -26,4 +27,8 @@ export function useApplySettings() {
   useEffect(() => {
     document.documentElement.style.setProperty("--diff-font-size", `${diffFontSize}px`);
   }, [diffFontSize]);
+
+  useEffect(() => {
+    document.documentElement.style.setProperty("--review-tab-accent", reviewTabColor);
+  }, [reviewTabColor]);
 }
