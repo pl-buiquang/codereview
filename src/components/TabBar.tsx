@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { useUIStore, type Tab } from "../store";
-import { repoLabel } from "./HomePanel";
+import { repoLabel } from "../lib/repoLabel";
 import type { Repository } from "../lib/types";
 
 function HomeIcon() {

@@ -153,3 +153,83 @@ pub struct ReviewSummary {
     pub repo_label: String,
     pub comment_count: i64,
 }
+
+/// A GitHub inbox item (PR or issue needing attention). Mirrors the `items`
+/// table; serialized to the frontend with the DB column names.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ItemRow {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub typ: String,
+    pub number: i64,
+    pub repo: String,
+    pub title: String,
+    pub url: String,
+    pub author_login: Option<String>,
+    pub author_avatar: Option<String>,
+    pub state: Option<String>,
+    pub is_draft: bool,
+    pub body: Option<String>,
+    pub latest_comment: Option<String>,
+    pub latest_actor: Option<String>,
+    pub updated_at: String,
+    pub files_changed: Option<i64>,
+    pub additions: Option<i64>,
+    pub deletions: Option<i64>,
+    pub top_files_json: Option<String>,
+    pub ci_state: Option<String>,
+    pub review_decision: Option<String>,
+    pub untracked_at: Option<String>,
+    pub closed_at: Option<String>,
+    pub engaged_at: Option<String>,
+    pub first_seen_at: String,
+    pub last_refreshed: String,
+}
+
+impl ItemRow {
+    pub fn from_row(row: &Row) -> rusqlite::Result<Self> {
+        Ok(Self {
+            id: row.get("id")?,
+            typ: row.get("type")?,
+            number: row.get("number")?,
+            repo: row.get("repo")?,
+            title: row.get("title")?,
+            url: row.get("url")?,
+            author_login: row.get("author_login")?,
+            author_avatar: row.get("author_avatar")?,
+            state: row.get("state")?,
+            is_draft: row.get::<_, i64>("is_draft")? != 0,
+            body: row.get("body")?,
+            latest_comment: row.get("latest_comment")?,
+            latest_actor: row.get("latest_actor")?,
+            updated_at: row.get("updated_at")?,
+            files_changed: row.get("files_changed")?,
+            additions: row.get("additions")?,
+            deletions: row.get("deletions")?,
+            top_files_json: row.get("top_files_json")?,
+            ci_state: row.get("ci_state")?,
+            review_decision: row.get("review_decision")?,
+            untracked_at: row.get("untracked_at")?,
+            closed_at: row.get("closed_at")?,
+            engaged_at: row.get("engaged_at")?,
+            first_seen_at: row.get("first_seen_at")?,
+            last_refreshed: row.get("last_refreshed")?,
+        })
+    }
+}
+
+/// One reason an item is in the inbox (e.g. `assigned`, `team_review` with a
+/// `org/team` detail).
+#[derive(Debug, Serialize)]
+pub struct ItemReason {
+    pub reason: String,
+    pub detail: String,
+}
+
+/// An inbox item plus the reasons it surfaced; the frontend buckets on these.
+#[derive(Debug, Serialize)]
+pub struct ItemWithReasons {
+    #[serde(flatten)]
+    pub item: ItemRow,
+    pub reasons: Vec<ItemReason>,
+}

@@ -1,7 +1,7 @@
 import { memo, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { TabBar } from "./components/TabBar";
-import { HomePanel } from "./components/HomePanel";
+import { DashboardPanel } from "./components/DashboardPanel";
 import { RepoView } from "./components/RepoView";
 import { ReviewView } from "./components/ReviewView";
 import { Toaster } from "./components/Toaster";
@@ -84,7 +84,7 @@ const TabPane = memo(function TabPane({ tab, active }: { tab: Tab; active: boole
 });
 
 const TabContent = memo(function TabContent({ tab }: { tab: Tab }) {
-  if (tab.kind === "home") return <HomePanel />;
+  if (tab.kind === "home") return <DashboardPanel />;
   if (tab.kind === "settings") return <SettingsView />;
   if (tab.kind === "review" && tab.reviewId != null) {
     return <ReviewView key={tab.reviewId} reviewId={tab.reviewId} />;

@@ -3,7 +3,10 @@ import { open, save } from "@tauri-apps/plugin-dialog";
 import type {
   Branch,
   Comment,
+  InboxItem,
+  InboxMeta,
   PrSummary,
+  RefreshResult,
   Repository,
   Review,
   ReviewDetail,
@@ -50,9 +53,23 @@ export const api = {
   ghAuthStatus: () => invoke<boolean>("gh_auth_status"),
   checkEnvironment: () => invoke<ToolEnv>("check_environment"),
   listPrs: (repoPath: string) => invoke<PrSummary[]>("list_prs", { repoPath }),
-  createReviewForPr: (repoId: number, repoPath: string, prNumber: number) =>
-    invoke<Review>("create_review_for_pr", { repoId, repoPath, prNumber }),
+  createReviewForPr: (owner: string, name: string, prNumber: number) =>
+    invoke<Review>("create_review_for_pr", { owner, name, prNumber }),
   publishReview: (reviewId: number) => invoke<Review>("publish_review", { reviewId }),
+
+  // GitHub inbox
+  refreshInbox: () => invoke<RefreshResult>("refresh_inbox"),
+  listInbox: () => invoke<InboxItem[]>("list_inbox"),
+  listArchive: (search: string | null) =>
+    invoke<InboxItem[]>("list_archive", { search }),
+  listClosed: () => invoke<InboxItem[]>("list_closed"),
+  inboxMeta: () => invoke<InboxMeta>("inbox_meta"),
+  engageItem: (id: string) => invoke<void>("engage_item", { id }),
+  unengageItem: (id: string) => invoke<void>("unengage_item", { id }),
+  untrackItem: (id: string) => invoke<void>("untrack_item", { id }),
+  retrackItem: (id: string) => invoke<void>("retrack_item", { id }),
+  openPrReview: (itemId: string, owner: string, name: string, number: number) =>
+    invoke<Review>("open_pr_review", { itemId, owner, name, number }),
 
   // Comments
   addComment: (args: {

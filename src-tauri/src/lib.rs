@@ -4,6 +4,7 @@ mod error;
 mod export;
 mod gh;
 mod git;
+mod inbox;
 mod path_env;
 mod tools;
 
@@ -66,6 +67,16 @@ pub fn run() {
             commands::gh::gh_auth_status,
             commands::gh::list_prs,
             commands::gh::check_environment,
+            commands::inbox::refresh_inbox,
+            commands::inbox::list_inbox,
+            commands::inbox::list_archive,
+            commands::inbox::list_closed,
+            commands::inbox::engage_item,
+            commands::inbox::unengage_item,
+            commands::inbox::untrack_item,
+            commands::inbox::retrack_item,
+            commands::inbox::open_pr_review,
+            commands::inbox::inbox_meta,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

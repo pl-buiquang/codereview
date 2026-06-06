@@ -3,6 +3,9 @@ import { persist } from "zustand/middleware";
 
 export type TabKind = "home" | "repo" | "settings" | "review";
 
+/** Which section the home tab's sidebar shows. */
+export type HomeSection = "inbox" | "archive" | "repositories";
+
 export interface Tab {
   id: string;
   kind: TabKind;
@@ -17,6 +20,7 @@ const reviewTabId = (reviewId: number) => `review-${reviewId}`;
 interface UIState {
   tabs: Tab[];
   activeTabId: string;
+  homeSection: HomeSection;
   openRepoTab: (repoId: number) => void;
   openSettingsTab: () => void;
   openReview: (reviewId: number) => void;
@@ -24,6 +28,7 @@ interface UIState {
   closeSettings: () => void;
   closeTab: (id: string) => void;
   setActiveTab: (id: string) => void;
+  setHomeSection: (section: HomeSection) => void;
   moveTab: (fromId: string, toId: string) => void;
 }
 
@@ -36,6 +41,7 @@ export const useUIStore = create<UIState>()(
     (set) => ({
       tabs: [HOME_TAB],
       activeTabId: HOME_TAB.id,
+      homeSection: "inbox",
 
       openRepoTab: (repoId) =>
         set((s) => ({
@@ -90,6 +96,8 @@ export const useUIStore = create<UIState>()(
 
       setActiveTab: (id) => set({ activeTabId: id }),
 
+      setHomeSection: (homeSection) => set({ homeSection }),
+
       // Reorder by dropping `fromId` onto `toId`. The home tab is pinned first:
       // it never moves and nothing can be dropped onto or before it.
       moveTab: (fromId, toId) =>
@@ -111,7 +119,11 @@ export const useUIStore = create<UIState>()(
     {
       name: "codereview-ui",
       version: 2,
-      partialize: (s) => ({ tabs: s.tabs, activeTabId: s.activeTabId }),
+      partialize: (s) => ({
+        tabs: s.tabs,
+        activeTabId: s.activeTabId,
+        homeSection: s.homeSection,
+      }),
       migrate: (persisted, version) => {
         if (version >= 2) return persisted as { tabs: Tab[]; activeTabId: string };
 

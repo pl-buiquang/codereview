@@ -1,8 +1,9 @@
-use std::path::Path;
+use std::path::PathBuf;
 
 use serde::Serialize;
 
 use crate::error::AppResult;
+use crate::gh::GhRepo;
 use crate::{gh, tools};
 
 #[tauri::command]
@@ -12,7 +13,7 @@ pub fn gh_auth_status() -> bool {
 
 #[tauri::command]
 pub fn list_prs(repo_path: String) -> AppResult<Vec<gh::PrSummary>> {
-    gh::list_prs(Path::new(&repo_path))
+    gh::list_prs(&GhRepo::Local(PathBuf::from(repo_path)))
 }
 
 /// Detected external-tool environment, for the Settings diagnostics panel.

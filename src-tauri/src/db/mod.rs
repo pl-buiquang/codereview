@@ -18,6 +18,8 @@ const MIGRATIONS: &[&str] = &[
     include_str!("migrations/0002_file_view_state.sql"),
     include_str!("migrations/0003_comment_subject_type.sql"),
     include_str!("migrations/0004_comment_origin.sql"),
+    include_str!("migrations/0005_repo_remote_index.sql"),
+    include_str!("migrations/0006_inbox.sql"),
 ];
 
 pub fn open(path: &Path) -> AppResult<Connection> {

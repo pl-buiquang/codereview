@@ -13,11 +13,14 @@ interface SettingsState {
   defaultViewType: DiffViewType;
   defaultThreeDot: boolean;
   reviewTabColor: string;
+  /** Comma-separated GitHub logins treated as bots in the inbox "Bots" bucket. */
+  botLogins: string;
   setTheme: (t: Theme) => void;
   setDiffFontSize: (n: number) => void;
   setDefaultViewType: (v: DiffViewType) => void;
   setDefaultThreeDot: (b: boolean) => void;
   setReviewTabColor: (c: string) => void;
+  setBotLogins: (s: string) => void;
 }
 
 export const useSettingsStore = create<SettingsState>()(
@@ -28,15 +31,27 @@ export const useSettingsStore = create<SettingsState>()(
       defaultViewType: "split",
       defaultThreeDot: true,
       reviewTabColor: DEFAULT_REVIEW_TAB_COLOR,
+      botLogins: "",
       setTheme: (theme) => set({ theme }),
       setDiffFontSize: (diffFontSize) => set({ diffFontSize }),
       setDefaultViewType: (defaultViewType) => set({ defaultViewType }),
       setDefaultThreeDot: (defaultThreeDot) => set({ defaultThreeDot }),
       setReviewTabColor: (reviewTabColor) => set({ reviewTabColor }),
+      setBotLogins: (botLogins) => set({ botLogins }),
     }),
     { name: "codereview-settings" },
   ),
 );
+
+/** Parse the configured bot logins into a lowercased set. */
+export function parseBotLogins(raw: string): Set<string> {
+  return new Set(
+    raw
+      .split(",")
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean),
+  );
+}
 
 /** Resolve `"system"` to the OS preference; pass-through otherwise. */
 export function effectiveTheme(theme: Theme): "dark" | "light" {

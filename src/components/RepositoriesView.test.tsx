@@ -22,7 +22,7 @@ vi.mock("../lib/api", () => ({
 const confirmDialog = vi.fn();
 vi.mock("../lib/confirm", () => ({ confirmDialog: (...a: unknown[]) => confirmDialog(...a) }));
 
-import { HomePanel } from "./HomePanel";
+import { RepositoriesView } from "./RepositoriesView";
 import { useUIStore } from "../store";
 import type { Repository } from "../lib/types";
 
@@ -41,7 +41,7 @@ function renderHome() {
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}>{children}</QueryClientProvider>
   );
-  return render(<HomePanel />, { wrapper });
+  return render(<RepositoriesView />, { wrapper });
 }
 
 beforeEach(() => {
@@ -50,7 +50,7 @@ beforeEach(() => {
   listRepositories.mockResolvedValue([]);
 });
 
-describe("HomePanel", () => {
+describe("RepositoriesView", () => {
   it("shows the empty state when there are no repos", async () => {
     renderHome();
     expect(await screen.findByText(/No repositories yet/i)).toBeInTheDocument();

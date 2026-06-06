@@ -2,20 +2,13 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, pickFolder } from "../lib/api";
 import { toast } from "../lib/toast";
 import { confirmDialog } from "../lib/confirm";
+import { repoLabel } from "../lib/repoLabel";
 import { useUIStore } from "../store";
 import type { Repository } from "../lib/types";
 
-export function repoLabel(repo: Repository): string {
-  if (repo.remote_owner && repo.remote_name) {
-    return `${repo.remote_owner}/${repo.remote_name}`;
-  }
-  return repo.path.split("/").filter(Boolean).pop() ?? repo.path;
-}
-
-export function HomePanel() {
+export function RepositoriesView() {
   const queryClient = useQueryClient();
   const openRepoTab = useUIStore((s) => s.openRepoTab);
-  const openSettingsTab = useUIStore((s) => s.openSettingsTab);
   const closeTab = useUIStore((s) => s.closeTab);
 
   const reposQuery = useQuery({
@@ -56,21 +49,12 @@ export function HomePanel() {
   const repos = reposQuery.data ?? [];
 
   return (
-    <section className="main-panel home-panel">
-      <header className="home-header">
-        <span className="app-title">codereview</span>
-        <div className="home-header-actions">
-          <button
-            className="btn-primary"
-            onClick={() => addRepo.mutate()}
-            disabled={addRepo.isPending}
-          >
-            {addRepo.isPending ? "Adding…" : "+ Add repo"}
-          </button>
-          <button className="btn-icon" title="Settings" onClick={openSettingsTab}>
-            ⚙
-          </button>
-        </div>
+    <section className="main-panel repos-panel">
+      <header className="inbox-header">
+        <h2 className="inbox-h">Repositories</h2>
+        <button className="btn-primary" onClick={() => addRepo.mutate()} disabled={addRepo.isPending}>
+          {addRepo.isPending ? "Adding…" : "+ Add repo"}
+        </button>
       </header>
 
       <nav className="repo-list">

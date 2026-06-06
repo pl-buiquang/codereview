@@ -1,13 +1,13 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use chrono::Utc;
 use rusqlite::{params, Connection, OptionalExtension};
 use tauri::State;
 
-use crate::db::models::{Comment, Review, ReviewDetail, ReviewSummary, Target};
+use crate::db::models::{Comment, Repository, Review, ReviewDetail, ReviewSummary, Target};
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
-use crate::gh;
+use crate::gh::{self, GhRepo};
 use crate::git;
 
 fn now() -> String {
@@ -17,6 +17,70 @@ fn now() -> String {
 fn get_target(conn: &Connection, id: i64) -> AppResult<Target> {
     conn.query_row("SELECT * FROM target WHERE id = ?1", params![id], Target::from_row)
         .map_err(Into::into)
+}
+
+fn get_repository(conn: &Connection, id: i64) -> AppResult<Repository> {
+    conn.query_row(
+        "SELECT * FROM repository WHERE id = ?1",
+        params![id],
+        Repository::from_row,
+    )
+    .map_err(Into::into)
+}
+
+/// Find a repository row for a GitHub `owner/name`, preferring a real local clone
+/// over a clone-less sentinel row, and creating a sentinel row when neither
+/// exists. This lets inbox PRs be reviewed without first adding the repo. A
+/// remote-only row stores `path = "github:{owner}/{name}"`.
+pub(crate) fn get_or_create_remote_repository(
+    conn: &Connection,
+    owner: &str,
+    name: &str,
+) -> AppResult<Repository> {
+    let existing: Option<i64> = conn
+        .query_row(
+            "SELECT id FROM repository
+             WHERE remote_owner = ?1 AND remote_name = ?2
+             ORDER BY (path LIKE 'github:%') ASC
+             LIMIT 1",
+            params![owner, name],
+            |r| r.get(0),
+        )
+        .optional()?;
+    if let Some(id) = existing {
+        return get_repository(conn, id);
+    }
+    let sentinel = format!("github:{owner}/{name}");
+    conn.execute(
+        "INSERT INTO repository (path, remote_owner, remote_name, default_branch, added_at)
+         VALUES (?1, ?2, ?3, NULL, ?4)",
+        params![sentinel, owner, name, now()],
+    )?;
+    get_repository(conn, conn.last_insert_rowid())
+}
+
+/// The `gh` invocation context for a repository: a local clone when one is on
+/// disk, otherwise a clone-less remote context resolved from `owner/name`.
+fn gh_ctx_for_repo(conn: &Connection, repo_id: i64) -> AppResult<GhRepo> {
+    let (path, owner, name): (String, Option<String>, Option<String>) = conn.query_row(
+        "SELECT path, remote_owner, remote_name FROM repository WHERE id = ?1",
+        params![repo_id],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+    )?;
+    match path.strip_prefix("github:") {
+        Some(rest) => {
+            // Prefer the stored remote columns; fall back to parsing the sentinel.
+            let (owner, name) = match (owner, name) {
+                (Some(o), Some(n)) => (o, n),
+                _ => rest
+                    .split_once('/')
+                    .map(|(o, n)| (o.to_string(), n.to_string()))
+                    .ok_or_else(|| AppError::Other("remote-only repo missing owner/name".into()))?,
+            };
+            Ok(GhRepo::Remote { owner, name })
+        }
+        None => Ok(GhRepo::Local(PathBuf::from(path))),
+    }
 }
 
 fn get_review_row(conn: &Connection, id: i64) -> AppResult<Review> {
@@ -153,15 +217,26 @@ pub fn create_review(
     new_review_for_target(&conn, target.id)
 }
 
-/// Start a fresh draft review against a real GitHub PR (creating/reusing its target).
+/// Start a fresh draft review against a real GitHub PR (creating/reusing its
+/// target). Identifies the PR by `owner/name` + number so any inbox PR can be
+/// opened, with no local clone required: the repo is resolved to a local clone
+/// if one is added, otherwise a clone-less remote context.
 #[tauri::command]
 pub fn create_review_for_pr(
-    repo_id: i64,
-    repo_path: String,
+    owner: String,
+    name: String,
     pr_number: i64,
     db: State<Db>,
 ) -> AppResult<Review> {
-    let info = gh::pr_view(std::path::Path::new(&repo_path), pr_number)?;
+    // Resolve the repo and build the gh context before the slow `gh` call so we
+    // don't hold the DB lock across a subprocess.
+    let (repo_id, ctx) = {
+        let conn = db.0.lock().unwrap();
+        let repo = get_or_create_remote_repository(&conn, &owner, &name)?;
+        let ctx = gh_ctx_for_repo(&conn, repo.id)?;
+        (repo.id, ctx)
+    };
+    let info = gh::pr_view(&ctx, pr_number)?;
     let conn = db.0.lock().unwrap();
     let target = get_or_create_pr_target(&conn, repo_id, pr_number, &info)?;
     new_review_for_target(&conn, target.id)
@@ -173,17 +248,17 @@ pub fn create_review_for_pr(
 pub fn review_diff(review_id: i64, db: State<Db>) -> AppResult<String> {
     let conn = db.0.lock().unwrap();
     let detail = load_detail(&conn, review_id)?;
-    let path = std::path::Path::new(&detail.repo_path);
     match detail.target.kind.as_str() {
         "github_pr" => {
             let number = detail
                 .target
                 .github_pr_number
                 .ok_or_else(|| AppError::Other("PR target missing number".into()))?;
-            gh::pr_diff(path, number)
+            let ctx = gh_ctx_for_repo(&conn, detail.target.repo_id)?;
+            gh::pr_diff(&ctx, number)
         }
         _ => git::diff(
-            path,
+            std::path::Path::new(&detail.repo_path),
             &detail.target.base_ref,
             &detail.target.head_ref,
             detail.target.three_dot,
@@ -211,25 +286,33 @@ pub fn file_source(
     };
     let sha = sha
         .ok_or_else(|| AppError::Other("this side has no source (file added or deleted)".into()))?;
-    let repo = std::path::Path::new(&detail.repo_path);
-    // Local commit is fastest and works for local targets and PRs that are
-    // checked out; for PRs whose commit isn't local, fall back to the GitHub API.
-    match git::show_file(repo, sha, &file_path) {
-        Ok(source) => Ok(source),
-        Err(local_err) => {
-            if detail.target.kind != "github_pr" {
-                return Err(local_err);
-            }
-            let (owner, name): (Option<String>, Option<String>) = conn.query_row(
-                "SELECT remote_owner, remote_name FROM repository WHERE id = ?1",
-                params![detail.target.repo_id],
-                |r| Ok((r.get(0)?, r.get(1)?)),
-            )?;
-            match (owner, name) {
-                (Some(owner), Some(name)) => gh::file_at_ref(repo, &owner, &name, &file_path, sha),
-                _ => Err(local_err),
+
+    // Remote-only (clone-less) PR targets have no local blob, so skip the
+    // guaranteed-to-fail `git show` and go straight to the GitHub contents API.
+    if !detail.repo_path.starts_with("github:") {
+        let repo = std::path::Path::new(&detail.repo_path);
+        // Local commit is fastest and works for local targets and PRs that are
+        // checked out; for PRs whose commit isn't local, fall through to the API.
+        match git::show_file(repo, sha, &file_path) {
+            Ok(source) => return Ok(source),
+            Err(local_err) => {
+                if detail.target.kind != "github_pr" {
+                    return Err(local_err);
+                }
             }
         }
+    }
+
+    let (owner, name): (Option<String>, Option<String>) = conn.query_row(
+        "SELECT remote_owner, remote_name FROM repository WHERE id = ?1",
+        params![detail.target.repo_id],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )?;
+    match (owner, name) {
+        (Some(owner), Some(name)) => gh::file_at_ref(&owner, &name, &file_path, sha),
+        _ => Err(AppError::Other(
+            "file source unavailable: no local clone and no GitHub remote".into(),
+        )),
     }
 }
 
@@ -512,13 +595,7 @@ pub fn publish_review(review_id: i64, db: State<Db>) -> AppResult<Review> {
 
     let payload = build_publish_payload(&detail);
 
-    let gh_id = gh::post_review(
-        std::path::Path::new(&detail.repo_path),
-        &owner,
-        &name,
-        number,
-        &payload.to_string(),
-    )?;
+    let gh_id = gh::post_review(&owner, &name, number, &payload.to_string())?;
 
     let ts = now();
     conn.execute(
@@ -802,6 +879,35 @@ mod tests {
         .unwrap();
         let id = conn.last_insert_rowid();
         assert_eq!(repo_label(&conn, id).unwrap(), "/only/path");
+    }
+
+    #[test]
+    fn remote_repository_creates_sentinel_then_reuses_local_clone() {
+        let conn = open_memory();
+
+        // No matching row yet: a clone-less sentinel row is created.
+        let r1 = get_or_create_remote_repository(&conn, "acme", "widget").unwrap();
+        assert_eq!(r1.path, "github:acme/widget");
+        assert_eq!(r1.remote_owner.as_deref(), Some("acme"));
+        let ctx = gh_ctx_for_repo(&conn, r1.id).unwrap();
+        assert!(matches!(ctx, GhRepo::Remote { .. }));
+
+        // Calling again reuses the same row (no duplicate).
+        let r2 = get_or_create_remote_repository(&conn, "acme", "widget").unwrap();
+        assert_eq!(r1.id, r2.id);
+
+        // Once a real local clone is added for that remote, it is preferred and
+        // the context becomes Local.
+        conn.execute(
+            "INSERT INTO repository (path, remote_owner, remote_name, added_at)
+             VALUES ('/clones/widget', 'acme', 'widget', 'now')",
+            [],
+        )
+        .unwrap();
+        let local_id = conn.last_insert_rowid();
+        let r3 = get_or_create_remote_repository(&conn, "acme", "widget").unwrap();
+        assert_eq!(r3.id, local_id, "should prefer the local clone over the sentinel");
+        assert!(matches!(gh_ctx_for_repo(&conn, r3.id).unwrap(), GhRepo::Local(_)));
     }
 
     #[test]

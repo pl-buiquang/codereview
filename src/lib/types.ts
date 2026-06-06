@@ -92,3 +92,61 @@ export interface ToolEnv {
   gh: string | null;
   gh_authed: boolean;
 }
+
+// --- GitHub inbox ---
+
+export type ItemReasonKind =
+  | "assigned"
+  | "mention"
+  | "direct_review"
+  | "team_review"
+  | "author"
+  | "comment";
+
+export interface ItemReason {
+  reason: ItemReasonKind;
+  detail: string;
+}
+
+/** One inbox item (PR or issue). Mirrors the backend `items` row, flattened with
+ *  its `reasons`. */
+export interface InboxItem {
+  id: string;
+  type: "pr" | "issue";
+  number: number;
+  repo: string; // "owner/name"
+  title: string;
+  url: string;
+  author_login: string | null;
+  author_avatar: string | null;
+  state: string | null;
+  is_draft: boolean;
+  body: string | null;
+  latest_comment: string | null;
+  latest_actor: string | null;
+  updated_at: string;
+  files_changed: number | null;
+  additions: number | null;
+  deletions: number | null;
+  top_files_json: string | null;
+  ci_state: string | null;
+  review_decision: string | null;
+  untracked_at: string | null;
+  closed_at: string | null;
+  engaged_at: string | null;
+  first_seen_at: string;
+  last_refreshed: string;
+  reasons: ItemReason[];
+}
+
+export interface RefreshResult {
+  viewerLogin: string;
+  itemCount: number;
+  closedCount: number;
+  durationMs: number;
+}
+
+export interface InboxMeta {
+  lastRefreshAt: string | null;
+  viewerLogin: string | null;
+}

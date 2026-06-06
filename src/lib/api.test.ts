@@ -78,10 +78,10 @@ describe("api command wrappers", () => {
     await api.listPrs("/repo");
     expect(invoke).toHaveBeenCalledWith("list_prs", { repoPath: "/repo" });
 
-    await api.createReviewForPr(1, "/repo", 42);
+    await api.createReviewForPr("acme", "widget", 42);
     expect(invoke).toHaveBeenCalledWith("create_review_for_pr", {
-      repoId: 1,
-      repoPath: "/repo",
+      owner: "acme",
+      name: "widget",
       prNumber: 42,
     });
 

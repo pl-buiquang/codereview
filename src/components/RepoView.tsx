@@ -216,7 +216,12 @@ function PrList({ repo, onOpen }: { repo: Repository; onOpen: (id: number) => vo
   });
 
   const startPrReview = useMutation({
-    mutationFn: (prNumber: number) => api.createReviewForPr(repo.id, repo.path, prNumber),
+    mutationFn: (prNumber: number) => {
+      if (!repo.remote_owner || !repo.remote_name) {
+        throw new Error("repository has no GitHub remote");
+      }
+      return api.createReviewForPr(repo.remote_owner, repo.remote_name, prNumber);
+    },
     onSuccess: (review) => {
       queryClient.invalidateQueries({ queryKey: ["reviews", repo.id] });
       onOpen(review.id);
