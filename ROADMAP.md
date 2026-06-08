@@ -32,23 +32,18 @@ with inline & multi-line comments, Markdown/JSON export, and GitHub publish via 
 
 ## 2. Comment anchoring & staleness
 
-- **Robust re-anchoring** — when `target.head_sha` changes, comments are currently shown as
-  "orphans" if their `(side, line)` no longer matches the diff (and flagged "outdated" when their
-  anchored SHA differs from the current head). Add real re-anchoring: map old line → new line via
-  the intervening diff, or anchor to content/context rather than raw line numbers.
-- **Surface staleness in the UI** — per-comment "outdated" badges exist; still missing a
-  review-level badge when the head moved, plus a "refresh diff" action.
+- **Re-anchor LEFT/base-side comments** — RIGHT-side comments now re-anchor to a moved head via the
+  intervening diff (`anchor.rs` + `reanchor_comments`); base-side comments are still left untouched
+  (would need an `anchored_base_sha` to map across base/merge-base movement). Content/context-based
+  anchoring remains an alternative to line-mapping.
 
 ## 3. GitHub integration depth
 
 - **Reply to existing threads** and **resolve** them via the API.
 - **PENDING (draft) GitHub reviews** — support GitHub's draft-review flow (add comments to a
   pending review, then submit) in addition to one-shot publish.
-- **Auto-refresh & polling** — refresh the PR list and re-fetch a PR's diff/threads on demand
-  or on an interval.
-- **`commit_id` freshness on publish** — publish currently posts against the stored
-  `target.head_sha`; if the PR head advanced since the review was opened, re-fetch and warn (or
-  re-anchor) before posting to avoid 422s.
+- **Auto-refresh & polling** — a manual "Refresh" re-resolves SHAs and re-fetches a review's
+  diff/threads today; still want PR-list refresh and optional interval polling.
 - **Provider abstraction** — factor `gh.rs` behind a trait so GitLab/Bitbucket/Gitea could be
   added later.
 
