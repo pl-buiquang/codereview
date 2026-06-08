@@ -65,6 +65,8 @@ export interface ReviewDetail {
   review: Review;
   target: Target;
   repo_path: string;
+  remote_owner: string | null;
+  remote_name: string | null;
   comments: Comment[];
   viewed_files: string[];
 }

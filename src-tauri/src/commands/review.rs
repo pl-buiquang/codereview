@@ -378,11 +378,12 @@ pub(crate) fn repo_label(conn: &Connection, repo_id: i64) -> AppResult<String> {
 pub(crate) fn load_detail(conn: &Connection, review_id: i64) -> AppResult<ReviewDetail> {
     let review = get_review_row(conn, review_id)?;
     let target = get_target(conn, review.target_id)?;
-    let repo_path: String = conn.query_row(
-        "SELECT path FROM repository WHERE id = ?1",
-        params![target.repo_id],
-        |r| r.get(0),
-    )?;
+    let (repo_path, remote_owner, remote_name): (String, Option<String>, Option<String>) = conn
+        .query_row(
+            "SELECT path, remote_owner, remote_name FROM repository WHERE id = ?1",
+            params![target.repo_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )?;
     let comments: Vec<Comment> = {
         let mut stmt = conn.prepare(
             "SELECT * FROM comment WHERE review_id = ?1 ORDER BY file_path, line, created_at",
@@ -404,6 +405,8 @@ pub(crate) fn load_detail(conn: &Connection, review_id: i64) -> AppResult<Review
         review,
         target,
         repo_path,
+        remote_owner,
+        remote_name,
         comments,
         viewed_files,
     })
@@ -976,6 +979,8 @@ mod tests {
                 created_at: "now".into(),
             },
             repo_path: "/repo".into(),
+            remote_owner: Some("owner".into()),
+            remote_name: Some("name".into()),
             comments,
             viewed_files: vec![],
         }

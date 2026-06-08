@@ -25,6 +25,8 @@ import {
 } from "../lib/diff";
 import { FileJumpList } from "./FileJumpList";
 import { FileViewPane } from "./FileViewPane";
+import { OpenPrButton } from "./OpenPrButton";
+import { githubPrUrl } from "../lib/githubUrl";
 import { useDebouncedCallback } from "../lib/useDebouncedCallback";
 import { useSettingsStore } from "../lib/settings";
 import { useUIStore } from "../store";
@@ -192,6 +194,10 @@ function ReviewHeader({
 
   const isPr = target.kind === "github_pr";
   const published = review.status === "published";
+  const prUrl =
+    isPr && detail.remote_owner && detail.remote_name && target.github_pr_number != null
+      ? githubPrUrl(detail.remote_owner, detail.remote_name, target.github_pr_number)
+      : null;
 
   return (
     <header className="review-header">
@@ -216,6 +222,7 @@ function ReviewHeader({
             Unified
           </button>
         </div>
+        {prUrl && <OpenPrButton url={prUrl} />}
         <button onClick={() => setShowExport(true)}>Export</button>
         {isPr && (
           <button

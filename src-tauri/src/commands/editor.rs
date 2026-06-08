@@ -13,3 +13,13 @@ pub fn open_in_default_app(app: AppHandle, path: String) -> AppResult<()> {
         .open_path(path, None::<&str>)
         .map_err(|e| AppError::Other(e.to_string()))
 }
+
+/// Open a URL in the OS default browser. Uses the opener plugin's Rust API for
+/// the same reason as `open_in_default_app`: it isn't gated by the opener IPC
+/// scope, so no per-URL allowlist is needed.
+#[tauri::command]
+pub fn open_url(app: AppHandle, url: String) -> AppResult<()> {
+    app.opener()
+        .open_url(url, None::<&str>)
+        .map_err(|e| AppError::Other(e.to_string()))
+}

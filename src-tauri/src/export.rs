@@ -177,6 +177,8 @@ mod tests {
             review: review(),
             target: target(),
             repo_path: "/repo".into(),
+            remote_owner: Some("owner".into()),
+            remote_name: Some("name".into()),
             comments,
             viewed_files: vec![],
         }

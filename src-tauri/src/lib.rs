@@ -64,6 +64,7 @@ pub fn run() {
             commands::export::preview_review,
             commands::export::export_review,
             commands::editor::open_in_default_app,
+            commands::editor::open_url,
             commands::gh::gh_auth_status,
             commands::gh::list_prs,
             commands::gh::check_environment,

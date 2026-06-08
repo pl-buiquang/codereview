@@ -139,6 +139,10 @@ pub struct ReviewDetail {
     pub review: Review,
     pub target: Target,
     pub repo_path: String,
+    /// GitHub `owner`/`name` of the target's repo, if it has a remote — used to
+    /// build the PR's web URL for the "Open PR" action.
+    pub remote_owner: Option<String>,
+    pub remote_name: Option<String>,
     pub comments: Vec<Comment>,
     /// File paths the user has marked "viewed" (collapsed) for this review.
     pub viewed_files: Vec<String>,

@@ -44,6 +44,7 @@ export const api = {
     invoke<string>("file_source", { reviewId, filePath, side }),
   openInDefaultApp: (path: string) =>
     invoke<void>("open_in_default_app", { path }),
+  openUrl: (url: string) => invoke<void>("open_url", { url }),
   updateReview: (reviewId: number, body?: string, event?: string) =>
     invoke<void>("update_review", { reviewId, body, event }),
   deleteReview: (reviewId: number) =>

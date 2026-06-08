@@ -6,6 +6,8 @@ import { toast } from "../lib/toast";
 import { confirmDialog } from "../lib/confirm";
 import { useSettingsStore } from "../lib/settings";
 import { DiffViewer } from "./DiffViewer";
+import { OpenPrButton } from "./OpenPrButton";
+import { githubPrUrl } from "../lib/githubUrl";
 import { useUIStore } from "../store";
 import type { PrSummary, Repository, ReviewSummary } from "../lib/types";
 
@@ -67,6 +69,14 @@ export function RepoView({ repo }: { repo: Repository }) {
             <ReviewRow
               key={r.review.id}
               summary={r}
+              prUrl={
+                r.target.kind === "github_pr" &&
+                repo.remote_owner &&
+                repo.remote_name &&
+                r.target.github_pr_number != null
+                  ? githubPrUrl(repo.remote_owner, repo.remote_name, r.target.github_pr_number)
+                  : null
+              }
               onOpen={() => openReview(r.review.id)}
               onDelete={async () => {
                 if (
@@ -271,10 +281,12 @@ function PrList({ repo, onOpen }: { repo: Repository; onOpen: (id: number) => vo
 
 function ReviewRow({
   summary,
+  prUrl,
   onOpen,
   onDelete,
 }: {
   summary: ReviewSummary;
+  prUrl: string | null;
   onOpen: () => void;
   onDelete: () => void;
 }) {
@@ -289,6 +301,7 @@ function ReviewRow({
           {review.event ? ` · ${review.event}` : ""}
         </span>
       </div>
+      {prUrl && <OpenPrButton url={prUrl} size="xs" />}
       <span className={`status-badge ${review.status}`}>{review.status}</span>
       <button
         className="btn-icon"
