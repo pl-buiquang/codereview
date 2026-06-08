@@ -223,11 +223,11 @@ function ReviewHeader({
       <div className="review-header-top">
         <button onClick={onBack}>← Back</button>
         <button
-          className="btn-icon header-collapse-toggle"
-          title={collapsed ? "Expand header" : "Collapse header"}
+          className="header-collapse-toggle"
+          title={collapsed ? "Show review details" : "Hide review details"}
           onClick={() => setCollapsed((c) => !c)}
         >
-          {collapsed ? "▸" : "▾"}
+          {collapsed ? "▸ Expand" : "▾ Collapse"}
         </button>
         <h2 className="review-title">{target.title}</h2>
         <span className={`status-badge ${review.status}`}>{review.status}</span>

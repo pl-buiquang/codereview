@@ -97,11 +97,23 @@ button:hover {
   color: var(--danger);
 }
 .header-collapse-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font: inherit;
   font-size: 12px;
+  font-weight: 600;
   line-height: 1;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-elev);
+  color: var(--accent);
+  cursor: pointer;
 }
 .header-collapse-toggle:hover {
-  color: var(--text);
+  border-color: var(--accent);
+  background: var(--bg);
 }
 
 /* Split button (default action + caret menu), e.g. "Open PR ▾". */
@@ -825,7 +837,7 @@ td.diff-code {
   mask-image: linear-gradient(to bottom, #000 70%, transparent);
 }
 .pr-meta-desc-body.scroll {
-  max-height: 260px;
+  max-height: 42vh;
   overflow-y: auto;
 }
 
