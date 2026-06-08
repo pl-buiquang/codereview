@@ -25,8 +25,6 @@ with inline & multi-line comments, Markdown/JSON export, and GitHub publish via 
 - **Threaded replies** — the `comment.parent_id` column already exists but is unused. Render
   replies under a root comment and let the user reply, like a GitHub thread.
 - **Resolve / unresolve threads** — mark a comment thread resolved; collapse resolved threads.
-- **Comment Markdown** — render comment bodies as Markdown (preview toggle) since they're
-  destined for Markdown export / GitHub anyway.
 - **Suggested changes** — GitHub-style ```suggestion blocks that publish as suggestions.
 - **Keyboard navigation** — next/prev file, next/prev comment, `c` to comment on the focused
   line, `j`/`k` movement.
@@ -43,14 +41,9 @@ with inline & multi-line comments, Markdown/JSON export, and GitHub publish via 
 
 ## 3. GitHub integration depth
 
-- **Show existing PR threads** — fetch existing review comments/threads
-  (`gh api .../pulls/{n}/comments` + `/reviews`) and render them inline, distinct from local
-  drafts. (Listed in the original M4 plan; not yet built.)
 - **Reply to existing threads** and **resolve** them via the API.
 - **PENDING (draft) GitHub reviews** — support GitHub's draft-review flow (add comments to a
   pending review, then submit) in addition to one-shot publish.
-- **PR metadata** — show PR description/body, labels, check status, mergeability, and existing
-  approval state in the review header.
 - **Auto-refresh & polling** — refresh the PR list and re-fetch a PR's diff/threads on demand
   or on an interval.
 - **`commit_id` freshness on publish** — publish currently posts against the stored
@@ -130,10 +123,8 @@ Repo/filesystem:
 
 ## 9. Nice-to-haves
 
-- Light theme; configurable diff color scheme.
-- Search/filter across PRs and the Reviews list.
+- Search/filter the PR list (the Reviews list already supports faceted filtering + sorting).
 - Per-comment severity/labels (nit, blocker, question) reflected in export.
 - Image/asset diffs.
 - More syntax grammars (e.g. Dockerfile isn't in refractor-common today, so `Dockerfile` shows
   unhighlighted — register extra languages).
-- Multi-window or tabbed reviews.
