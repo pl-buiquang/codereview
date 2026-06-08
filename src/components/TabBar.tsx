@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { useUIStore, type Tab } from "../store";
@@ -25,6 +25,22 @@ function HomeIcon() {
   );
 }
 
+/** The display label for a tab. Review titles come from the (cached) review
+ *  query, so this is a hook shared by the tab strip and the overflow menu. */
+function useTabLabel(tab: Tab, repos: Repository[]): string {
+  const reviewQuery = useQuery({
+    queryKey: ["review", tab.reviewId],
+    queryFn: () => api.getReview(tab.reviewId!),
+    enabled: tab.kind === "review" && tab.reviewId != null,
+  });
+
+  if (tab.kind === "home") return "Home";
+  if (tab.kind === "settings") return "⚙ Settings";
+  if (tab.kind === "review") return reviewQuery.data?.target.title ?? `Review #${tab.reviewId}`;
+  const repo = repos.find((r) => r.id === tab.repoId);
+  return repo ? repoLabel(repo) : `repo #${tab.repoId}`;
+}
+
 function TabItem({ tab, repos }: { tab: Tab; repos: Repository[] }) {
   const activeTabId = useUIStore((s) => s.activeTabId);
   const setActiveTab = useUIStore((s) => s.setActiveTab);
@@ -34,24 +50,7 @@ function TabItem({ tab, repos }: { tab: Tab; repos: Repository[] }) {
 
   // The home tab is pinned: it can't be dragged or accept a drop before it.
   const draggable = tab.kind !== "home";
-
-  const reviewQuery = useQuery({
-    queryKey: ["review", tab.reviewId],
-    queryFn: () => api.getReview(tab.reviewId!),
-    enabled: tab.kind === "review" && tab.reviewId != null,
-  });
-
-  let label: string;
-  if (tab.kind === "home") {
-    label = "Home";
-  } else if (tab.kind === "settings") {
-    label = "⚙ Settings";
-  } else if (tab.kind === "review") {
-    label = reviewQuery.data?.target.title ?? `Review #${tab.reviewId}`;
-  } else {
-    const repo = repos.find((r) => r.id === tab.repoId);
-    label = repo ? repoLabel(repo) : `repo #${tab.repoId}`;
-  }
+  const label = useTabLabel(tab, repos);
 
   return (
     <div
@@ -96,6 +95,79 @@ function TabItem({ tab, repos }: { tab: Tab; repos: Repository[] }) {
   );
 }
 
+function OverflowRow({
+  tab,
+  repos,
+  onPick,
+}: {
+  tab: Tab;
+  repos: Repository[];
+  onPick: () => void;
+}) {
+  const activeTabId = useUIStore((s) => s.activeTabId);
+  const setActiveTab = useUIStore((s) => s.setActiveTab);
+  const closeTab = useUIStore((s) => s.closeTab);
+  const label = useTabLabel(tab, repos);
+
+  return (
+    <div
+      className={`tab-overflow-row ${tab.id === activeTabId ? "active" : ""}`}
+      title={label}
+      onClick={() => {
+        setActiveTab(tab.id);
+        onPick();
+      }}
+    >
+      <span className="tab-overflow-label">{label}</span>
+      {tab.kind !== "home" && (
+        <button
+          className="tab-overflow-close"
+          title="Close tab"
+          onClick={(e) => {
+            e.stopPropagation();
+            closeTab(tab.id);
+          }}
+        >
+          ✕
+        </button>
+      )}
+    </div>
+  );
+}
+
+function TabOverflowMenu({ tabs, repos }: { tabs: Tab[]; repos: Repository[] }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
+  return (
+    <div className="tab-overflow" ref={ref}>
+      <button
+        className="tab-overflow-btn"
+        title="All tabs"
+        onClick={() => setOpen((o) => !o)}
+      >
+        ⋯
+      </button>
+      {open && (
+        <div className="tab-overflow-menu">
+          {tabs.map((tab) => (
+            <OverflowRow key={tab.id} tab={tab} repos={repos} onPick={() => setOpen(false)} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function TabBar() {
   const tabs = useUIStore((s) => s.tabs);
 
@@ -107,9 +179,12 @@ export function TabBar() {
 
   return (
     <nav className="tab-bar">
-      {tabs.map((tab) => (
-        <TabItem key={tab.id} tab={tab} repos={repos} />
-      ))}
+      <div className="tab-bar-tabs">
+        {tabs.map((tab) => (
+          <TabItem key={tab.id} tab={tab} repos={repos} />
+        ))}
+      </div>
+      {tabs.length > 1 && <TabOverflowMenu tabs={tabs} repos={repos} />}
     </nav>
   );
 }
