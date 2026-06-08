@@ -1745,7 +1745,7 @@ td.diff-code {
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
 }
 .jump-list-header {
   font-size: 12px;
@@ -1753,13 +1753,12 @@ td.diff-code {
   color: var(--muted);
   padding: 4px 8px;
 }
-.jump-row {
+.tree-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  gap: 6px;
   width: 100%;
-  padding: 6px 8px;
+  padding: 5px 8px;
   border: none;
   border-radius: 6px;
   background: transparent;
@@ -1768,18 +1767,30 @@ td.diff-code {
   text-align: left;
   cursor: pointer;
 }
-.jump-row:hover {
+.tree-row:hover {
   background: rgba(255, 255, 255, 0.04);
 }
-.jump-row.active {
+.tree-row.active {
   background: color-mix(in srgb, var(--accent) 15%, transparent);
 }
-.jump-row.viewed {
+.tree-row.viewed {
   color: var(--muted);
 }
-.jump-path {
-  direction: rtl;
-  text-align: left;
+.tree-chevron {
+  flex-shrink: 0;
+  color: var(--muted);
+  transition: transform 0.12s ease;
+}
+.tree-chevron.open {
+  transform: rotate(90deg);
+}
+.tree-folder {
+  flex-shrink: 0;
+  color: var(--muted);
+}
+.tree-name {
+  flex: 1;
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
