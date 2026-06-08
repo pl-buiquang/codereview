@@ -485,7 +485,7 @@ button:hover {
 .diff-file {
   border: 1px solid var(--border);
   border-radius: 8px;
-  overflow: hidden;
+  overflow: clip;
 }
 .diff-file-header {
   display: flex;
@@ -494,6 +494,9 @@ button:hover {
   padding: 8px 12px;
   background: var(--bg-elev);
   border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 3;
 }
 .file-path {
   font-family: var(--code-font, ui-monospace, SFMono-Regular, Menlo, monospace);
