@@ -58,6 +58,16 @@ function TabItem({ tab, repos }: { tab: Tab; repos: Repository[] }) {
         dragOver ? "drag-over" : ""
       }`}
       onClick={() => setActiveTab(tab.id)}
+      onAuxClick={(e) => {
+        if (e.button === 1 && tab.kind !== "home") {
+          e.preventDefault();
+          closeTab(tab.id);
+        }
+      }}
+      onMouseDown={(e) => {
+        // Suppress the middle-click autoscroll cursor.
+        if (e.button === 1) e.preventDefault();
+      }}
       title={label}
       draggable={draggable}
       onDragStart={(e) => {
