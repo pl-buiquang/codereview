@@ -2,8 +2,10 @@ use std::path::{Path, PathBuf};
 
 use chrono::Utc;
 use rusqlite::{params, Connection, OptionalExtension};
+use serde::Serialize;
 use tauri::State;
 
+use crate::anchor::{self, Remap};
 use crate::db::models::{Comment, Repository, Review, ReviewDetail, ReviewSummary, Target};
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
@@ -189,6 +191,225 @@ pub(crate) fn get_or_create_pr_target(
         ],
     )?;
     get_target(conn, conn.last_insert_rowid())
+}
+
+/// Outcome of re-resolving a target's head SHA: whether it moved since the last
+/// resolution, plus the previous and current values for the frontend badge.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FreshnessResult {
+    pub head_moved: bool,
+    pub previous_head_sha: Option<String>,
+    pub current_head_sha: Option<String>,
+}
+
+/// Re-resolve a target's SHAs (and refs/title for PRs) and persist them,
+/// reporting whether the head moved. Mirrors how each kind resolves on open
+/// (`get_or_create_local_target` / `get_or_create_pr_target`) but updates an
+/// existing row in place.
+///
+/// Follows the split-lock pattern: resolve repo/`gh` context under the lock, drop
+/// it for the `git rev-parse` / `gh pr view` subprocess, then re-lock to UPDATE.
+/// Shared with `publish_review` so publish can pin the freshest head.
+fn refresh_target_shas(db: &Db, target: &Target) -> AppResult<FreshnessResult> {
+    let previous_head_sha = target.head_sha.clone();
+
+    let current_head_sha = match target.kind.as_str() {
+        "github_pr" => {
+            let number = target
+                .github_pr_number
+                .ok_or_else(|| AppError::Other("PR target missing number".into()))?;
+            let ctx = {
+                let conn = db.0.lock().unwrap();
+                gh_ctx_for_repo(&conn, target.repo_id)?
+            };
+            let info = gh::pr_view(&ctx, number)?;
+            let conn = db.0.lock().unwrap();
+            conn.execute(
+                "UPDATE target SET title = ?1, base_ref = ?2, head_ref = ?3, head_sha = ?4 WHERE id = ?5",
+                params![info.title, info.base_ref, info.head_ref, info.head_sha, target.id],
+            )?;
+            Some(info.head_sha)
+        }
+        _ => {
+            let repo_path = {
+                let conn = db.0.lock().unwrap();
+                let path: String = conn.query_row(
+                    "SELECT path FROM repository WHERE id = ?1",
+                    params![target.repo_id],
+                    |r| r.get(0),
+                )?;
+                path
+            };
+            let repo = Path::new(&repo_path);
+            let base_sha = git::rev_parse(repo, &target.base_ref).ok();
+            let head_sha = git::rev_parse(repo, &target.head_ref).ok();
+            let conn = db.0.lock().unwrap();
+            conn.execute(
+                "UPDATE target SET base_sha = ?1, head_sha = ?2 WHERE id = ?3",
+                params![base_sha, head_sha, target.id],
+            )?;
+            head_sha
+        }
+    };
+
+    Ok(FreshnessResult {
+        head_moved: current_head_sha.is_some() && current_head_sha != previous_head_sha,
+        previous_head_sha,
+        current_head_sha,
+    })
+}
+
+fn refresh_review_impl(review_id: i64, db: &Db) -> AppResult<FreshnessResult> {
+    let target = {
+        let conn = db.0.lock().unwrap();
+        let review = get_review_row(&conn, review_id)?;
+        get_target(&conn, review.target_id)?
+    };
+    refresh_target_shas(db, &target)
+}
+
+/// Re-resolve a review's target SHAs from the source of truth (`git`/`gh`) and
+/// persist them, surfacing whether the head moved. Does not re-anchor comments —
+/// that is a separate explicit action.
+#[tauri::command]
+pub fn refresh_review(review_id: i64, db: State<Db>) -> AppResult<FreshnessResult> {
+    refresh_review_impl(review_id, &db)
+}
+
+/// Tally of what `reanchor_review_comments` did to a review's diff comments.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReanchorResult {
+    pub reanchored: usize,
+    pub lost: usize,
+    pub skipped_no_change: usize,
+}
+
+/// Re-anchor a review's RIGHT-side diff comments from their stored
+/// `anchored_head_sha` to the target's current `head_sha` using the intervening
+/// per-file diff. Pure helper: the caller holds the DB lock.
+fn reanchor_review_comments(conn: &Connection, detail: &ReviewDetail) -> AppResult<ReanchorResult> {
+    let mut result = ReanchorResult {
+        reanchored: 0,
+        lost: 0,
+        skipped_no_change: 0,
+    };
+
+    let Some(current) = detail.target.head_sha.as_deref() else {
+        return Ok(result);
+    };
+
+    let candidates: Vec<&Comment> = detail
+        .comments
+        .iter()
+        .filter(|c| c.side == "RIGHT" && c.subject_type == "line" && c.origin != "file_view")
+        .collect();
+
+    // Group the comments that need remapping by (anchored_sha, file) so each
+    // intervening per-file diff is fetched at most once.
+    let mut groups: std::collections::HashMap<(String, String), Vec<&Comment>> =
+        std::collections::HashMap::new();
+    for c in candidates {
+        match c.anchored_head_sha.as_deref() {
+            None => result.skipped_no_change += 1,
+            Some(sha) if sha == current => result.skipped_no_change += 1,
+            Some(sha) => groups
+                .entry((sha.to_string(), c.file_path.clone()))
+                .or_default()
+                .push(c),
+        }
+    }
+
+    let is_remote = detail.repo_path.starts_with("github:");
+    let mut compare_cache: std::collections::HashMap<String, Vec<gh::ComparedFile>> =
+        std::collections::HashMap::new();
+
+    for ((anchored_sha, file_path), comments) in &groups {
+        let patch: Option<String> = if is_remote {
+            let (owner, name) = match (&detail.remote_owner, &detail.remote_name) {
+                (Some(o), Some(n)) => (o.clone(), n.clone()),
+                _ => {
+                    return Err(AppError::Other(
+                        "clone-less re-anchor requires a GitHub remote".into(),
+                    ))
+                }
+            };
+            let files = match compare_cache.get(anchored_sha) {
+                Some(f) => f,
+                None => {
+                    let f = gh::compare(&owner, &name, anchored_sha, current)?;
+                    compare_cache.entry(anchored_sha.clone()).or_insert(f)
+                }
+            };
+            files
+                .iter()
+                .find(|f| &f.filename == file_path)
+                .and_then(|f| f.patch.clone())
+        } else {
+            Some(git::diff_shas_path(
+                Path::new(&detail.repo_path),
+                anchored_sha,
+                current,
+                file_path,
+            )?)
+        };
+
+        // A missing patch on a clone-less PR means the file isn't in the compare
+        // (renamed/binary/absent): every comment on it is Lost. An empty local
+        // diff means the file is unchanged, so lines map to themselves.
+        let hunks = match &patch {
+            Some(p) => Some(anchor::parse_file_patch(p)),
+            None if is_remote => None,
+            None => Some(anchor::FileHunks::default()),
+        };
+
+        for c in comments {
+            let Some(hunks) = &hunks else {
+                result.lost += 1;
+                continue;
+            };
+
+            // A true multi-line range remaps both endpoints; otherwise only `line`.
+            let range_start = c.start_line.filter(|&s| s != c.line);
+
+            let new_line = match anchor::remap_right_line(c.line, hunks) {
+                Remap::Shifted(l) => l,
+                Remap::Lost => {
+                    result.lost += 1;
+                    continue;
+                }
+            };
+            let new_start = match range_start {
+                Some(s) => match anchor::remap_right_line(s, hunks) {
+                    Remap::Shifted(l) => Some(l),
+                    Remap::Lost => {
+                        result.lost += 1;
+                        continue;
+                    }
+                },
+                None => c.start_line,
+            };
+
+            conn.execute(
+                "UPDATE comment SET line = ?1, start_line = ?2, anchored_head_sha = ?3, updated_at = ?4 WHERE id = ?5",
+                params![new_line, new_start, current, now(), c.id],
+            )?;
+            result.reanchored += 1;
+        }
+    }
+
+    Ok(result)
+}
+
+/// Re-anchor a draft review's RIGHT-side diff comments to the target's current
+/// head SHA, reporting how many moved, were lost, or were already current.
+#[tauri::command]
+pub fn reanchor_comments(review_id: i64, db: State<Db>) -> AppResult<ReanchorResult> {
+    let conn = db.0.lock().unwrap();
+    ensure_draft(&conn, review_id)?;
+    let detail = load_detail(&conn, review_id)?;
+    reanchor_review_comments(&conn, &detail)
 }
 
 fn new_review_for_target(conn: &Connection, target_id: i64) -> AppResult<Review> {
@@ -475,6 +696,16 @@ pub fn update_review(
 /// GitHub's bulk reviews API can't anchor file-level comments (each comment
 /// needs a `path` + `line`/`position`), so file comments are folded into the
 /// review body under a "File-level comments" section instead.
+/// Whether a comment is anchored to the given (fresh) head SHA and so safe to
+/// post inline. A `None` `anchored_head_sha` is treated as anchored — legacy and
+/// local rows keep today's behaviour.
+fn is_anchored_to(c: &Comment, head_sha: Option<&str>) -> bool {
+    match c.anchored_head_sha.as_deref() {
+        None => true,
+        Some(sha) => Some(sha) == head_sha,
+    }
+}
+
 fn build_publish_payload(detail: &ReviewDetail) -> serde_json::Value {
     let event = match detail.review.event.as_deref() {
         Some("approve") => "APPROVE",
@@ -485,7 +716,11 @@ fn build_publish_payload(detail: &ReviewDetail) -> serde_json::Value {
     let comments: Vec<serde_json::Value> = detail
         .comments
         .iter()
-        .filter(|c| c.subject_type != "file" && c.origin != "file_view")
+        .filter(|c| {
+            c.subject_type != "file"
+                && c.origin != "file_view"
+                && is_anchored_to(c, detail.target.head_sha.as_deref())
+        })
         .map(|c| {
             let mut obj = serde_json::json!({
                 "path": c.file_path,
@@ -556,6 +791,32 @@ fn body_with_file_comments(detail: &ReviewDetail) -> String {
         }
     }
 
+    // Diff line comments that re-anchoring could not move onto the fresh head
+    // would 422 if posted inline, so they degrade into prose here.
+    let lost_comments: Vec<&Comment> = detail
+        .comments
+        .iter()
+        .filter(|c| {
+            c.subject_type != "file"
+                && c.origin != "file_view"
+                && !is_anchored_to(c, detail.target.head_sha.as_deref())
+        })
+        .collect();
+    if !lost_comments.is_empty() {
+        if !body.is_empty() {
+            body.push_str("\n\n");
+        }
+        body.push_str("## Comments that could not be re-anchored");
+        for c in lost_comments {
+            body.push_str(&format!(
+                "\n- **{}** {}: {}",
+                c.file_path,
+                line_label(c),
+                c.body.trim()
+            ));
+        }
+    }
+
     body
 }
 
@@ -572,8 +833,10 @@ fn line_label(c: &Comment) -> String {
 /// updated review.
 #[tauri::command]
 pub fn publish_review(review_id: i64, db: State<Db>) -> AppResult<Review> {
-    let conn = db.0.lock().unwrap();
-    let detail = load_detail(&conn, review_id)?;
+    let detail = {
+        let conn = db.0.lock().unwrap();
+        load_detail(&conn, review_id)?
+    };
     if detail.review.status == "published" {
         return Err(AppError::Other("this review is already published".into()));
     }
@@ -586,15 +849,27 @@ pub fn publish_review(review_id: i64, db: State<Db>) -> AppResult<Review> {
         .target
         .github_pr_number
         .ok_or_else(|| AppError::Other("PR target missing number".into()))?;
-    let (owner, name): (Option<String>, Option<String>) = conn.query_row(
-        "SELECT remote_owner, remote_name FROM repository WHERE id = ?1",
-        params![detail.target.repo_id],
-        |r| Ok((r.get(0)?, r.get(1)?)),
-    )?;
+    let (owner, name): (Option<String>, Option<String>) = {
+        let conn = db.0.lock().unwrap();
+        conn.query_row(
+            "SELECT remote_owner, remote_name FROM repository WHERE id = ?1",
+            params![detail.target.repo_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?
+    };
     let (owner, name) = match (owner, name) {
         (Some(o), Some(n)) => (o, n),
         _ => return Err(AppError::Other("repository has no GitHub remote".into())),
     };
+
+    // Pin the freshest head, re-anchor RIGHT comments onto it, then build the
+    // payload against the verified head so an advanced PR never causes a 422.
+    refresh_target_shas(&db, &detail.target)?;
+
+    let conn = db.0.lock().unwrap();
+    let detail = load_detail(&conn, review_id)?;
+    reanchor_review_comments(&conn, &detail)?;
+    let detail = load_detail(&conn, review_id)?;
 
     let payload = build_publish_payload(&detail);
 
@@ -734,6 +1009,10 @@ pub fn delete_comment(comment_id: i64, db: State<Db>) -> AppResult<()> {
 mod tests {
     use super::*;
     use crate::db::open_memory;
+    use std::fs;
+    use std::process::Command;
+    use std::sync::Mutex;
+    use tempfile::TempDir;
 
     /// Insert a repository row and return its id.
     fn seed_repo(conn: &Connection, owner: Option<&str>, name: Option<&str>) -> i64 {
@@ -761,6 +1040,29 @@ mod tests {
                 (review_id, file_path, side, line, start_line, diff_hunk, body, created_at, updated_at)
              VALUES (?1, ?2, ?3, ?4, ?5, '@@ hunk @@', ?6, 'now', 'now')",
             params![review_id, file_path, side, line, start_line, body],
+        )
+        .unwrap();
+        conn.last_insert_rowid()
+    }
+
+    /// Like `seed_comment` but pins `anchored_head_sha` so re-anchoring sees a
+    /// prior revision to remap from.
+    #[allow(clippy::too_many_arguments)]
+    fn seed_comment_anchored(
+        conn: &Connection,
+        review_id: i64,
+        file_path: &str,
+        side: &str,
+        line: i64,
+        start_line: Option<i64>,
+        body: &str,
+        anchored_head_sha: Option<&str>,
+    ) -> i64 {
+        conn.execute(
+            "INSERT INTO comment
+                (review_id, file_path, side, line, start_line, diff_hunk, body, anchored_head_sha, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, '@@ hunk @@', ?6, ?7, 'now', 'now')",
+            params![review_id, file_path, side, line, start_line, body, anchored_head_sha],
         )
         .unwrap();
         conn.last_insert_rowid()
@@ -1168,5 +1470,341 @@ mod tests {
         assert!(body.contains("**src/lib.rs**"));
         assert!(body.contains("- L12: single note"));
         assert!(body.contains("- L18-L20: range note"));
+    }
+
+    fn anchored_payload_comment(
+        line: i64,
+        start_line: Option<i64>,
+        anchored_head_sha: Option<&str>,
+    ) -> Comment {
+        Comment {
+            anchored_head_sha: anchored_head_sha.map(Into::into),
+            ..payload_comment(line, start_line, "RIGHT")
+        }
+    }
+
+    #[test]
+    fn payload_keeps_comment_inline_when_anchored_to_fresh_head() {
+        let mut d = detail_with(None, "", vec![anchored_payload_comment(5, None, Some("freshsha"))]);
+        d.target.head_sha = Some("freshsha".into());
+
+        let p = build_publish_payload(&d);
+        assert_eq!(p["commit_id"], "freshsha");
+        assert_eq!(p["comments"].as_array().unwrap().len(), 1);
+        assert_eq!(p["comments"][0]["line"], 5);
+        assert!(p.get("body").is_none());
+    }
+
+    #[test]
+    fn payload_folds_unanchored_comment_into_body_instead_of_inline() {
+        let mut d = detail_with(
+            None,
+            "",
+            vec![anchored_payload_comment(7, None, Some("stalesha"))],
+        );
+        d.target.head_sha = Some("freshsha".into());
+
+        let p = build_publish_payload(&d);
+        assert_eq!(p["commit_id"], "freshsha");
+        assert!(
+            p["comments"].as_array().unwrap().is_empty(),
+            "stale comment must not be posted inline"
+        );
+        let body = p["body"].as_str().unwrap();
+        assert!(body.contains("## Comments that could not be re-anchored"));
+        assert!(body.contains("**src/lib.rs** L7: comment body"));
+    }
+
+    // ---- refresh helper (real git via the two-heads fixture) ----
+
+    fn git(dir: &Path, args: &[&str]) {
+        let out = Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(args)
+            .output()
+            .expect("spawn git");
+        assert!(
+            out.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    /// A repo with two linear commits on `main`: H1 has three lines, H2 inserts a
+    /// line above an existing one. Returns `(dir, h1, h2)`.
+    fn fixture_repo_two_heads() -> (TempDir, String, String) {
+        let dir = TempDir::new().unwrap();
+        let p = dir.path();
+        git(p, &["init", "-q", "-b", "main"]);
+        git(p, &["config", "user.email", "test@example.com"]);
+        git(p, &["config", "user.name", "Test"]);
+        fs::write(p.join("file.txt"), "alpha\nbeta\ngamma\n").unwrap();
+        git(p, &["add", "."]);
+        git(p, &["commit", "-q", "-m", "h1"]);
+        let h1 = git::rev_parse(p, "HEAD").unwrap();
+
+        fs::write(p.join("file.txt"), "alpha\nINSERTED\nbeta\ngamma\n").unwrap();
+        git(p, &["commit", "-q", "-am", "h2"]);
+        let h2 = git::rev_parse(p, "HEAD").unwrap();
+        (dir, h1, h2)
+    }
+
+    /// Insert a repository row pointing at `path` and return its id.
+    fn seed_repo_at(conn: &Connection, path: &str) -> i64 {
+        conn.execute(
+            "INSERT INTO repository (path, default_branch, added_at) VALUES (?1, 'main', 'now')",
+            params![path],
+        )
+        .unwrap();
+        conn.last_insert_rowid()
+    }
+
+    #[test]
+    fn refresh_local_target_updates_shas_and_reports_move() {
+        let (dir, h1, _h2) = fixture_repo_two_heads();
+        let repo_path = dir.path().to_str().unwrap().to_string();
+
+        let conn = open_memory();
+        let repo = seed_repo_at(&conn, &repo_path);
+        // Pin the target's head to H1 while the branch already sits at H2.
+        let target =
+            get_or_create_local_target(&conn, repo, &repo_path, "main~1", "main", true).unwrap();
+        conn.execute(
+            "UPDATE target SET head_sha = ?1 WHERE id = ?2",
+            params![h1, target.id],
+        )
+        .unwrap();
+        let review = new_review_for_target(&conn, target.id).unwrap();
+
+        let db = Db(Mutex::new(conn));
+        let pinned = {
+            let conn = db.0.lock().unwrap();
+            get_target(&conn, target.id).unwrap()
+        };
+        let fresh = refresh_target_shas(&db, &pinned).unwrap();
+
+        let h2 = git::rev_parse(dir.path(), "main").unwrap();
+        let base = git::rev_parse(dir.path(), "main~1").unwrap();
+        let stored = {
+            let conn = db.0.lock().unwrap();
+            get_target(&conn, target.id).unwrap()
+        };
+        assert_eq!(stored.head_sha.as_deref(), Some(h2.as_str()));
+        assert_eq!(stored.base_sha.as_deref(), Some(base.as_str()));
+
+        assert!(fresh.head_moved);
+        assert_eq!(fresh.previous_head_sha.as_deref(), Some(h1.as_str()));
+        assert_eq!(fresh.current_head_sha.as_deref(), Some(h2.as_str()));
+
+        // The command path resolves the same review's target.
+        let again = refresh_review_impl(review.id, &db).unwrap();
+        assert!(!again.head_moved, "second refresh is a no-op");
+    }
+
+    #[test]
+    fn refresh_local_target_no_move_reports_false() {
+        let (dir, _h1, h2) = fixture_repo_two_heads();
+        let repo_path = dir.path().to_str().unwrap().to_string();
+
+        let conn = open_memory();
+        let repo = seed_repo_at(&conn, &repo_path);
+        // Target head already matches the branch tip, so refresh is a no-op.
+        let target =
+            get_or_create_local_target(&conn, repo, &repo_path, "main~1", "main", true).unwrap();
+        assert_eq!(target.head_sha.as_deref(), Some(h2.as_str()));
+
+        let db = Db(Mutex::new(conn));
+        let fresh = refresh_target_shas(&db, &target).unwrap();
+
+        assert!(!fresh.head_moved);
+        assert_eq!(fresh.previous_head_sha.as_deref(), Some(h2.as_str()));
+        assert_eq!(fresh.current_head_sha.as_deref(), Some(h2.as_str()));
+    }
+
+    // ---- re-anchor helper (real git via an insert+replace fixture) ----
+
+    /// A repo with two linear commits on `main`. H1 has four lines; H2 inserts a
+    /// line above `beta` (shifting later lines) and replaces `gamma` in place.
+    /// Returns `(dir, h1, h2)`.
+    ///
+    /// Mapping RIGHT lines H1 -> H2: 1(alpha)->1, 2(beta)->3 (shifted),
+    /// 3(gamma)->Lost (deleted/replaced), 4(delta)->5 (shifted).
+    fn fixture_repo_insert_and_replace() -> (TempDir, String, String) {
+        let dir = TempDir::new().unwrap();
+        let p = dir.path();
+        git(p, &["init", "-q", "-b", "main"]);
+        git(p, &["config", "user.email", "test@example.com"]);
+        git(p, &["config", "user.name", "Test"]);
+        fs::write(p.join("file.txt"), "alpha\nbeta\ngamma\ndelta\n").unwrap();
+        git(p, &["add", "."]);
+        git(p, &["commit", "-q", "-m", "h1"]);
+        let h1 = git::rev_parse(p, "HEAD").unwrap();
+
+        fs::write(p.join("file.txt"), "alpha\nINSERTED\nbeta\ngammaX\ndelta\n").unwrap();
+        git(p, &["commit", "-q", "-am", "h2"]);
+        let h2 = git::rev_parse(p, "HEAD").unwrap();
+        (dir, h1, h2)
+    }
+
+    fn comment_row(conn: &Connection, id: i64) -> Comment {
+        get_comment(conn, id).unwrap()
+    }
+
+    #[test]
+    fn reanchor_shifts_moved_comment_and_advances_sha() {
+        let (dir, h1, h2) = fixture_repo_insert_and_replace();
+        let repo_path = dir.path().to_str().unwrap().to_string();
+
+        let conn = open_memory();
+        let repo = seed_repo_at(&conn, &repo_path);
+        let target =
+            get_or_create_local_target(&conn, repo, &repo_path, "main~1", "main", false).unwrap();
+        conn.execute(
+            "UPDATE target SET head_sha = ?1 WHERE id = ?2",
+            params![h2, target.id],
+        )
+        .unwrap();
+        let review = new_review_for_target(&conn, target.id).unwrap();
+
+        // beta (H1 line 2) shifts down to line 3 in H2.
+        let id = seed_comment_anchored(
+            &conn,
+            review.id,
+            "file.txt",
+            "RIGHT",
+            2,
+            None,
+            "on beta",
+            Some(&h1),
+        );
+
+        let detail = load_detail(&conn, review.id).unwrap();
+        let result = reanchor_review_comments(&conn, &detail).unwrap();
+        assert_eq!(result.reanchored, 1);
+        assert_eq!(result.lost, 0);
+        assert_eq!(result.skipped_no_change, 0);
+
+        let c = comment_row(&conn, id);
+        assert_eq!(c.line, 3);
+        assert_eq!(c.anchored_head_sha.as_deref(), Some(h2.as_str()));
+    }
+
+    #[test]
+    fn reanchor_leaves_replaced_comment_lost_with_sha_untouched() {
+        let (dir, h1, h2) = fixture_repo_insert_and_replace();
+        let repo_path = dir.path().to_str().unwrap().to_string();
+
+        let conn = open_memory();
+        let repo = seed_repo_at(&conn, &repo_path);
+        let target =
+            get_or_create_local_target(&conn, repo, &repo_path, "main~1", "main", false).unwrap();
+        conn.execute(
+            "UPDATE target SET head_sha = ?1 WHERE id = ?2",
+            params![h2, target.id],
+        )
+        .unwrap();
+        let review = new_review_for_target(&conn, target.id).unwrap();
+
+        // gamma (H1 line 3) is replaced in H2 -> Lost.
+        let id = seed_comment_anchored(
+            &conn,
+            review.id,
+            "file.txt",
+            "RIGHT",
+            3,
+            None,
+            "on gamma",
+            Some(&h1),
+        );
+
+        let detail = load_detail(&conn, review.id).unwrap();
+        let result = reanchor_review_comments(&conn, &detail).unwrap();
+        assert_eq!(result.lost, 1);
+        assert_eq!(result.reanchored, 0);
+
+        let c = comment_row(&conn, id);
+        assert_eq!(c.line, 3, "lost comment's line is left untouched");
+        assert_eq!(
+            c.anchored_head_sha.as_deref(),
+            Some(h1.as_str()),
+            "lost comment keeps its old sha"
+        );
+    }
+
+    #[test]
+    fn reanchor_ignores_left_side_comments() {
+        let (dir, h1, h2) = fixture_repo_insert_and_replace();
+        let repo_path = dir.path().to_str().unwrap().to_string();
+
+        let conn = open_memory();
+        let repo = seed_repo_at(&conn, &repo_path);
+        let target =
+            get_or_create_local_target(&conn, repo, &repo_path, "main~1", "main", false).unwrap();
+        conn.execute(
+            "UPDATE target SET head_sha = ?1 WHERE id = ?2",
+            params![h2, target.id],
+        )
+        .unwrap();
+        let review = new_review_for_target(&conn, target.id).unwrap();
+
+        let id = seed_comment_anchored(
+            &conn,
+            review.id,
+            "file.txt",
+            "LEFT",
+            2,
+            None,
+            "left side",
+            Some(&h1),
+        );
+
+        let detail = load_detail(&conn, review.id).unwrap();
+        let result = reanchor_review_comments(&conn, &detail).unwrap();
+        assert_eq!(result.reanchored, 0);
+        assert_eq!(result.lost, 0);
+        assert_eq!(result.skipped_no_change, 0);
+
+        let c = comment_row(&conn, id);
+        assert_eq!(c.line, 2);
+        assert_eq!(c.anchored_head_sha.as_deref(), Some(h1.as_str()));
+    }
+
+    #[test]
+    fn reanchor_skips_comment_already_on_current_head() {
+        let (dir, _h1, h2) = fixture_repo_insert_and_replace();
+        let repo_path = dir.path().to_str().unwrap().to_string();
+
+        let conn = open_memory();
+        let repo = seed_repo_at(&conn, &repo_path);
+        let target =
+            get_or_create_local_target(&conn, repo, &repo_path, "main~1", "main", false).unwrap();
+        conn.execute(
+            "UPDATE target SET head_sha = ?1 WHERE id = ?2",
+            params![h2, target.id],
+        )
+        .unwrap();
+        let review = new_review_for_target(&conn, target.id).unwrap();
+
+        let id = seed_comment_anchored(
+            &conn,
+            review.id,
+            "file.txt",
+            "RIGHT",
+            3,
+            None,
+            "already current",
+            Some(&h2),
+        );
+
+        let detail = load_detail(&conn, review.id).unwrap();
+        let result = reanchor_review_comments(&conn, &detail).unwrap();
+        assert_eq!(result.skipped_no_change, 1);
+        assert_eq!(result.reanchored, 0);
+        assert_eq!(result.lost, 0);
+
+        let c = comment_row(&conn, id);
+        assert_eq!(c.line, 3);
+        assert_eq!(c.anchored_head_sha.as_deref(), Some(h2.as_str()));
     }
 }

@@ -218,6 +218,18 @@ export interface RefreshResult {
   durationMs: number;
 }
 
+export interface FreshnessResult {
+  headMoved: boolean;
+  previousHeadSha: string | null;
+  currentHeadSha: string | null;
+}
+
+export interface ReanchorResult {
+  reanchored: number;
+  lost: number;
+  skippedNoChange: number;
+}
+
 export interface InboxMeta {
   lastRefreshAt: string | null;
   viewerLogin: string | null;

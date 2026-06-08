@@ -61,7 +61,12 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
   });
 
   const diffQuery = useQuery({
-    queryKey: ["review-diff", reviewId, detailQuery.data?.target.id],
+    queryKey: [
+      "review-diff",
+      reviewId,
+      detailQuery.data?.target.id,
+      detailQuery.data?.target.head_sha,
+    ],
     enabled: detailQuery.data != null,
     queryFn: () => api.reviewDiff(reviewId),
   });
@@ -211,8 +216,37 @@ function ReviewHeader({
     onError: (e) => toast.error(`Publish failed:\n${String(e)}`),
   });
 
+  const owner = detail.remote_owner ?? null;
+  const name = detail.remote_name ?? null;
+  const prNumber = target.github_pr_number ?? null;
+
+  const refreshReview = useMutation({
+    mutationFn: () => api.refreshReview(review.id),
+    onSuccess: (r) => {
+      queryClient.invalidateQueries({ queryKey: ["review", review.id] });
+      queryClient.invalidateQueries({ queryKey: ["pr-threads", owner, name, prNumber] });
+      if (r.headMoved) toast.success("Head moved — re-anchor to update comments.");
+    },
+    onError: (e) => toast.error(`Refresh failed:\n${String(e)}`),
+  });
+
+  const reanchorComments = useMutation({
+    mutationFn: () => api.reanchorComments(review.id),
+    onSuccess: (r) => {
+      queryClient.invalidateQueries({ queryKey: ["review", review.id] });
+      toast.success(`Re-anchored ${r.reanchored}, ${r.lost} could not be moved`);
+    },
+    onError: (e) => toast.error(`Re-anchor failed:\n${String(e)}`),
+  });
+
   const isPr = target.kind === "github_pr";
   const published = review.status === "published";
+  const headMoved = detail.comments.some(
+    (c) =>
+      c.anchored_head_sha &&
+      target.head_sha &&
+      c.anchored_head_sha !== target.head_sha,
+  );
   const prUrl =
     isPr && detail.remote_owner && detail.remote_name && target.github_pr_number != null
       ? githubPrUrl(detail.remote_owner, detail.remote_name, target.github_pr_number)
@@ -249,6 +283,38 @@ function ReviewHeader({
           </button>
         </div>
         {prUrl && <OpenPrButton url={prUrl} />}
+        {headMoved && (
+          <span className="head-moved">
+            <span
+              className="head-moved-badge"
+              title="The head has moved since some comments were written — they may no longer line up with the code."
+            >
+              ⚠ head moved
+            </span>
+            <button
+              disabled={readOnly || reanchorComments.isPending}
+              title={
+                readOnly
+                  ? "Published reviews cannot be re-anchored"
+                  : "Move comments onto the current head and clear outdated badges"
+              }
+              onClick={() => reanchorComments.mutate()}
+            >
+              {reanchorComments.isPending ? "Re-anchoring…" : "Re-anchor comments"}
+            </button>
+          </span>
+        )}
+        <button
+          disabled={readOnly || refreshReview.isPending}
+          title={
+            readOnly
+              ? "Published reviews cannot be refreshed"
+              : "Re-resolve the head/base and refresh the diff"
+          }
+          onClick={() => refreshReview.mutate()}
+        >
+          {refreshReview.isPending ? "Refreshing…" : "Refresh"}
+        </button>
         <button onClick={() => setShowExport(true)}>Export</button>
         {isPr && (
           <button

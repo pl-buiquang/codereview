@@ -11,8 +11,8 @@
   --muted: #8b949e;
   --accent: #2f81f7;
   --danger: #f85149;
-  --success: var(--success);
-  --warning: var(--warning);
+  --success: #3fb950;
+  --warning: #d29922;
   --diff-add-bg: rgba(63, 185, 80, 0.15);
   --diff-del-bg: rgba(248, 81, 73, 0.15);
   --review-tab-accent: #ffffff;
@@ -737,6 +737,22 @@ td.diff-code {
 }
 .review-header-top .view-toggle {
   margin-left: auto;
+}
+.head-moved {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.head-moved-badge {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  color: rgb(210, 153, 34);
+  background: color-mix(in srgb, var(--warning) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warning) 40%, transparent);
+  cursor: help;
 }
 
 .review-summary {

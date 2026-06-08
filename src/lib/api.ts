@@ -3,11 +3,13 @@ import { open, save } from "@tauri-apps/plugin-dialog";
 import type {
   Branch,
   Comment,
+  FreshnessResult,
   InboxItem,
   InboxMeta,
   PrMeta,
   PrSummary,
   PrThread,
+  ReanchorResult,
   RefreshResult,
   Repository,
   Review,
@@ -51,6 +53,10 @@ export const api = {
     invoke<void>("update_review", { reviewId, body, event }),
   deleteReview: (reviewId: number) =>
     invoke<void>("delete_review", { reviewId }),
+  refreshReview: (reviewId: number) =>
+    invoke<FreshnessResult>("refresh_review", { reviewId }),
+  reanchorComments: (reviewId: number) =>
+    invoke<ReanchorResult>("reanchor_comments", { reviewId }),
 
   // GitHub
   ghAuthStatus: () => invoke<boolean>("gh_auth_status"),

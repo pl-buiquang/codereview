@@ -220,6 +220,39 @@ pub fn pr_files(owner: &str, name: &str, number: i64) -> AppResult<Vec<ChangedFi
     serde_json::from_str(&out).map_err(|e| AppError::Gh(format!("failed to parse pr files: {e}")))
 }
 
+/// One changed file from the REST `compare/{base}...{head}` API, carrying its
+/// per-file unified-diff `patch` (absent for binary/large files).
+#[derive(Debug, Deserialize)]
+pub struct ComparedFile {
+    pub filename: String,
+    #[serde(default)]
+    pub patch: Option<String>,
+    // Part of the compare contract (Spec 01 §2); surfaced for callers/tests even
+    // though the re-anchor helper keys only on filename + patch.
+    #[allow(dead_code)]
+    pub status: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct CompareRaw {
+    files: Vec<ComparedFile>,
+}
+
+/// `gh api repos/{owner}/{name}/compare/{base}...{head}` → changed files with
+/// per-file patches. Three-dot compare semantics (GitHub's own "files changed").
+/// Clone-less; ignores `files` pagination (compare returns up to 300 per page).
+pub fn compare(owner: &str, name: &str, base: &str, head: &str) -> AppResult<Vec<ComparedFile>> {
+    let endpoint = format!("repos/{owner}/{name}/compare/{base}...{head}");
+    let ctx = GhRepo::Remote {
+        owner: owner.to_string(),
+        name: name.to_string(),
+    };
+    let out = run_gh(&ctx, &["api", &endpoint])?;
+    let raw: CompareRaw =
+        serde_json::from_str(&out).map_err(|e| AppError::Gh(format!("failed to parse compare: {e}")))?;
+    Ok(raw.files)
+}
+
 pub fn pr_diff(ctx: &GhRepo, number: i64) -> AppResult<String> {
     let num = number.to_string();
     let mut args = vec!["pr", "diff", num.as_str()];
@@ -997,5 +1030,41 @@ mod tests {
         assert!(outdated.comments[0].outdated);
         assert_eq!(outdated.comments[1].id, "C3");
         assert!(outdated.comments[1].author.is_none());
+    }
+
+    const COMPARE_FIXTURE: &str = r#"{
+      "status": "ahead",
+      "ahead_by": 2,
+      "files": [
+        {
+          "filename": "src/a.rs",
+          "status": "modified",
+          "additions": 3,
+          "deletions": 1,
+          "changes": 4,
+          "patch": "@@ -1,2 +1,4 @@\n alpha\n+INSERTED\n beta\n-gamma\n+GAMMA"
+        },
+        {
+          "filename": "assets/logo.png",
+          "status": "added"
+        }
+      ]
+    }"#;
+
+    #[test]
+    fn compare_parses_fixture() {
+        let raw: CompareRaw = serde_json::from_str(COMPARE_FIXTURE).expect("fixture parses");
+        assert_eq!(raw.files.len(), 2);
+
+        let a = &raw.files[0];
+        assert_eq!(a.filename, "src/a.rs");
+        assert_eq!(a.status, "modified");
+        assert!(a.patch.as_deref().unwrap().contains("+INSERTED"));
+
+        // Binary/added file with no patch -> None via #[serde(default)].
+        let logo = &raw.files[1];
+        assert_eq!(logo.filename, "assets/logo.png");
+        assert_eq!(logo.status, "added");
+        assert!(logo.patch.is_none());
     }
 }

@@ -132,6 +132,33 @@ pub fn diff(path: &Path, base: &str, head: &str, three_dot: bool) -> AppResult<S
     run_git(path, &["diff", "--no-color", &range])
 }
 
+/// Plain two-dot diff between two commits (literal line evolution old→new).
+/// Two-dot, NOT three-dot: merge-base semantics are irrelevant here. Kept
+/// alongside the path-scoped variant the re-anchor helper uses (Spec 01 §2).
+#[allow(dead_code)]
+pub fn diff_shas(repo: &Path, old_sha: &str, new_sha: &str) -> AppResult<String> {
+    run_git(repo, &["diff", "--no-color", &format!("{old_sha}..{new_sha}")])
+}
+
+/// Two-dot diff scoped to a single file, so the diff parser only sees one file.
+pub fn diff_shas_path(
+    repo: &Path,
+    old_sha: &str,
+    new_sha: &str,
+    file_path: &str,
+) -> AppResult<String> {
+    run_git(
+        repo,
+        &[
+            "diff",
+            "--no-color",
+            &format!("{old_sha}..{new_sha}"),
+            "--",
+            file_path,
+        ],
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -218,6 +245,26 @@ mod tests {
         dir
     }
 
+    /// Build a repo with two linear commits on `main`. H1 has a few lines; H2
+    /// inserts a line above an existing one, so the SHA-to-SHA diff is
+    /// deterministic. Returns `(dir, h1, h2)`.
+    fn fixture_repo_two_heads() -> (TempDir, String, String) {
+        let dir = TempDir::new().unwrap();
+        let p = dir.path();
+        git(p, &["init", "-q", "-b", "main"]);
+        git(p, &["config", "user.email", "test@example.com"]);
+        git(p, &["config", "user.name", "Test"]);
+        fs::write(p.join("file.txt"), "alpha\nbeta\ngamma\n").unwrap();
+        git(p, &["add", "."]);
+        git(p, &["commit", "-q", "-m", "h1"]);
+        let h1 = rev_parse(p, "HEAD").unwrap();
+
+        fs::write(p.join("file.txt"), "alpha\nINSERTED\nbeta\ngamma\n").unwrap();
+        git(p, &["commit", "-q", "-am", "h2"]);
+        let h2 = rev_parse(p, "HEAD").unwrap();
+        (dir, h1, h2)
+    }
+
     #[test]
     fn is_git_repo_true_for_repo_false_otherwise() {
         let repo = fixture_repo();
@@ -286,5 +333,21 @@ mod tests {
         let repo = fixture_repo();
         let err = show_file(repo.path(), "main", "no-such-file.txt").unwrap_err();
         assert!(matches!(err, AppError::Git(_)));
+    }
+
+    #[test]
+    fn diff_shas_shows_inserted_line() {
+        let (repo, h1, h2) = fixture_repo_two_heads();
+        let out = diff_shas(repo.path(), &h1, &h2).unwrap();
+        assert!(out.contains("+INSERTED"), "diff was: {out}");
+        assert!(out.contains("file.txt"));
+    }
+
+    #[test]
+    fn diff_shas_path_scopes_to_one_file() {
+        let (repo, h1, h2) = fixture_repo_two_heads();
+        let out = diff_shas_path(repo.path(), &h1, &h2, "file.txt").unwrap();
+        assert!(out.contains("+INSERTED"), "diff was: {out}");
+        assert!(out.contains("file.txt"));
     }
 }

@@ -1,3 +1,4 @@
+mod anchor;
 mod commands;
 mod db;
 mod error;
@@ -61,6 +62,8 @@ pub fn run() {
             commands::review::review_diff,
             commands::review::file_source,
             commands::review::publish_review,
+            commands::review::refresh_review,
+            commands::review::reanchor_comments,
             commands::export::preview_review,
             commands::export::export_review,
             commands::editor::open_in_default_app,
