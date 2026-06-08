@@ -1,10 +1,19 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useUIStore } from "../store";
-import { useSettingsStore, type Theme } from "../lib/settings";
+import { useSettingsStore, type ThemeMode } from "../lib/settings";
 import { api } from "../lib/api";
 import type { ToolEnv } from "../lib/types";
+import { ThemeSection } from "./settings/ThemeSection";
 
-const THEMES: { value: Theme; label: string }[] = [
+type SettingsSection = "general" | "theme";
+
+const SECTIONS: { key: SettingsSection; label: string; emoji: string }[] = [
+  { key: "general", label: "General", emoji: "⚙" },
+  { key: "theme", label: "Theme", emoji: "🎨" },
+];
+
+const THEME_MODES: { value: ThemeMode; label: string }[] = [
   { value: "dark", label: "Dark" },
   { value: "light", label: "Light" },
   { value: "system", label: "System" },
@@ -69,18 +78,92 @@ function ToolRow({
   );
 }
 
-export function SettingsView() {
-  const closeSettings = useUIStore((s) => s.closeSettings);
-  const theme = useSettingsStore((s) => s.theme);
+function GeneralSection() {
+  const themeMode = useSettingsStore((s) => s.themeMode);
   const diffFontSize = useSettingsStore((s) => s.diffFontSize);
   const defaultViewType = useSettingsStore((s) => s.defaultViewType);
   const defaultThreeDot = useSettingsStore((s) => s.defaultThreeDot);
-  const reviewTabColor = useSettingsStore((s) => s.reviewTabColor);
-  const setTheme = useSettingsStore((s) => s.setTheme);
+  const setThemeMode = useSettingsStore((s) => s.setThemeMode);
   const setDiffFontSize = useSettingsStore((s) => s.setDiffFontSize);
   const setDefaultViewType = useSettingsStore((s) => s.setDefaultViewType);
   const setDefaultThreeDot = useSettingsStore((s) => s.setDefaultThreeDot);
-  const setReviewTabColor = useSettingsStore((s) => s.setReviewTabColor);
+
+  return (
+    <div className="settings-section-narrow">
+      <section className="settings-group">
+        <h3>Appearance</h3>
+        <label className="settings-row">
+          <span>Theme</span>
+          <select
+            value={themeMode}
+            onChange={(e) => setThemeMode(e.target.value as ThemeMode)}
+          >
+            {THEME_MODES.map((t) => (
+              <option key={t.value} value={t.value}>
+                {t.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="settings-row">
+          <span>Diff font size</span>
+          <span className="settings-control">
+            <input
+              type="range"
+              min={10}
+              max={20}
+              step={0.5}
+              value={diffFontSize}
+              onChange={(e) => setDiffFontSize(Number(e.target.value))}
+            />
+            <span className="settings-value">{diffFontSize}px</span>
+          </span>
+        </label>
+        <p className="muted">
+          Customize colors, syntax highlighting and the code font in the Theme section.
+        </p>
+      </section>
+
+      <section className="settings-group">
+        <h3>Review defaults</h3>
+        <div className="settings-row">
+          <span>Default diff view</span>
+          <span className="view-toggle">
+            <button
+              className={defaultViewType === "split" ? "active" : ""}
+              onClick={() => setDefaultViewType("split")}
+            >
+              Split
+            </button>
+            <button
+              className={defaultViewType === "unified" ? "active" : ""}
+              onClick={() => setDefaultViewType("unified")}
+            >
+              Unified
+            </button>
+          </span>
+        </div>
+        <label className="settings-row">
+          <span>Default to merge-base (three-dot) diff</span>
+          <input
+            type="checkbox"
+            checked={defaultThreeDot}
+            onChange={(e) => setDefaultThreeDot(e.target.checked)}
+          />
+        </label>
+      </section>
+
+      <section className="settings-group">
+        <h3>Environment</h3>
+        <EnvironmentPanel />
+      </section>
+    </div>
+  );
+}
+
+export function SettingsView() {
+  const closeSettings = useUIStore((s) => s.closeSettings);
+  const [section, setSection] = useState<SettingsSection>("general");
 
   return (
     <section className="main-panel settings-panel">
@@ -89,79 +172,26 @@ export function SettingsView() {
         <h2>Settings</h2>
       </header>
 
-      <div className="settings-body">
-        <section className="settings-group">
-          <h3>Appearance</h3>
-          <label className="settings-row">
-            <span>Theme</span>
-            <select value={theme} onChange={(e) => setTheme(e.target.value as Theme)}>
-              {THEMES.map((t) => (
-                <option key={t.value} value={t.value}>
-                  {t.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="settings-row">
-            <span>Diff font size</span>
-            <span className="settings-control">
-              <input
-                type="range"
-                min={10}
-                max={20}
-                step={0.5}
-                value={diffFontSize}
-                onChange={(e) => setDiffFontSize(Number(e.target.value))}
-              />
-              <span className="settings-value">{diffFontSize}px</span>
-            </span>
-          </label>
-          <label className="settings-row">
-            <span>Review tab underline</span>
-            <span className="settings-control">
-              <input
-                type="color"
-                value={reviewTabColor}
-                onChange={(e) => setReviewTabColor(e.target.value)}
-              />
-              <span className="settings-value">{reviewTabColor}</span>
-            </span>
-          </label>
-        </section>
+      <div className="settings-layout">
+        <nav className="settings-sidebar">
+          <ul className="nav-list">
+            {SECTIONS.map((s) => (
+              <li key={s.key}>
+                <button
+                  className={`nav-item${section === s.key ? " active" : ""}`}
+                  onClick={() => setSection(s.key)}
+                >
+                  <span className="nav-emoji">{s.emoji}</span>
+                  <span>{s.label}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </nav>
 
-        <section className="settings-group">
-          <h3>Review defaults</h3>
-          <div className="settings-row">
-            <span>Default diff view</span>
-            <span className="view-toggle">
-              <button
-                className={defaultViewType === "split" ? "active" : ""}
-                onClick={() => setDefaultViewType("split")}
-              >
-                Split
-              </button>
-              <button
-                className={defaultViewType === "unified" ? "active" : ""}
-                onClick={() => setDefaultViewType("unified")}
-              >
-                Unified
-              </button>
-            </span>
-          </div>
-          <label className="settings-row">
-            <span>Default to merge-base (three-dot) diff</span>
-            <input
-              type="checkbox"
-              checked={defaultThreeDot}
-              onChange={(e) => setDefaultThreeDot(e.target.checked)}
-            />
-          </label>
-        </section>
-
-        <section className="settings-group">
-          <h3>Environment</h3>
-          <EnvironmentPanel />
-        </section>
+        <div className="settings-content">
+          {section === "general" ? <GeneralSection /> : <ThemeSection />}
+        </div>
       </div>
     </section>
   );

@@ -1,34 +1,52 @@
 import { useEffect } from "react";
-import { effectiveTheme, useSettingsStore } from "./settings";
+import {
+  resolveActiveTheme,
+  tokenVar,
+  TOKEN_ROLES,
+  UI_VAR,
+  useSettingsStore,
+  type Theme,
+  type UiColors,
+} from "./settings";
+
+/** Write every token of a resolved theme onto <html> as inline CSS variables. */
+function applyTheme(theme: Theme) {
+  const root = document.documentElement;
+  (Object.keys(UI_VAR) as (keyof UiColors)[]).forEach((key) => {
+    root.style.setProperty(UI_VAR[key], theme.ui[key]);
+  });
+  TOKEN_ROLES.forEach((role) => {
+    root.style.setProperty(tokenVar(role), theme.syntax[role]);
+  });
+  if (theme.codeFont) root.style.setProperty("--code-font", theme.codeFont);
+  else root.style.removeProperty("--code-font");
+  root.style.colorScheme = theme.base;
+}
 
 /**
- * Reflect persisted appearance settings onto the document: `data-theme` on
- * <html> (with a live listener when following the OS) and the `--diff-font-size`
- * CSS variable. Call once near the app root.
+ * Reflect persisted appearance settings onto the document: the active theme's
+ * colors/font as inline CSS variables (re-resolving live when following the OS)
+ * and the `--diff-font-size` variable. Call once near the app root.
  */
 export function useApplySettings() {
-  const theme = useSettingsStore((s) => s.theme);
+  const themeMode = useSettingsStore((s) => s.themeMode);
+  const customThemes = useSettingsStore((s) => s.customThemes);
+  const darkThemeId = useSettingsStore((s) => s.darkThemeId);
+  const lightThemeId = useSettingsStore((s) => s.lightThemeId);
   const diffFontSize = useSettingsStore((s) => s.diffFontSize);
-  const reviewTabColor = useSettingsStore((s) => s.reviewTabColor);
 
   useEffect(() => {
-    const root = document.documentElement;
-    const apply = () => {
-      root.dataset.theme = effectiveTheme(theme);
-    };
+    const apply = () =>
+      applyTheme(resolveActiveTheme({ themeMode, customThemes, darkThemeId, lightThemeId }));
     apply();
-    if (theme === "system") {
+    if (themeMode === "system") {
       const mq = window.matchMedia("(prefers-color-scheme: light)");
       mq.addEventListener("change", apply);
       return () => mq.removeEventListener("change", apply);
     }
-  }, [theme]);
+  }, [themeMode, customThemes, darkThemeId, lightThemeId]);
 
   useEffect(() => {
     document.documentElement.style.setProperty("--diff-font-size", `${diffFontSize}px`);
   }, [diffFontSize]);
-
-  useEffect(() => {
-    document.documentElement.style.setProperty("--review-tab-accent", reviewTabColor);
-  }, [reviewTabColor]);
 }

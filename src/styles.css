@@ -1,3 +1,8 @@
+/*
+ * Dark-theme fallbacks for first paint. The active theme (dark, light, or a
+ * custom one) is written over these as inline CSS variables on <html> by
+ * `useApplySettings` — see src/lib/settings.ts for the full token set.
+ */
 :root {
   --bg: #0d1117;
   --bg-elev: #161b22;
@@ -6,22 +11,23 @@
   --muted: #8b949e;
   --accent: #2f81f7;
   --danger: #f85149;
+  --success: var(--success);
+  --warning: var(--warning);
+  --diff-add-bg: rgba(63, 185, 80, 0.15);
+  --diff-del-bg: rgba(248, 81, 73, 0.15);
+  --review-tab-accent: #ffffff;
+  --tok-comment: #8b949e;
+  --tok-punctuation: #c9d1d9;
+  --tok-literal: #79c0ff;
+  --tok-string: #a5d6ff;
+  --tok-operator: #d2a8ff;
+  --tok-keyword: #ff7b72;
+  --tok-function: #d2a8ff;
+  --tok-variable: #ffa657;
   --diff-font-size: 12.5px;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica,
     Arial, sans-serif;
   font-size: 14px;
-}
-
-/* Light theme — applied via `data-theme="light"` on <html>. */
-:root[data-theme="light"] {
-  --bg: #ffffff;
-  --bg-elev: #f6f8fa;
-  --border: #d0d7de;
-  --text: #1f2328;
-  --muted: #656d76;
-  --accent: #0969da;
-  --danger: #cf222e;
-  color-scheme: light;
 }
 
 * {
@@ -143,7 +149,7 @@ button:hover {
 }
 .sha {
   color: var(--muted);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--code-font, ui-monospace, SFMono-Regular, Menlo, monospace);
   font-size: 12px;
 }
 
@@ -262,7 +268,7 @@ button:hover {
   background: rgba(255, 255, 255, 0.04);
 }
 .repo-item.active {
-  background: rgba(47, 129, 247, 0.15);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
 }
 .repo-item-main {
   display: flex;
@@ -291,7 +297,7 @@ button:hover {
   place-items: center;
 }
 .main-header h2 {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--code-font, ui-monospace, SFMono-Regular, Menlo, monospace);
   font-size: 14px;
   color: var(--muted);
   font-weight: 500;
@@ -317,7 +323,7 @@ button:hover {
   border-bottom: 1px solid var(--border);
 }
 .branch-name {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--code-font, ui-monospace, SFMono-Regular, Menlo, monospace);
 }
 
 /* Compare bar */
@@ -394,11 +400,11 @@ button:hover {
   border-bottom: 1px solid var(--border);
 }
 .file-path {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--code-font, ui-monospace, SFMono-Regular, Menlo, monospace);
   font-size: 13px;
 }
 .diff-stats .add {
-  color: #3fb950;
+  color: var(--success);
   margin-right: 8px;
 }
 .diff-stats .del {
@@ -441,7 +447,7 @@ button:hover {
 }
 .file-comments {
   padding: 8px 12px;
-  background: rgba(47, 129, 247, 0.06);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
   border-bottom: 1px solid var(--border);
 }
 
@@ -449,7 +455,7 @@ button:hover {
 .diff {
   background: var(--bg);
   color: var(--text);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--code-font, ui-monospace, SFMono-Regular, Menlo, monospace);
   font-size: var(--diff-font-size, 12.5px);
 }
 .diff-gutter {
@@ -460,17 +466,17 @@ button:hover {
 }
 .diff-code-insert,
 .diff-gutter-insert {
-  background: rgba(63, 185, 80, 0.15);
+  background: var(--diff-add-bg);
 }
 .diff-code-delete,
 .diff-gutter-delete {
-  background: rgba(248, 81, 73, 0.15);
+  background: var(--diff-del-bg);
 }
 .diff-code-insert .diff-code-edit {
-  background: rgba(63, 185, 80, 0.4);
+  background: color-mix(in srgb, var(--success) 40%, transparent);
 }
 .diff-code-delete .diff-code-edit {
-  background: rgba(248, 81, 73, 0.4);
+  background: color-mix(in srgb, var(--danger) 40%, transparent);
 }
 .diff-gutter:hover {
   background: rgba(255, 255, 255, 0.08);
@@ -509,15 +515,15 @@ button:hover {
 .expand-error-note {
   font-size: 0.85em;
 }
-/* Prism syntax tokens (dark) */
+/* Prism syntax tokens — colors come from the active theme's `--tok-*` vars. */
 .diff .token.comment,
 .diff .token.prolog,
 .diff .token.doctype,
 .diff .token.cdata {
-  color: #8b949e;
+  color: var(--tok-comment);
 }
 .diff .token.punctuation {
-  color: #c9d1d9;
+  color: var(--tok-punctuation);
 }
 .diff .token.property,
 .diff .token.tag,
@@ -526,7 +532,7 @@ button:hover {
 .diff .token.constant,
 .diff .token.symbol,
 .diff .token.deleted {
-  color: #79c0ff;
+  color: var(--tok-literal);
 }
 .diff .token.selector,
 .diff .token.attr-name,
@@ -534,26 +540,26 @@ button:hover {
 .diff .token.char,
 .diff .token.builtin,
 .diff .token.inserted {
-  color: #a5d6ff;
+  color: var(--tok-string);
 }
 .diff .token.operator,
 .diff .token.entity,
 .diff .token.url {
-  color: #d2a8ff;
+  color: var(--tok-operator);
 }
 .diff .token.atrule,
 .diff .token.attr-value,
 .diff .token.keyword {
-  color: #ff7b72;
+  color: var(--tok-keyword);
 }
 .diff .token.function,
 .diff .token.class-name {
-  color: #d2a8ff;
+  color: var(--tok-function);
 }
 .diff .token.regex,
 .diff .token.important,
 .diff .token.variable {
-  color: #ffa657;
+  color: var(--tok-variable);
 }
 
 .viewed-toggle {
@@ -568,8 +574,8 @@ button:hover {
 
 /* selected range highlight (multi-line comment selection) */
 .diff {
-  --diff-gutter-selected-background-color: rgba(47, 129, 247, 0.35);
-  --diff-code-selected-background-color: rgba(47, 129, 247, 0.18);
+  --diff-gutter-selected-background-color: color-mix(in srgb, var(--accent) 35%, transparent);
+  --diff-code-selected-background-color: color-mix(in srgb, var(--accent) 18%, transparent);
   --diff-gutter-selected-text-color: var(--text);
   --diff-code-selected-text-color: var(--text);
 }
@@ -584,7 +590,7 @@ td.diff-code {
   background: transparent;
 }
 .btn-danger:hover {
-  background: rgba(248, 81, 73, 0.12);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
 }
 
 /* Review header */
@@ -606,7 +612,7 @@ td.diff-code {
   gap: 12px;
 }
 .review-title {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--code-font, ui-monospace, SFMono-Regular, Menlo, monospace);
   font-size: 15px;
   margin: 0;
 }
@@ -619,12 +625,12 @@ td.diff-code {
   border: 1px solid var(--border);
 }
 .status-badge.draft {
-  color: #d29922;
-  border-color: #d29922;
+  color: var(--warning);
+  border-color: var(--warning);
 }
 .status-badge.published {
-  color: #3fb950;
-  border-color: #3fb950;
+  color: var(--success);
+  border-color: var(--success);
 }
 .save-state {
   color: var(--muted);
@@ -740,7 +746,7 @@ td.diff-code {
   min-width: 0;
 }
 .review-row-title {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--code-font, ui-monospace, SFMono-Regular, Menlo, monospace);
 }
 
 /* Inline comments */
@@ -752,7 +758,7 @@ td.diff-code {
 }
 .orphan-comments {
   padding: 8px 12px;
-  background: rgba(210, 153, 34, 0.08);
+  background: color-mix(in srgb, var(--warning) 8%, transparent);
 }
 .comment-item {
   display: flex;
@@ -769,8 +775,8 @@ td.diff-code {
   font-weight: 600;
   white-space: nowrap;
   color: rgb(210, 153, 34);
-  background: rgba(210, 153, 34, 0.14);
-  border: 1px solid rgba(210, 153, 34, 0.4);
+  background: color-mix(in srgb, var(--warning) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warning) 40%, transparent);
   cursor: help;
 }
 .comment-item textarea {
@@ -890,7 +896,7 @@ td.diff-code {
 }
 /* Discreet bar marking lines added/modified on the head side. */
 .file-view-pane tr.diff-line.changed-line td.diff-code {
-  box-shadow: inset 2px 0 0 #3fb950;
+  box-shadow: inset 2px 0 0 var(--success);
 }
 .origin-badge {
   flex: none;
@@ -901,8 +907,8 @@ td.diff-code {
   font-weight: 600;
   white-space: nowrap;
   color: var(--accent);
-  background: rgba(47, 129, 247, 0.14);
-  border: 1px solid rgba(47, 129, 247, 0.4);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
   cursor: help;
 }
 
@@ -940,7 +946,7 @@ td.diff-code {
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 12px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--code-font, ui-monospace, SFMono-Regular, Menlo, monospace);
   font-size: var(--diff-font-size, 12.5px);
   white-space: pre-wrap;
   word-break: break-word;
@@ -1015,13 +1021,35 @@ td.diff-code {
   align-items: center;
   gap: 12px;
 }
-.settings-body {
-  padding: 16px 20px;
+.settings-layout {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+.settings-sidebar {
+  width: 200px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--border);
+  background: var(--bg-elev);
+  display: flex;
+  flex-direction: column;
+  padding: 14px 10px;
+  gap: 6px;
+}
+.settings-content {
+  flex: 1;
+  min-width: 0;
   overflow: auto;
+  padding: 16px 20px;
   display: flex;
   flex-direction: column;
   gap: 24px;
+}
+.settings-section-narrow {
   max-width: 640px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
 }
 .settings-group {
   display: flex;
@@ -1060,7 +1088,7 @@ td.diff-code {
   gap: 12px;
 }
 .env-path {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--code-font, ui-monospace, SFMono-Regular, Menlo, monospace);
   font-size: 12px;
   color: var(--muted);
   max-width: 60%;
@@ -1069,7 +1097,174 @@ td.diff-code {
   white-space: nowrap;
 }
 .env-ok {
-  color: #3fb950;
+  color: var(--success);
+}
+
+/* --- Settings: theme section --------------------------------------------- */
+.theme-section {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+.theme-slots {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 640px;
+}
+.theme-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 640px;
+}
+.theme-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  cursor: pointer;
+  text-align: left;
+}
+.theme-row:hover {
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+.theme-row.selected {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.theme-row .theme-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.theme-swatches {
+  display: inline-flex;
+  gap: 3px;
+  flex-shrink: 0;
+}
+.theme-swatch {
+  width: 13px;
+  height: 13px;
+  border-radius: 3px;
+  border: 1px solid rgba(127, 127, 127, 0.4);
+}
+.theme-badge {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+.theme-row-actions {
+  display: inline-flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.theme-list-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* --- Settings: theme editor ---------------------------------------------- */
+.theme-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.theme-editor-readonly {
+  color: var(--muted);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-start;
+}
+.color-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 10px 18px;
+}
+.color-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.color-field label {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+}
+.color-field input[type="color"] {
+  width: 30px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: none;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.color-field input[type="text"] {
+  width: 110px;
+  flex-shrink: 0;
+  font-family: var(--code-font, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12px;
+}
+.theme-font-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.theme-font-row select,
+.theme-font-row input[type="text"] {
+  min-width: 180px;
+}
+.theme-preview {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.theme-preview pre {
+  margin: 0;
+  padding: 12px 14px;
+  font-family: var(--code-font, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: var(--diff-font-size, 12.5px);
+  line-height: 1.5;
+  overflow: auto;
+  background: var(--bg);
+  color: var(--text);
+}
+.theme-preview .token.comment {
+  color: var(--tok-comment);
+}
+.theme-preview .token.punctuation {
+  color: var(--tok-punctuation);
+}
+.theme-preview .token.literal {
+  color: var(--tok-literal);
+}
+.theme-preview .token.string {
+  color: var(--tok-string);
+}
+.theme-preview .token.operator {
+  color: var(--tok-operator);
+}
+.theme-preview .token.keyword {
+  color: var(--tok-keyword);
+}
+.theme-preview .token.function {
+  color: var(--tok-function);
+}
+.theme-preview .token.variable {
+  color: var(--tok-variable);
 }
 
 /* --- In-review file jump list --------------------------------------------- */
@@ -1120,7 +1315,7 @@ td.diff-code {
   background: rgba(255, 255, 255, 0.04);
 }
 .jump-row.active {
-  background: rgba(47, 129, 247, 0.15);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
 }
 .jump-row.viewed {
   color: var(--muted);
@@ -1131,7 +1326,7 @@ td.diff-code {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--code-font, ui-monospace, SFMono-Regular, Menlo, monospace);
   font-size: 12px;
 }
 .jump-meta {
@@ -1142,7 +1337,7 @@ td.diff-code {
   font-size: 12px;
 }
 .jump-meta .add {
-  color: #3fb950;
+  color: var(--success);
 }
 .jump-meta .del {
   color: var(--danger);
@@ -1207,7 +1402,7 @@ td.diff-code {
   background: rgba(255, 255, 255, 0.05);
 }
 .nav-item.active {
-  background: rgba(47, 129, 247, 0.15);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
   color: var(--accent);
   font-weight: 600;
 }
@@ -1250,7 +1445,7 @@ td.diff-code {
   font-size: 12px;
 }
 .mono {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--code-font, ui-monospace, SFMono-Regular, Menlo, monospace);
 }
 .truncate {
   overflow: hidden;
@@ -1303,7 +1498,7 @@ td.diff-code {
   color: var(--muted);
 }
 .inbox-tab.active .inbox-tab-count {
-  background: rgba(47, 129, 247, 0.15);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
   color: var(--accent);
 }
 
@@ -1369,7 +1564,7 @@ td.diff-code {
   color: var(--text);
 }
 .filter-item.active {
-  background: rgba(47, 129, 247, 0.15);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
   color: var(--accent);
 }
 .filter-item .truncate {
@@ -1462,7 +1657,7 @@ td.diff-code {
   font-size: 12px;
 }
 .inbox-repo {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--code-font, ui-monospace, SFMono-Regular, Menlo, monospace);
   color: var(--text);
   opacity: 0.75;
 }
@@ -1519,7 +1714,7 @@ td.diff-code {
   color: var(--muted);
 }
 .inbox-stats .add {
-  color: #3fb950;
+  color: var(--success);
 }
 .inbox-stats .del {
   color: var(--danger);
@@ -1569,11 +1764,11 @@ td.diff-code {
   border-radius: 4px;
 }
 .type-pr {
-  background: rgba(63, 185, 80, 0.18);
-  color: #3fb950;
+  background: color-mix(in srgb, var(--success) 18%, transparent);
+  color: var(--success);
 }
 .type-issue {
-  background: rgba(47, 129, 247, 0.18);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
   color: var(--accent);
 }
 .reason-badge {
@@ -1587,19 +1782,19 @@ td.diff-code {
   color: var(--muted);
 }
 .reason-assigned {
-  background: rgba(210, 153, 34, 0.18);
-  color: #d29922;
+  background: color-mix(in srgb, var(--warning) 18%, transparent);
+  color: var(--warning);
 }
 .reason-mention {
   background: rgba(163, 113, 247, 0.18);
   color: #a371f7;
 }
 .reason-direct_review {
-  background: rgba(248, 81, 73, 0.18);
+  background: color-mix(in srgb, var(--danger) 18%, transparent);
   color: var(--danger);
 }
 .reason-author {
-  background: rgba(47, 129, 247, 0.18);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
   color: var(--accent);
 }
 .reason-team_review {
@@ -1615,26 +1810,26 @@ td.diff-code {
   color: var(--muted);
 }
 .status-open {
-  background: rgba(63, 185, 80, 0.18);
-  color: #3fb950;
+  background: color-mix(in srgb, var(--success) 18%, transparent);
+  color: var(--success);
 }
 .status-merged {
   background: rgba(163, 113, 247, 0.18);
   color: #a371f7;
 }
 .status-closed {
-  background: rgba(248, 81, 73, 0.18);
+  background: color-mix(in srgb, var(--danger) 18%, transparent);
   color: var(--danger);
 }
 .ci-badge {
   font-size: 11px;
 }
 .ci-ok {
-  color: #3fb950;
+  color: var(--success);
 }
 .ci-bad {
   color: var(--danger);
 }
 .ci-pending {
-  color: #d29922;
+  color: var(--warning);
 }
