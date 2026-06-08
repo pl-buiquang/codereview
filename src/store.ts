@@ -4,7 +4,7 @@ import { persist } from "zustand/middleware";
 export type TabKind = "home" | "repo" | "settings" | "review";
 
 /** Which section the home tab's sidebar shows. */
-export type HomeSection = "inbox" | "archive" | "repositories";
+export type HomeSection = "inbox" | "reviews" | "archive" | "repositories";
 
 export interface Tab {
   id: string;

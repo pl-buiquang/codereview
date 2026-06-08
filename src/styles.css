@@ -1894,6 +1894,19 @@ td.diff-code {
   align-items: center;
   gap: 10px;
 }
+.sort-control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.sort-select {
+  font: inherit;
+  background: var(--bg-elev);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 8px;
+}
 .inbox-h {
   margin: 0;
   font-size: 18px;

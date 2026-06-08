@@ -1,10 +1,12 @@
 import { useUIStore, type HomeSection } from "../store";
 import { InboxView } from "./InboxView";
+import { ReviewsView } from "./ReviewsView";
 import { ArchiveView } from "./ArchiveView";
 import { RepositoriesView } from "./RepositoriesView";
 
 const NAV: { key: HomeSection; label: string; emoji: string }[] = [
   { key: "inbox", label: "Inbox", emoji: "📨" },
+  { key: "reviews", label: "Reviews", emoji: "📝" },
   { key: "archive", label: "Archive", emoji: "🗄" },
   { key: "repositories", label: "Repositories", emoji: "📁" },
 ];
@@ -39,6 +41,7 @@ export function DashboardPanel() {
 
       <div className="dashboard-main">
         {section === "inbox" && <InboxView />}
+        {section === "reviews" && <ReviewsView />}
         {section === "archive" && <ArchiveView />}
         {section === "repositories" && <RepositoriesView />}
       </div>
