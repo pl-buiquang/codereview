@@ -5,7 +5,9 @@ import type {
   Comment,
   InboxItem,
   InboxMeta,
+  PrMeta,
   PrSummary,
+  PrThread,
   RefreshResult,
   Repository,
   Review,
@@ -54,6 +56,10 @@ export const api = {
   ghAuthStatus: () => invoke<boolean>("gh_auth_status"),
   checkEnvironment: () => invoke<ToolEnv>("check_environment"),
   listPrs: (repoPath: string) => invoke<PrSummary[]>("list_prs", { repoPath }),
+  prMeta: (owner: string, name: string, number: number) =>
+    invoke<PrMeta>("pr_meta", { owner, name, number }),
+  prReviewThreads: (owner: string, name: string, number: number) =>
+    invoke<PrThread[]>("pr_review_threads", { owner, name, number }),
   createReviewForPr: (owner: string, name: string, prNumber: number) =>
     invoke<Review>("create_review_for_pr", { owner, name, prNumber }),
   publishReview: (reviewId: number) => invoke<Review>("publish_review", { reviewId }),

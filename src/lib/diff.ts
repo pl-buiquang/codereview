@@ -116,6 +116,36 @@ export function changeKeyOf(change: ChangeData): string {
   return getChangeKey(change);
 }
 
+/**
+ * Group `items` onto diff change keys by their `(side, line)` anchor, reusing
+ * the same `"SIDE:line"` → changeKey map (`keyByAnchor`) that places local
+ * comments. Items whose anchor isn't in the current diff (no side/line, or a
+ * line not present — e.g. an outdated GitHub thread) fall into `orphans`.
+ */
+export function anchorByLine<T>(
+  items: T[],
+  sideLine: (t: T) => { side: string; line: number | null } | null,
+  keyByAnchor: Map<string, string>,
+): { byKey: Map<string, T[]>; orphans: T[] } {
+  const byKey = new Map<string, T[]>();
+  const orphans: T[] = [];
+  for (const item of items) {
+    const anchor = sideLine(item);
+    const key =
+      anchor && anchor.line != null
+        ? keyByAnchor.get(`${anchor.side}:${anchor.line}`)
+        : undefined;
+    if (!key) {
+      orphans.push(item);
+      continue;
+    }
+    const arr = byKey.get(key) ?? [];
+    arr.push(item);
+    byKey.set(key, arr);
+  }
+  return { byKey, orphans };
+}
+
 const CONTEXT_LINES = 3;
 
 /** The line number a change occupies on `side`, or null if it has no presence

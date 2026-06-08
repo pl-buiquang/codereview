@@ -268,3 +268,734 @@ pub fn pr_view(ctx: &GhRepo, number: i64) -> AppResult<PrInfo> {
         head_sha: raw.head_ref_oid,
     })
 }
+
+// ---------------------------------------------------------------------------
+// PR metadata (clone-less, for the review header)
+// ---------------------------------------------------------------------------
+
+const PR_META_QUERY: &str = r#"
+query PrMeta($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      number
+      title
+      url
+      body
+      state
+      isDraft
+      mergeable
+      reviewDecision
+      additions
+      deletions
+      changedFiles
+      author { login avatarUrl }
+      labels(first: 50) { nodes { name color } }
+      latestReviews(first: 20) { nodes { author { login avatarUrl } state } }
+      commits(last: 1) {
+        nodes {
+          commit {
+            statusCheckRollup {
+              state
+              contexts(first: 100) {
+                nodes {
+                  __typename
+                  ... on CheckRun { name conclusion status detailsUrl }
+                  ... on StatusContext { context state targetUrl }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+"#;
+
+/// PR metadata returned to the frontend (review header). Read-only; never persisted.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrMeta {
+    pub number: i64,
+    pub title: String,
+    pub url: String,
+    pub body: String,
+    pub state: String,
+    pub is_draft: bool,
+    pub mergeable: Option<String>,
+    pub review_decision: Option<String>,
+    pub additions: i64,
+    pub deletions: i64,
+    pub changed_files: i64,
+    pub author: Option<PrActor>,
+    pub labels: Vec<PrLabel>,
+    pub reviews: Vec<PrReviewer>,
+    pub ci_state: Option<String>,
+    pub checks: Vec<PrCheck>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PrActor {
+    pub login: Option<String>,
+    pub avatar_url: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PrLabel {
+    pub name: String,
+    pub color: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PrReviewer {
+    pub author: Option<PrActor>,
+    pub state: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PrCheck {
+    pub name: String,
+    pub state: Option<String>,
+    pub url: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PrMetaData {
+    repository: Option<PrMetaRepo>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PrMetaRepo {
+    #[serde(rename = "pullRequest")]
+    pull_request: Option<PrMetaPr>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PrMetaPr {
+    number: i64,
+    title: String,
+    url: String,
+    #[serde(default)]
+    body: Option<String>,
+    state: String,
+    #[serde(default)]
+    is_draft: bool,
+    #[serde(default)]
+    mergeable: Option<String>,
+    #[serde(default)]
+    review_decision: Option<String>,
+    additions: i64,
+    deletions: i64,
+    changed_files: i64,
+    #[serde(default)]
+    author: Option<PrActor>,
+    #[serde(default)]
+    labels: LabelConn,
+    #[serde(default)]
+    latest_reviews: ReviewConn,
+    #[serde(default)]
+    commits: CommitMetaConn,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct LabelConn {
+    #[serde(default)]
+    nodes: Vec<LabelNode>,
+}
+
+#[derive(Debug, Deserialize)]
+struct LabelNode {
+    name: String,
+    color: String,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct ReviewConn {
+    #[serde(default)]
+    nodes: Vec<ReviewNode>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ReviewNode {
+    #[serde(default)]
+    author: Option<PrActor>,
+    state: String,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct CommitMetaConn {
+    #[serde(default)]
+    nodes: Vec<CommitMetaNode>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CommitMetaNode {
+    commit: CommitMetaInner,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CommitMetaInner {
+    #[serde(default)]
+    status_check_rollup: Option<RollupNode>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RollupNode {
+    #[serde(default)]
+    state: Option<String>,
+    #[serde(default)]
+    contexts: ContextConn,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct ContextConn {
+    #[serde(default)]
+    nodes: Vec<ContextNode>,
+}
+
+/// A union node from `statusCheckRollup.contexts`: either a `CheckRun` (GitHub
+/// Actions / app checks) or a legacy `StatusContext` (commit statuses).
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ContextNode {
+    #[serde(rename = "__typename")]
+    typename: String,
+    // CheckRun
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    conclusion: Option<String>,
+    #[serde(default)]
+    status: Option<String>,
+    #[serde(default)]
+    details_url: Option<String>,
+    // StatusContext
+    #[serde(default)]
+    context: Option<String>,
+    #[serde(default)]
+    state: Option<String>,
+    #[serde(default)]
+    target_url: Option<String>,
+}
+
+fn map_pr_meta(pr: PrMetaPr) -> PrMeta {
+    let labels = pr
+        .labels
+        .nodes
+        .into_iter()
+        .map(|l| PrLabel {
+            name: l.name,
+            color: l.color,
+        })
+        .collect();
+    let reviews = pr
+        .latest_reviews
+        .nodes
+        .into_iter()
+        .map(|r| PrReviewer {
+            author: r.author,
+            state: r.state,
+        })
+        .collect();
+    let rollup = pr
+        .commits
+        .nodes
+        .into_iter()
+        .next()
+        .and_then(|c| c.commit.status_check_rollup);
+    let ci_state = rollup.as_ref().and_then(|r| r.state.clone());
+    let checks = rollup
+        .map(|r| {
+            r.contexts
+                .nodes
+                .into_iter()
+                .map(|c| {
+                    if c.typename == "CheckRun" {
+                        PrCheck {
+                            name: c.name.unwrap_or_default(),
+                            // A finished CheckRun reports `conclusion`; an in-flight
+                            // one only has `status`.
+                            state: c.conclusion.or(c.status),
+                            url: c.details_url,
+                        }
+                    } else {
+                        PrCheck {
+                            name: c.context.unwrap_or_default(),
+                            state: c.state,
+                            url: c.target_url,
+                        }
+                    }
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    PrMeta {
+        number: pr.number,
+        title: pr.title,
+        url: pr.url,
+        body: pr.body.unwrap_or_default(),
+        state: pr.state,
+        is_draft: pr.is_draft,
+        mergeable: pr.mergeable,
+        review_decision: pr.review_decision,
+        additions: pr.additions,
+        deletions: pr.deletions,
+        changed_files: pr.changed_files,
+        author: pr.author,
+        labels,
+        reviews,
+        ci_state,
+        checks,
+    }
+}
+
+/// Fetch a PR's metadata for the review header. Clone-less (owner/name/number),
+/// read-only, ephemeral — nothing is written to SQLite.
+pub fn pr_meta(owner: &str, name: &str, number: i64) -> AppResult<PrMeta> {
+    let vars = serde_json::json!({ "owner": owner, "name": name, "number": number });
+    let data: PrMetaData = graphql(PR_META_QUERY, vars)?;
+    let pr = data
+        .repository
+        .and_then(|r| r.pull_request)
+        .ok_or_else(|| AppError::Gh(format!("PR {owner}/{name}#{number} not found")))?;
+    Ok(map_pr_meta(pr))
+}
+
+// ---------------------------------------------------------------------------
+// PR review threads (clone-less, read-only, ephemeral)
+// ---------------------------------------------------------------------------
+
+const PR_THREADS_QUERY: &str = r#"
+query PrThreads($owner: String!, $name: String!, $number: Int!, $cursor: String) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      reviewThreads(first: 50, after: $cursor) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id
+          isResolved
+          isOutdated
+          isCollapsed
+          path
+          line
+          startLine
+          originalLine
+          diffSide
+          startDiffSide
+          subjectType
+          comments(first: 100) {
+            pageInfo { hasNextPage endCursor }
+            nodes {
+              id
+              databaseId
+              author { login avatarUrl }
+              body
+              createdAt
+              url
+              diffHunk
+              outdated
+            }
+          }
+        }
+      }
+    }
+  }
+}
+"#;
+
+/// An existing GitHub review thread on a PR's diff. Read-only; never persisted.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrThread {
+    pub id: String,
+    pub is_resolved: bool,
+    pub is_outdated: bool,
+    pub is_collapsed: bool,
+    pub path: Option<String>,
+    pub line: Option<i64>,
+    pub start_line: Option<i64>,
+    pub original_line: Option<i64>,
+    pub diff_side: Option<String>,
+    pub start_diff_side: Option<String>,
+    pub subject_type: Option<String>,
+    pub comments: Vec<PrThreadComment>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrThreadComment {
+    pub id: String,
+    pub database_id: Option<i64>,
+    pub author: Option<PrActor>,
+    pub body: String,
+    pub created_at: String,
+    pub url: String,
+    pub diff_hunk: Option<String>,
+    pub outdated: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct PrThreadsData {
+    repository: Option<PrThreadsRepo>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PrThreadsRepo {
+    #[serde(rename = "pullRequest")]
+    pull_request: Option<PrThreadsPr>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PrThreadsPr {
+    review_threads: ThreadConn,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ThreadConn {
+    page_info: PageInfo,
+    nodes: Vec<ThreadNode>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PageInfo {
+    #[serde(rename = "hasNextPage")]
+    has_next_page: bool,
+    #[serde(rename = "endCursor")]
+    end_cursor: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ThreadNode {
+    id: String,
+    is_resolved: bool,
+    is_outdated: bool,
+    is_collapsed: bool,
+    #[serde(default)]
+    path: Option<String>,
+    #[serde(default)]
+    line: Option<i64>,
+    #[serde(default)]
+    start_line: Option<i64>,
+    #[serde(default)]
+    original_line: Option<i64>,
+    #[serde(default)]
+    diff_side: Option<String>,
+    #[serde(default)]
+    start_diff_side: Option<String>,
+    #[serde(default)]
+    subject_type: Option<String>,
+    #[serde(default)]
+    comments: ThreadCommentConn,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct ThreadCommentConn {
+    #[serde(default)]
+    nodes: Vec<ThreadCommentNode>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ThreadCommentNode {
+    id: String,
+    #[serde(default)]
+    database_id: Option<i64>,
+    #[serde(default)]
+    author: Option<PrActor>,
+    #[serde(default)]
+    body: Option<String>,
+    created_at: String,
+    url: String,
+    #[serde(default)]
+    diff_hunk: Option<String>,
+    #[serde(default)]
+    outdated: bool,
+}
+
+fn map_thread(t: ThreadNode) -> PrThread {
+    // We take the first 100 comments per thread; threads longer than that are
+    // vanishingly rare and replies beyond the cap are dropped rather than paginated.
+    let comments = t
+        .comments
+        .nodes
+        .into_iter()
+        .map(|c| PrThreadComment {
+            id: c.id,
+            database_id: c.database_id,
+            author: c.author,
+            body: c.body.unwrap_or_default(),
+            created_at: c.created_at,
+            url: c.url,
+            diff_hunk: c.diff_hunk,
+            outdated: c.outdated,
+        })
+        .collect();
+    PrThread {
+        id: t.id,
+        is_resolved: t.is_resolved,
+        is_outdated: t.is_outdated,
+        is_collapsed: t.is_collapsed,
+        path: t.path,
+        line: t.line,
+        start_line: t.start_line,
+        original_line: t.original_line,
+        diff_side: t.diff_side,
+        start_diff_side: t.start_diff_side,
+        subject_type: t.subject_type,
+        comments,
+    }
+}
+
+/// Fetch a PR's existing review threads (inline diff comment threads). Clone-less
+/// (owner/name/number), read-only, ephemeral — nothing is written to SQLite.
+/// Paginates `reviewThreads` to completion so large PRs aren't silently truncated.
+pub fn pr_review_threads(owner: &str, name: &str, number: i64) -> AppResult<Vec<PrThread>> {
+    let mut threads = Vec::new();
+    let mut cursor: Option<String> = None;
+    loop {
+        let vars =
+            serde_json::json!({ "owner": owner, "name": name, "number": number, "cursor": cursor });
+        let data: PrThreadsData = graphql(PR_THREADS_QUERY, vars)?;
+        let conn = data
+            .repository
+            .and_then(|r| r.pull_request)
+            .map(|pr| pr.review_threads)
+            .ok_or_else(|| AppError::Gh(format!("PR {owner}/{name}#{number} not found")))?;
+        threads.extend(conn.nodes.into_iter().map(map_thread));
+        if conn.page_info.has_next_page {
+            match conn.page_info.end_cursor {
+                Some(c) => cursor = Some(c),
+                None => break,
+            }
+        } else {
+            break;
+        }
+    }
+    Ok(threads)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const FIXTURE: &str = r#"{
+      "repository": {
+        "pullRequest": {
+          "number": 42,
+          "title": "Add widgets",
+          "url": "https://github.com/acme/widget/pull/42",
+          "body": "Summary line.\nDoes a thing.",
+          "state": "OPEN",
+          "isDraft": false,
+          "mergeable": "MERGEABLE",
+          "reviewDecision": null,
+          "additions": 120,
+          "deletions": 7,
+          "changedFiles": 5,
+          "author": { "login": "octocat", "avatarUrl": "https://example.com/a.png" },
+          "labels": { "nodes": [
+            { "name": "bug", "color": "d73a4a" },
+            { "name": "wip", "color": "ededed" }
+          ] },
+          "latestReviews": { "nodes": [
+            { "author": { "login": "rev1", "avatarUrl": "https://example.com/r1.png" }, "state": "APPROVED" },
+            { "author": { "login": "rev2", "avatarUrl": null }, "state": "CHANGES_REQUESTED" }
+          ] },
+          "commits": { "nodes": [
+            { "commit": { "statusCheckRollup": {
+              "state": "FAILURE",
+              "contexts": { "nodes": [
+                { "__typename": "CheckRun", "name": "build", "conclusion": "SUCCESS", "status": "COMPLETED", "detailsUrl": "https://ci/build" },
+                { "__typename": "CheckRun", "name": "test", "conclusion": null, "status": "IN_PROGRESS", "detailsUrl": "https://ci/test" },
+                { "__typename": "StatusContext", "context": "legacy/lint", "state": "FAILURE", "targetUrl": "https://ci/lint" }
+              ] }
+            } } }
+          ] }
+        }
+      }
+    }"#;
+
+    #[test]
+    fn pr_meta_maps_fixture() {
+        let data: PrMetaData = serde_json::from_str(FIXTURE).expect("fixture parses");
+        let pr = data.repository.unwrap().pull_request.unwrap();
+        let meta = map_pr_meta(pr);
+
+        assert_eq!(meta.number, 42);
+        assert_eq!(meta.state, "OPEN");
+        assert!(!meta.is_draft);
+        assert_eq!(meta.mergeable.as_deref(), Some("MERGEABLE"));
+        assert_eq!(meta.review_decision, None);
+        assert_eq!(meta.additions, 120);
+        assert_eq!(meta.changed_files, 5);
+        assert_eq!(meta.author.as_ref().and_then(|a| a.login.as_deref()), Some("octocat"));
+
+        let labels: Vec<&str> = meta.labels.iter().map(|l| l.name.as_str()).collect();
+        assert_eq!(labels, vec!["bug", "wip"]);
+
+        assert_eq!(meta.reviews.len(), 2);
+        assert_eq!(meta.reviews[0].state, "APPROVED");
+
+        assert_eq!(meta.ci_state.as_deref(), Some("FAILURE"));
+        assert_eq!(meta.checks.len(), 3);
+        // Finished CheckRun -> conclusion.
+        assert_eq!(meta.checks[0].name, "build");
+        assert_eq!(meta.checks[0].state.as_deref(), Some("SUCCESS"));
+        // In-flight CheckRun -> falls back to status.
+        assert_eq!(meta.checks[1].name, "test");
+        assert_eq!(meta.checks[1].state.as_deref(), Some("IN_PROGRESS"));
+        // Legacy StatusContext -> context/state/targetUrl.
+        assert_eq!(meta.checks[2].name, "legacy/lint");
+        assert_eq!(meta.checks[2].state.as_deref(), Some("FAILURE"));
+        assert_eq!(meta.checks[2].url.as_deref(), Some("https://ci/lint"));
+    }
+
+    #[test]
+    fn pr_meta_handles_nulls_and_empties() {
+        let json = r#"{
+          "repository": {
+            "pullRequest": {
+              "number": 1,
+              "title": "t",
+              "url": "u",
+              "body": null,
+              "state": "CLOSED",
+              "isDraft": true,
+              "mergeable": "UNKNOWN",
+              "reviewDecision": null,
+              "additions": 0,
+              "deletions": 0,
+              "changedFiles": 0,
+              "author": null,
+              "labels": { "nodes": [] },
+              "latestReviews": { "nodes": [] },
+              "commits": { "nodes": [] }
+            }
+          }
+        }"#;
+        let data: PrMetaData = serde_json::from_str(json).expect("parses");
+        let meta = map_pr_meta(data.repository.unwrap().pull_request.unwrap());
+        assert_eq!(meta.body, "");
+        assert!(meta.is_draft);
+        assert_eq!(meta.mergeable.as_deref(), Some("UNKNOWN"));
+        assert!(meta.author.is_none());
+        assert!(meta.labels.is_empty());
+        assert!(meta.reviews.is_empty());
+        assert_eq!(meta.ci_state, None);
+        assert!(meta.checks.is_empty());
+    }
+
+    const THREADS_FIXTURE: &str = r#"{
+      "repository": {
+        "pullRequest": {
+          "reviewThreads": {
+            "pageInfo": { "hasNextPage": false, "endCursor": null },
+            "nodes": [
+              {
+                "id": "T_resolved",
+                "isResolved": true,
+                "isOutdated": false,
+                "isCollapsed": true,
+                "path": "src/a.rs",
+                "line": 12,
+                "startLine": null,
+                "originalLine": 12,
+                "diffSide": "RIGHT",
+                "startDiffSide": null,
+                "subjectType": "LINE",
+                "comments": { "pageInfo": { "hasNextPage": false, "endCursor": null }, "nodes": [
+                  {
+                    "id": "C1",
+                    "databaseId": 1001,
+                    "author": { "login": "rev1", "avatarUrl": "https://example.com/r1.png" },
+                    "body": "Looks good to **me**.",
+                    "createdAt": "2024-03-01T00:00:00Z",
+                    "url": "https://github.com/acme/widget/pull/1#discussion_r1001",
+                    "diffHunk": "@@ -1 +1 @@",
+                    "outdated": false
+                  }
+                ] }
+              },
+              {
+                "id": "T_outdated",
+                "isResolved": false,
+                "isOutdated": true,
+                "isCollapsed": false,
+                "path": "src/b.rs",
+                "line": null,
+                "startLine": null,
+                "originalLine": 7,
+                "diffSide": "RIGHT",
+                "startDiffSide": null,
+                "subjectType": "LINE",
+                "comments": { "pageInfo": { "hasNextPage": false, "endCursor": null }, "nodes": [
+                  {
+                    "id": "C2",
+                    "databaseId": 1002,
+                    "author": { "login": "rev2", "avatarUrl": null },
+                    "body": "This moved.",
+                    "createdAt": "2024-03-02T00:00:00Z",
+                    "url": "https://github.com/acme/widget/pull/1#discussion_r1002",
+                    "diffHunk": null,
+                    "outdated": true
+                  },
+                  {
+                    "id": "C3",
+                    "databaseId": 1003,
+                    "author": null,
+                    "body": "Agreed.",
+                    "createdAt": "2024-03-03T00:00:00Z",
+                    "url": "https://github.com/acme/widget/pull/1#discussion_r1003",
+                    "diffHunk": null,
+                    "outdated": true
+                  }
+                ] }
+              }
+            ]
+          }
+        }
+      }
+    }"#;
+
+    #[test]
+    fn pr_threads_maps_fixture() {
+        let data: PrThreadsData = serde_json::from_str(THREADS_FIXTURE).expect("fixture parses");
+        let conn = data.repository.unwrap().pull_request.unwrap().review_threads;
+        assert!(!conn.page_info.has_next_page);
+        let threads: Vec<PrThread> = conn.nodes.into_iter().map(map_thread).collect();
+
+        assert_eq!(threads.len(), 2);
+
+        let resolved = &threads[0];
+        assert!(resolved.is_resolved);
+        assert!(!resolved.is_outdated);
+        assert_eq!(resolved.path.as_deref(), Some("src/a.rs"));
+        assert_eq!(resolved.line, Some(12));
+        assert_eq!(resolved.diff_side.as_deref(), Some("RIGHT"));
+        assert_eq!(resolved.comments.len(), 1);
+        assert_eq!(resolved.comments[0].body, "Looks good to **me**.");
+        assert_eq!(resolved.comments[0].database_id, Some(1001));
+        assert_eq!(
+            resolved.comments[0].author.as_ref().and_then(|a| a.login.as_deref()),
+            Some("rev1")
+        );
+
+        let outdated = &threads[1];
+        assert!(outdated.is_outdated);
+        assert!(!outdated.is_resolved);
+        assert_eq!(outdated.line, None);
+        assert_eq!(outdated.original_line, Some(7));
+        // root + reply preserved in order.
+        assert_eq!(outdated.comments.len(), 2);
+        assert_eq!(outdated.comments[0].id, "C2");
+        assert!(outdated.comments[0].outdated);
+        assert_eq!(outdated.comments[1].id, "C3");
+        assert!(outdated.comments[1].author.is_none());
+    }
+}

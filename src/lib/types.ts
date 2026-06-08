@@ -95,6 +95,76 @@ export interface ToolEnv {
   gh_authed: boolean;
 }
 
+// --- GitHub PR metadata (review header; read-only, ephemeral) ---
+
+export interface PrActor {
+  login: string | null;
+  avatarUrl: string | null;
+}
+
+export interface PrLabel {
+  name: string;
+  color: string; // hex without '#'
+}
+
+export interface PrReviewer {
+  author: PrActor | null;
+  state: string; // APPROVED | CHANGES_REQUESTED | COMMENTED | DISMISSED | PENDING
+}
+
+export interface PrCheck {
+  name: string;
+  state: string | null; // conclusion/status or StatusContext.state
+  url: string | null;
+}
+
+export interface PrMeta {
+  number: number;
+  title: string;
+  url: string;
+  body: string; // Markdown source
+  state: string; // OPEN | CLOSED | MERGED
+  isDraft: boolean;
+  mergeable: string | null; // MERGEABLE | CONFLICTING | UNKNOWN
+  reviewDecision: string | null; // APPROVED | CHANGES_REQUESTED | REVIEW_REQUIRED | null
+  additions: number;
+  deletions: number;
+  changedFiles: number;
+  author: PrActor | null;
+  labels: PrLabel[];
+  reviews: PrReviewer[];
+  ciState: string | null;
+  checks: PrCheck[];
+}
+
+// --- GitHub PR review threads (read-only, ephemeral; not persisted) ---
+
+export interface PrThreadComment {
+  id: string;
+  databaseId: number | null;
+  author: PrActor | null;
+  body: string; // Markdown source
+  createdAt: string;
+  url: string;
+  diffHunk: string | null;
+  outdated: boolean;
+}
+
+export interface PrThread {
+  id: string;
+  isResolved: boolean;
+  isOutdated: boolean;
+  isCollapsed: boolean;
+  path: string | null;
+  line: number | null;
+  startLine: number | null;
+  originalLine: number | null;
+  diffSide: string | null; // LEFT | RIGHT
+  startDiffSide: string | null;
+  subjectType: string | null; // LINE | FILE
+  comments: PrThreadComment[];
+}
+
 // --- GitHub inbox ---
 
 export type ItemReasonKind =

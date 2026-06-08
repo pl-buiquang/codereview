@@ -67,6 +67,8 @@ pub fn run() {
             commands::editor::open_url,
             commands::gh::gh_auth_status,
             commands::gh::list_prs,
+            commands::gh::pr_meta,
+            commands::gh::pr_review_threads,
             commands::gh::check_environment,
             commands::inbox::refresh_inbox,
             commands::inbox::list_inbox,

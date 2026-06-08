@@ -16,6 +16,7 @@ import { api, pickSavePath } from "../lib/api";
 import { toast } from "../lib/toast";
 import { confirmDialog } from "../lib/confirm";
 import {
+  anchorByLine,
   changeKeyOf,
   countChanges,
   fileDisplayPath,
@@ -25,12 +26,15 @@ import {
 } from "../lib/diff";
 import { FileJumpList } from "./FileJumpList";
 import { FileViewPane } from "./FileViewPane";
+import { GithubThread } from "./GithubThread";
+import { Markdown } from "./Markdown";
 import { OpenPrButton } from "./OpenPrButton";
+import { PrMetaPanel } from "./PrMetaPanel";
 import { githubPrUrl } from "../lib/githubUrl";
 import { useDebouncedCallback } from "../lib/useDebouncedCallback";
 import { useSettingsStore } from "../lib/settings";
 import { useUIStore } from "../store";
-import type { Comment, ReviewDetail, ReviewEvent, Side } from "../lib/types";
+import type { Comment, PrThread, ReviewDetail, ReviewEvent, Side } from "../lib/types";
 
 type SaveState = "idle" | "saving" | "saved";
 
@@ -60,6 +64,19 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
     queryKey: ["review-diff", reviewId, detailQuery.data?.target.id],
     enabled: detailQuery.data != null,
     queryFn: () => api.reviewDiff(reviewId),
+  });
+
+  const target = detailQuery.data?.target;
+  const owner = detailQuery.data?.remote_owner ?? null;
+  const name = detailQuery.data?.remote_name ?? null;
+  const prNumber = target?.github_pr_number ?? null;
+  // Kept separate from ["review", id] so comment-autosave invalidations don't
+  // refetch GitHub threads (and vice-versa). Ephemeral; never persisted.
+  const threadsQuery = useQuery({
+    queryKey: ["pr-threads", owner, name, prNumber],
+    enabled:
+      target?.kind === "github_pr" && !!owner && !!name && prNumber != null,
+    queryFn: () => api.prReviewThreads(owner!, name!, prNumber!),
   });
 
   if (detailQuery.isLoading) return <section className="main-panel">Loading review…</section>;
@@ -104,6 +121,7 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
               diffText={diffQuery.data}
               viewType={viewType}
               detail={detail}
+              threads={threadsQuery.data ?? []}
               readOnly={readOnly}
               onOpenFilePane={setFilePanePath}
               onSaving={() => setSaveState("saving")}
@@ -165,6 +183,7 @@ function ReviewHeader({
   const [body, setBody] = useState(review.body);
   const [event, setEvent] = useState<ReviewEvent | "">(review.event ?? "");
   const [showExport, setShowExport] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
 
   const save = useDebouncedCallback((nextBody: string, nextEvent: string) => {
     onSaving();
@@ -203,6 +222,13 @@ function ReviewHeader({
     <header className="review-header">
       <div className="review-header-top">
         <button onClick={onBack}>← Back</button>
+        <button
+          className="btn-icon header-collapse-toggle"
+          title={collapsed ? "Expand header" : "Collapse header"}
+          onClick={() => setCollapsed((c) => !c)}
+        >
+          {collapsed ? "▸" : "▾"}
+        </button>
         <h2 className="review-title">{target.title}</h2>
         <span className={`status-badge ${review.status}`}>{review.status}</span>
         <span className="save-state">
@@ -278,35 +304,47 @@ function ReviewHeader({
         />
       )}
 
-      <div className="review-summary">
-        <textarea
-          placeholder="Review summary…"
-          value={body}
-          disabled={readOnly}
-          onChange={(e) => {
-            setBody(e.target.value);
-            save(e.target.value, event);
-          }}
-        />
-        <div className="verdict">
-          <span className="muted">Verdict:</span>
-          {VERDICTS.map((v) => (
-            <label key={v.value} className="verdict-option">
-              <input
-                type="radio"
-                name="verdict"
-                disabled={readOnly}
-                checked={event === v.value}
-                onChange={() => {
-                  setEvent(v.value);
-                  save(body, v.value);
-                }}
-              />
-              {v.label}
-            </label>
-          ))}
-        </div>
-      </div>
+      {!collapsed && (
+        <>
+          {isPr && detail.remote_owner && detail.remote_name && target.github_pr_number != null && (
+            <PrMetaPanel
+              owner={detail.remote_owner}
+              name={detail.remote_name}
+              number={target.github_pr_number}
+            />
+          )}
+
+          <div className="review-summary">
+            <textarea
+              placeholder="Review summary…"
+              value={body}
+              disabled={readOnly}
+              onChange={(e) => {
+                setBody(e.target.value);
+                save(e.target.value, event);
+              }}
+            />
+            <div className="verdict">
+              <span className="muted">Verdict:</span>
+              {VERDICTS.map((v) => (
+                <label key={v.value} className="verdict-option">
+                  <input
+                    type="radio"
+                    name="verdict"
+                    disabled={readOnly}
+                    checked={event === v.value}
+                    onChange={() => {
+                      setEvent(v.value);
+                      save(body, v.value);
+                    }}
+                  />
+                  {v.label}
+                </label>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
     </header>
   );
 }
@@ -315,6 +353,7 @@ function ReviewDiff({
   diffText,
   viewType,
   detail,
+  threads,
   readOnly,
   onOpenFilePane,
   onSaving,
@@ -324,6 +363,7 @@ function ReviewDiff({
   diffText: string;
   viewType: ViewType;
   detail: ReviewDetail;
+  threads: PrThread[];
   readOnly: boolean;
   onOpenFilePane: (path: string) => void;
   onSaving: () => void;
@@ -341,6 +381,7 @@ function ReviewDiff({
           file={file}
           viewType={viewType}
           detail={detail}
+          threads={threads}
           readOnly={readOnly}
           onOpenFilePane={onOpenFilePane}
           onSaving={onSaving}
@@ -364,6 +405,7 @@ function FileReview({
   file,
   viewType,
   detail,
+  threads,
   readOnly,
   onOpenFilePane,
   onSaving,
@@ -374,6 +416,7 @@ function FileReview({
   file: FileData;
   viewType: ViewType;
   detail: ReviewDetail;
+  threads: PrThread[];
   readOnly: boolean;
   onOpenFilePane: (path: string) => void;
   onSaving: () => void;
@@ -497,6 +540,18 @@ function FileReview({
     return { commentsByKey: byKey, orphans: orphan };
   }, [detail.comments, path, keyByAnchor]);
 
+  // Existing GitHub review threads on this file: anchored ones become inline
+  // widgets, the rest (outdated, file-level, or off the current diff) drop into
+  // a "from GitHub" orphan block. Read-only — never converted to comment rows.
+  const { byKey: threadsByKey, orphans: orphanThreads } = useMemo(() => {
+    const fileThreads = threads.filter((t) => t.path === path);
+    return anchorByLine(
+      fileThreads,
+      (t) => ({ side: t.diffSide ?? "", line: t.line }),
+      keyByAnchor,
+    );
+  }, [threads, path, keyByAnchor]);
+
   // Click a line to start a 1-line selection; shift-click another line on the
   // same side to extend it into a range (the composer sits on the focus line).
   const onLineClick = (
@@ -574,6 +629,7 @@ function FileReview({
 
   const widgets: Record<string, React.ReactNode> = {};
   const keys = new Set<string>(commentsByKey.keys());
+  for (const key of threadsByKey.keys()) keys.add(key);
   if (selection) keys.add(selection.focusKey);
   for (const key of keys) {
     const composerOpen = !readOnly && selection?.focusKey === key;
@@ -581,19 +637,25 @@ function FileReview({
       composerOpen && range && range.lo !== range.hi
         ? `Lines ${range.lo}–${range.hi} (${selection!.side})`
         : undefined;
+    const keyThreads = threadsByKey.get(key) ?? [];
     widgets[key] = (
-      <LineWidget
-        comments={commentsByKey.get(key) ?? []}
-        headSha={detail.target.head_sha}
-        composerOpen={!!composerOpen}
-        rangeLabel={rangeLabel}
-        readOnly={readOnly}
-        onCloseComposer={() => setSelection(null)}
-        onAdd={submitSelectionComment}
-        onSaving={onSaving}
-        onSaved={onSaved}
-        onCommentsChanged={onCommentsChanged}
-      />
+      <>
+        <LineWidget
+          comments={commentsByKey.get(key) ?? []}
+          headSha={detail.target.head_sha}
+          composerOpen={!!composerOpen}
+          rangeLabel={rangeLabel}
+          readOnly={readOnly}
+          onCloseComposer={() => setSelection(null)}
+          onAdd={submitSelectionComment}
+          onSaving={onSaving}
+          onSaved={onSaved}
+          onCommentsChanged={onCommentsChanged}
+        />
+        {keyThreads.map((t) => (
+          <GithubThread key={t.id} thread={t} />
+        ))}
+      </>
     );
   }
 
@@ -682,6 +744,7 @@ function FileReview({
           widgets={widgets}
           selectedChanges={selectedChanges}
           orphans={orphans}
+          orphanThreads={orphanThreads}
           headSha={detail.target.head_sha}
           readOnly={readOnly}
           canExpand={canExpand}
@@ -706,6 +769,7 @@ function FileBody({
   widgets,
   selectedChanges,
   orphans,
+  orphanThreads,
   headSha,
   readOnly,
   canExpand,
@@ -724,6 +788,7 @@ function FileBody({
   widgets: Record<string, React.ReactNode>;
   selectedChanges: string[];
   orphans: Comment[];
+  orphanThreads: PrThread[];
   headSha: string | null;
   readOnly: boolean;
   canExpand: boolean;
@@ -757,6 +822,14 @@ function FileBody({
               onSaved={onSaved}
               onCommentsChanged={onCommentsChanged}
             />
+          ))}
+        </div>
+      )}
+      {orphanThreads.length > 0 && (
+        <div className="github-orphan-threads">
+          <p className="muted">GitHub threads not on the current diff:</p>
+          {orphanThreads.map((t) => (
+            <GithubThread key={t.id} thread={t} />
           ))}
         </div>
       )}
@@ -898,6 +971,7 @@ export function CommentItem({
   onCommentsChanged: () => void;
 }) {
   const [body, setBody] = useState(comment.body);
+  const [tab, setTab] = useState<"write" | "preview">("write");
   const save = useDebouncedCallback((text: string) => {
     onSaving();
     api
@@ -935,14 +1009,37 @@ export function CommentItem({
           outdated · {comment.anchored_head_sha!.slice(0, 7)}
         </span>
       )}
-      <textarea
-        value={body}
-        disabled={readOnly}
-        onChange={(e) => {
-          setBody(e.target.value);
-          save(e.target.value);
-        }}
-      />
+      {readOnly ? (
+        <Markdown source={comment.body} />
+      ) : (
+        <div className="comment-edit">
+          <div className="comment-edit-tabs">
+            <button
+              className={tab === "write" ? "active" : ""}
+              onClick={() => setTab("write")}
+            >
+              Write
+            </button>
+            <button
+              className={tab === "preview" ? "active" : ""}
+              onClick={() => setTab("preview")}
+            >
+              Preview
+            </button>
+          </div>
+          {tab === "write" ? (
+            <textarea
+              value={body}
+              onChange={(e) => {
+                setBody(e.target.value);
+                save(e.target.value);
+              }}
+            />
+          ) : (
+            <Markdown source={body} />
+          )}
+        </div>
+      )}
       {!readOnly && (
         <button
           className="btn-icon"

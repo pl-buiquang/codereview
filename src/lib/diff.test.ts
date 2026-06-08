@@ -5,6 +5,7 @@ import {
   parseDiff,
 } from "react-diff-view";
 import {
+  anchorByLine,
   languageForPath,
   fileDisplayPath,
   indexFile,
@@ -100,6 +101,51 @@ describe("indexFile", () => {
     const { metaByKey } = indexFile(file);
     const firstChange = file.hunks[0].changes[0];
     expect(metaByKey.has(changeKeyOf(firstChange))).toBe(true);
+  });
+});
+
+describe("anchorByLine", () => {
+  // Maps the same anchors indexFile produces for SAMPLE_DIFF.
+  const keyByAnchor = new Map<string, string>([
+    ["RIGHT:1", "right-1"],
+    ["LEFT:1", "left-1"],
+    ["RIGHT:2", "right-2"],
+    ["LEFT:2", "left-2"],
+  ]);
+  type Item = { id: string; side: string | null; line: number | null };
+  const sideLine = (t: Item) => ({ side: t.side ?? "", line: t.line });
+
+  it("anchors items by SIDE:line and groups multiple onto one key", () => {
+    const items: Item[] = [
+      { id: "a", side: "RIGHT", line: 2 },
+      { id: "b", side: "RIGHT", line: 2 },
+      { id: "c", side: "LEFT", line: 1 },
+    ];
+    const { byKey, orphans } = anchorByLine(items, sideLine, keyByAnchor);
+    expect(orphans).toEqual([]);
+    expect(byKey.get("right-2")?.map((i) => i.id)).toEqual(["a", "b"]);
+    expect(byKey.get("left-1")?.map((i) => i.id)).toEqual(["c"]);
+  });
+
+  it("distinguishes LEFT and RIGHT for the same line number", () => {
+    const items: Item[] = [
+      { id: "r", side: "RIGHT", line: 1 },
+      { id: "l", side: "LEFT", line: 1 },
+    ];
+    const { byKey } = anchorByLine(items, sideLine, keyByAnchor);
+    expect(byKey.get("right-1")?.map((i) => i.id)).toEqual(["r"]);
+    expect(byKey.get("left-1")?.map((i) => i.id)).toEqual(["l"]);
+  });
+
+  it("orphans items with a null line or a line not in the diff", () => {
+    const items: Item[] = [
+      { id: "nullline", side: "RIGHT", line: null },
+      { id: "missing", side: "RIGHT", line: 99 },
+      { id: "nullside", side: null, line: 1 },
+    ];
+    const { byKey, orphans } = anchorByLine(items, sideLine, keyByAnchor);
+    expect(byKey.size).toBe(0);
+    expect(orphans.map((i) => i.id)).toEqual(["nullline", "missing", "nullside"]);
   });
 });
 

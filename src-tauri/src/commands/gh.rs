@@ -16,6 +16,26 @@ pub fn list_prs(repo_path: String) -> AppResult<Vec<gh::PrSummary>> {
     gh::list_prs(&GhRepo::Local(PathBuf::from(repo_path)))
 }
 
+/// `async` so Tauri runs the slow `gh` GraphQL call off the main (UI) thread,
+/// letting it overlap the diff/threads fetches instead of freezing the webview
+/// (same rationale as the inbox commands). The body is synchronous; it holds no
+/// DB lock.
+#[tauri::command]
+pub async fn pr_meta(owner: String, name: String, number: i64) -> AppResult<gh::PrMeta> {
+    gh::pr_meta(&owner, &name, number)
+}
+
+/// `async` for the same reason as `pr_meta` — keeps the (paginated) review-thread
+/// fetch off the UI thread so it loads concurrently with the diff and metadata.
+#[tauri::command]
+pub async fn pr_review_threads(
+    owner: String,
+    name: String,
+    number: i64,
+) -> AppResult<Vec<gh::PrThread>> {
+    gh::pr_review_threads(&owner, &name, number)
+}
+
 /// Detected external-tool environment, for the Settings diagnostics panel.
 /// `git`/`gh` are the resolved absolute paths (or `null` if not found).
 #[derive(Debug, Serialize)]
