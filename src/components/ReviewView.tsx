@@ -22,7 +22,11 @@ import {
   fileDisplayPath,
   hunkContextSnippet,
   indexFile,
+  leadingExpandRange,
+  sourceLineCount,
   tokenizeFile,
+  trailingExpandRange,
+  trailingGap,
 } from "../lib/diff";
 import { FileJumpList } from "./FileJumpList";
 import { FileViewPane } from "./FileViewPane";
@@ -548,6 +552,41 @@ function FileReview({
     [ensureSource],
   );
 
+  // Edge expansion ranges are computed inside the setHunks updater from the
+  // updater's own `h` (current first/last hunk): `await ensureSource()` yields,
+  // so hunks may have changed (another expander clicked) by the time we run.
+  const expandLeading = useCallback(
+    async (n: number) => {
+      const src = await ensureSource();
+      if (src == null) return;
+      setHunks((h) => {
+        if (h.length === 0) return h;
+        const [start, end] = leadingExpandRange(h[0], n);
+        return start < end ? expandFromRawCode(h, src, start, end) : h;
+      });
+    },
+    [ensureSource],
+  );
+
+  const expandTrailing = useCallback(
+    async (n: number) => {
+      const src = await ensureSource();
+      if (src == null) return;
+      setHunks((h) => {
+        if (h.length === 0) return h;
+        const [start, end] = trailingExpandRange(h[h.length - 1], sourceLineCount(src), n);
+        return start < end ? expandFromRawCode(h, src, start, end) : h;
+      });
+    },
+    [ensureSource],
+  );
+
+  // null until the base source is fetched — the trailing gap size is unknown.
+  const oldLineCount = useMemo(
+    () => (rawSource == null ? null : sourceLineCount(rawSource)),
+    [rawSource],
+  );
+
   const { metaByKey, keyByAnchor } = useMemo(
     () => indexFile({ ...file, hunks }),
     [file, hunks],
@@ -816,7 +855,10 @@ function FileReview({
           canExpand={canExpand}
           expanding={expanding}
           expandError={expandError}
+          oldLineCount={oldLineCount}
           onExpandBetween={expandBetween}
+          onExpandLeading={expandLeading}
+          onExpandTrailing={expandTrailing}
           onLineClick={onLineClick}
           onSaving={onSaving}
           onSaved={onSaved}
@@ -841,7 +883,10 @@ function FileBody({
   canExpand,
   expanding,
   expandError,
+  oldLineCount,
   onExpandBetween,
+  onExpandLeading,
+  onExpandTrailing,
   onLineClick,
   onSaving,
   onSaved,
@@ -860,7 +905,10 @@ function FileBody({
   canExpand: boolean;
   expanding: boolean;
   expandError: string | null;
+  oldLineCount: number | null; // null until the base source is fetched
   onExpandBetween: (prev: HunkData, next: HunkData, n: number) => void;
+  onExpandLeading: (n: number) => void;
+  onExpandTrailing: (n: number) => void;
   onLineClick: (args: { change: ChangeData | null }, event: React.MouseEvent) => void;
   onSaving: () => void;
   onSaved: () => void;
@@ -914,11 +962,26 @@ function FileBody({
         >
           {(renderedHunks) =>
             renderedHunks.flatMap((hunk, i) => {
-              // v1: only the gaps BETWEEN hunks get an expander; leading and
-              // trailing collapsed blocks (expand-to-top/bottom) are v1.1.
+              // All three gap kinds expand: leading (above the first hunk),
+              // between hunks, and trailing (below the last hunk — its size is
+              // unknown until the base source is fetched, so it renders
+              // optimistically with no count).
               const prev = i === 0 ? null : renderedHunks[i - 1];
               const collapsed = getCollapsedLinesCountBetween(prev, hunk);
               const rows: React.ReactElement[] = [];
+              if (canExpand && prev == null && collapsed > 0) {
+                rows.push(
+                  <Decoration key="exp-top" className="diff-expander">
+                    <ExpandControl
+                      count={collapsed}
+                      direction="up"
+                      busy={expanding}
+                      onExpandChunk={() => onExpandLeading(EXPAND_CHUNK)}
+                      onExpandAll={() => onExpandLeading(Number.POSITIVE_INFINITY)}
+                    />
+                  </Decoration>,
+                );
+              }
               if (canExpand && prev != null && collapsed > 0) {
                 rows.push(
                   <Decoration key={`exp-${hunk.content}`} className="diff-expander">
@@ -932,6 +995,23 @@ function FileBody({
                 );
               }
               rows.push(<Hunk key={hunk.content} hunk={hunk} />);
+              if (
+                canExpand &&
+                i === renderedHunks.length - 1 &&
+                (oldLineCount == null || trailingGap(hunk, oldLineCount) > 0)
+              ) {
+                rows.push(
+                  <Decoration key="exp-bottom" className="diff-expander">
+                    <ExpandControl
+                      count={oldLineCount == null ? null : trailingGap(hunk, oldLineCount)}
+                      direction="down"
+                      busy={expanding}
+                      onExpandChunk={() => onExpandTrailing(EXPAND_CHUNK)}
+                      onExpandAll={() => onExpandTrailing(Number.POSITIVE_INFINITY)}
+                    />
+                  </Decoration>,
+                );
+              }
               return rows;
             })
           }
