@@ -12,6 +12,10 @@ import {
   changeKeyOf,
   countChanges,
   hunkContextSnippet,
+  leadingExpandRange,
+  sourceLineCount,
+  trailingExpandRange,
+  trailingGap,
 } from "./diff";
 
 describe("languageForPath", () => {
@@ -281,5 +285,127 @@ describe("context expansion anchoring", () => {
     expect(keyByAnchor.get("RIGHT:6")).toBeDefined();
     expect(keyByAnchor.get("RIGHT:8")).toBeDefined();
     expect(keyByAnchor.get("RIGHT:9")).toBeUndefined();
+  });
+
+  // One hunk in the middle of the 20-line BASE_SOURCE: hidden lines both above
+  // (old 1–5) and below (old 9–20), exercising the edge expanders.
+  const EDGE_DIFF = `diff --git a/f.txt b/f.txt
+index e1fc989..368d3c3 100644
+--- a/f.txt
++++ b/f.txt
+@@ -6,3 +6,3 @@ b05
+ b06
+-b07
++n07
+ b08
+`;
+
+  describe("sourceLineCount", () => {
+    it("ignores the trailing-newline empty element", () => {
+      expect(sourceLineCount("a\nb\n")).toBe(2);
+      expect(sourceLineCount("a\nb")).toBe(2);
+      expect(sourceLineCount("")).toBe(0);
+      expect(sourceLineCount("\n")).toBe(1);
+    });
+  });
+
+  describe("trailingGap", () => {
+    const lastHunk = { oldStart: 10, oldLines: 5 } as never;
+
+    it("counts hidden old-side lines below the last hunk", () => {
+      expect(trailingGap(lastHunk, 30)).toBe(16); // 30 - 14
+      expect(trailingGap(lastHunk, 14)).toBe(0); // hunk reaches EOF
+    });
+
+    it("clamps to zero, never negative", () => {
+      expect(trailingGap(lastHunk, 10)).toBe(0);
+      expect(trailingGap(lastHunk, 0)).toBe(0);
+    });
+  });
+
+  describe("leadingExpandRange", () => {
+    it("reveals the n lines adjacent to the first hunk", () => {
+      expect(leadingExpandRange({ oldStart: 100 } as never, 20)).toEqual([80, 100]);
+    });
+
+    it("clamps to the top of the file", () => {
+      expect(leadingExpandRange({ oldStart: 10 } as never, 20)).toEqual([1, 10]);
+      expect(
+        leadingExpandRange({ oldStart: 10 } as never, Number.POSITIVE_INFINITY),
+      ).toEqual([1, 10]);
+    });
+
+    it("yields an empty range when there is no leading gap", () => {
+      expect(leadingExpandRange({ oldStart: 1 } as never, 20)).toEqual([1, 1]);
+    });
+  });
+
+  describe("trailingExpandRange", () => {
+    const lastHunk = { oldStart: 10, oldLines: 5 } as never;
+
+    it("reveals the n lines just below the last hunk", () => {
+      expect(trailingExpandRange(lastHunk, 100, 20)).toEqual([15, 35]);
+    });
+
+    it("Infinity clamps to EOF (end exclusive reaches the last line)", () => {
+      expect(trailingExpandRange(lastHunk, 100, Number.POSITIVE_INFINITY)).toEqual([
+        15, 101,
+      ]);
+    });
+
+    it("yields an empty range when the hunk already reaches EOF", () => {
+      expect(trailingExpandRange(lastHunk, 14, 20)).toEqual([15, 15]);
+    });
+  });
+
+  it("leading expansion reveals line 1 and keeps revealed lines commentable", () => {
+    const [file] = parseDiff(EDGE_DIFF);
+    const first = file.hunks[0];
+    expect(first.oldStart).toBe(6); // fixture's first hunk starts past line 1
+
+    const [start, end] = leadingExpandRange(first, Number.POSITIVE_INFINITY);
+    const expanded = expandFromRawCode(file.hunks, BASE_SOURCE, start, end);
+
+    // Old line 1 is now a normal change with matching old/new numbers (the
+    // hunk's insert/delete pair is balanced, so numbering stays level).
+    const lineOne = expanded[0].changes[0];
+    expect(lineOne).toMatchObject({
+      type: "normal",
+      oldLineNumber: 1,
+      newLineNumber: 1,
+      content: "b01",
+    });
+
+    // Revealed lines stay commentable: indexFile yields a RIGHT anchor for them.
+    const { metaByKey, keyByAnchor } = indexFile({ ...file, hunks: expanded });
+    const key = keyByAnchor.get("RIGHT:1");
+    expect(key).toBeDefined();
+    expect(metaByKey.get(key!)).toMatchObject({ side: "RIGHT", line: 1 });
+  });
+
+  it("trailing expansion reaches the final source line with no phantom EOF line", () => {
+    const [file] = parseDiff(EDGE_DIFF);
+    const last = file.hunks[file.hunks.length - 1];
+
+    const [start, end] = trailingExpandRange(
+      last,
+      sourceLineCount(BASE_SOURCE),
+      Number.POSITIVE_INFINITY,
+    );
+    expect([start, end]).toEqual([9, 21]);
+    const expanded = expandFromRawCode(file.hunks, BASE_SOURCE, start, end);
+
+    const lastHunk = expanded[expanded.length - 1];
+    const finalChange = lastHunk.changes[lastHunk.changes.length - 1];
+    expect(finalChange).toMatchObject({
+      type: "normal",
+      oldLineNumber: 20,
+      content: "b20",
+    });
+
+    // No phantom empty line appended past EOF.
+    const { keyByAnchor } = indexFile({ ...file, hunks: expanded });
+    expect(keyByAnchor.get("LEFT:20")).toBeDefined();
+    expect(keyByAnchor.get("LEFT:21")).toBeUndefined();
   });
 });
