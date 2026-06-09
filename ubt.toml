@@ -1,0 +1,40 @@
+# ubt.toml — Universal Build Tool configuration
+#
+# This is a Tauri v2 desktop app: a pnpm/Vite frontend (src/) plus a cargo
+# backend (src-tauri/). The two ecosystems are wired together by the Tauri CLI,
+# so the "build" and "run" of the *app* go through `pnpm tauri`, not bare cargo
+# or vite. The mappings below point ubt's universal verbs at the right tool.
+
+[project]
+# Drive everything through pnpm (the committed lockfile is pnpm-lock.yaml).
+tool = "pnpm"
+
+[commands]
+# Build the full desktop app (release binary + bundles under
+# src-tauri/target/release/). Overrides the default `pnpm build`, which only
+# builds the frontend.
+build = "pnpm tauri build {{args}}"
+
+# Run the app with hot-reload (Vite + Rust). This is the "preview the app" path.
+start = "pnpm tauri dev {{args}}"
+
+# Fast frontend type-check without emitting (the project's main TS gate).
+check = "pnpm exec tsc --noEmit {{args}}"
+
+# The only configured linter is clippy on the Rust backend.
+lint = "cargo clippy --manifest-path src-tauri/Cargo.toml {{args}}"
+
+# Clean both layers' build artifacts.
+clean = "cargo clean --manifest-path src-tauri/Cargo.toml {{args}}"
+
+# `dep install`/`test` (vitest) fall through to pnpm defaults — no override needed.
+
+[aliases]
+# Frontend-only build (tsc && vite build) — quick way to surface TS errors.
+web-build = "pnpm build"
+
+# Frontend-only Vite dev server / preview (no Rust, browser-only).
+web = "pnpm dev"
+
+# Run the Rust backend's test suite (frontend tests use `ubt test`).
+test-rs = "cargo test --manifest-path src-tauri/Cargo.toml"
