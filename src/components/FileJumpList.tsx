@@ -125,7 +125,7 @@ export function FileJumpList({
   const detail = detailQuery.data;
 
   const diffQuery = useQuery({
-    queryKey: ["review-diff", reviewId, detail?.target.id],
+    queryKey: ["review-diff", reviewId, detail?.target.id, detail?.target.head_sha],
     enabled: detail != null,
     queryFn: () => api.reviewDiff(reviewId),
   });
