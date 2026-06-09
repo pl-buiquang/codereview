@@ -111,6 +111,14 @@ export const MONO_FONT_PRESETS: { label: string; value: string }[] = [
   { label: "IBM Plex Mono", value: '"IBM Plex Mono", monospace' },
 ];
 
+/** PR-list auto-refresh choices; value is the refetchInterval in ms, 0 = off. */
+export const PR_LIST_POLL_OPTIONS: { label: string; value: number }[] = [
+  { label: "off", value: 0 },
+  { label: "30s", value: 30_000 },
+  { label: "60s", value: 60_000 },
+  { label: "5m", value: 300_000 },
+];
+
 export const BUILTIN_DARK_ID = "builtin-dark";
 export const BUILTIN_LIGHT_ID = "builtin-light";
 
@@ -238,6 +246,7 @@ type PersistedSettings = Pick<
   | "defaultViewType"
   | "defaultThreeDot"
   | "botLogins"
+  | "prListPollMs"
 >;
 
 interface SettingsState {
@@ -250,6 +259,8 @@ interface SettingsState {
   defaultThreeDot: boolean;
   /** Comma-separated GitHub logins treated as bots in the inbox "Bots" bucket. */
   botLogins: string;
+  /** PR-list auto-refresh interval in ms; 0 = off. */
+  prListPollMs: number;
   setThemeMode: (m: ThemeMode) => void;
   setDarkThemeId: (id: string) => void;
   setLightThemeId: (id: string) => void;
@@ -262,6 +273,7 @@ interface SettingsState {
   setDefaultViewType: (v: DiffViewType) => void;
   setDefaultThreeDot: (b: boolean) => void;
   setBotLogins: (s: string) => void;
+  setPrListPollMs: (ms: number) => void;
 }
 
 export const useSettingsStore = create<SettingsState>()(
@@ -275,6 +287,7 @@ export const useSettingsStore = create<SettingsState>()(
       defaultViewType: "split",
       defaultThreeDot: true,
       botLogins: "",
+      prListPollMs: 0,
       setThemeMode: (themeMode) => set({ themeMode }),
       setDarkThemeId: (darkThemeId) => set({ darkThemeId }),
       setLightThemeId: (lightThemeId) => set({ lightThemeId }),
@@ -317,6 +330,7 @@ export const useSettingsStore = create<SettingsState>()(
       setDefaultViewType: (defaultViewType) => set({ defaultViewType }),
       setDefaultThreeDot: (defaultThreeDot) => set({ defaultThreeDot }),
       setBotLogins: (botLogins) => set({ botLogins }),
+      setPrListPollMs: (prListPollMs) => set({ prListPollMs }),
     }),
     {
       name: "codereview-settings",
@@ -330,6 +344,7 @@ export const useSettingsStore = create<SettingsState>()(
         defaultViewType: s.defaultViewType,
         defaultThreeDot: s.defaultThreeDot,
         botLogins: s.botLogins,
+        prListPollMs: s.prListPollMs,
       }),
       migrate: (persisted, version) => {
         const p = (persisted ?? {}) as Record<string, unknown>;
@@ -346,6 +361,7 @@ export const useSettingsStore = create<SettingsState>()(
           defaultViewType: (p.defaultViewType as DiffViewType) ?? "split",
           defaultThreeDot: (p.defaultThreeDot as boolean) ?? true,
           botLogins: (p.botLogins as string) ?? "",
+          prListPollMs: 0,
         };
 
         // Preserve a customized review-tab color by forking a theme for it.
