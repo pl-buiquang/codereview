@@ -247,6 +247,46 @@ export function changedRightLines(file: FileData): Set<number> {
   return lines;
 }
 
+/**
+ * Number of real lines in a fetched source file. `git show`/the contents API
+ * append a trailing newline, so split("\n") yields a final empty element that
+ * must not count as a line (same convention as buildFullFileFile). "" → 0.
+ */
+export function sourceLineCount(source: string): number {
+  if (source === "") return 0;
+  const lines = source.split("\n");
+  if (lines[lines.length - 1] === "") lines.pop();
+  return lines.length;
+}
+
+/** Hidden old-side lines below the last hunk. 0 when the hunk reaches EOF; never negative. */
+export function trailingGap(lastHunk: HunkData, oldLineCount: number): number {
+  return Math.max(0, oldLineCount - (lastHunk.oldStart + lastHunk.oldLines) + 1);
+}
+
+/**
+ * [start, end) old-side range revealing the n hidden lines directly ABOVE the
+ * first hunk (the bottom of the hidden block, expanding upward). n = Infinity
+ * reveals the whole leading block; oldStart === 1 yields the empty range [1, 1).
+ */
+export function leadingExpandRange(firstHunk: HunkData, n: number): [number, number] {
+  return [Math.max(1, firstHunk.oldStart - n), firstHunk.oldStart];
+}
+
+/**
+ * [start, end) old-side range revealing the n hidden lines directly BELOW the
+ * last hunk (expanding downward). `end` is exclusive, so clamping to
+ * `oldLineCount + 1` reaches EOF; a gap of 0 yields an empty range.
+ */
+export function trailingExpandRange(
+  lastHunk: HunkData,
+  oldLineCount: number,
+  n: number,
+): [number, number] {
+  const start = lastHunk.oldStart + lastHunk.oldLines;
+  return [start, Math.min(start + n, oldLineCount + 1)];
+}
+
 export function countChanges(file: FileData): { add: number; del: number } {
   let add = 0;
   let del = 0;
