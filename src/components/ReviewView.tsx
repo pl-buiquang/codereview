@@ -944,23 +944,30 @@ function FileBody({
 function ExpandControl({
   count,
   busy,
+  direction = "between",
   onExpandChunk,
   onExpandAll,
 }: {
-  count: number;
+  /** null: size unknown (trailing gap before the base source is fetched). */
+  count: number | null;
   busy: boolean;
+  direction?: "up" | "down" | "between";
   onExpandChunk: () => void;
   onExpandAll: () => void;
 }) {
+  const arrow = direction === "up" ? "↑ " : direction === "down" ? "↓ " : "";
   return (
     <div className="expand-control">
       {busy ? (
         <span className="muted">Expanding…</span>
       ) : (
         <>
-          <span className="expand-label">⋯ {count} hidden lines</span>
-          {count > EXPAND_CHUNK && (
+          <span className="expand-label">
+            {count != null ? `⋯ ${count} hidden lines` : "⋯ hidden lines"}
+          </span>
+          {(count == null || count > EXPAND_CHUNK) && (
             <button className="expand-btn" onClick={onExpandChunk} disabled={busy}>
+              {arrow}
               {EXPAND_CHUNK} lines
             </button>
           )}
