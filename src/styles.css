@@ -958,6 +958,18 @@ td.diff-code {
 }
 
 /* PR list */
+.pr-list-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 12px;
+}
+.pr-list-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
 .pr-list {
   display: flex;
   flex-direction: column;

@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ViewType } from "react-diff-view";
 import { api } from "../lib/api";
 import { toast } from "../lib/toast";
 import { confirmDialog } from "../lib/confirm";
-import { useSettingsStore } from "../lib/settings";
+import { PR_LIST_POLL_OPTIONS, useSettingsStore } from "../lib/settings";
+import { timeAgo } from "../lib/timeAgo";
 import { DiffViewer } from "./DiffViewer";
 import { OpenPrButton } from "./OpenPrButton";
 import { githubPrUrl } from "../lib/githubUrl";
@@ -218,12 +219,23 @@ function BranchCompare({ repo }: { repo: Repository }) {
 
 function PrList({ repo, onOpen }: { repo: Repository; onOpen: (id: number) => void }) {
   const queryClient = useQueryClient();
+  const prListPollMs = useSettingsStore((s) => s.prListPollMs);
+  const setPrListPollMs = useSettingsStore((s) => s.setPrListPollMs);
+
   const authQuery = useQuery({ queryKey: ["gh-auth"], queryFn: api.ghAuthStatus });
   const prsQuery = useQuery({
     queryKey: ["prs", repo.path],
     queryFn: () => api.listPrs(repo.path),
     enabled: authQuery.data === true,
+    refetchInterval: prListPollMs > 0 ? prListPollMs : false,
   });
+
+  // Re-render every 30s so the "updated Xm ago" label stays honest with polling off.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick((n) => n + 1), 30_000);
+    return () => clearInterval(id);
+  }, []);
 
   const startPrReview = useMutation({
     mutationFn: (prNumber: number) => {
@@ -246,36 +258,79 @@ function PrList({ repo, onOpen }: { repo: Repository; onOpen: (id: number) => vo
         Not authenticated with GitHub. Run <code>gh auth login</code> in a terminal, then reopen.
       </p>
     );
-  if (prsQuery.isLoading) return <p className="muted">Loading open PRs…</p>;
-  if (prsQuery.isError)
-    return <p className="error">Could not list PRs: {String(prsQuery.error)}</p>;
-
   const prs = prsQuery.data ?? [];
-  if (prs.length === 0) return <p className="muted">No open pull requests.</p>;
+  let body: ReactNode;
+  if (prsQuery.isLoading) {
+    body = <p className="muted">Loading open PRs…</p>;
+  } else if (prsQuery.isError) {
+    body = <p className="error">Could not list PRs: {String(prsQuery.error)}</p>;
+  } else if (prs.length === 0) {
+    body = <p className="muted">No open pull requests.</p>;
+  } else {
+    body = (
+      <div className="pr-list">
+        {prs.map((pr: PrSummary) => (
+          <div
+            key={pr.number}
+            className="pr-row"
+            onClick={() => startPrReview.mutate(pr.number)}
+            title="Start a review of this PR"
+          >
+            <div className="pr-row-main">
+              <span className="pr-title">
+                #{pr.number} {pr.title}
+              </span>
+              <span className="muted">
+                {pr.author?.login ?? "unknown"} · {pr.baseRefName} ← {pr.headRefName}
+              </span>
+            </div>
+            <button className="btn-primary" disabled={startPrReview.isPending}>
+              Review
+            </button>
+          </div>
+        ))}
+      </div>
+    );
+  }
 
   return (
-    <div className="pr-list">
-      {prs.map((pr: PrSummary) => (
-        <div
-          key={pr.number}
-          className="pr-row"
-          onClick={() => startPrReview.mutate(pr.number)}
-          title="Start a review of this PR"
-        >
-          <div className="pr-row-main">
-            <span className="pr-title">
-              #{pr.number} {pr.title}
-            </span>
-            <span className="muted">
-              {pr.author?.login ?? "unknown"} · {pr.baseRefName} ← {pr.headRefName}
-            </span>
-          </div>
-          <button className="btn-primary" disabled={startPrReview.isPending}>
-            Review
+    <>
+      <div className="pr-list-toolbar">
+        <span className="muted">Open pull requests</span>
+        <span className="pr-list-toolbar-right">
+          {prsQuery.dataUpdatedAt > 0 && (
+            <span className="muted small">updated {timeAgo(prsQuery.dataUpdatedAt)}</span>
+          )}
+          <label className="muted small">
+            auto
+            <select
+              value={prListPollMs}
+              onChange={(e) => setPrListPollMs(Number(e.target.value))}
+            >
+              {PR_LIST_POLL_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            className="btn-primary"
+            disabled={prsQuery.isFetching}
+            onClick={() => prsQuery.refetch()}
+          >
+            {prsQuery.isFetching ? (
+              <>
+                <span className="spinner" /> Refreshing…
+              </>
+            ) : (
+              "↻ Refresh"
+            )}
           </button>
-        </div>
-      ))}
-    </div>
+        </span>
+      </div>
+      {body}
+    </>
   );
 }
 
