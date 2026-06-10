@@ -1,29 +1,12 @@
 /*
- * Dark-theme fallbacks for first paint. The active theme (dark, light, or a
- * custom one) is written over these as inline CSS variables on <html> by
- * `useApplySettings` — see src/lib/settings.ts for the full token set.
+ * All theme tokens (colors, fonts, radii, the 8 `--tok-*` syntax roles) live in
+ * src/styles/tokens.css and are selected by the `cr cr-{a|b|c} {dark|light}`
+ * classes `useApplySettings` puts on <html>. This :root keeps only the
+ * non-theme `--diff-font-size` fallback (overwritten inline by useApplySettings)
+ * and the base font rules. The `font-size: 14px` here is removed in Phase 2,
+ * after which the `.cr` rule in tokens.css governs density (13px / 12.5px for C).
  */
 :root {
-  --bg: #0d1117;
-  --bg-elev: #161b22;
-  --border: #30363d;
-  --text: #e6edf3;
-  --muted: #8b949e;
-  --accent: #2f81f7;
-  --danger: #f85149;
-  --success: #3fb950;
-  --warning: #d29922;
-  --diff-add-bg: rgba(63, 185, 80, 0.15);
-  --diff-del-bg: rgba(248, 81, 73, 0.15);
-  --review-tab-accent: #ffffff;
-  --tok-comment: #8b949e;
-  --tok-punctuation: #c9d1d9;
-  --tok-literal: #79c0ff;
-  --tok-string: #a5d6ff;
-  --tok-operator: #d2a8ff;
-  --tok-keyword: #ff7b72;
-  --tok-function: #d2a8ff;
-  --tok-variable: #ffa657;
   --diff-font-size: 12.5px;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica,
     Arial, sans-serif;

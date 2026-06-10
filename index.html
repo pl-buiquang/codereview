@@ -4,7 +4,36 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Tauri + React + Typescript</title>
+    <title>CodeReview</title>
+    <script>
+      // FOUC guard: set the theme classes (cr cr-{dir} {mode}) on <html> before
+      // first paint, from the persisted zustand settings, so the app never
+      // flashes an unthemed/wrong-mode frame. useApplySettings reconciles on mount.
+      (function () {
+        try {
+          var dir = "a";
+          var mode = null;
+          var raw = localStorage.getItem("codereview-settings");
+          if (raw) {
+            var s = (JSON.parse(raw) || {}).state || {};
+            if (s.direction === "a" || s.direction === "b" || s.direction === "c") dir = s.direction;
+            mode = s.mode || s.themeMode || null; // v2 uses `mode`; v1 used `themeMode`
+          }
+          if (mode !== "dark" && mode !== "light" && mode !== "system") mode = "system";
+          var resolved =
+            mode === "system"
+              ? window.matchMedia("(prefers-color-scheme: light)").matches
+                ? "light"
+                : "dark"
+              : mode;
+          var root = document.documentElement;
+          root.className = "cr cr-" + dir + " " + resolved;
+          root.style.colorScheme = resolved;
+        } catch (e) {
+          document.documentElement.className = "cr cr-a dark";
+        }
+      })();
+    </script>
   </head>
 
   <body>

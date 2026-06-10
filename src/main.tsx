@@ -2,6 +2,8 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import App from "./App";
+import "./styles/fonts";
+import "./styles/tokens.css";
 import "react-diff-view/style/index.css";
 import "./styles.css";
 
