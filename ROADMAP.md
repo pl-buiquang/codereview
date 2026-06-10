@@ -113,8 +113,6 @@ Repo/filesystem:
 - **Auto-update** via the Tauri updater plugin.
 - **CI pipeline** — GitHub Actions matrix (macOS/Windows/Linux) to build and attach artifacts
   to releases; run `tsc`, `cargo test`, lints on PRs.
-- **Reproducible builds** — `Cargo.lock` and `pnpm-lock.yaml` are committed; pin toolchains
-  (`rust-toolchain.toml`, `.nvmrc`).
 
 ## 9. Nice-to-haves
 
