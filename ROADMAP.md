@@ -16,12 +16,6 @@ with inline & multi-line comments, Markdown/JSON export, and GitHub publish via 
   Frontend-only via `react-diff-view`'s `expandFromRawCode` over old-side line ranges
   (`getCollapsedLinesCountBetween(null, hunk)` gives the leading count; the trailing size needs
   the fetched base file's line count). Prototyped once, then reverted.
-- **Diff context expansion on GitHub-PR targets** — the `file_source` GitHub-contents-API
-  fallback already exists, but PR `target` rows store `base_sha = NULL`, so LEFT/base expansion
-  fails with "this side has no source (file added or deleted)". Needs `base_sha` populated for PR
-  targets (gh `baseRefOid`) **and** a backfill for rows created before that — reopening a saved
-  review doesn't re-run `get_or_create_pr_target`, so existing rows keep `NULL`. Mind the
-  three-dot caveat: the diff's old side is the merge-base, not the base-branch tip.
 - **Threaded replies** — the `comment.parent_id` column already exists but is unused. Render
   replies under a root comment and let the user reply, like a GitHub thread.
 - **Resolve / unresolve threads** — mark a comment thread resolved; collapse resolved threads.
