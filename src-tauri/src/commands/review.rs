@@ -85,6 +85,24 @@ fn gh_ctx_for_repo(conn: &Connection, repo_id: i64) -> AppResult<GhRepo> {
     }
 }
 
+/// The GitHub owner/name of a repository, if it has one: the stored remote
+/// columns, else parsed from the clone-less `github:owner/name` path sentinel.
+/// None for purely local repos (callers skip GitHub-API work gracefully).
+fn repo_owner_name(conn: &Connection, repo_id: i64) -> AppResult<Option<(String, String)>> {
+    let (path, owner, name): (String, Option<String>, Option<String>) = conn.query_row(
+        "SELECT path, remote_owner, remote_name FROM repository WHERE id = ?1",
+        params![repo_id],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+    )?;
+    if let (Some(o), Some(n)) = (owner, name) {
+        return Ok(Some((o, n)));
+    }
+    Ok(path
+        .strip_prefix("github:")
+        .and_then(|rest| rest.split_once('/'))
+        .map(|(o, n)| (o.to_string(), n.to_string())))
+}
+
 fn get_review_row(conn: &Connection, id: i64) -> AppResult<Review> {
     conn.query_row("SELECT * FROM review WHERE id = ?1", params![id], Review::from_row)
         .map_err(Into::into)
@@ -154,11 +172,15 @@ fn get_or_create_local_target(
 }
 
 /// Reuse one `target` per GitHub PR number, refreshing title/refs/head sha.
+/// `merge_base_sha` is the resolved merge-base of `base_ref...head` (the LEFT
+/// side of the three-dot PR diff — NOT the base-branch tip); None means
+/// resolution failed/was skipped and the stored value is preserved (COALESCE).
 pub(crate) fn get_or_create_pr_target(
     conn: &Connection,
     repo_id: i64,
     pr_number: i64,
     info: &gh::PrInfo,
+    merge_base_sha: Option<&str>,
 ) -> AppResult<Target> {
     let existing: Option<i64> = conn
         .query_row(
@@ -170,8 +192,10 @@ pub(crate) fn get_or_create_pr_target(
 
     if let Some(id) = existing {
         conn.execute(
-            "UPDATE target SET title = ?1, base_ref = ?2, head_ref = ?3, head_sha = ?4 WHERE id = ?5",
-            params![info.title, info.base_ref, info.head_ref, info.head_sha, id],
+            "UPDATE target SET title = ?1, base_ref = ?2, head_ref = ?3, head_sha = ?4,
+                               base_sha = COALESCE(?5, base_sha)
+             WHERE id = ?6",
+            params![info.title, info.base_ref, info.head_ref, info.head_sha, merge_base_sha, id],
         )?;
         return get_target(conn, id);
     }
@@ -179,13 +203,14 @@ pub(crate) fn get_or_create_pr_target(
     conn.execute(
         "INSERT INTO target
             (repo_id, kind, github_pr_number, title, base_ref, head_ref, base_sha, head_sha, three_dot, created_at)
-         VALUES (?1, 'github_pr', ?2, ?3, ?4, ?5, NULL, ?6, 1, ?7)",
+         VALUES (?1, 'github_pr', ?2, ?3, ?4, ?5, ?6, ?7, 1, ?8)",
         params![
             repo_id,
             pr_number,
             info.title,
             info.base_ref,
             info.head_ref,
+            merge_base_sha,
             info.head_sha,
             now()
         ],
@@ -210,7 +235,9 @@ pub struct FreshnessResult {
 ///
 /// Follows the split-lock pattern: resolve repo/`gh` context under the lock, drop
 /// it for the `git rev-parse` / `gh pr view` subprocess, then re-lock to UPDATE.
-/// Shared with `publish_review` so publish can pin the freshest head.
+/// Shared with `publish_review` so publish can pin the freshest head, and called
+/// by the Refresh button via `refresh_review` — both therefore also heal a
+/// PR target's `base_sha` (merge-base) as a side effect.
 fn refresh_target_shas(db: &Db, target: &Target) -> AppResult<FreshnessResult> {
     let previous_head_sha = target.head_sha.clone();
 
@@ -219,15 +246,25 @@ fn refresh_target_shas(db: &Db, target: &Target) -> AppResult<FreshnessResult> {
             let number = target
                 .github_pr_number
                 .ok_or_else(|| AppError::Other("PR target missing number".into()))?;
-            let ctx = {
+            let (ctx, owner_name) = {
                 let conn = db.0.lock().unwrap();
-                gh_ctx_for_repo(&conn, target.repo_id)?
+                (
+                    gh_ctx_for_repo(&conn, target.repo_id)?,
+                    repo_owner_name(&conn, target.repo_id)?,
+                )
             };
             let info = gh::pr_view(&ctx, number)?;
+            // PR diffs are three-dot: the LEFT side is the merge-base, not the
+            // base-branch tip. Resolution failure degrades to None and the
+            // stored base_sha is preserved (COALESCE).
+            let merge_base = owner_name
+                .and_then(|(o, n)| gh::merge_base_sha(&o, &n, &info.base_ref, &info.head_sha).ok());
             let conn = db.0.lock().unwrap();
             conn.execute(
-                "UPDATE target SET title = ?1, base_ref = ?2, head_ref = ?3, head_sha = ?4 WHERE id = ?5",
-                params![info.title, info.base_ref, info.head_ref, info.head_sha, target.id],
+                "UPDATE target SET title = ?1, base_ref = ?2, head_ref = ?3, head_sha = ?4,
+                                   base_sha = COALESCE(?5, base_sha)
+                 WHERE id = ?6",
+                params![info.title, info.base_ref, info.head_ref, info.head_sha, merge_base, target.id],
             )?;
             Some(info.head_sha)
         }
@@ -458,8 +495,13 @@ pub fn create_review_for_pr(
         (repo.id, ctx)
     };
     let info = gh::pr_view(&ctx, pr_number)?;
+    // PR diffs are three-dot, so the LEFT side is the merge-base — resolve it
+    // here (lock still dropped) and store it as the target's base_sha. Failure
+    // degrades to None: the stored value is preserved (COALESCE) and a NULL
+    // heals later via file_source's lazy backfill.
+    let merge_base = gh::merge_base_sha(&owner, &name, &info.base_ref, &info.head_sha).ok();
     let conn = db.0.lock().unwrap();
-    let target = get_or_create_pr_target(&conn, repo_id, pr_number, &info)?;
+    let target = get_or_create_pr_target(&conn, repo_id, pr_number, &info, merge_base.as_deref())?;
     new_review_for_target(&conn, target.id)
 }
 
@@ -488,9 +530,11 @@ pub fn review_diff(review_id: i64, db: State<Db>) -> AppResult<String> {
 }
 
 /// Full source of one side of a file (LEFT→base, RIGHT→head), used to reveal
-/// collapsed context between hunks and to render the full-file review pane. Reads
-/// the local blob via `git show`; for GitHub PR targets whose commit isn't checked
-/// out locally, falls back to the GitHub contents API.
+/// collapsed context between hunks and to render the full-file review pane.
+/// For GitHub PR targets LEFT is the merge-base blob (`target.base_sha`, lazily
+/// backfilled here for rows created before it was populated). Reads the local
+/// blob via `git show`; for GitHub PR targets whose commit isn't checked out
+/// locally, falls back to the GitHub contents API.
 #[tauri::command]
 pub fn file_source(
     review_id: i64,
@@ -500,13 +544,36 @@ pub fn file_source(
 ) -> AppResult<String> {
     let conn = db.0.lock().unwrap();
     let detail = load_detail(&conn, review_id)?;
-    let sha = match side.as_str() {
-        "LEFT" => detail.target.base_sha.as_deref(),
-        "RIGHT" => detail.target.head_sha.as_deref(),
+    let sha: Option<String> = match side.as_str() {
+        "LEFT" => detail.target.base_sha.clone(),
+        "RIGHT" => detail.target.head_sha.clone(),
         other => return Err(AppError::Other(format!("invalid side: {other}"))),
     };
-    let sha = sha
-        .ok_or_else(|| AppError::Other("this side has no source (file added or deleted)".into()))?;
+
+    // Lazy backfill: github_pr targets created before base_sha was populated (or
+    // whose resolution failed) store NULL. Resolve the merge-base now and persist
+    // it so the row heals without a manual refresh. file_source already runs gh
+    // under this lock (file_at_ref below), so this follows the same precedent.
+    let sha = match (sha, side.as_str(), detail.target.kind.as_str()) {
+        (None, "LEFT", "github_pr") => {
+            let resolved = repo_owner_name(&conn, detail.target.repo_id)?.and_then(|(o, n)| {
+                let head = detail.target.head_sha.as_deref().unwrap_or(&detail.target.head_ref);
+                gh::merge_base_sha(&o, &n, &detail.target.base_ref, head).ok()
+            });
+            if let Some(mb) = &resolved {
+                conn.execute(
+                    "UPDATE target SET base_sha = ?1 WHERE id = ?2",
+                    params![mb, detail.target.id],
+                )?;
+            }
+            resolved.ok_or_else(|| {
+                AppError::Other("could not resolve the PR merge-base for the base side".into())
+            })?
+        }
+        (sha, _, _) => sha.ok_or_else(|| {
+            AppError::Other("this side has no source (file added or deleted)".into())
+        })?,
+    };
 
     // Remote-only (clone-less) PR targets have no local blob, so skip the
     // guaranteed-to-fail `git show` and go straight to the GitHub contents API.
@@ -514,7 +581,7 @@ pub fn file_source(
         let repo = std::path::Path::new(&detail.repo_path);
         // Local commit is fastest and works for local targets and PRs that are
         // checked out; for PRs whose commit isn't local, fall through to the API.
-        match git::show_file(repo, sha, &file_path) {
+        match git::show_file(repo, &sha, &file_path) {
             Ok(source) => return Ok(source),
             Err(local_err) => {
                 if detail.target.kind != "github_pr" {
@@ -530,7 +597,7 @@ pub fn file_source(
         |r| Ok((r.get(0)?, r.get(1)?)),
     )?;
     match (owner, name) {
-        (Some(owner), Some(name)) => gh::file_at_ref(&owner, &name, &file_path, sha),
+        (Some(owner), Some(name)) => gh::file_at_ref(&owner, &name, &file_path, &sha),
         _ => Err(AppError::Other(
             "file source unavailable: no local clone and no GitHub remote".into(),
         )),
@@ -1103,18 +1170,82 @@ mod tests {
         let conn = open_memory();
         let repo = seed_repo(&conn, Some("owner"), Some("repo"));
 
-        let t1 = get_or_create_pr_target(&conn, repo, 7, &pr_info()).unwrap();
+        let t1 = get_or_create_pr_target(&conn, repo, 7, &pr_info(), None).unwrap();
         assert_eq!(t1.kind, "github_pr");
         assert_eq!(t1.github_pr_number, Some(7));
         assert_eq!(t1.head_sha.as_deref(), Some("deadbeef"));
+        assert!(t1.base_sha.is_none());
 
         let mut updated = pr_info();
         updated.title = "Renamed PR".into();
         updated.head_sha = "cafe".into();
-        let t2 = get_or_create_pr_target(&conn, repo, 7, &updated).unwrap();
+        let t2 = get_or_create_pr_target(&conn, repo, 7, &updated, None).unwrap();
         assert_eq!(t1.id, t2.id);
         assert_eq!(t2.title, "Renamed PR");
         assert_eq!(t2.head_sha.as_deref(), Some("cafe"));
+        assert!(t2.base_sha.is_none(), "a None merge-base never invents a base_sha");
+    }
+
+    #[test]
+    fn pr_target_stores_merge_base_sha() {
+        let conn = open_memory();
+        let repo = seed_repo(&conn, Some("owner"), Some("repo"));
+
+        let t = get_or_create_pr_target(&conn, repo, 7, &pr_info(), Some("mb1")).unwrap();
+        assert_eq!(t.base_sha.as_deref(), Some("mb1"));
+    }
+
+    #[test]
+    fn pr_target_refresh_preserves_base_sha_on_none() {
+        let conn = open_memory();
+        let repo = seed_repo(&conn, Some("owner"), Some("repo"));
+
+        let t1 = get_or_create_pr_target(&conn, repo, 7, &pr_info(), Some("mb1")).unwrap();
+        assert_eq!(t1.base_sha.as_deref(), Some("mb1"));
+
+        // A failed/skipped resolution (None) keeps the stored value (COALESCE).
+        let t2 = get_or_create_pr_target(&conn, repo, 7, &pr_info(), None).unwrap();
+        assert_eq!(t1.id, t2.id);
+        assert_eq!(t2.base_sha.as_deref(), Some("mb1"));
+
+        // A fresh resolution overwrites it.
+        let t3 = get_or_create_pr_target(&conn, repo, 7, &pr_info(), Some("mb2")).unwrap();
+        assert_eq!(t3.base_sha.as_deref(), Some("mb2"));
+    }
+
+    #[test]
+    fn repo_owner_name_resolution() {
+        let conn = open_memory();
+
+        // Stored remote columns win.
+        let with_remote = seed_repo(&conn, Some("owner"), Some("repo"));
+        assert_eq!(
+            repo_owner_name(&conn, with_remote).unwrap(),
+            Some(("owner".into(), "repo".into()))
+        );
+
+        // Clone-less sentinel path with NULL columns parses owner/name.
+        conn.execute(
+            "INSERT INTO repository (path, default_branch, added_at)
+             VALUES ('github:acme/widget', 'main', 'now')",
+            [],
+        )
+        .unwrap();
+        let clone_less = conn.last_insert_rowid();
+        assert_eq!(
+            repo_owner_name(&conn, clone_less).unwrap(),
+            Some(("acme".into(), "widget".into()))
+        );
+
+        // Purely local repo has no GitHub identity.
+        conn.execute(
+            "INSERT INTO repository (path, default_branch, added_at)
+             VALUES ('/local/only', 'main', 'now')",
+            [],
+        )
+        .unwrap();
+        let local = conn.last_insert_rowid();
+        assert_eq!(repo_owner_name(&conn, local).unwrap(), None);
     }
 
     #[test]

@@ -233,8 +233,16 @@ pub struct ComparedFile {
     pub status: String,
 }
 
+/// The merge-base commit reference embedded in a REST compare response.
+#[derive(Debug, Deserialize)]
+struct CommitRef {
+    sha: String,
+}
+
 #[derive(Debug, Deserialize)]
 struct CompareRaw {
+    #[serde(default)]
+    merge_base_commit: Option<CommitRef>,
     files: Vec<ComparedFile>,
 }
 
@@ -251,6 +259,23 @@ pub fn compare(owner: &str, name: &str, base: &str, head: &str) -> AppResult<Vec
     let raw: CompareRaw =
         serde_json::from_str(&out).map_err(|e| AppError::Gh(format!("failed to parse compare: {e}")))?;
     Ok(raw.files)
+}
+
+/// Merge-base of `base` and `head` via the REST compare API (clone-less).
+/// `?per_page=1` caps the commits payload; only `merge_base_commit.sha` is read.
+/// This is the LEFT side of GitHub's three-dot PR diff — NOT the base-branch tip.
+pub fn merge_base_sha(owner: &str, name: &str, base: &str, head: &str) -> AppResult<String> {
+    let endpoint = format!("repos/{owner}/{name}/compare/{base}...{head}?per_page=1");
+    let ctx = GhRepo::Remote {
+        owner: owner.to_string(),
+        name: name.to_string(),
+    };
+    let out = run_gh(&ctx, &["api", &endpoint])?;
+    let raw: CompareRaw =
+        serde_json::from_str(&out).map_err(|e| AppError::Gh(format!("failed to parse compare: {e}")))?;
+    raw.merge_base_commit
+        .map(|c| c.sha)
+        .ok_or_else(|| AppError::Gh("compare response missing merge_base_commit".into()))
 }
 
 pub fn pr_diff(ctx: &GhRepo, number: i64) -> AppResult<String> {
@@ -1035,6 +1060,7 @@ mod tests {
     const COMPARE_FIXTURE: &str = r#"{
       "status": "ahead",
       "ahead_by": 2,
+      "merge_base_commit": { "sha": "abc123" },
       "files": [
         {
           "filename": "src/a.rs",
@@ -1066,5 +1092,29 @@ mod tests {
         assert_eq!(logo.filename, "assets/logo.png");
         assert_eq!(logo.status, "added");
         assert!(logo.patch.is_none());
+    }
+
+    #[test]
+    fn compare_fixture_parses_merge_base() {
+        let raw: CompareRaw = serde_json::from_str(COMPARE_FIXTURE).expect("fixture parses");
+        assert_eq!(raw.merge_base_commit.unwrap().sha, "abc123");
+        // `files` still parse exactly as before alongside the new field.
+        assert_eq!(raw.files.len(), 2);
+        assert_eq!(raw.files[0].filename, "src/a.rs");
+    }
+
+    #[test]
+    fn compare_fixture_without_merge_base_is_none() {
+        // The #[serde(default)] contract compare() relies on: older/partial
+        // responses without merge_base_commit still deserialize.
+        let json = r#"{
+          "status": "ahead",
+          "files": [
+            { "filename": "src/a.rs", "status": "modified" }
+          ]
+        }"#;
+        let raw: CompareRaw = serde_json::from_str(json).expect("parses");
+        assert!(raw.merge_base_commit.is_none());
+        assert_eq!(raw.files.len(), 1);
     }
 }

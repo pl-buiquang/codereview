@@ -518,12 +518,10 @@ function FileReview({
 
   // react-diff-view's expansion math works in OLD/LEFT line numbers, so the raw
   // source must be the base file. Added/deleted/binary files have no usable base
-  // side; GitHub PR targets are rejected server-side (v1 — see file_source).
+  // side. For GitHub-PR targets LEFT is the merge-base blob, served via the
+  // backend's base_sha (lazily backfilled) + contents-API fallback.
   const canExpand =
-    detail.target.kind === "local" &&
-    file.type !== "add" &&
-    file.type !== "delete" &&
-    !file.isBinary;
+    file.type !== "add" && file.type !== "delete" && !file.isBinary;
 
   const ensureSource = useCallback(async (): Promise<string | null> => {
     if (rawSource != null) return rawSource;
