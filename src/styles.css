@@ -1083,17 +1083,18 @@ td.diff-code {
 /* PR metadata panel */
 .pr-meta-panel {
   margin-top: 12px;
-  padding: 10px 12px;
+  padding: 12px 16px;
   border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg-elev);
+  border-radius: var(--radius-l);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 9px;
   font-size: 12px;
 }
 .pr-meta-panel.muted {
-  color: var(--muted);
+  color: var(--text-2);
 }
 .pr-meta-error {
   color: var(--danger);
@@ -1107,7 +1108,8 @@ td.diff-code {
   gap: 8px;
 }
 .pr-meta-counts {
-  color: var(--muted);
+  color: var(--text-2);
+  font-family: var(--font-mono);
 }
 .pr-meta-counts .add {
   color: var(--success);
@@ -1125,7 +1127,7 @@ td.diff-code {
   color: var(--warning);
 }
 .mergeable-neutral {
-  color: var(--muted);
+  color: var(--text-2);
 }
 .pr-meta-decision {
   font-weight: 600;
@@ -1142,14 +1144,18 @@ td.diff-code {
 .pr-reviewer {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 1px 6px 1px 1px;
+  gap: 6px;
+  height: 22px;
+  padding: 0 9px 0 3px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-2);
 }
 .pr-reviewer-avatar {
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
   flex-shrink: 0;
 }
@@ -1214,7 +1220,7 @@ td.diff-code {
   color: var(--warning);
 }
 .pr-check-state {
-  color: var(--muted);
+  color: var(--text-2);
 }
 .pr-meta-description {
   display: flex;
@@ -1289,7 +1295,8 @@ td.diff-code {
 /* Inline comments */
 .line-widget {
   padding: 8px 12px;
-  background: var(--bg-elev);
+  background: var(--surface-2);
+  border-left: 2px solid var(--accent-border);
   border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
 }
@@ -1320,10 +1327,10 @@ td.diff-code {
   flex: 1;
   min-height: 44px;
   resize: vertical;
-  background: var(--bg);
+  background: var(--surface);
   color: var(--text);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-m);
   padding: 6px 8px;
   font: inherit;
 }
@@ -1342,26 +1349,32 @@ td.diff-code {
   gap: 2px;
 }
 .comment-edit-tabs button {
-  padding: 1px 8px;
-  font-size: 12px;
+  height: 22px;
+  padding: 0 10px;
+  font-size: 11px;
+  font-weight: 600;
   background: transparent;
-  color: var(--muted);
-  border: 1px solid var(--border);
-  border-radius: 6px;
+  color: var(--text-2);
+  border: none;
+  border-radius: var(--radius-s);
   cursor: pointer;
+}
+.comment-edit-tabs button:hover {
+  background: var(--surface-2);
 }
 .comment-edit-tabs button.active {
   color: var(--text);
-  border-color: var(--accent);
+  background: var(--surface-3);
 }
 
 /* Read-only GitHub review threads (distinct from local .line-widget/.comment-item) */
 .github-thread {
   margin: 6px 0;
-  padding: 8px 10px;
-  border-left: 3px solid var(--accent);
-  border-radius: 0 6px 6px 0;
-  background: color-mix(in srgb, var(--accent) 7%, transparent);
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-left: 2px solid var(--accent-border);
+  border-radius: var(--radius-m);
+  background: var(--surface-2);
 }
 .github-thread-header {
   display: flex;
@@ -1371,12 +1384,14 @@ td.diff-code {
   margin-bottom: 6px;
 }
 .github-thread-mark {
-  padding: 1px 6px;
-  border-radius: 9px;
-  font-size: 10px;
+  padding: 1px 7px;
+  border-radius: 4px;
+  font-size: 9.5px;
   font-weight: 700;
-  letter-spacing: 0.02em;
-  color: #fff;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  font-family: var(--font-mono);
+  color: var(--on-accent);
   background: var(--accent);
   cursor: help;
 }
@@ -1392,18 +1407,18 @@ td.diff-code {
   border: 1px solid color-mix(in srgb, var(--success) 40%, transparent);
 }
 .badge-outdated {
-  color: rgb(210, 153, 34);
-  background: color-mix(in srgb, var(--warning) 14%, transparent);
-  border: 1px solid color-mix(in srgb, var(--warning) 40%, transparent);
+  color: var(--warning);
+  background: var(--warning-soft);
+  border: 1px solid var(--warning);
 }
 .github-thread-toggle {
   margin-left: auto;
   padding: 1px 8px;
   font-size: 12px;
-  color: var(--muted);
+  color: var(--text-2);
   background: transparent;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-s);
   cursor: pointer;
 }
 .github-thread-comment + .github-thread-comment {
@@ -1425,14 +1440,14 @@ td.diff-code {
   flex-shrink: 0;
 }
 .github-thread-avatar-empty {
-  background: var(--border);
+  background: var(--surface-3);
 }
 .github-thread-author {
-  font-weight: 600;
+  font-weight: 700;
   color: var(--text);
 }
 .github-thread-time {
-  color: var(--muted);
+  color: var(--text-3);
 }
 .github-thread-link {
   margin-left: auto;
@@ -1473,28 +1488,31 @@ td.diff-code {
   margin-right: 6px;
 }
 .markdown-body code {
-  font-family: var(--code-font, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-family: var(--font-mono);
   font-size: 0.9em;
-  padding: 1px 4px;
+  padding: 1px 5px;
   border-radius: 4px;
-  background: color-mix(in srgb, var(--muted) 18%, transparent);
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+  color: var(--text);
 }
 .markdown-body pre {
   margin: 0 0 8px;
   padding: 8px 10px;
   overflow: auto;
-  border-radius: 6px;
-  background: var(--bg);
+  border-radius: var(--radius-m);
+  background: var(--bg-sunken);
   border: 1px solid var(--border);
 }
 .markdown-body pre code {
   padding: 0;
   background: none;
+  border: none;
 }
 .markdown-body blockquote {
   margin: 0 0 8px;
   padding: 0 10px;
-  color: var(--muted);
+  color: var(--text-2);
   border-left: 3px solid var(--border);
 }
 .markdown-body table {
@@ -1540,16 +1558,26 @@ td.diff-code {
   font-size: 12px;
   margin: 0 0 10px;
 }
+.composer {
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-m);
+  background: var(--surface);
+  padding: 8px 10px;
+}
 .composer textarea {
   width: 100%;
   min-height: 60px;
   resize: vertical;
-  background: var(--bg);
+  background: transparent;
   color: var(--text);
-  border: 1px solid var(--accent);
-  border-radius: 6px;
-  padding: 6px 8px;
+  border: none;
+  padding: 2px 0;
   font: inherit;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.composer textarea:focus-visible {
+  outline: none;
 }
 .composer-actions {
   display: flex;
@@ -1639,7 +1667,7 @@ td.diff-code {
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.6);
+  background: var(--scrim);
   display: grid;
   place-items: center;
   z-index: 100;
@@ -1649,9 +1677,10 @@ td.diff-code {
   max-height: 85vh;
   display: flex;
   flex-direction: column;
-  background: var(--bg-elev);
+  background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-l);
+  box-shadow: var(--shadow-pop);
   padding: 16px;
 }
 .modal-header {
@@ -1665,11 +1694,11 @@ td.diff-code {
 .export-preview {
   flex: 1;
   overflow: auto;
-  background: var(--bg);
+  background: var(--bg-sunken);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-m);
   padding: 12px;
-  font-family: var(--code-font, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-family: var(--font-mono);
   font-size: var(--diff-font-size, 12.5px);
   white-space: pre-wrap;
   word-break: break-word;
@@ -1697,11 +1726,11 @@ td.diff-code {
   align-items: flex-start;
   gap: 10px;
   padding: 10px 12px;
-  border-radius: 8px;
+  border-radius: var(--radius-m);
   border: 1px solid var(--border);
-  background: var(--bg-elev);
+  background: var(--surface);
   color: var(--text);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  box-shadow: var(--shadow-pop);
 }
 .toast.error {
   border-left: 3px solid var(--danger);
@@ -1718,7 +1747,7 @@ td.diff-code {
 .toast-close {
   background: none;
   border: none;
-  color: var(--muted);
+  color: var(--text-2);
   cursor: pointer;
   padding: 0 2px;
   line-height: 1;
@@ -1733,7 +1762,7 @@ td.diff-code {
 }
 .confirm-message {
   margin: 4px 0 0;
-  color: var(--muted);
+  color: var(--text-2);
   white-space: pre-wrap;
   line-height: 1.5;
 }

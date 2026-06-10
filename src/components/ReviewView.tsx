@@ -1225,7 +1225,7 @@ export function CommentItem({
             }
           }}
         >
-          🗑
+          <Icon name="x" size={12} />
         </button>
       )}
     </div>
@@ -1253,9 +1253,11 @@ export function Composer({
         onChange={(e) => setText(e.target.value)}
       />
       <div className="composer-actions">
-        <button onClick={onCancel}>Cancel</button>
+        <button className="btn btn-ghost" onClick={onCancel}>
+          Cancel
+        </button>
         <button
-          className="btn-primary"
+          className="btn btn-primary"
           disabled={busy || text.trim() === ""}
           onClick={async () => {
             setBusy(true);
