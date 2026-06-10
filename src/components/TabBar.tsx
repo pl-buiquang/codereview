@@ -4,25 +4,14 @@ import { api } from "../lib/api";
 import { useUIStore, type Tab } from "../store";
 import { repoLabel } from "../lib/repoLabel";
 import type { Repository } from "../lib/types";
+import { Icon, type IconName } from "./icons";
 
-function HomeIcon() {
-  return (
-    <svg
-      className="home-icon"
-      width="15"
-      height="15"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-label="Home"
-    >
-      <path d="M3 10.5 12 3l9 7.5" />
-      <path d="M5 9.5V21h14V9.5" />
-    </svg>
-  );
+/** The type glyph shown on an inactive document tab (active tabs show the dot). */
+function tabIcon(kind: Tab["kind"]): IconName {
+  if (kind === "repo") return "repo";
+  if (kind === "review") return "review";
+  if (kind === "settings") return "gear";
+  return "file";
 }
 
 /** The display label for a tab. Review titles come from the (cached) review
@@ -35,7 +24,7 @@ function useTabLabel(tab: Tab, repos: Repository[]): string {
   });
 
   if (tab.kind === "home") return "Home";
-  if (tab.kind === "settings") return "⚙ Settings";
+  if (tab.kind === "settings") return "Settings";
   if (tab.kind === "review") return reviewQuery.data?.target.title ?? `Review #${tab.reviewId}`;
   const repo = repos.find((r) => r.id === tab.repoId);
   return repo ? repoLabel(repo) : `repo #${tab.repoId}`;
@@ -50,11 +39,12 @@ function TabItem({ tab, repos }: { tab: Tab; repos: Repository[] }) {
 
   // The home tab is pinned: it can't be dragged or accept a drop before it.
   const draggable = tab.kind !== "home";
+  const isActive = tab.id === activeTabId;
   const label = useTabLabel(tab, repos);
 
   return (
     <div
-      className={`tab tab-${tab.kind} ${tab.id === activeTabId ? "active" : ""} ${
+      className={`tab tab-${tab.kind} ${isActive ? "active" : ""} ${
         dragOver ? "drag-over" : ""
       }`}
       onClick={() => setActiveTab(tab.id)}
@@ -88,18 +78,27 @@ function TabItem({ tab, repos }: { tab: Tab; repos: Repository[] }) {
         if (fromId) moveTab(fromId, tab.id);
       }}
     >
-      {tab.kind === "home" ? <HomeIcon /> : <span className="tab-label">{label}</span>}
-      {tab.kind !== "home" && (
-        <button
-          className="tab-close"
-          title="Close tab"
-          onClick={(e) => {
-            e.stopPropagation();
-            closeTab(tab.id);
-          }}
-        >
-          ✕
-        </button>
+      {tab.kind === "home" ? (
+        <Icon name="home" size={15} className="home-icon" />
+      ) : (
+        <>
+          {isActive ? (
+            <span className="tab-dot" />
+          ) : (
+            <Icon name={tabIcon(tab.kind)} size={12} className="tab-icon" />
+          )}
+          <span className="tab-label">{label}</span>
+          <button
+            className="tab-close"
+            title="Close tab"
+            onClick={(e) => {
+              e.stopPropagation();
+              closeTab(tab.id);
+            }}
+          >
+            <Icon name="x" size={10} />
+          </button>
+        </>
       )}
     </div>
   );
@@ -138,7 +137,7 @@ function OverflowRow({
             closeTab(tab.id);
           }}
         >
-          ✕
+          <Icon name="x" size={10} />
         </button>
       )}
     </div>
@@ -165,7 +164,7 @@ function TabOverflowMenu({ tabs, repos }: { tabs: Tab[]; repos: Repository[] }) 
         title="All tabs"
         onClick={() => setOpen((o) => !o)}
       >
-        ⋯
+        <Icon name="chev" size={14} />
       </button>
       {open && (
         <div className="tab-overflow-menu">
