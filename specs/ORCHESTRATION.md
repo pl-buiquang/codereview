@@ -1,39 +1,51 @@
-# ORCHESTRATION — Multi-agent implementation roadmap for specs 04–21
+# ORCHESTRATION — Multi-agent implementation roadmap for specs 06–21
 
-How to land specs 04–21 with parallel implementation agents in isolated git worktrees, merged
-into `main` by an integration step in a fixed order, gated by the standard suite at every step.
-Specs 00–03 are already shipped. All decisions below were locked with the user; the **Discrepancies**
-section at the end records where a spec's own text disagrees with this plan — do not silently fix
-those, resolve them as written there.
+How to land the remaining specs with parallel implementation agents in isolated git worktrees,
+merged into `main` by an integration step in a fixed order, gated by the standard suite at every
+step.
 
-## 1. Spec index
+**Status (2026-06):** Specs **00–03 are shipped** (head-SHA freshness) and **Wave 1 is merged** —
+specs **04, 05, 09, 10, 15, 20** landed on `main` (executed merge order `04 → 05 → 15 → 20 → 09 →
+10`, CI green). The spec files for those implemented specs have been removed (git history keeps
+them). What remains is **Waves 2–6** (specs 06–08, 11–14, 16–19, 21 + release verification).
 
-| Spec | Title | Size | Primary files |
-|---|---|---|---|
-| 04 | Toolchain pinning | XS | NEW `rust-toolchain.toml`, NEW `.nvmrc`, `package.json`, `ubt.toml` (commit), `CLAUDE.md`, `ROADMAP.md` |
-| 05 | CI checks workflow | S | NEW `.github/workflows/ci.yml` |
-| 06 | Release pipeline | M | NEW `.github/workflows/release.yml` |
-| 07 | Auto-update (updater plugin) | M | `release.yml`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, `src-tauri/src/lib.rs`, `src-tauri/capabilities/default.json`, `.gitignore`, `package.json`, NEW `src/lib/updater.ts`, NEW `src/components/UpdateBanner.tsx`, `src/App.tsx`, `src/styles.css` |
-| 08 | Code-signing readiness | M | NEW `docs/signing.md`, `release.yml`, `README.md` |
-| 09 | Diff expand to file top/bottom | M | `src/lib/diff.ts` (+test), `src/components/ReviewView.tsx` |
-| 10 | `base_sha` for PR targets | M | `src-tauri/src/gh.rs`, `src-tauri/src/commands/review.rs`, `ReviewView.tsx` (one predicate), `ROADMAP.md` |
-| 11 | Threaded replies | L | `commands/review.rs`, `src-tauri/src/export.rs`, NEW `src/lib/threads.ts`, `src/lib/api.ts`, `ReviewView.tsx`, `src/components/FileViewPane.tsx`, `src/styles.css` |
-| 12 | Resolve/unresolve local threads | M | NEW migration **0007**, `db/mod.rs`, `db/models.rs`, `commands/review.rs`, `export.rs`, `lib.rs`, `types.ts`, `api.ts`, NEW `src/lib/text.ts`, `ReviewView.tsx`, CSS |
-| 13 | Suggested changes | M | `src/lib/diff.ts` (+test), `ReviewView.tsx`, `src/components/Markdown.tsx` (+test), `styles.css`, `export.rs` (test only), `ROADMAP.md` |
-| 14 | Keyboard navigation | L | NEW `src/lib/keyboard.ts`, NEW `src/components/ShortcutHelp.tsx`, `src/components/FileJumpList.tsx`, `ReviewView.tsx`, `styles.css`, `README.md`, `ROADMAP.md` |
-| 15 | Word-level highlighting (markEdits) | S | `src/lib/diff.ts` (+test) only |
-| 16 | LEFT-side re-anchoring | L | NEW migration **0008**, `db/mod.rs`, `db/models.rs`, `src-tauri/src/git.rs`, `src-tauri/src/anchor.rs`, `commands/review.rs`, `export.rs` (fixtures), `types.ts`, NEW `src/lib/staleness.ts`, `ReviewView.tsx`, `FileViewPane.tsx`, `ROADMAP.md` |
-| 17 | Capture GitHub comment ids | M | `gh.rs`, `commands/review.rs`, `ROADMAP.md` |
-| 18 | Reply/resolve GitHub threads | M | `gh.rs`, `src-tauri/src/commands/gh.rs`, `lib.rs`, `api.ts`, `types.ts`, `src/components/GithubThread.tsx` (+test), `ReviewView.tsx` (threadCtx + Composer), `styles.css` |
-| 19 | PENDING (draft) GitHub reviews | L | NEW migration **0009**, `db/mod.rs`, `commands/review.rs`, `gh.rs`, `lib.rs`, `types.ts`, `api.ts`, NEW `src/lib/status.ts`, `ReviewView.tsx`, `src/components/RepoView.tsx`, `src/components/ReviewsView.tsx`, `styles.css` |
-| 20 | PR-list refresh + polling | XS | `src/lib/settings.ts` (+test), `src/lib/timeAgo.ts` (+test), `RepoView.tsx` (+test), `styles.css` |
-| 21 | Provider trait over gh.rs | M | NEW `src-tauri/src/provider.rs`, `lib.rs`, `commands/gh.rs`, `commands/review.rs`, `ROADMAP.md` |
+**Execution:** each wave runs as one invocation of the **Workflow tool** — a parallel `Implement`
+phase (one `agent({isolation:'worktree'})` per track) followed by a sequential `Integrate` phase
+(one agent that merges into `main`). The runnable scripts live in `specs/workflows/` (Wave 1 ran
+this way; `specs/workflows/wave-2.js` is the next). See §7 for the model and §8 for integration.
+
+All decisions below were locked with the user; the **Discrepancies** section at the end records
+where a spec's own text disagrees with this plan — do not silently fix those, resolve them as
+written there.
+
+## 1. Spec index (remaining specs only)
+
+Specs 00–03 (shipped) and 04/05/09/10/15/20 (Wave 1, merged) are implemented; their spec files
+were removed after landing — see git history / the `main` commit log. The 12 specs below are the
+remaining work, by wave:
+
+| Spec | Wave | Title | Size | Primary files |
+|---|---|---|---|---|
+| 06 | 2 | Release pipeline | M | NEW `.github/workflows/release.yml` |
+| 07 | 2 | Auto-update (updater plugin) | M | `release.yml`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, `src-tauri/src/lib.rs`, `src-tauri/capabilities/default.json`, `.gitignore`, `package.json`, NEW `src/lib/updater.ts`, NEW `src/components/UpdateBanner.tsx`, `src/App.tsx`, `src/styles.css` |
+| 08 | 2 | Code-signing readiness | M | NEW `docs/signing.md`, `release.yml`, `README.md` |
+| 11 | 2 | Threaded replies | L | `commands/review.rs`, `src-tauri/src/export.rs`, NEW `src/lib/threads.ts`, `src/lib/api.ts`, `ReviewView.tsx`, `src/components/FileViewPane.tsx`, `src/styles.css` |
+| 12 | 2 | Resolve/unresolve local threads | M | NEW migration **0007**, `db/mod.rs`, `db/models.rs`, `commands/review.rs`, `export.rs`, `lib.rs`, `types.ts`, `api.ts`, NEW `src/lib/text.ts`, `ReviewView.tsx`, CSS |
+| 17 | 2 | Capture GitHub comment ids | M | `gh.rs`, `commands/review.rs`, `ROADMAP.md` |
+| 13 | 3 | Suggested changes | M | `src/lib/diff.ts` (+test), `ReviewView.tsx`, `src/components/Markdown.tsx` (+test), `styles.css`, `export.rs` (test only), `ROADMAP.md` |
+| 16 | 3 | LEFT-side re-anchoring | L | NEW migration **0008**, `db/mod.rs`, `db/models.rs`, `src-tauri/src/git.rs`, `src-tauri/src/anchor.rs`, `commands/review.rs`, `export.rs` (fixtures), `types.ts`, NEW `src/lib/staleness.ts`, `ReviewView.tsx`, `FileViewPane.tsx`, `ROADMAP.md` |
+| 18 | 3 | Reply/resolve GitHub threads | M | `gh.rs`, `src-tauri/src/commands/gh.rs`, `lib.rs`, `api.ts`, `types.ts`, `src/components/GithubThread.tsx` (+test), `ReviewView.tsx` (threadCtx + Composer), `styles.css` |
+| 14 | 4 | Keyboard navigation | L | NEW `src/lib/keyboard.ts`, NEW `src/components/ShortcutHelp.tsx`, `src/components/FileJumpList.tsx`, `ReviewView.tsx`, `styles.css`, `README.md`, `ROADMAP.md` |
+| 19 | 4 | PENDING (draft) GitHub reviews | L | NEW migration **0009**, `db/mod.rs`, `commands/review.rs`, `gh.rs`, `lib.rs`, `types.ts`, `api.ts`, NEW `src/lib/status.ts`, `ReviewView.tsx`, `src/components/RepoView.tsx`, `src/components/ReviewsView.tsx`, `styles.css` |
+| 21 | 5 | Provider trait over gh.rs | M | NEW `src-tauri/src/provider.rs`, `lib.rs`, `commands/gh.rs`, `commands/review.rs`, `ROADMAP.md` |
 
 ## 2. Hard-dependency DAG
 
-```
-04 ──► 05                       (05 consumes 04's pin files; never hard-code versions)
+`04 ──► 05` is satisfied (both merged in Wave 1). The edges below are all between pending specs;
+edges into a pending spec from a merged one (e.g. `10 ──► 16`) are satisfied because the merged
+side is already on `main`.
 
+```
 06 ──► 07 ──► 08                (same release.yml region; sequential, ONE worktree)
 
 11 ──► 12                       (same UI components; sequential, ONE worktree; 0007 needs 11's fixtures)
@@ -53,14 +65,17 @@ those, resolve them as written there.
 
 Heavy-contention files and which specs touch them:
 
+Specs struck through here are merged (Wave 1) — their contention is already resolved on `main`;
+only the remaining specs in each row still need sequencing.
+
 | File | Specs | Rule |
 |---|---|---|
-| `src/components/ReviewView.tsx` (heavy) | **09, 11, 12, 13, 14** | **Max one heavy spec per wave.** (Light touches by 10, 16, 18, 19 are allowed alongside; merge-order handles them.) |
-| `src-tauri/src/commands/review.rs` (heavy) | **10, 16, 17, 19** | **Max one per wave.** (11/12 also touch it — see merge-order notes below.) |
+| `src/components/ReviewView.tsx` (heavy) | ~~09~~, **11, 12, 13, 14** | **Max one heavy spec per wave.** (Light touches by 16, 18, 19 are allowed alongside; merge-order handles them. 09 already merged.) |
+| `src-tauri/src/commands/review.rs` (heavy) | ~~10~~, **16, 17, 19** | **Max one per wave.** (11/12 also touch it — see merge-order notes below. 10 already merged.) |
 | `add_comment` path in review.rs | 11, 16 | **Never the same wave; 11 first** (16 extends `add_comment_impl`, which 11 creates). |
 | `build_publish_payload` / publish path | 11, 17, 19 | 17 extracts `inline_publish_comments`; 11 (merged after 17 in wave 2) must put `fold_replies` **inside that helper**, not in `build_publish_payload`. 19 (wave 4) wraps the result. |
 | `.github/workflows/release.yml` | 06, 07, 08 | Same `env:`/`with:` region — sequential in one worktree, order 06→07→08. |
-| `src/lib/diff.ts` + `diff.test.ts` | 09, 13, 15 | 09+15 share wave 1: disjoint functions (15 rewrites `tokenizeFile`, 09 adds helpers) — merge 15 first, 09 rebases. 13 is wave 3. |
+| `src/lib/diff.ts` + `diff.test.ts` | ~~09, 15~~, 13 | 09+15 (Wave 1, merged) resolved as disjoint functions. Only **13** (wave 3) remains; it adds suggestion parsing — disjoint from the merged 09/15 code. |
 | `src/lib/api.ts`, `src/lib/types.ts` | 11, 12, 16, 18, 19 | Trivial append conflicts — resolve at merge by keeping **both** additions. |
 | `src-tauri/src/lib.rs` `generate_handler!` / `mod` list | 07, 12, 18, 19, 21 | Trivial append conflicts — keep all registrations, alphabetical mods. |
 | `db/mod.rs` `MIGRATIONS` array | 12, 16, 19 | Append-only, **positional** (index = schema version). Order in array must be 0007, 0008, 0009 — guaranteed by wave order. |
@@ -68,8 +83,8 @@ Heavy-contention files and which specs touch them:
 | `src/styles.css` | 07, 11, 12, 13, 14, 18, 19, 20 | Pure append blocks — keep both sides at merge. |
 | `CommentItem` / `Composer` in ReviewView.tsx | 11, 12, 13, 16, 18 | All additive optional props. Wave 3 has 13+16+18 all touching ReviewView lightly→moderately: merge order 18→13→16 and resolve prop additions additively. |
 | `src/components/FileViewPane.tsx` | 11, 16 | Different waves — fine. |
-| `src/components/RepoView.tsx` | 19, 20 | Different waves (20 wave 1, 19 wave 4) — fine. |
-| `package.json` | 04, 07 | Different waves — fine. |
+| `src/components/RepoView.tsx` | 19, ~~20~~ | 20 merged (Wave 1); only **19** (wave 4) remains. |
+| `package.json` | ~~04~~, 07 | 04 merged (Wave 1); only **07** (wave 2) remains. |
 | `ROADMAP.md`, `README.md` | many | Trivial; resolve at merge. |
 
 ## 4. Migration-number reservations
@@ -91,26 +106,11 @@ exist in `MIGRATIONS` before adding 0009 — satisfied by wave order.
 
 Notation: `A | B` = parallel tracks (separate worktrees); `[A→B]` = sequential in one worktree.
 
-### Wave 1 — independent foundations
+### Wave 1 — independent foundations — ✅ DONE
 
-| Track | Spec(s) | Branch | Files claimed |
-|---|---|---|---|
-| 1a | 04 | `spec/04-toolchain-pinning` | rust-toolchain.toml, .nvmrc, package.json, ubt.toml, CLAUDE.md, ROADMAP.md |
-| 1b | 05 | `spec/05-ci-checks` — **branch off `spec/04-…` tip** (hard dep: needs the pin files) | .github/workflows/ci.yml |
-| 1c | 09 | `spec/09-diff-expand-edges` | src/lib/diff.ts(+test) [edge-range helpers], ReviewView.tsx (heavy slot) |
-| 1d | 10 | `spec/10-pr-target-base-sha` | gh.rs, commands/review.rs (heavy slot), ReviewView.tsx (canExpand predicate only), ROADMAP.md |
-| 1e | 15 | `spec/15-word-level-highlight` | src/lib/diff.ts(+test) [tokenizeFile only] |
-| 1f | 20 | `spec/20-pr-list-refresh` | settings.ts(+test), timeAgo.ts(+test), RepoView.tsx(+test), styles.css |
-
-**Merge order: 04 → 05 → 15 → 20 → 09 → 10.**
-Known intra-wave overlaps: 15 vs 09 in `diff.ts`/`diff.test.ts` (disjoint functions; 09 rebases over
-15); 09 vs 10 in `ReviewView.tsx` (10 is a one-predicate edit; 10 merges last and rebases trivially —
-note the 09 edge expanders light up on PR targets the moment 10's predicate lands, by design).
-
-**Wave-1 verification:** gates after every merge (§6). **After 05 merges and is pushed, watch the
-first CI run to green** before merging anything else:
-`gh run watch "$(gh run list --workflow ci.yml --limit 1 --json databaseId -q '.[0].databaseId')"`.
-After 09+10: manual smoke — expand-to-top/bottom on a local review; gap expansion on a GitHub PR.
+Specs 04, 05, 09, 10, 15, 20 merged to `main` via `specs/workflows/` (the wave-1 Workflow run),
+executed merge order `04 → 05 → 15 → 20 → 09 → 10`, gates green after each merge and CI green.
+Spec files removed. The remaining waves below are the active plan.
 
 ### Wave 2 — threads, publish-id capture, release pipeline
 
@@ -210,34 +210,48 @@ cargo test   --manifest-path src-tauri/Cargo.toml
 All five must pass — including the cargo gates on frontend-only specs (they prove no backend
 drift). Spec-specific extra gates are listed per wave above and in each spec's Gates section.
 
-## 7. Worktree protocol (implementation agents)
+## 7. Execution model (Workflow tool)
 
-1. **One worktree per track**: `git worktree add ../codereview-spec-NN spec/NN-<short-name> main`
-   (sequential tracks like `[11→12]` reuse the worktree and start the next spec's commits on the
-   same branch chain only after the previous spec's gates pass; rename or branch
-   `spec/12-resolve-threads` off `spec/11-…` tip for clean history). Track 1b branches off
-   `spec/04-toolchain-pinning`'s tip, not `main`.
-2. **Branch naming:** `spec/NN-name` (e.g. `spec/09-diff-expand-edges`).
-3. **`pnpm install` first** in every fresh worktree (`node_modules` is not shared). Respect the
-   pinned toolchains once 04 lands (`rustup` picks up `rust-toolchain.toml` automatically).
-4. **No shared `CARGO_TARGET_DIR`.** Each worktree builds into its own
-   `src-tauri/target` — do not export a common target dir; parallel cargo builds must not
-   contend on one lock.
-5. **Touch only the files your spec lists** (the "Files claimed" column above + your spec's
-   "Files touched"). If you believe you must touch an unclaimed file, stop and surface it instead
-   of editing.
-6. **Commit message format** matches the existing log style — `type(scope): summary`, types seen
-   in this repo: `feat(review)`, `fix(review)`, `docs(roadmap)`, `docs(specs)`, `ci(release)`,
-   `ci(checks)`, `docs(signing)`. One spec may span several commits (specs mark independently
-   buildable steps); each commit must leave the worktree green.
-7. Run the full gate suite (§6) in the worktree before declaring the track done. Do **not** merge
-   or push — that is the integration step's job.
-8. Wave-2 track 2c additionally: never write key material into the worktree; run the spec 07
-   key-guard greps before every commit; `*.key` goes in `.gitignore`.
+Each wave is one invocation of the **Workflow tool**, with a script under `specs/workflows/`
+(e.g. `wave-2.js`). The script has two phases mirroring the Wave-1 run:
+
+- **`Implement` phase** — `parallel()` of one `agent(prompt, {isolation:'worktree', schema})` per
+  track. `isolation:'worktree'` gives each track its own fresh git worktree automatically — there
+  is **no manual `git worktree add`**, and each worktree has its own `src-tauri/target`, so the
+  "no shared `CARGO_TARGET_DIR`" concern is handled for free. Tracks return structured data
+  (branch, commits, gatesPassed, deviations).
+- **`Integrate` phase** — one `agent` in the **main checkout** that merges the track branches into
+  `main` per §8 and the wave's merge order, gating after each merge.
+
+Rules each implementation agent follows (encoded in the script's `COMMON` preamble):
+
+1. **Create your branch first** inside your worktree: `git checkout -b spec/NN-name`. Sequential
+   tracks like `[11→12]` reuse the same worktree — implement 11, gate, commit, then
+   `git checkout -b spec/12-resolve-threads` off 11's tip and continue (clean branch chain).
+2. **Branch naming:** `spec/NN-name` (e.g. `spec/11-threaded-replies`).
+3. **`pnpm install` first** in the fresh worktree (`node_modules` is not shared). The pinned
+   toolchains are already on `main` (`rustup` picks up `rust-toolchain.toml` automatically).
+4. **Read your spec(s) completely** plus the **Discrepancies** section below before writing code;
+   where spec line-anchors and current code disagree, the code wins on location, the spec on intent.
+5. **Touch only the files your spec lists** (the "Files claimed" column in §5 + your spec's
+   "Files touched"). If you believe you must touch an unclaimed file, stop and report it as a
+   deviation instead of editing.
+6. **Commit message format** matches the log style — `type(scope): summary`, types seen in this
+   repo: `feat(review)`, `fix(review)`, `docs(roadmap)`, `docs(specs)`, `ci(release)`,
+   `ci(checks)`, `docs(signing)`. One spec may span several commits; each must leave the tree green.
+7. Run the full gate suite (§6) in the worktree before declaring the track done. **Do not merge,
+   push, or delete branches** — that is the Integrate phase's job. The final message is structured
+   data for the integrator.
+8. Wave-2 track 2c additionally: never generate/write key material in the worktree (keygen +
+   `gh secret set` + backup is a **user checkpoint** after the wave, see Discrepancy #8); use a
+   clearly-marked placeholder pubkey + `TODO(user)` in `tauri.conf.json`; run the spec-07 key-guard
+   greps before every commit; `*.key` goes in `.gitignore`.
 
 ## 8. Integration protocol (merge step)
 
-For each wave, after all tracks report green:
+This is the **`Integrate` phase** of each wave's Workflow: a single agent runs it in the main
+checkout after the `Implement` tracks report green (the track branches live in the same repo).
+For each wave:
 
 1. Merge branches into `main` **in the wave's stated merge order**, one at a time
    (`git merge --no-ff spec/NN-name` from the main checkout).
@@ -256,10 +270,10 @@ For each wave, after all tracks report green:
 4. **Wave 2 only:** before each merge, the PRIVATE-KEY grep
    (`git diff main..<branch> | grep -niE "PRIVATE KEY|untrusted comment|secret key"` → empty);
    after all merges, `git grep -qi "untrusted comment"` → nothing.
-5. Push directly to `main` (repo convention — no PRs). **After every push, watch CI:**
-   `gh run watch "$(gh run list --workflow ci.yml --limit 1 --json databaseId -q '.[0].databaseId')"`
-   (from wave 1's 05-merge onward). A red run is fixed forward immediately before starting the
-   next wave.
+5. Push directly to `main` (repo convention — no PRs). **After every push, watch CI** (the
+   `ci.yml` workflow has shipped since Wave 1):
+   `gh run watch "$(gh run list --workflow ci.yml --limit 1 --json databaseId -q '.[0].databaseId')"`.
+   A red run is fixed forward immediately before starting the next wave.
 6. Clean up merged worktrees/branches (`git worktree remove …`, `git branch -d spec/NN-…`).
 
 ## 9. Wave 6 — release-verification runbook (user-gated)
@@ -332,11 +346,12 @@ another update; there is no rotation mechanism.
    edit `ReviewView.tsx` (banner/props, threadCtx, header buttons). Accepted: the touches are
    additive/regional and the merge orders (18→13→16, 19→14) sequence them; not a rule violation,
    but integration should expect non-append conflicts in `ReviewView.tsx` in waves 3 and 4.
-7. **Wave-1 `diff.ts` contention is not covered by the trivial-append list.** Specs 09 and 15 both
-   edit `src/lib/diff.ts` and `diff.test.ts` in wave 1. The functions are disjoint
-   (15: `tokenizeFile`/imports; 09: new exported helpers), so the 15→…→09 merge order resolves it,
-   but it is a real (if easy) merge, unlike api.ts/types.ts appends.
-8. **Spec 07's keygen/backup is a user-interaction point inside wave 2.** The plan's waves are
-   otherwise agent-autonomous; track 2c blocks mid-wave on the user confirming the key backup and
-   on `gh secret set` (operator credentials). Schedule track 2c's keygen step early in the wave so
-   the wait doesn't serialize the whole wave.
+7. **~~Wave-1 `diff.ts` contention~~ — RESOLVED (merged).** Specs 09 and 15 both edited
+   `src/lib/diff.ts`/`diff.test.ts` in wave 1; the disjoint-function merge (15 → 09) landed cleanly
+   on `main`. Kept here only as the precedent for spec 13's wave-3 `diff.ts` work.
+8. **Spec 07's keygen/backup is a USER CHECKPOINT, not agent work.** Implementation agents are
+   autonomous and cannot generate keys or set GitHub secrets. So track 2c writes the updater code
+   with a **placeholder `pubkey` + `TODO(user)`** and never touches key material. The real
+   keygen (`tauri signer generate`), `gh secret set TAURI_SIGNING_PRIVATE_KEY[_PASSWORD]`, backup
+   confirmation, and pasting the real pubkey into `tauri.conf.json` happen **between the Wave-2 run
+   and Wave 6** as an explicit user step — live release/RC verification stays in Wave 6 (cf. #5).
