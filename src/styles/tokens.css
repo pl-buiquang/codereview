@@ -5,9 +5,9 @@
    B · Modern      — Manrope, indigo accent, near-black darks, soft radii
    C · Terminal    — JetBrains Mono everywhere, green accent, sharp
 
-   Sourced from specs/design_handoff_codereview_redesign/tokens.css with two
-   additions per spec 22: the 8 `--tok-*` syntax-highlight values inside each
-   theme block, and the COMPAT alias block at the end (removed in Phase 8).
+   Sourced from the spec-22 design handoff bundle with two additions: the 8
+   `--tok-*` syntax-highlight values inside each theme block (the handoff has
+   been removed post-implementation; see git history if the originals are needed).
    ============================================================ */
 
 .cr {
