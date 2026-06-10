@@ -3,6 +3,7 @@ import {
   expandFromRawCode,
   getCollapsedLinesCountBetween,
   parseDiff,
+  type TokenNode,
 } from "react-diff-view";
 import {
   anchorByLine,
@@ -12,6 +13,7 @@ import {
   changeKeyOf,
   countChanges,
   hunkContextSnippet,
+  tokenizeFile,
 } from "./diff";
 
 describe("languageForPath", () => {
@@ -209,6 +211,94 @@ describe("hunkContextSnippet", () => {
     const snippet = hunkContextSnippet(file.hunks[0], "RIGHT", 999, 999, 3);
     expect(snippet).toContain("@@ -1,7 +1,7 @@");
     expect(snippet.split("\n")).toHaveLength(1);
+  });
+});
+
+// Collect every token node type reachable from a side's per-line token trees.
+function tokenTypes(linesOfTrees: TokenNode[][]): Set<string> {
+  const types = new Set<string>();
+  const walk = (node: TokenNode) => {
+    types.add(node.type);
+    for (const child of node.children ?? []) walk(child);
+  };
+  for (const line of linesOfTrees) for (const node of line) walk(node);
+  return types;
+}
+
+// A modified line pair in a TypeScript file (languageForPath resolves "f.ts").
+const MODIFIED_TS_DIFF = `diff --git a/f.ts b/f.ts
+index 0000000..1111111 100644
+--- a/f.ts
++++ b/f.ts
+@@ -1,1 +1,1 @@
+-const a = 1;
++const a = 2;
+`;
+
+// Same modified pair, but in a file with no registered language.
+const MODIFIED_UNKNOWN_DIFF = `diff --git a/notes.unknownext b/notes.unknownext
+index 0000000..1111111 100644
+--- a/notes.unknownext
++++ b/notes.unknownext
+@@ -1,1 +1,1 @@
+-const a = 1;
++const a = 2;
+`;
+
+// A pure insertion (no paired delete) into a TypeScript file.
+const INSERT_ONLY_TS_DIFF = `diff --git a/f.ts b/f.ts
+index 0000000..1111111 100644
+--- a/f.ts
++++ b/f.ts
+@@ -1,1 +1,2 @@
+ const a = 1;
++const b = 2;
+`;
+
+describe("tokenizeFile", () => {
+  it("marks intra-line edits on a modified line pair", () => {
+    const [file] = parseDiff(MODIFIED_TS_DIFF);
+    const tokens = tokenizeFile(file);
+    expect(tokens).toBeDefined();
+    expect(tokenTypes(tokens!.new)).toContain("edit");
+    expect(tokenTypes(tokens!.old)).toContain("edit");
+  });
+
+  it("keeps syntax highlight tokens alongside edit marks", () => {
+    const [file] = parseDiff(MODIFIED_TS_DIFF);
+    const tokens = tokenizeFile(file);
+    expect(tokens).toBeDefined();
+    const types = tokenTypes(tokens!.new);
+    const refractorTypes = [...types].filter((t) => t !== "text" && t !== "edit");
+    expect(refractorTypes.length).toBeGreaterThan(0);
+  });
+
+  it("skips markEdits above the changed-line threshold", () => {
+    const [file] = parseDiff(MODIFIED_TS_DIFF); // add + del = 2
+    const tokens = tokenizeFile(file, { markEditsMaxChanges: 1 });
+    expect(tokens).toBeDefined();
+    expect(tokenTypes(tokens!.new)).not.toContain("edit");
+    expect(tokenTypes(tokens!.old)).not.toContain("edit");
+  });
+
+  it("marks edits in files without a registered language", () => {
+    const [file] = parseDiff(MODIFIED_UNKNOWN_DIFF);
+    const tokens = tokenizeFile(file);
+    expect(tokens).toBeDefined();
+    expect(tokenTypes(tokens!.new)).toContain("edit");
+  });
+
+  it("returns undefined when neither language nor edits apply", () => {
+    const [file] = parseDiff(MODIFIED_UNKNOWN_DIFF);
+    expect(tokenizeFile(file, { markEditsMaxChanges: 0 })).toBeUndefined();
+  });
+
+  it("adds no edit marks for pure insert/delete blocks", () => {
+    const [file] = parseDiff(INSERT_ONLY_TS_DIFF);
+    const tokens = tokenizeFile(file);
+    expect(tokens).toBeDefined();
+    expect(tokenTypes(tokens!.new)).not.toContain("edit");
+    expect(tokenTypes(tokens!.old)).not.toContain("edit");
   });
 });
 

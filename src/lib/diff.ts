@@ -1,9 +1,11 @@
 import {
   getChangeKey,
+  markEdits,
   tokenize,
   type ChangeData,
   type FileData,
   type HunkData,
+  type TokenizeOptions,
 } from "react-diff-view";
 import { refractor } from "refractor";
 import type { Side } from "./types";
@@ -35,12 +37,40 @@ export function languageForPath(path: string): string | undefined {
   return lang && refractor.registered(lang) ? lang : undefined;
 }
 
-/** Syntax-highlight tokens for a file's hunks, or undefined if unsupported. */
-export function tokenizeFile(file: FileData) {
+/** Files with more changed lines than this skip word-level edit marking (perf). */
+export const MARK_EDITS_MAX_CHANGES = 2000;
+
+/**
+ * Tokens for a file's hunks: syntax highlight (when the language is known)
+ * plus word-level intra-line edit marks (when the diff isn't huge), or
+ * undefined when neither applies.
+ */
+export function tokenizeFile(
+  file: FileData,
+  opts: { markEditsMaxChanges?: number } = {},
+) {
   const language = languageForPath(fileDisplayPath(file));
+  const { markEditsMaxChanges = MARK_EDITS_MAX_CHANGES } = opts;
+  const { add, del } = countChanges(file);
+  const wantEdits = add + del <= markEditsMaxChanges;
+  if (!language && !wantEdits) return undefined;
+
+  const base: TokenizeOptions = language
+    ? { highlight: true, refractor: refractorCompat, language }
+    : { highlight: false };
+  if (wantEdits) {
+    try {
+      return tokenize(file.hunks, {
+        ...base,
+        enhancers: [markEdits(file.hunks, { type: "block" })],
+      });
+    } catch {
+      // markEdits can throw on odd change blocks; retry highlight-only below.
+    }
+  }
   if (!language) return undefined;
   try {
-    return tokenize(file.hunks, { highlight: true, refractor: refractorCompat, language });
+    return tokenize(file.hunks, base);
   } catch {
     return undefined;
   }
