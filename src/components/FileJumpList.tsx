@@ -10,6 +10,7 @@ import { useQuery } from "@tanstack/react-query";
 import { parseDiff } from "react-diff-view";
 import { api } from "../lib/api";
 import { countChanges, fileDisplayPath } from "../lib/diff";
+import { Icon } from "./icons";
 
 interface Row {
   index: number;
@@ -87,25 +88,6 @@ function Chevron({ open }: { open: boolean }) {
       aria-hidden="true"
     >
       <path d="m9 6 6 6-6 6" />
-    </svg>
-  );
-}
-
-function FolderIcon() {
-  return (
-    <svg
-      className="tree-folder"
-      width="14"
-      height="14"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M4 20a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2Z" />
     </svg>
   );
 }
@@ -271,7 +253,7 @@ export function FileJumpList({
             title={node.path}
           >
             <Chevron open={open} />
-            <FolderIcon />
+            <Icon name="folder" size={13} className="tree-folder" />
             <span className="tree-name">{node.name}</span>
           </button>,
           ...(open ? renderNodes(node.children, depth + 1) : []),
@@ -289,11 +271,12 @@ export function FileJumpList({
           onClick={() => jumpTo(row.index)}
           title={row.path}
         >
+          <Icon name="file" size={13} className="tree-file" />
           <span className="tree-name">{node.name}</span>
           <span className="jump-meta">
             {row.count > 0 && <span className="jump-badge">{row.count}</span>}
-            <span className="add">+{row.add}</span>
-            <span className="del">−{row.del}</span>
+            <span className="delta-add">+{row.add}</span>
+            <span className="delta-del">−{row.del}</span>
           </span>
         </button>,
       ];

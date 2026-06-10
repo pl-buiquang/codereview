@@ -793,93 +793,78 @@ button:disabled,
   gap: 16px;
 }
 .diff-file {
+  background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-l);
+  box-shadow: var(--shadow-card);
   overflow: clip;
 }
 .diff-file-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 12px;
-  background: var(--bg-elev);
+  gap: 10px;
+  padding: 9px 12px;
+  background: var(--surface-2);
   border-bottom: 1px solid var(--border);
+  border-radius: var(--radius-l) var(--radius-l) 0 0;
   position: sticky;
   top: 0;
   z-index: 3;
 }
 .file-path {
-  font-family: var(--code-font, ui-monospace, SFMono-Regular, Menlo, monospace);
-  font-size: 13px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
 }
-.diff-stats .add {
-  color: var(--success);
-  margin-right: 8px;
-}
-.diff-stats .del {
-  color: var(--danger);
+.diff-stats {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
 }
 .binary-note {
   padding: 12px;
 }
-.file-comment-btn {
-  margin-left: 8px;
-  padding: 2px 8px;
-  font-size: 12px;
-  background: transparent;
-  color: var(--muted);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  cursor: pointer;
-}
-.file-comment-btn:hover {
-  color: var(--text);
-  border-color: var(--accent);
-}
-.open-file-btn {
-  margin-left: 8px;
-  padding: 2px 8px;
-  font-size: 12px;
-  background: transparent;
-  color: var(--muted);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  cursor: pointer;
-}
-.open-file-btn:hover:not(:disabled) {
-  color: var(--text);
-  border-color: var(--accent);
-}
-.open-file-btn:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
 .file-comments {
   padding: 8px 12px;
-  background: color-mix(in srgb, var(--accent) 6%, transparent);
+  background: var(--accent-soft);
   border-bottom: 1px solid var(--border);
 }
 
-/* react-diff-view dark theme overrides */
+/* react-diff-view overrides — restyle only via documented class hooks */
 .diff {
-  background: var(--bg);
+  background: var(--surface);
   color: var(--text);
-  font-family: var(--code-font, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-family: var(--font-mono);
   font-size: var(--diff-font-size, 12.5px);
 }
 .diff-gutter {
-  color: var(--muted);
+  color: var(--text-3);
+  font-size: 10.5px;
+  text-align: right;
 }
 .diff-gutter-col {
-  background: var(--bg);
+  background: var(--surface);
 }
-.diff-code-insert,
-.diff-gutter-insert {
+.diff-code-insert {
   background: var(--diff-add-bg);
 }
-.diff-code-delete,
-.diff-gutter-delete {
+.diff-gutter-insert {
+  background: var(--diff-add-strong);
+  color: var(--text);
+}
+.diff-code-delete {
   background: var(--diff-del-bg);
+}
+.diff-gutter-delete {
+  background: var(--diff-del-strong);
+  color: var(--text);
 }
 .diff-code-insert .diff-code-edit {
   background: color-mix(in srgb, var(--success) 40%, transparent);
@@ -888,14 +873,14 @@ button:disabled,
   background: color-mix(in srgb, var(--danger) 40%, transparent);
 }
 .diff-gutter:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--surface-2);
 }
 .diff-hunk-header {
-  background: var(--bg-elev);
-  color: var(--muted);
+  background: var(--bg-sunken);
+  color: var(--text-2);
 }
 .diff-expander .diff-decoration-content {
-  background: var(--bg-elev);
+  background: var(--bg-sunken);
   border-top: 1px dashed var(--border);
   border-bottom: 1px dashed var(--border);
 }
@@ -906,7 +891,7 @@ button:disabled,
   gap: 0.75rem;
   padding: 0.25rem 0.5rem;
   font-size: 0.85em;
-  color: var(--muted);
+  color: var(--text-2);
 }
 .expand-btn {
   background: transparent;
@@ -1021,7 +1006,8 @@ td.diff-code {
   gap: 12px;
 }
 .review-title {
-  font-family: var(--code-font, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-family: var(--font-mono);
+  font-weight: 600;
   font-size: 15px;
   margin: 0;
 }
@@ -1042,7 +1028,7 @@ td.diff-code {
   border-color: var(--success);
 }
 .save-state {
-  color: var(--muted);
+  color: var(--text-3);
   font-size: 12px;
 }
 .review-header-top .view-toggle {
@@ -1072,11 +1058,11 @@ td.diff-code {
   width: 100%;
   min-height: 64px;
   resize: vertical;
-  background: var(--bg-elev);
+  background: var(--surface);
   color: var(--text);
   border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 8px 10px;
+  border-radius: var(--radius-m);
+  padding: 10px 12px;
   font: inherit;
 }
 .verdict {
@@ -1084,6 +1070,7 @@ td.diff-code {
   align-items: center;
   gap: 16px;
   margin-top: 8px;
+  padding: 10px 14px;
 }
 .verdict-option {
   display: inline-flex;
@@ -1572,24 +1559,6 @@ td.diff-code {
 }
 
 /* Full-file review pane (v2) */
-.view-file-btn {
-  margin-left: 8px;
-  padding: 2px 8px;
-  font-size: 12px;
-  background: transparent;
-  color: var(--muted);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  cursor: pointer;
-}
-.view-file-btn:hover:not(:disabled) {
-  color: var(--text);
-  border-color: var(--accent);
-}
-.view-file-btn:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
 .file-view-pane {
   position: fixed;
   top: 0;
@@ -1620,7 +1589,7 @@ td.diff-code {
   align-items: center;
   gap: 12px;
   padding: 8px 12px;
-  background: var(--bg-elev);
+  background: var(--surface-2);
   border-bottom: 1px solid var(--border);
 }
 .file-view-pane-header .file-path {
@@ -2101,53 +2070,62 @@ td.diff-code {
   overflow-y: auto;
 }
 .jump-list {
-  flex: 0 0 240px;
+  flex: 0 0 248px;
   min-height: 0;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 1px;
+  padding: 4px 8px 12px;
+  border-right: 1px solid var(--border);
 }
 .jump-list-header {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--muted);
-  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-2);
+  padding: 8px;
 }
 .tree-row {
   display: flex;
   align-items: center;
   gap: 6px;
   width: 100%;
-  padding: 5px 8px;
+  height: 24px;
+  padding: 0 8px;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-s);
   background: transparent;
-  color: inherit;
-  font: inherit;
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 400;
   text-align: left;
   cursor: pointer;
 }
 .tree-row:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--surface-2);
+  color: var(--text);
 }
-.tree-row.active {
-  background: color-mix(in srgb, var(--accent) 15%, transparent);
+.tree-row.active,
+.tree-row.active:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 .tree-row.viewed {
-  color: var(--muted);
+  color: var(--text-3);
 }
 .tree-chevron {
   flex-shrink: 0;
-  color: var(--muted);
+  color: var(--text-3);
   transition: transform 0.12s ease;
 }
 .tree-chevron.open {
   transform: rotate(90deg);
 }
-.tree-folder {
+.tree-folder,
+.tree-file {
   flex-shrink: 0;
-  color: var(--muted);
+  color: var(--text-3);
 }
 .tree-name {
   flex: 1;
@@ -2155,28 +2133,20 @@ td.diff-code {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-family: var(--code-font, ui-monospace, SFMono-Regular, Menlo, monospace);
-  font-size: 12px;
 }
 .jump-meta {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   flex-shrink: 0;
-  font-size: 12px;
-}
-.jump-meta .add {
-  color: var(--success);
-}
-.jump-meta .del {
-  color: var(--danger);
 }
 .jump-badge {
-  font-size: 11px;
-  padding: 0 7px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 0 6px;
   border-radius: 999px;
-  border: 1px solid var(--border);
-  color: var(--muted);
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 /* ===================== Dashboard (home tab) ===================== */

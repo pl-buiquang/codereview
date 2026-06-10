@@ -34,6 +34,7 @@ import { GithubThread } from "./GithubThread";
 import { Markdown } from "./Markdown";
 import { OpenPrButton } from "./OpenPrButton";
 import { PrMetaPanel } from "./PrMetaPanel";
+import { Icon } from "./icons";
 import { githubPrUrl } from "../lib/githubUrl";
 import { useDebouncedCallback } from "../lib/useDebouncedCallback";
 import { useSettingsStore } from "../lib/settings";
@@ -259,19 +260,21 @@ function ReviewHeader({
   return (
     <header className="review-header">
       <div className="review-header-top">
-        <button onClick={onBack}>← Back</button>
+        <button className="btn btn-ghost" onClick={onBack}>
+          <Icon name="back" size={13} /> Back
+        </button>
         <button
-          className="header-collapse-toggle"
+          className="btn btn-ghost"
           title={collapsed ? "Show review details" : "Hide review details"}
           onClick={() => setCollapsed((c) => !c)}
         >
-          {collapsed ? "▸ Expand" : "▾ Collapse"}
+          <Icon name="chev" size={13} /> {collapsed ? "Expand" : "Collapse"}
         </button>
         <h2 className="review-title">{target.title}</h2>
-        <span className={`status-badge ${review.status}`}>{review.status}</span>
-        <span className="save-state">
-          {saveState === "saving" ? "Saving…" : "Saved"}
+        <span className={`badge ${review.status === "draft" ? "badge-draft" : "badge-pr"}`}>
+          {review.status}
         </span>
+        <span className="save-state">{saveState === "saving" ? "Saving…" : "Saved"}</span>
         <div className="view-toggle">
           <button
             className={viewType === "split" ? "active" : ""}
@@ -296,6 +299,7 @@ function ReviewHeader({
               ⚠ head moved
             </span>
             <button
+              className="btn btn-sm"
               disabled={readOnly || reanchorComments.isPending}
               title={
                 readOnly
@@ -309,6 +313,7 @@ function ReviewHeader({
           </span>
         )}
         <button
+          className="btn"
           disabled={readOnly || refreshReview.isPending}
           title={
             readOnly
@@ -317,12 +322,22 @@ function ReviewHeader({
           }
           onClick={() => refreshReview.mutate()}
         >
-          {refreshReview.isPending ? "Refreshing…" : "Refresh"}
+          {refreshReview.isPending ? (
+            <>
+              <span className="spinner" /> Refreshing…
+            </>
+          ) : (
+            <>
+              <Icon name="refresh" size={13} /> Refresh
+            </>
+          )}
         </button>
-        <button onClick={() => setShowExport(true)}>Export</button>
+        <button className="btn" onClick={() => setShowExport(true)}>
+          Export
+        </button>
         {isPr && (
           <button
-            className="btn-primary"
+            className="btn btn-primary"
             disabled={published || publishReview.isPending}
             title={
               published
@@ -345,7 +360,7 @@ function ReviewHeader({
           </button>
         )}
         <button
-          className="btn-danger"
+          className="btn btn-danger"
           onClick={async () => {
             if (
               await confirmDialog({
@@ -386,6 +401,7 @@ function ReviewHeader({
 
           <div className="review-summary">
             <textarea
+              className="textarea"
               placeholder="Review summary…"
               value={body}
               disabled={readOnly}
@@ -394,10 +410,10 @@ function ReviewHeader({
                 save(e.target.value, event);
               }}
             />
-            <div className="verdict">
+            <div className="verdict card">
               <span className="muted">Verdict:</span>
               {VERDICTS.map((v) => (
-                <label key={v.value} className="verdict-option">
+                <label key={v.value} className="verdict-option check">
                   <input
                     type="radio"
                     name="verdict"
@@ -767,21 +783,21 @@ function FileReview({
   return (
     <div className="diff-file" id={`file-${index}`}>
       <div className="diff-file-header">
-        <span className="file-path">{path}</span>
+        <span className="file-path mono">{path}</span>
         <span className="diff-stats">
-          <span className="add">+{add}</span>
-          <span className="del">−{del}</span>
+          <span className="delta-add">+{add}</span>
+          <span className="delta-del">−{del}</span>
           {!readOnly && (
             <button
-              className="file-comment-btn"
+              className="btn btn-sm btn-ghost file-comment-btn"
               title="Add a comment on the whole file"
               onClick={() => setFileComposerOpen(true)}
             >
-              💬 Comment on file
+              <Icon name="comment" size={12} /> Comment on file
             </button>
           )}
           <button
-            className="view-file-btn"
+            className="btn btn-sm btn-ghost view-file-btn"
             title={
               isDeleted
                 ? "File was deleted; no head version to view"
@@ -792,10 +808,10 @@ function FileReview({
             disabled={isDeleted || file.isBinary}
             onClick={() => onOpenFilePane(path)}
           >
-            View file
+            <Icon name="eye" size={12} /> View file
           </button>
           <button
-            className="open-file-btn"
+            className="btn btn-sm btn-ghost open-file-btn"
             title={
               isDeleted
                 ? "File was deleted; no working copy to open"
@@ -804,9 +820,9 @@ function FileReview({
             disabled={isDeleted}
             onClick={openInDefaultApp}
           >
-            Open
+            <Icon name="ext" size={12} /> Open
           </button>
-          <label className="viewed-toggle" title="Collapse this file">
+          <label className="viewed-toggle check" title="Collapse this file">
             <input
               type="checkbox"
               checked={viewed}
