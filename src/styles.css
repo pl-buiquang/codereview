@@ -2612,6 +2612,126 @@ td.diff-code {
   gap: 6px;
 }
 
+/* ===== Reviews / Archive / Repositories (Phase 4) ===== */
+.sort-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-2);
+  font-size: 12px;
+}
+.sort-select {
+  height: 30px;
+  border-radius: var(--radius-m);
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text);
+  padding: 0 8px;
+  font-size: 12.5px;
+  font-family: var(--font-ui);
+}
+.archive-search {
+  width: 320px;
+  max-width: 100%;
+}
+.rev-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 14px;
+  cursor: pointer;
+}
+.rev-main {
+  flex: 1;
+  min-width: 0;
+}
+.rev-title {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text);
+}
+.rev-meta {
+  margin-top: 3px;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 11.5px;
+  color: var(--text-2);
+}
+.rev-meta .sep::before {
+  content: "·";
+  color: var(--text-3);
+  margin-right: 6px;
+}
+.btn-split {
+  position: relative;
+}
+.btn-split-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  min-width: 140px;
+  padding: 4px;
+  box-shadow: var(--shadow-pop);
+}
+.btn-split-menu button {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  border-radius: var(--radius-s);
+  padding: 6px 8px;
+  text-align: left;
+  font-weight: 500;
+  white-space: nowrap;
+  color: var(--text);
+}
+.btn-split-menu button:hover {
+  background: var(--surface-2);
+}
+.repo-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  cursor: pointer;
+}
+.repo-row-icon {
+  flex: none;
+  color: var(--text-2);
+  display: grid;
+  place-items: center;
+}
+.repo-row-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.repo-row-name {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text);
+}
+.repo-row-path {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.archive-list .pr-title {
+  color: var(--text-2);
+}
+
 .nav-list {
   list-style: none;
   margin: 0;

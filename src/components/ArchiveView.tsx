@@ -42,18 +42,19 @@ export function ArchiveView() {
   const items = archiveQuery.data ?? [];
 
   return (
-    <section className="main-panel inbox-panel">
-      <header className="inbox-header">
-        <h2 className="inbox-h">Archive</h2>
+    <section className="cr-main">
+      <header className="cr-pagehead">
+        <h1 className="cr-h1">Archive</h1>
+        <div className="cr-spacer" />
         <input
-          className="archive-search"
+          className="input archive-search"
           placeholder="Search archived by title, repo, or author…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
       </header>
 
-      <div className="inbox-list">
+      <div className="cr-list archive-list">
         {archiveQuery.isLoading && <p className="muted">Loading…</p>}
         {!archiveQuery.isLoading && items.length === 0 && (
           <p className="muted">{search.trim() ? "No matches." : "Nothing archived."}</p>

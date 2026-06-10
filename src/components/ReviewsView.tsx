@@ -8,6 +8,7 @@ import { githubPrUrl } from "../lib/githubUrl";
 import { useUIStore } from "../store";
 import type { ReviewSummary } from "../lib/types";
 import { OpenPrButton } from "./OpenPrButton";
+import { Icon } from "./icons";
 
 type SortKey = "modified" | "created" | "comments" | "title";
 
@@ -114,11 +115,11 @@ export function ReviewsView() {
   }, [all, statusFilter, originFilter, repoFilter, verdictFilter, sort]);
 
   return (
-    <section className="main-panel inbox-panel">
-      <header className="inbox-header">
+    <section className="cr-main">
+      <header className="cr-pagehead">
         <div>
-          <h2 className="inbox-h">Reviews</h2>
-          <p className="muted small">
+          <h1 className="cr-h1">Reviews</h1>
+          <p className="cr-sub">
             {reviewsQuery.isLoading
               ? "Loading…"
               : `${filtered.length}${filtered.length !== all.length ? ` of ${all.length}` : ""} review${
@@ -126,29 +127,28 @@ export function ReviewsView() {
                 }`}
           </p>
         </div>
-        <div className="inbox-header-actions">
-          <label className="muted small sort-control">
-            Sort
-            <select className="sort-select" value={sort} onChange={(e) => setSort(e.target.value as SortKey)}>
-              {SORTS.map((s) => (
-                <option key={s.key} value={s.key}>
-                  {s.label}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
+        <div className="cr-spacer" />
+        <label className="sort-control">
+          Sort
+          <select className="sort-select" value={sort} onChange={(e) => setSort(e.target.value as SortKey)}>
+            {SORTS.map((s) => (
+              <option key={s.key} value={s.key}>
+                {s.label}
+              </option>
+            ))}
+          </select>
+        </label>
       </header>
 
       <div className="inbox-layout">
-        <aside className="inbox-filters">
+        <aside className="cr-rail">
           <FilterGroup title="Status" entries={statusEntries} selected={statusFilter} onSelect={setStatusFilter} />
           <FilterGroup title="Origin" entries={originEntries} selected={originFilter} onSelect={setOriginFilter} />
           <FilterGroup title="Repositories" entries={repoEntries} selected={repoFilter} onSelect={setRepoFilter} mono />
           <FilterGroup title="Verdict" entries={verdictEntries} selected={verdictFilter} onSelect={setVerdictFilter} />
         </aside>
 
-        <div className="inbox-list">
+        <div className="cr-list">
           {reviewsQuery.isLoading && <p className="muted">Loading…</p>}
           {reviewsQuery.isError && <p className="error">Could not load reviews: {String(reviewsQuery.error)}</p>}
           {!reviewsQuery.isLoading && all.length === 0 && (
@@ -196,17 +196,23 @@ function ReviewRow({
   const { review, target, repo_label, comment_count } = summary;
   const kindLabel = target.kind === "github_pr" ? `PR #${target.github_pr_number}` : "local";
   return (
-    <div className="review-row" onClick={onOpen}>
-      <div className="review-row-main">
-        <span className="review-row-title">{target.title}</span>
-        <span className="muted small">
-          <span className="mono">{repo_label}</span> · {kindLabel} · {comment_count} comment
-          {comment_count === 1 ? "" : "s"}
-          {review.event ? ` · ${review.event}` : ""} · updated {timeAgo(review.updated_at)}
-        </span>
+    <div className="card rev-row" onClick={onOpen}>
+      <div className="rev-main">
+        <span className="rev-title">{target.title}</span>
+        <div className="rev-meta">
+          <span className="mono">{repo_label}</span>
+          <span className="sep">{kindLabel}</span>
+          <span className="sep">
+            {comment_count} comment{comment_count === 1 ? "" : "s"}
+          </span>
+          {review.event && <span className="sep">{review.event}</span>}
+          <span className="sep">updated {timeAgo(review.updated_at)}</span>
+        </div>
       </div>
       {prUrl && <OpenPrButton url={prUrl} size="xs" />}
-      <span className={`status-badge ${review.status}`}>{review.status}</span>
+      <span className={`badge ${review.status === "draft" ? "badge-draft" : "badge-pr"}`}>
+        {review.status}
+      </span>
       <button
         className="btn-icon"
         title="Delete review"
@@ -215,7 +221,7 @@ function ReviewRow({
           onDelete();
         }}
       >
-        ✕
+        <Icon name="x" size={12} />
       </button>
     </div>
   );
@@ -236,28 +242,25 @@ function FilterGroup({
 }) {
   if (entries.length === 0) return null;
   return (
-    <div className="filter-group">
-      <div className="filter-title">
+    <div className="cr-rail-group">
+      <div className="cr-rail-h">
         <span>{title}</span>
         {selected && (
-          <button className="filter-clear" onClick={() => onSelect(null)}>
+          <button className="cr-rail-clear" onClick={() => onSelect(null)}>
             clear
           </button>
         )}
       </div>
-      <ul className="filter-items">
-        {entries.map(({ key, label, count }) => (
-          <li key={key}>
-            <button
-              className={`filter-item${key === selected ? " active" : ""}`}
-              onClick={() => onSelect(key === selected ? null : key)}
-            >
-              <span className={mono ? "mono truncate" : "truncate"}>{label}</span>
-              <span className="filter-count">{count}</span>
-            </button>
-          </li>
-        ))}
-      </ul>
+      {entries.map(({ key, label, count }) => (
+        <button
+          key={key}
+          className={`cr-rail-item${key === selected ? " on" : ""}`}
+          onClick={() => onSelect(key === selected ? null : key)}
+        >
+          <span className={mono ? "lbl mono" : "lbl"}>{label}</span>
+          <span className="count">{count}</span>
+        </button>
+      ))}
     </div>
   );
 }

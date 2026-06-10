@@ -5,6 +5,7 @@ import { confirmDialog } from "../lib/confirm";
 import { repoLabel } from "../lib/repoLabel";
 import { useUIStore } from "../store";
 import type { Repository } from "../lib/types";
+import { Icon } from "./icons";
 
 export function RepositoriesView() {
   const queryClient = useQueryClient();
@@ -49,24 +50,28 @@ export function RepositoriesView() {
   const repos = reposQuery.data ?? [];
 
   return (
-    <section className="main-panel repos-panel">
-      <header className="inbox-header">
-        <h2 className="inbox-h">Repositories</h2>
-        <button className="btn-primary" onClick={() => addRepo.mutate()} disabled={addRepo.isPending}>
-          {addRepo.isPending ? "Adding…" : "+ Add repo"}
+    <section className="cr-main">
+      <header className="cr-pagehead">
+        <h1 className="cr-h1">Repositories</h1>
+        <div className="cr-spacer" />
+        <button className="btn btn-primary" onClick={() => addRepo.mutate()} disabled={addRepo.isPending}>
+          <Icon name="plus" size={13} /> {addRepo.isPending ? "Adding…" : "Add repo"}
         </button>
       </header>
 
-      <nav className="repo-list">
+      <nav className="cr-list">
         {reposQuery.isLoading && <p className="muted">Loading…</p>}
         {!reposQuery.isLoading && repos.length === 0 && (
           <p className="muted">No repositories yet. Add a local git repo to start.</p>
         )}
         {repos.map((repo) => (
-          <div key={repo.id} className="repo-item" onClick={() => openRepoTab(repo.id)}>
-            <div className="repo-item-main">
-              <span className="repo-name">{repoLabel(repo)}</span>
-              <span className="repo-path" title={repo.path}>
+          <div key={repo.id} className="card repo-row" onClick={() => openRepoTab(repo.id)}>
+            <span className="repo-row-icon">
+              <Icon name="repo" size={16} />
+            </span>
+            <div className="repo-row-main">
+              <span className="repo-row-name">{repoLabel(repo)}</span>
+              <span className="repo-row-path" title={repo.path}>
                 {repo.path}
               </span>
             </div>
@@ -87,7 +92,7 @@ export function RepositoriesView() {
                 }
               }}
             >
-              ✕
+              <Icon name="x" size={12} />
             </button>
           </div>
         ))}
