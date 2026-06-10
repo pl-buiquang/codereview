@@ -279,14 +279,3 @@
   --tok-function: #3A66A3;
   --tok-variable: #9C5331;
 }
-
-/* ============================================================
-   COMPAT — temporary aliases bridging the old styles.css var names
-   to the new token names. Swept per phase; removed entirely in Phase 8.
-   ============================================================ */
-.cr {
-  --bg-elev: var(--surface);          /* 19 uses */
-  --muted: var(--text-2);             /* 62 uses */
-  --code-font: var(--font-mono);      /* 15 uses */
-  --review-tab-accent: var(--accent); /*  1 use  */
-}

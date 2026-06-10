@@ -5,11 +5,12 @@ import { effectiveTheme, useSettingsStore, type ThemeMode } from "../lib/setting
 import { DIRECTIONS } from "../lib/themes";
 import { api } from "../lib/api";
 import type { ToolEnv } from "../lib/types";
+import { Icon, type IconName } from "./icons";
 
 type SettingsSection = "general";
 
-const SECTIONS: { key: SettingsSection; label: string; emoji: string }[] = [
-  { key: "general", label: "General", emoji: "⚙" },
+const SECTIONS: { key: SettingsSection; label: string; icon: IconName }[] = [
+  { key: "general", label: "General", icon: "gear" },
 ];
 
 const MODES: { value: ThemeMode; label: string }[] = [
@@ -214,20 +215,17 @@ export function SettingsView() {
       </header>
 
       <div className="settings-layout">
-        <nav className="settings-sidebar">
-          <ul className="nav-list">
-            {SECTIONS.map((s) => (
-              <li key={s.key}>
-                <button
-                  className={`nav-item${section === s.key ? " active" : ""}`}
-                  onClick={() => setSection(s.key)}
-                >
-                  <span className="nav-emoji">{s.emoji}</span>
-                  <span>{s.label}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
+        <nav className="settings-sidebar cr-nav">
+          {SECTIONS.map((s) => (
+            <button
+              key={s.key}
+              className={`cr-nav-item${section === s.key ? " active" : ""}`}
+              onClick={() => setSection(s.key)}
+            >
+              <Icon name={s.icon} size={15} />
+              <span>{s.label}</span>
+            </button>
+          ))}
         </nav>
 
         <div className="settings-content">
