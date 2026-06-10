@@ -8,6 +8,7 @@ import { PR_LIST_POLL_OPTIONS, useSettingsStore } from "../lib/settings";
 import { timeAgo } from "../lib/timeAgo";
 import { DiffViewer } from "./DiffViewer";
 import { OpenPrButton } from "./OpenPrButton";
+import { Icon } from "./icons";
 import { githubPrUrl } from "../lib/githubUrl";
 import { useUIStore } from "../store";
 import type { PrSummary, Repository, ReviewSummary } from "../lib/types";
@@ -39,61 +40,69 @@ export function RepoView({ repo }: { repo: Repository }) {
   const reviews = reviewsQuery.data ?? [];
 
   return (
-    <section className="main-panel">
-      <header className="main-header">
-        <h2>
+    <section className="cr-main">
+      <header className="cr-pagehead">
+        <h1 className="cr-h1 repo-title">
           {repo.remote_owner && repo.remote_name
             ? `${repo.remote_owner}/${repo.remote_name}`
             : repoPath}
-        </h2>
+        </h1>
       </header>
 
-      <div className="tabs">
-        <button className={tab === "branches" ? "active" : ""} onClick={() => setTab("branches")}>
+      <div className="cr-tabs">
+        <button
+          className={`cr-tab${tab === "branches" ? " active" : ""}`}
+          onClick={() => setTab("branches")}
+        >
           Virtual PR
         </button>
-        <button className={tab === "prs" ? "active" : ""} onClick={() => setTab("prs")}>
+        <button
+          className={`cr-tab${tab === "prs" ? " active" : ""}`}
+          onClick={() => setTab("prs")}
+        >
           GitHub PRs
         </button>
       </div>
 
-      {tab === "branches" ? (
-        <BranchCompare repo={repo} />
-      ) : (
-        <PrList repo={repo} onOpen={openReview} />
-      )}
+      <div className="repo-body">
+        {tab === "branches" ? (
+          <BranchCompare repo={repo} />
+        ) : (
+          <PrList repo={repo} onOpen={openReview} />
+        )}
 
-      {reviews.length > 0 && (
-        <div className="reviews-list">
-          <h3>Reviews</h3>
-          {reviews.map((r) => (
-            <ReviewRow
-              key={r.review.id}
-              summary={r}
-              prUrl={
-                r.target.kind === "github_pr" &&
-                repo.remote_owner &&
-                repo.remote_name &&
-                r.target.github_pr_number != null
-                  ? githubPrUrl(repo.remote_owner, repo.remote_name, r.target.github_pr_number)
-                  : null
-              }
-              onOpen={() => openReview(r.review.id)}
-              onDelete={async () => {
-                if (
-                  await confirmDialog({
-                    title: "Delete review",
-                    message: "Delete this review and all its comments?",
-                    confirmLabel: "Delete",
-                    danger: true,
-                  })
-                )
-                  deleteReview.mutate(r.review.id);
-              }}
-            />
-          ))}
-        </div>
-      )}
+        {reviews.length > 0 && (
+          <div className="repo-reviews">
+            <h3 className="repo-section-h">Reviews</h3>
+            {reviews.map((r) => (
+              <ReviewRow
+                key={r.review.id}
+                summary={r}
+                prUrl={
+                  r.target.kind === "github_pr" &&
+                  repo.remote_owner &&
+                  repo.remote_name &&
+                  r.target.github_pr_number != null
+                    ? githubPrUrl(repo.remote_owner, repo.remote_name, r.target.github_pr_number)
+                    : null
+                }
+                onOpen={() => openReview(r.review.id)}
+                onDelete={async () => {
+                  if (
+                    await confirmDialog({
+                      title: "Delete review",
+                      message: "Delete this review and all its comments?",
+                      confirmLabel: "Delete",
+                      danger: true,
+                    })
+                  )
+                    deleteReview.mutate(r.review.id);
+                }}
+              />
+            ))}
+          </div>
+        )}
+      </div>
     </section>
   );
 }
@@ -151,54 +160,59 @@ function BranchCompare({ repo }: { repo: Repository }) {
 
   return (
     <>
-      <div className="compare-bar">
-        <span className="compare-label">New virtual PR</span>
-        <label>
-          base
-          <select value={base} onChange={(e) => setBase(e.target.value)}>
-            {branchNames.map((n) => (
-              <option key={n} value={n}>
-                {n}
-              </option>
-            ))}
-          </select>
-        </label>
-        <span className="arrow">←</span>
-        <label>
-          compare
-          <select value={head} onChange={(e) => setHead(e.target.value)}>
-            {branchNames.map((n) => (
-              <option key={n} value={n}>
-                {n}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="checkbox" title="Diff against merge-base (GitHub PR semantics)">
-          <input type="checkbox" checked={threeDot} onChange={(e) => setThreeDot(e.target.checked)} />
-          merge-base
-        </label>
-        <button disabled={!canCompare} onClick={() => setComparison({ base, head, threeDot })}>
-          Preview diff
-        </button>
-        <button
-          className="btn-primary"
-          disabled={!canCompare || startReview.isPending}
-          onClick={() => startReview.mutate()}
-        >
-          {startReview.isPending ? "Starting…" : "Start review"}
-        </button>
-        <div className="view-toggle">
-          <button className={viewType === "split" ? "active" : ""} onClick={() => setViewType("split")}>
-            Split
+      <div className="card vpr-card">
+        <h3 className="repo-section-h">New virtual PR</h3>
+        <div className="vpr-row">
+          <label className="vpr-field">
+            base
+            <select className="select mono" value={base} onChange={(e) => setBase(e.target.value)}>
+              {branchNames.map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </select>
+          </label>
+          <Icon name="back" size={14} />
+          <label className="vpr-field">
+            compare
+            <select className="select mono" value={head} onChange={(e) => setHead(e.target.value)}>
+              {branchNames.map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="check" title="Diff against merge-base (GitHub PR semantics)">
+            <input type="checkbox" checked={threeDot} onChange={(e) => setThreeDot(e.target.checked)} />
+            merge-base
+          </label>
+        </div>
+        <div className="vpr-row">
+          <button className="btn" disabled={!canCompare} onClick={() => setComparison({ base, head, threeDot })}>
+            Preview diff
           </button>
           <button
-            className={viewType === "unified" ? "active" : ""}
-            onClick={() => setViewType("unified")}
+            className="btn btn-primary"
+            disabled={!canCompare || startReview.isPending}
+            onClick={() => startReview.mutate()}
           >
-            Unified
+            {startReview.isPending ? "Starting…" : "Start review"}
           </button>
+          <div className="view-toggle">
+            <button className={viewType === "split" ? "active" : ""} onClick={() => setViewType("split")}>
+              Split
+            </button>
+            <button
+              className={viewType === "unified" ? "active" : ""}
+              onClick={() => setViewType("unified")}
+            >
+              Unified
+            </button>
+          </div>
         </div>
+        <p className="vpr-helper">Pick branches, then “Preview diff” or “Start review”.</p>
       </div>
 
       <div className="diff-area">
@@ -272,7 +286,7 @@ function PrList({ repo, onOpen }: { repo: Repository; onOpen: (id: number) => vo
         {prs.map((pr: PrSummary) => (
           <div
             key={pr.number}
-            className="pr-row"
+            className="card pr-row"
             onClick={() => startPrReview.mutate(pr.number)}
             title="Start a review of this PR"
           >
@@ -280,11 +294,11 @@ function PrList({ repo, onOpen }: { repo: Repository; onOpen: (id: number) => vo
               <span className="pr-title">
                 #{pr.number} {pr.title}
               </span>
-              <span className="muted">
+              <span className="faint">
                 {pr.author?.login ?? "unknown"} · {pr.baseRefName} ← {pr.headRefName}
               </span>
             </div>
-            <button className="btn-primary" disabled={startPrReview.isPending}>
+            <button className="btn btn-sm btn-primary" disabled={startPrReview.isPending}>
               Review
             </button>
           </div>
@@ -297,37 +311,39 @@ function PrList({ repo, onOpen }: { repo: Repository; onOpen: (id: number) => vo
     <>
       <div className="pr-list-toolbar">
         <span className="muted">Open pull requests</span>
-        <span className="pr-list-toolbar-right">
-          {prsQuery.dataUpdatedAt > 0 && (
-            <span className="muted small">updated {timeAgo(prsQuery.dataUpdatedAt)}</span>
-          )}
-          <label className="muted small">
-            auto
-            <select
-              value={prListPollMs}
-              onChange={(e) => setPrListPollMs(Number(e.target.value))}
-            >
-              {PR_LIST_POLL_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button
-            className="btn-primary"
-            disabled={prsQuery.isFetching}
-            onClick={() => prsQuery.refetch()}
+        <span className="cr-spacer" />
+        {prsQuery.dataUpdatedAt > 0 && (
+          <span className="cr-sub">updated {timeAgo(prsQuery.dataUpdatedAt)}</span>
+        )}
+        <label className="sort-control">
+          auto
+          <select
+            className="sort-select"
+            value={prListPollMs}
+            onChange={(e) => setPrListPollMs(Number(e.target.value))}
           >
-            {prsQuery.isFetching ? (
-              <>
-                <span className="spinner" /> Refreshing…
-              </>
-            ) : (
-              "↻ Refresh"
-            )}
-          </button>
-        </span>
+            {PR_LIST_POLL_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button
+          className="btn btn-primary"
+          disabled={prsQuery.isFetching}
+          onClick={() => prsQuery.refetch()}
+        >
+          {prsQuery.isFetching ? (
+            <>
+              <span className="spinner" /> Refreshing…
+            </>
+          ) : (
+            <>
+              <Icon name="refresh" size={13} /> Refresh
+            </>
+          )}
+        </button>
       </div>
       {body}
     </>
@@ -348,16 +364,21 @@ function ReviewRow({
   const { review, target, comment_count } = summary;
   const kindLabel = target.kind === "github_pr" ? `PR #${target.github_pr_number}` : "local";
   return (
-    <div className="review-row" onClick={onOpen}>
-      <div className="review-row-main">
-        <span className="review-row-title">{target.title}</span>
-        <span className="muted">
-          {kindLabel} · {comment_count} comment{comment_count === 1 ? "" : "s"}
-          {review.event ? ` · ${review.event}` : ""}
-        </span>
+    <div className="card rev-row" onClick={onOpen}>
+      <div className="rev-main">
+        <span className="rev-title">{target.title}</span>
+        <div className="rev-meta">
+          <span>{kindLabel}</span>
+          <span className="sep">
+            {comment_count} comment{comment_count === 1 ? "" : "s"}
+          </span>
+          {review.event && <span className="sep">{review.event}</span>}
+        </div>
       </div>
       {prUrl && <OpenPrButton url={prUrl} size="xs" />}
-      <span className={`status-badge ${review.status}`}>{review.status}</span>
+      <span className={`badge ${review.status === "draft" ? "badge-draft" : "badge-pr"}`}>
+        {review.status}
+      </span>
       <button
         className="btn-icon"
         title="Delete review"
@@ -366,7 +387,7 @@ function ReviewRow({
           onDelete();
         }}
       >
-        ✕
+        <Icon name="x" size={12} />
       </button>
     </div>
   );

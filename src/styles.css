@@ -1268,47 +1268,6 @@ td.diff-code {
 }
 
 /* PR list */
-.pr-list-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 4px 12px;
-}
-.pr-list-toolbar-right {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.pr-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-bottom: 16px;
-}
-.pr-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  cursor: pointer;
-}
-.pr-row:hover {
-  border-color: var(--muted);
-}
-.pr-row-main {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  flex: 1;
-  min-width: 0;
-}
-.pr-title {
-  font-weight: 600;
-}
-
 /* Reviews list */
 .reviews-list {
   margin-bottom: 16px;
@@ -2730,6 +2689,94 @@ td.diff-code {
 }
 .archive-list .pr-title {
   color: var(--text-2);
+}
+
+/* ===== Repo view / Virtual PR (Phase 5) ===== */
+input[type="checkbox"],
+input[type="radio"],
+input[type="range"] {
+  accent-color: var(--accent);
+}
+.repo-title {
+  font-family: var(--font-mono);
+  font-size: 15px;
+  font-weight: 600;
+}
+.repo-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.repo-section-h {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-2);
+}
+.repo-reviews {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.vpr-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px;
+}
+.vpr-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.vpr-field {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+.vpr-field .select {
+  min-width: 160px;
+}
+.vpr-row .view-toggle {
+  margin-left: auto;
+}
+.vpr-helper {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+.pr-list-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.pr-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.pr-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  cursor: pointer;
+}
+.pr-row-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
 }
 
 .nav-list {
