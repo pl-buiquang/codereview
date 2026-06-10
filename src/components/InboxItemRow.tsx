@@ -1,6 +1,7 @@
 import { timeAgo } from "../lib/timeAgo";
 import type { InboxItem } from "../lib/types";
 import { CiBadge, ReasonBadge, StatusPill, TypeBadge } from "./InboxBadges";
+import { Icon } from "./icons";
 
 interface TopFile {
   path: string;
@@ -42,72 +43,72 @@ export function InboxItemRow({
   const topFiles = parseTopFiles(item.top_files_json);
 
   return (
-    <div className="inbox-row">
-      <div className="inbox-row-body">
+    <div className="card pr-card">
+      <span className="avatar">
         {item.author_avatar ? (
-          <img className="inbox-avatar" src={item.author_avatar} alt={item.author_login ?? ""} />
+          <img src={item.author_avatar} alt={item.author_login ?? ""} />
         ) : (
-          <div className="inbox-avatar inbox-avatar-empty" />
+          <Icon name="person" size={16} />
         )}
+      </span>
 
-        <div className="inbox-row-main">
-          <div className="inbox-row-meta">
-            <TypeBadge type={item.type} />
-            <span className="inbox-repo">{item.repo}</span>
-            <span className="inbox-number">#{item.number}</span>
-            <StatusPill state={item.state} isDraft={item.is_draft} />
-            {item.type === "pr" && <CiBadge state={item.ci_state} />}
-            <span className="inbox-updated" title={item.updated_at}>
-              {timeAgo(item.updated_at)}
-            </span>
-          </div>
-
-          <a className="inbox-title" href={item.url} target="_blank" rel="noreferrer">
-            {item.title}
-          </a>
-
-          <div className="inbox-reasons">
-            {item.reasons.map((r, i) => (
-              <ReasonBadge key={i} reason={r.reason} detail={r.detail} />
-            ))}
-            <span className="inbox-author">by {item.author_login ?? "unknown"}</span>
-          </div>
-
-          {(item.latest_comment || item.body) && (
-            <p className="inbox-snippet">
-              {item.latest_actor && item.latest_comment && (
-                <span className="inbox-snippet-actor">{item.latest_actor}: </span>
-              )}
-              {item.latest_comment ?? item.body}
-            </p>
-          )}
-
-          {item.type === "pr" && (
-            <div className="inbox-stats">
-              <span>
-                <span className="mono">{item.files_changed ?? 0}</span> files
-              </span>
-              <span>
-                <span className="add">+{item.additions ?? 0}</span>{" "}
-                <span className="del">−{item.deletions ?? 0}</span>
-              </span>
-              {item.review_decision && (
-                <span className="inbox-decision">
-                  {item.review_decision.toLowerCase().replace(/_/g, " ")}
-                </span>
-              )}
-              {topFiles.length > 0 && (
-                <span className="inbox-topfiles" title={topFiles.map((f) => f.path).join("\n")}>
-                  {topFiles.length} top file{topFiles.length > 1 ? "s" : ""}
-                </span>
-              )}
-            </div>
-          )}
+      <div className="pr-main">
+        <div className="pr-meta">
+          <TypeBadge type={item.type} />
+          <span className="repo mono">{item.repo}</span>
+          <span className="mono">#{item.number}</span>
+          <StatusPill state={item.state} isDraft={item.is_draft} />
+          {item.type === "pr" && <CiBadge state={item.ci_state} />}
         </div>
 
-        <div className="inbox-row-actions">
+        <a className="pr-title" href={item.url} target="_blank" rel="noreferrer">
+          {item.title}
+        </a>
+
+        <div className="pr-checks">
+          {item.reasons.map((r, i) => (
+            <ReasonBadge key={i} reason={r.reason} detail={r.detail} />
+          ))}
+          <span className="faint">by {item.author_login ?? "unknown"}</span>
+        </div>
+
+        {(item.latest_comment || item.body) && (
+          <p className="pr-snippet">
+            {item.latest_actor && item.latest_comment && (
+              <span className="mono">{item.latest_actor}: </span>
+            )}
+            {item.latest_comment ?? item.body}
+          </p>
+        )}
+
+        {item.type === "pr" && (
+          <div className="pr-foot">
+            <span>
+              <span className="mono">{item.files_changed ?? 0}</span> files
+            </span>
+            <span>
+              <span className="delta-add">+{item.additions ?? 0}</span>{" "}
+              <span className="delta-del">−{item.deletions ?? 0}</span>
+            </span>
+            {item.review_decision && (
+              <span>{item.review_decision.toLowerCase().replace(/_/g, " ")}</span>
+            )}
+            {topFiles.length > 0 && (
+              <a href={item.url} target="_blank" rel="noreferrer" title={topFiles.map((f) => f.path).join("\n")}>
+                {topFiles.length} top file{topFiles.length > 1 ? "s" : ""}
+              </a>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div className="pr-side">
+        <span className="pr-when" title={item.updated_at}>
+          {timeAgo(item.updated_at)}
+        </span>
+        <div className="pr-actions">
           {item.type === "pr" && (
-            <button className="btn-primary btn-xs" disabled={busy} onClick={onOpenReview}>
+            <button className="btn btn-sm btn-primary" disabled={busy} onClick={onOpenReview}>
               Open as review
             </button>
           )}
@@ -115,36 +116,36 @@ export function InboxItemRow({
             <>
               {variant === "inbox" ? (
                 <button
-                  className="btn-xs"
+                  className="btn btn-sm"
                   disabled={busy}
                   onClick={onEngage}
                   title="Done — moves to Visited; resurfaces on new activity"
                 >
-                  ✓ Done
+                  Done
                 </button>
               ) : (
                 <button
-                  className="btn-xs"
+                  className="btn btn-sm"
                   disabled={busy}
                   onClick={onUnengage}
                   title="Bring back to its inbox bucket"
                 >
-                  ↩ Bring back
+                  Bring back
                 </button>
               )}
               <button
-                className="btn-xs"
+                className="btn btn-sm btn-ghost"
                 disabled={busy}
                 onClick={onUntrack}
                 title="Untrack — dismiss (find it again in Archive)"
               >
-                ✕ Untrack
+                Untrack
               </button>
             </>
           )}
           {variant === "archive" && (
-            <button className="btn-xs" disabled={busy} onClick={onRetrack} title="Re-track">
-              ↺ Re-track
+            <button className="btn btn-sm" disabled={busy} onClick={onRetrack} title="Re-track">
+              Re-track
             </button>
           )}
         </div>

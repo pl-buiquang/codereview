@@ -7,16 +7,17 @@ import { timeAgo } from "../lib/timeAgo";
 import { useUIStore } from "../store";
 import type { InboxItem } from "../lib/types";
 import { InboxItemRow, type RowVariant } from "./InboxItemRow";
+import { Icon, type IconName } from "./icons";
 
 type BucketKey = "needs-you" | "authored" | "team-review" | "bots" | "visited" | "closed";
 
-const TABS: { key: BucketKey; label: string; emoji: string; variant: RowVariant }[] = [
-  { key: "needs-you", label: "Needs you", emoji: "🔥", variant: "inbox" },
-  { key: "authored", label: "Authored", emoji: "📥", variant: "inbox" },
-  { key: "team-review", label: "Team review", emoji: "👥", variant: "inbox" },
-  { key: "bots", label: "Bots", emoji: "🤖", variant: "inbox" },
-  { key: "visited", label: "Visited", emoji: "👁", variant: "visited" },
-  { key: "closed", label: "Closed", emoji: "✅", variant: "closed" },
+const TABS: { key: BucketKey; label: string; icon: IconName; variant: RowVariant }[] = [
+  { key: "needs-you", label: "Needs you", icon: "flame", variant: "inbox" },
+  { key: "authored", label: "Authored", icon: "inbox", variant: "inbox" },
+  { key: "team-review", label: "Team review", icon: "team", variant: "inbox" },
+  { key: "bots", label: "Bots", icon: "bot", variant: "inbox" },
+  { key: "visited", label: "Visited", icon: "eye", variant: "visited" },
+  { key: "closed", label: "Closed", icon: "closed", variant: "closed" },
 ];
 
 function isVisited(item: InboxItem): boolean {
@@ -132,54 +133,55 @@ export function InboxView() {
   const lastRefresh = metaQuery.data?.lastRefreshAt;
 
   return (
-    <section className="main-panel inbox-panel">
-      <header className="inbox-header">
+    <section className="cr-main">
+      <header className="cr-pagehead">
         <div>
-          <h2 className="inbox-h">Inbox</h2>
+          <h1 className="cr-h1">Inbox</h1>
           {metaQuery.data?.viewerLogin && (
-            <p className="muted small">
+            <p className="cr-sub">
               Logged in as <span className="mono">@{metaQuery.data.viewerLogin}</span>
             </p>
           )}
         </div>
-        <div className="inbox-header-actions">
-          {lastRefresh && <span className="muted small">updated {timeAgo(lastRefresh)}</span>}
-          <button className="btn-primary" onClick={() => refresh.mutate()} disabled={refresh.isPending}>
-            {refresh.isPending ? (
-              <>
-                <span className="spinner" /> Refreshing…
-              </>
-            ) : (
-              "↻ Refresh"
-            )}
-          </button>
-        </div>
+        <div className="cr-spacer" />
+        {lastRefresh && <span className="cr-sub">updated {timeAgo(lastRefresh)}</span>}
+        <button className="btn btn-primary" onClick={() => refresh.mutate()} disabled={refresh.isPending}>
+          {refresh.isPending ? (
+            <>
+              <span className="spinner" /> Refreshing…
+            </>
+          ) : (
+            <>
+              <Icon name="refresh" size={13} /> Refresh
+            </>
+          )}
+        </button>
       </header>
 
-      <div className="inbox-tabs" role="tablist">
+      <div className="cr-tabs" role="tablist">
         {TABS.map((t) => (
           <button
             key={t.key}
             role="tab"
             aria-selected={t.key === active}
-            className={`inbox-tab${t.key === active ? " active" : ""}`}
+            className={`cr-tab${t.key === active ? " active" : ""}`}
             onClick={() => setActive(t.key)}
           >
-            <span>{t.emoji}</span>
+            <Icon name={t.icon} size={13} />
             <span>{t.label}</span>
-            <span className="inbox-tab-count">{buckets[t.key].length}</span>
+            <span className="n">{buckets[t.key].length}</span>
           </button>
         ))}
       </div>
 
       <div className="inbox-layout">
-        <aside className="inbox-filters">
+        <aside className="cr-rail">
           <FilterList title="Type" entries={typeEntries} selected={effType} onSelect={setTypeFilter} />
           <FilterList title="Repositories" entries={repoEntries} selected={effRepo} onSelect={setRepoFilter} mono />
           <FilterList title="Users" entries={authorEntries} selected={effAuthor} onSelect={setAuthorFilter} />
         </aside>
 
-        <div className="inbox-list">
+        <div className="cr-list">
           {refresh.isPending && (
             <div className="inbox-loading">
               <span className="spinner spinner-lg" />
@@ -230,28 +232,25 @@ function FilterList({
 }) {
   if (entries.length === 0) return null;
   return (
-    <div className="filter-group">
-      <div className="filter-title">
+    <div className="cr-rail-group">
+      <div className="cr-rail-h">
         <span>{title}</span>
         {selected && (
-          <button className="filter-clear" onClick={() => onSelect(null)}>
+          <button className="cr-rail-clear" onClick={() => onSelect(null)}>
             clear
           </button>
         )}
       </div>
-      <ul className="filter-items">
-        {entries.map(([key, count]) => (
-          <li key={key}>
-            <button
-              className={`filter-item${key === selected ? " active" : ""}`}
-              onClick={() => onSelect(key === selected ? null : key)}
-            >
-              <span className={mono ? "mono truncate" : "truncate"}>{key}</span>
-              <span className="filter-count">{count}</span>
-            </button>
-          </li>
-        ))}
-      </ul>
+      {entries.map(([key, count]) => (
+        <button
+          key={key}
+          className={`cr-rail-item${key === selected ? " on" : ""}`}
+          onClick={() => onSelect(key === selected ? null : key)}
+        >
+          <span className={mono ? "lbl mono" : "lbl"}>{key}</span>
+          <span className="count">{count}</span>
+        </button>
+      ))}
     </div>
   );
 }

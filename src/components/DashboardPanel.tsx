@@ -3,12 +3,13 @@ import { InboxView } from "./InboxView";
 import { ReviewsView } from "./ReviewsView";
 import { ArchiveView } from "./ArchiveView";
 import { RepositoriesView } from "./RepositoriesView";
+import { Icon, type IconName } from "./icons";
 
-const NAV: { key: HomeSection; label: string; emoji: string }[] = [
-  { key: "inbox", label: "Inbox", emoji: "📨" },
-  { key: "reviews", label: "Reviews", emoji: "📝" },
-  { key: "archive", label: "Archive", emoji: "🗄" },
-  { key: "repositories", label: "Repositories", emoji: "📁" },
+const NAV: { key: HomeSection; label: string; icon: IconName }[] = [
+  { key: "inbox", label: "Inbox", icon: "inbox" },
+  { key: "reviews", label: "Reviews", icon: "review" },
+  { key: "archive", label: "Archive", icon: "archive" },
+  { key: "repositories", label: "Repositories", icon: "repo" },
 ];
 
 export function DashboardPanel() {
@@ -18,25 +19,29 @@ export function DashboardPanel() {
 
   return (
     <div className="dashboard">
-      <nav className="dashboard-sidebar">
-        <span className="app-title">codereview</span>
-        <ul className="nav-list">
+      <nav className="cr-side">
+        <div className="cr-side-brand">
+          <span className="cr-side-logo">cr</span>
+          codereview
+        </div>
+        <div className="cr-nav">
           {NAV.map((n) => (
-            <li key={n.key}>
-              <button
-                className={`nav-item${section === n.key ? " active" : ""}`}
-                onClick={() => setSection(n.key)}
-              >
-                <span className="nav-emoji">{n.emoji}</span>
-                <span>{n.label}</span>
-              </button>
-            </li>
+            <button
+              key={n.key}
+              className={`cr-nav-item${section === n.key ? " active" : ""}`}
+              onClick={() => setSection(n.key)}
+            >
+              <Icon name={n.icon} size={15} />
+              {n.label}
+            </button>
           ))}
-        </ul>
-        <button className="nav-item nav-settings" onClick={openSettingsTab} title="Settings">
-          <span className="nav-emoji">⚙</span>
-          <span>Settings</span>
-        </button>
+        </div>
+        <div className="cr-side-foot cr-nav">
+          <button className="cr-nav-item" onClick={openSettingsTab} title="Settings">
+            <Icon name="gear" size={15} />
+            Settings
+          </button>
+        </div>
       </nav>
 
       <div className="dashboard-main">
