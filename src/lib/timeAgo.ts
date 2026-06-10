@@ -1,6 +1,6 @@
-/** Compact "x ago" relative time, e.g. "3h ago", "2d ago". */
-export function timeAgo(iso: string): string {
-  const then = new Date(iso).getTime();
+/** Compact "x ago" relative time, e.g. "3h ago", "2d ago". Accepts ISO string or epoch ms. */
+export function timeAgo(when: string | number): string {
+  const then = new Date(when).getTime();
   if (Number.isNaN(then)) return "";
   const secs = Math.round((Date.now() - then) / 1000);
   if (secs < 60) return "just now";

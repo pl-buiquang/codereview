@@ -21,6 +21,7 @@ beforeEach(() => {
     defaultViewType: "split",
     defaultThreeDot: true,
     botLogins: "",
+    prListPollMs: 0,
   });
 });
 
@@ -49,6 +50,21 @@ describe("useSettingsStore", () => {
     expect(n.defaultViewType).toBe("unified");
     expect(n.defaultThreeDot).toBe(false);
     expect(n.botLogins).toBe("dependabot, renovate");
+  });
+
+  it("defaults prListPollMs to 0 (off)", () => {
+    expect(useSettingsStore.getState().prListPollMs).toBe(0);
+  });
+
+  it("setPrListPollMs updates and is persisted", () => {
+    useSettingsStore.getState().setPrListPollMs(30000);
+    const state = useSettingsStore.getState();
+    expect(state.prListPollMs).toBe(30000);
+    const snapshot = useSettingsStore.persist.getOptions().partialize!(state) as Record<
+      string,
+      unknown
+    >;
+    expect(snapshot.prListPollMs).toBe(30000);
   });
 });
 
