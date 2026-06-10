@@ -1,13 +1,9 @@
 /* ============================================================
-   CodeReview — design tokens (vendored from the design handoff)
+   CodeReview — extracted design tokens
    3 directions × 2 modes. Apply: class="cr cr-a dark" etc.
    A · Continuity  — IBM Plex, blue accent, slate-navy darks
    B · Modern      — Manrope, indigo accent, near-black darks, soft radii
    C · Terminal    — JetBrains Mono everywhere, green accent, sharp
-
-   Sourced from specs/design_handoff_codereview_redesign/tokens.css with two
-   additions per spec 22: the 8 `--tok-*` syntax-highlight values inside each
-   theme block, and the COMPAT alias block at the end (removed in Phase 8).
    ============================================================ */
 
 .cr {
@@ -58,14 +54,6 @@
   --shadow-pop: 0 8px 24px rgba(0,0,0,0.45);
   --titlebar: #0A0F15;
   --scrim: rgba(8, 12, 17, 0.6);
-  --tok-comment: #61788C;
-  --tok-punctuation: #AEBDCB;
-  --tok-literal: #79C0FF;
-  --tok-string: #A5D6FF;
-  --tok-operator: #56D4DD;
-  --tok-keyword: #FF7B72;
-  --tok-function: #D2A8FF;
-  --tok-variable: #FFA657;
 }
 .cr-a.light {
   --bg: #F4F7FA;
@@ -97,14 +85,6 @@
   --shadow-pop: 0 8px 24px rgba(26, 39, 53, 0.14);
   --titlebar: #E7EDF3;
   --scrim: rgba(26, 39, 53, 0.25);
-  --tok-comment: #6B7E90;
-  --tok-punctuation: #45586B;
-  --tok-literal: #0550AE;
-  --tok-string: #0A3069;
-  --tok-operator: #0E7490;
-  --tok-keyword: #BF2D3D;
-  --tok-function: #6E40C9;
-  --tok-variable: #953800;
 }
 
 /* ---------------- Direction B · Modern ---------------- */
@@ -144,14 +124,6 @@
   --shadow-pop: 0 12px 32px rgba(0,0,0,0.55);
   --titlebar: #060609;
   --scrim: rgba(4, 4, 8, 0.65);
-  --tok-comment: #64647A;
-  --tok-punctuation: #A6A6BB;
-  --tok-literal: #7DCFFF;
-  --tok-string: #6EE7B7;
-  --tok-operator: #B4BCF9;
-  --tok-keyword: #A78BFA;
-  --tok-function: #7AA2F7;
-  --tok-variable: #FDBA74;
 }
 .cr-b.light {
   --bg: #FAFAFB;
@@ -183,14 +155,6 @@
   --shadow-pop: 0 12px 32px rgba(27, 27, 34, 0.16);
   --titlebar: #F1F1F4;
   --scrim: rgba(27, 27, 34, 0.25);
-  --tok-comment: #8A8A99;
-  --tok-punctuation: #4B4B58;
-  --tok-literal: #0369A1;
-  --tok-string: #047857;
-  --tok-operator: #C026D3;
-  --tok-keyword: #7C3AED;
-  --tok-function: #2563EB;
-  --tok-variable: #C2410C;
 }
 
 /* ---------------- Direction C · Terminal ---------------- */
@@ -231,14 +195,6 @@
   --shadow-pop: 0 8px 24px rgba(0,0,0,0.5);
   --titlebar: #101218;
   --scrim: rgba(10, 12, 16, 0.6);
-  --tok-comment: #586273;
-  --tok-punctuation: #A8B0C0;
-  --tok-literal: #73DACA;
-  --tok-string: #9ECE6A;
-  --tok-operator: #89DDFF;
-  --tok-keyword: #BB9AF7;
-  --tok-function: #7AA2F7;
-  --tok-variable: #E0A875;
 }
 .cr-c.light {
   --bg: #F4F2EC;
@@ -270,12 +226,4 @@
   --shadow-pop: 0 8px 24px rgba(44, 46, 51, 0.18);
   --titlebar: #ECE9E0;
   --scrim: rgba(44, 46, 51, 0.22);
-  --tok-comment: #8E8B7E;
-  --tok-punctuation: #54564E;
-  --tok-literal: #B26209;
-  --tok-string: #56783A;
-  --tok-operator: #45707A;
-  --tok-keyword: #945E80;
-  --tok-function: #3A66A3;
-  --tok-variable: #9C5331;
 }

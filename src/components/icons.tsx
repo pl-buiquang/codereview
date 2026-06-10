@@ -2,7 +2,8 @@ import type { CSSProperties, ReactNode } from "react";
 
 /**
  * The design-system icon set — inline 16×16 stroke SVGs (1.4px, currentColor),
- * ported verbatim from the `CRIcon` set in the spec-22 design handoff.
+ * ported verbatim from `CRIcon` in the design handoff
+ * (specs/design_handoff_codereview_redesign/reference/cr/chrome.jsx).
  */
 export type IconName =
   | "menu"
