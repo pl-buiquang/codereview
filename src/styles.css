@@ -1549,6 +1549,70 @@ td.diff-code {
   font-variant-numeric: tabular-nums;
 }
 
+/* --- Settings: direction picker (Phase 1; restyled in Phase 8) ----------- */
+.settings-row-stack {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+}
+.theme-directions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.theme-card {
+  flex: 1 1 0;
+  min-width: 150px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  text-align: left;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-l, 8px);
+  /* `cr cr-{id} {mode}` on the element re-scopes the tokens so each card
+     previews its own direction's bg/text/fonts/accent. */
+}
+.theme-card.selected {
+  border-color: var(--accent-border, var(--accent));
+  box-shadow: 0 0 0 1px var(--accent-border, var(--accent));
+}
+.theme-card-swatches {
+  display: flex;
+  gap: 4px;
+}
+.theme-card-swatches > span {
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+}
+.theme-card-sample {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.theme-card-aa {
+  font-size: 18px;
+  font-weight: 600;
+}
+.theme-card-sample code {
+  font-size: 11px;
+  color: var(--text-2);
+}
+.theme-card-meta {
+  display: flex;
+  flex-direction: column;
+}
+.theme-card-label {
+  font-weight: 600;
+  font-size: 13px;
+}
+.theme-card-blurb {
+  font-size: 11px;
+  color: var(--text-2);
+}
+
 /* --- Settings: environment panel ----------------------------------------- */
 .env-rows {
   display: flex;

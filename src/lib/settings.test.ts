@@ -1,22 +1,10 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
-import {
-  useSettingsStore,
-  effectiveTheme,
-  resolveActiveTheme,
-  findTheme,
-  BUILTIN_DARK,
-  BUILTIN_LIGHT,
-  BUILTIN_DARK_ID,
-  BUILTIN_LIGHT_ID,
-  DEFAULT_DIFF_FONT_SIZE,
-} from "./settings";
+import { useSettingsStore, effectiveTheme, DEFAULT_DIFF_FONT_SIZE } from "./settings";
 
 beforeEach(() => {
   useSettingsStore.setState({
-    themeMode: "dark",
-    customThemes: [],
-    darkThemeId: BUILTIN_DARK_ID,
-    lightThemeId: BUILTIN_LIGHT_ID,
+    direction: "a",
+    mode: "system",
     diffFontSize: DEFAULT_DIFF_FONT_SIZE,
     defaultViewType: "split",
     defaultThreeDot: true,
@@ -25,133 +13,114 @@ beforeEach(() => {
   });
 });
 
+const migrate = useSettingsStore.persist.getOptions().migrate!;
+
 describe("useSettingsStore", () => {
-  it("has sensible defaults (dark mode, built-in slots, 12.5px, split, three-dot)", () => {
+  it("has sensible defaults (direction a, system mode, 12.5px, split, three-dot)", () => {
     const s = useSettingsStore.getState();
-    expect(s.themeMode).toBe("dark");
-    expect(s.customThemes).toEqual([]);
-    expect(s.darkThemeId).toBe(BUILTIN_DARK_ID);
-    expect(s.lightThemeId).toBe(BUILTIN_LIGHT_ID);
+    expect(s.direction).toBe("a");
+    expect(s.mode).toBe("system");
     expect(s.diffFontSize).toBe(12.5);
     expect(s.defaultViewType).toBe("split");
     expect(s.defaultThreeDot).toBe(true);
+    expect(s.prListPollMs).toBe(0);
   });
 
-  it("non-theme setters update each field", () => {
+  it("setters update each field", () => {
     const s = useSettingsStore.getState();
-    s.setThemeMode("light");
+    s.setDirection("c");
+    s.setMode("light");
     s.setDiffFontSize(16);
     s.setDefaultViewType("unified");
     s.setDefaultThreeDot(false);
     s.setBotLogins("dependabot, renovate");
+    s.setPrListPollMs(30000);
     const n = useSettingsStore.getState();
-    expect(n.themeMode).toBe("light");
+    expect(n.direction).toBe("c");
+    expect(n.mode).toBe("light");
     expect(n.diffFontSize).toBe(16);
     expect(n.defaultViewType).toBe("unified");
     expect(n.defaultThreeDot).toBe(false);
     expect(n.botLogins).toBe("dependabot, renovate");
+    expect(n.prListPollMs).toBe(30000);
   });
 
-  it("defaults prListPollMs to 0 (off)", () => {
-    expect(useSettingsStore.getState().prListPollMs).toBe(0);
-  });
-
-  it("setPrListPollMs updates and is persisted", () => {
-    useSettingsStore.getState().setPrListPollMs(30000);
-    const state = useSettingsStore.getState();
-    expect(state.prListPollMs).toBe(30000);
-    const snapshot = useSettingsStore.persist.getOptions().partialize!(state) as Record<
-      string,
-      unknown
-    >;
-    expect(snapshot.prListPollMs).toBe(30000);
-  });
-});
-
-describe("custom theme management", () => {
-  it("addThemeFrom clones a source into an editable custom theme", () => {
-    const id = useSettingsStore.getState().addThemeFrom(BUILTIN_DARK_ID, "Midnight");
-    const t = useSettingsStore.getState().customThemes.find((x) => x.id === id)!;
-    expect(t.name).toBe("Midnight");
-    expect(t.builtin).toBe(false);
-    expect(t.derivedFrom).toBe(BUILTIN_DARK_ID);
-    expect(t.ui).toEqual(BUILTIN_DARK.ui);
-    expect(t.syntax).toEqual(BUILTIN_DARK.syntax);
-    // Must be a copy, not a reference to the frozen built-in.
-    expect(t.ui).not.toBe(BUILTIN_DARK.ui);
-  });
-
-  it("updateTheme merges ui/syntax patches and ignores built-ins", () => {
-    const store = useSettingsStore.getState();
-    const id = store.addThemeFrom(BUILTIN_LIGHT_ID, "Custom Light");
-    store.updateTheme(id, { ui: { accent: "#ff0000" }, syntax: { keyword: "#00ff00" } });
-    store.updateTheme(BUILTIN_DARK_ID, { ui: { accent: "#123456" } });
-    const t = useSettingsStore.getState().customThemes.find((x) => x.id === id)!;
-    expect(t.ui.accent).toBe("#ff0000");
-    expect(t.ui.bg).toBe(BUILTIN_LIGHT.ui.bg); // untouched key preserved
-    expect(t.syntax.keyword).toBe("#00ff00");
-    expect(BUILTIN_DARK.ui.accent).toBe("#2f81f7"); // built-in unchanged
-  });
-
-  it("renameTheme updates the name", () => {
-    const store = useSettingsStore.getState();
-    const id = store.addThemeFrom(BUILTIN_DARK_ID, "Old");
-    store.renameTheme(id, "New");
-    expect(useSettingsStore.getState().customThemes.find((x) => x.id === id)!.name).toBe("New");
-  });
-
-  it("deleteTheme removes it and repoints slots to the matching built-in", () => {
-    const store = useSettingsStore.getState();
-    const id = store.addThemeFrom(BUILTIN_DARK_ID, "Doomed");
-    store.setDarkThemeId(id);
-    store.setLightThemeId(id);
-    store.deleteTheme(id);
-    const s = useSettingsStore.getState();
-    expect(s.customThemes.find((x) => x.id === id)).toBeUndefined();
-    expect(s.darkThemeId).toBe(BUILTIN_DARK_ID);
-    expect(s.lightThemeId).toBe(BUILTIN_LIGHT_ID);
+  it("partialize persists the v2 keys and no setters", () => {
+    const snapshot = useSettingsStore.persist.getOptions().partialize!(
+      useSettingsStore.getState(),
+    ) as Record<string, unknown>;
+    expect(Object.keys(snapshot).sort()).toEqual(
+      [
+        "botLogins",
+        "defaultThreeDot",
+        "defaultViewType",
+        "diffFontSize",
+        "direction",
+        "mode",
+        "prListPollMs",
+      ].sort(),
+    );
   });
 });
 
-describe("findTheme", () => {
-  it("resolves built-ins and customs, undefined for unknown", () => {
-    const id = useSettingsStore.getState().addThemeFrom(BUILTIN_DARK_ID, "Mine");
-    const customs = useSettingsStore.getState().customThemes;
-    expect(findTheme(customs, BUILTIN_DARK_ID)).toBe(BUILTIN_DARK);
-    expect(findTheme(customs, id)?.name).toBe("Mine");
-    expect(findTheme(customs, "nope")).toBeUndefined();
+describe("settings migration to v2", () => {
+  it("v0 (flat `theme`) → v2: maps mode, resets direction, keeps non-theme settings", () => {
+    const out = migrate(
+      {
+        theme: "light",
+        reviewTabColor: "#abcdef",
+        diffFontSize: 15,
+        defaultViewType: "unified",
+        defaultThreeDot: false,
+        botLogins: "bot1",
+        prListPollMs: 60000,
+      },
+      0,
+    ) as Record<string, unknown>;
+    expect(out.direction).toBe("a");
+    expect(out.mode).toBe("light");
+    expect(out.diffFontSize).toBe(15);
+    expect(out.defaultViewType).toBe("unified");
+    expect(out.defaultThreeDot).toBe(false);
+    expect(out.botLogins).toBe("bot1");
+    expect(out.prListPollMs).toBe(60000);
+    expect(out).not.toHaveProperty("reviewTabColor");
+    expect(out).not.toHaveProperty("theme");
   });
-});
 
-describe("resolveActiveTheme", () => {
-  it("maps mode + slots to a concrete theme", () => {
-    expect(
-      resolveActiveTheme({
-        themeMode: "dark",
-        customThemes: [],
-        darkThemeId: BUILTIN_DARK_ID,
-        lightThemeId: BUILTIN_LIGHT_ID,
-      }),
-    ).toBe(BUILTIN_DARK);
-    expect(
-      resolveActiveTheme({
+  it("v1 (`themeMode` + theme slots) → v2: maps mode, drops custom-theme fields", () => {
+    const out = migrate(
+      {
         themeMode: "light",
-        customThemes: [],
-        darkThemeId: BUILTIN_DARK_ID,
-        lightThemeId: BUILTIN_LIGHT_ID,
-      }),
-    ).toBe(BUILTIN_LIGHT);
+        customThemes: [{ id: "x", name: "X" }],
+        darkThemeId: "x",
+        lightThemeId: "builtin-light",
+        diffFontSize: 13,
+        defaultViewType: "split",
+        defaultThreeDot: true,
+        botLogins: "",
+        prListPollMs: 0,
+      },
+      1,
+    ) as Record<string, unknown>;
+    expect(out.direction).toBe("a");
+    expect(out.mode).toBe("light");
+    expect(out.diffFontSize).toBe(13);
+    expect(out).not.toHaveProperty("customThemes");
+    expect(out).not.toHaveProperty("darkThemeId");
+    expect(out).not.toHaveProperty("lightThemeId");
+    expect(out).not.toHaveProperty("themeMode");
   });
 
-  it("falls back to the base built-in for a dangling slot id", () => {
-    expect(
-      resolveActiveTheme({
-        themeMode: "dark",
-        customThemes: [],
-        darkThemeId: "missing",
-        lightThemeId: BUILTIN_LIGHT_ID,
-      }),
-    ).toBe(BUILTIN_DARK);
+  it("non-dark/light old mode collapses to system; missing fields fall back to defaults", () => {
+    expect((migrate({ themeMode: "system" }, 1) as Record<string, unknown>).mode).toBe("system");
+    const out = migrate({}, 1) as Record<string, unknown>;
+    expect(out.mode).toBe("system");
+    expect(out.diffFontSize).toBe(DEFAULT_DIFF_FONT_SIZE);
+    expect(out.defaultViewType).toBe("split");
+    expect(out.defaultThreeDot).toBe(true);
+    expect(out.botLogins).toBe("");
+    expect(out.prListPollMs).toBe(0);
   });
 });
 

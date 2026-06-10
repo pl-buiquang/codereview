@@ -1,19 +1,18 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useUIStore } from "../store";
-import { useSettingsStore, type ThemeMode } from "../lib/settings";
+import { effectiveTheme, useSettingsStore, type ThemeMode } from "../lib/settings";
+import { DIRECTIONS } from "../lib/themes";
 import { api } from "../lib/api";
 import type { ToolEnv } from "../lib/types";
-import { ThemeSection } from "./settings/ThemeSection";
 
-type SettingsSection = "general" | "theme";
+type SettingsSection = "general";
 
 const SECTIONS: { key: SettingsSection; label: string; emoji: string }[] = [
   { key: "general", label: "General", emoji: "⚙" },
-  { key: "theme", label: "Theme", emoji: "🎨" },
 ];
 
-const THEME_MODES: { value: ThemeMode; label: string }[] = [
+const MODES: { value: ThemeMode; label: string }[] = [
   { value: "dark", label: "Dark" },
   { value: "light", label: "Light" },
   { value: "system", label: "System" },
@@ -78,12 +77,52 @@ function ToolRow({
   );
 }
 
+function DirectionPicker() {
+  const direction = useSettingsStore((s) => s.direction);
+  const mode = useSettingsStore((s) => s.mode);
+  const setDirection = useSettingsStore((s) => s.setDirection);
+  const resolved = effectiveTheme(mode);
+
+  return (
+    <div className="theme-directions">
+      {DIRECTIONS.map((d) => (
+        <button
+          key={d.id}
+          type="button"
+          className={`cr cr-${d.id} ${resolved} theme-card${
+            direction === d.id ? " selected" : ""
+          }`}
+          onClick={() => setDirection(d.id)}
+          aria-pressed={direction === d.id}
+        >
+          <span className="theme-card-swatches">
+            <span style={{ background: "var(--bg)" }} />
+            <span style={{ background: "var(--surface)" }} />
+            <span style={{ background: "var(--accent)" }} />
+            <span style={{ background: "var(--success)" }} />
+          </span>
+          <span className="theme-card-sample">
+            <span className="theme-card-aa" style={{ fontFamily: "var(--font-ui)" }}>
+              Aa
+            </span>
+            <code style={{ fontFamily: "var(--font-mono)" }}>const x = 1;</code>
+          </span>
+          <span className="theme-card-meta">
+            <span className="theme-card-label">{d.label}</span>
+            <span className="theme-card-blurb">{d.blurb}</span>
+          </span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function GeneralSection() {
-  const themeMode = useSettingsStore((s) => s.themeMode);
+  const mode = useSettingsStore((s) => s.mode);
   const diffFontSize = useSettingsStore((s) => s.diffFontSize);
   const defaultViewType = useSettingsStore((s) => s.defaultViewType);
   const defaultThreeDot = useSettingsStore((s) => s.defaultThreeDot);
-  const setThemeMode = useSettingsStore((s) => s.setThemeMode);
+  const setMode = useSettingsStore((s) => s.setMode);
   const setDiffFontSize = useSettingsStore((s) => s.setDiffFontSize);
   const setDefaultViewType = useSettingsStore((s) => s.setDefaultViewType);
   const setDefaultThreeDot = useSettingsStore((s) => s.setDefaultThreeDot);
@@ -92,19 +131,24 @@ function GeneralSection() {
     <div className="settings-section-narrow">
       <section className="settings-group">
         <h3>Appearance</h3>
-        <label className="settings-row">
-          <span>Theme</span>
-          <select
-            value={themeMode}
-            onChange={(e) => setThemeMode(e.target.value as ThemeMode)}
-          >
-            {THEME_MODES.map((t) => (
-              <option key={t.value} value={t.value}>
-                {t.label}
-              </option>
+        <div className="settings-row settings-row-stack">
+          <span>Direction</span>
+          <DirectionPicker />
+        </div>
+        <div className="settings-row">
+          <span>Mode</span>
+          <span className="view-toggle">
+            {MODES.map((m) => (
+              <button
+                key={m.value}
+                className={mode === m.value ? "active" : ""}
+                onClick={() => setMode(m.value)}
+              >
+                {m.label}
+              </button>
             ))}
-          </select>
-        </label>
+          </span>
+        </div>
         <label className="settings-row">
           <span>Diff font size</span>
           <span className="settings-control">
@@ -119,9 +163,6 @@ function GeneralSection() {
             <span className="settings-value">{diffFontSize}px</span>
           </span>
         </label>
-        <p className="muted">
-          Customize colors, syntax highlighting and the code font in the Theme section.
-        </p>
       </section>
 
       <section className="settings-group">
@@ -190,7 +231,7 @@ export function SettingsView() {
         </nav>
 
         <div className="settings-content">
-          {section === "general" ? <GeneralSection /> : <ThemeSection />}
+          <GeneralSection />
         </div>
       </div>
     </section>
