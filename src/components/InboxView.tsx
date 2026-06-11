@@ -189,32 +189,36 @@ export function InboxView() {
           )}
         </div>
         <div className="cr-spacer" />
-        {lastRefresh && <span className="cr-sub">updated {timeAgo(lastRefresh)}</span>}
-        <label className="sort-control" title="Automatically refresh the inbox on this interval">
-          auto
-          <select
-            className="sort-select"
-            value={inboxPollMs}
-            onChange={(e) => setInboxPollMs(Number(e.target.value))}
-          >
-            {INBOX_POLL_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <button className="btn btn-primary" onClick={() => refresh.mutate({})} disabled={refresh.isPending}>
-          {refresh.isPending ? (
-            <>
-              <span className="spinner" /> Refreshing…
-            </>
-          ) : (
-            <>
-              <Icon name="refresh" size={13} /> Refresh
-            </>
-          )}
-        </button>
+        <div className="inbox-head-actions">
+          <div className="inbox-head-buttons">
+            <label className="sort-control" title="Automatically refresh the inbox on this interval">
+              auto
+              <select
+                className="sort-select"
+                value={inboxPollMs}
+                onChange={(e) => setInboxPollMs(Number(e.target.value))}
+              >
+                {INBOX_POLL_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button className="btn btn-primary" onClick={() => refresh.mutate({})} disabled={refresh.isPending}>
+              {refresh.isPending ? (
+                <>
+                  <span className="spinner" /> Refreshing…
+                </>
+              ) : (
+                <>
+                  <Icon name="refresh" size={13} /> Refresh
+                </>
+              )}
+            </button>
+          </div>
+          {lastRefresh && <span className="cr-sub">updated {timeAgo(lastRefresh)}</span>}
+        </div>
       </header>
 
       <div className="cr-tabs" role="tablist">

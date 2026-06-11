@@ -2145,6 +2145,20 @@ td.diff-code {
 .cr-spacer {
   flex: 1;
 }
+.inbox-head-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 5px;
+}
+.inbox-head-buttons {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.inbox-head-actions .cr-sub {
+  margin: 0;
+}
 
 /* Top tabs (Needs you / Authored…) */
 .cr-tabs {
