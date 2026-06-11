@@ -212,6 +212,7 @@ function ReviewHeader({
       queryClient.invalidateQueries({ queryKey: ["review", review.id] });
       queryClient.invalidateQueries({ queryKey: ["reviews"] });
       toast.success("Review published to GitHub.");
+      closeReview();
     },
     onError: (e) => toast.error(`Publish failed:\n${String(e)}`),
   });

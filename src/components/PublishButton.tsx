@@ -69,7 +69,13 @@ export function PublishButton({
         title="Post this review to the GitHub PR as a comment"
         onClick={() => publishAs(primary.value, primary.label)}
       >
-        {pending ? "Publishing…" : "Publish"}
+        {pending ? (
+          <>
+            <span className="spinner" /> Publishing…
+          </>
+        ) : (
+          "Publish"
+        )}
       </button>
       <button
         className="btn btn-primary"

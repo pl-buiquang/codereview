@@ -898,8 +898,10 @@ fn line_label(c: &Comment) -> String {
 /// Publish a draft review to its GitHub PR via the line-based reviews API, then
 /// lock it (published reviews can't be edited or re-published). Returns the
 /// updated review.
+// Async so the GitHub round-trip runs off the main thread — a sync command would
+// block the webview and freeze the UI while publishing (see `refresh_inbox`).
 #[tauri::command]
-pub fn publish_review(review_id: i64, db: State<Db>) -> AppResult<Review> {
+pub async fn publish_review(review_id: i64, db: State<'_, Db>) -> AppResult<Review> {
     let detail = {
         let conn = db.0.lock().unwrap();
         load_detail(&conn, review_id)?
