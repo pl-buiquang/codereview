@@ -33,6 +33,7 @@ import { FileViewPane } from "./FileViewPane";
 import { GithubThread } from "./GithubThread";
 import { Markdown } from "./Markdown";
 import { OpenPrButton } from "./OpenPrButton";
+import { PublishButton } from "./PublishButton";
 import { PrMetaPanel } from "./PrMetaPanel";
 import { Icon } from "./icons";
 import { githubPrUrl } from "../lib/githubUrl";
@@ -44,12 +45,6 @@ import type { Comment, PrThread, ReviewDetail, ReviewEvent, Side } from "../lib/
 type SaveState = "idle" | "saving" | "saved";
 
 const EXPAND_CHUNK = 20;
-
-const VERDICTS: { value: ReviewEvent; label: string }[] = [
-  { value: "comment", label: "Comment" },
-  { value: "approve", label: "Approve" },
-  { value: "request_changes", label: "Request changes" },
-];
 
 export function ReviewView({ reviewId }: { reviewId: number }) {
   const queryClient = useQueryClient();
@@ -191,14 +186,13 @@ function ReviewHeader({
   const closeReview = useUIStore((s) => s.closeReview);
   const { review, target } = detail;
   const [body, setBody] = useState(review.body);
-  const [event, setEvent] = useState<ReviewEvent | "">(review.event ?? "");
   const [showExport, setShowExport] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
 
-  const save = useDebouncedCallback((nextBody: string, nextEvent: string) => {
+  const save = useDebouncedCallback((nextBody: string) => {
     onSaving();
     api
-      .updateReview(review.id, nextBody, nextEvent)
+      .updateReview(review.id, nextBody)
       .then(onSaved)
       .catch((e) => toast.error(String(e)));
   }, 400);
@@ -212,7 +206,12 @@ function ReviewHeader({
   });
 
   const publishReview = useMutation({
-    mutationFn: () => api.publishReview(review.id),
+    // Persist the chosen verdict (and any unsaved summary) before publishing —
+    // the backend reads `review.event` from the DB to build the GitHub payload.
+    mutationFn: async (event: ReviewEvent) => {
+      await api.updateReview(review.id, body, event);
+      return api.publishReview(review.id);
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["review", review.id] });
       queryClient.invalidateQueries({ queryKey: ["reviews"] });
@@ -336,28 +335,11 @@ function ReviewHeader({
           Export
         </button>
         {isPr && (
-          <button
-            className="btn btn-primary"
-            disabled={published || publishReview.isPending}
-            title={
-              published
-                ? "Already published — cannot publish again"
-                : "Post this review to the GitHub PR"
-            }
-            onClick={async () => {
-              if (
-                await confirmDialog({
-                  title: "Publish review",
-                  message: "Publish this review to the GitHub PR? This cannot be undone.",
-                  confirmLabel: "Publish",
-                  danger: true,
-                })
-              )
-                publishReview.mutate();
-            }}
-          >
-            {publishReview.isPending ? "Publishing…" : published ? "Published" : "Publish"}
-          </button>
+          <PublishButton
+            published={published}
+            pending={publishReview.isPending}
+            onPublish={(event) => publishReview.mutate(event)}
+          />
         )}
         <button
           className="btn btn-danger"
@@ -407,27 +389,9 @@ function ReviewHeader({
               disabled={readOnly}
               onChange={(e) => {
                 setBody(e.target.value);
-                save(e.target.value, event);
+                save(e.target.value);
               }}
             />
-            <div className="verdict card">
-              <span className="muted">Verdict:</span>
-              {VERDICTS.map((v) => (
-                <label key={v.value} className="verdict-option check">
-                  <input
-                    type="radio"
-                    name="verdict"
-                    disabled={readOnly}
-                    checked={event === v.value}
-                    onChange={() => {
-                      setEvent(v.value);
-                      save(body, v.value);
-                    }}
-                  />
-                  {v.label}
-                </label>
-              ))}
-            </div>
           </div>
         </>
       )}

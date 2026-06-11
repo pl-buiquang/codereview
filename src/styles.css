@@ -1065,21 +1065,6 @@ td.diff-code {
   padding: 10px 12px;
   font: inherit;
 }
-.verdict {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  margin-top: 8px;
-  padding: 10px 14px;
-}
-.verdict-option {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 13px;
-  cursor: pointer;
-}
-
 /* PR metadata panel */
 .pr-meta-panel {
   margin-top: 12px;
