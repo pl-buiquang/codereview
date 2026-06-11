@@ -123,10 +123,14 @@ function GeneralSection() {
   const diffFontSize = useSettingsStore((s) => s.diffFontSize);
   const defaultViewType = useSettingsStore((s) => s.defaultViewType);
   const defaultThreeDot = useSettingsStore((s) => s.defaultThreeDot);
+  const botLogins = useSettingsStore((s) => s.botLogins);
+  const repoStripPrefixes = useSettingsStore((s) => s.repoStripPrefixes);
   const setMode = useSettingsStore((s) => s.setMode);
   const setDiffFontSize = useSettingsStore((s) => s.setDiffFontSize);
   const setDefaultViewType = useSettingsStore((s) => s.setDefaultViewType);
   const setDefaultThreeDot = useSettingsStore((s) => s.setDefaultThreeDot);
+  const setBotLogins = useSettingsStore((s) => s.setBotLogins);
+  const setRepoStripPrefixes = useSettingsStore((s) => s.setRepoStripPrefixes);
 
   return (
     <div className="settings-section-narrow">
@@ -192,6 +196,38 @@ function GeneralSection() {
             checked={defaultThreeDot}
             onChange={(e) => setDefaultThreeDot(e.target.checked)}
           />
+        </label>
+      </section>
+
+      <section className="settings-group">
+        <h3>Inbox</h3>
+        <label className="settings-row settings-row-stack">
+          <span>Bot logins</span>
+          <input
+            type="text"
+            className="input"
+            placeholder="dependabot, renovate"
+            value={botLogins}
+            onChange={(e) => setBotLogins(e.target.value)}
+          />
+          <span className="settings-hint muted">
+            Comma-separated GitHub logins routed to the Bots tab (case-insensitive; GitHub
+            strips the <code>[bot]</code> suffix).
+          </span>
+        </label>
+        <label className="settings-row settings-row-stack">
+          <span>Strip repo prefixes</span>
+          <input
+            type="text"
+            className="input"
+            placeholder="philips-internal/cardiologs-"
+            value={repoStripPrefixes}
+            onChange={(e) => setRepoStripPrefixes(e.target.value)}
+          />
+          <span className="settings-hint muted">
+            Comma-separated prefixes removed from repo names in the inbox. Hovering a stripped
+            name shows the full <code>owner/name</code>.
+          </span>
         </label>
       </section>
 

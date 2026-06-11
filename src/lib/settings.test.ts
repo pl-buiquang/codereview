@@ -1,5 +1,11 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
-import { useSettingsStore, effectiveTheme, DEFAULT_DIFF_FONT_SIZE } from "./settings";
+import {
+  useSettingsStore,
+  effectiveTheme,
+  parseRepoStripPrefixes,
+  stripRepoPrefix,
+  DEFAULT_DIFF_FONT_SIZE,
+} from "./settings";
 
 beforeEach(() => {
   useSettingsStore.setState({
@@ -9,6 +15,7 @@ beforeEach(() => {
     defaultViewType: "split",
     defaultThreeDot: true,
     botLogins: "",
+    repoStripPrefixes: "",
     prListPollMs: 0,
   });
 });
@@ -34,6 +41,7 @@ describe("useSettingsStore", () => {
     s.setDefaultViewType("unified");
     s.setDefaultThreeDot(false);
     s.setBotLogins("dependabot, renovate");
+    s.setRepoStripPrefixes("philips-internal/cardiologs-");
     s.setPrListPollMs(30000);
     const n = useSettingsStore.getState();
     expect(n.direction).toBe("c");
@@ -42,6 +50,7 @@ describe("useSettingsStore", () => {
     expect(n.defaultViewType).toBe("unified");
     expect(n.defaultThreeDot).toBe(false);
     expect(n.botLogins).toBe("dependabot, renovate");
+    expect(n.repoStripPrefixes).toBe("philips-internal/cardiologs-");
     expect(n.prListPollMs).toBe(30000);
   });
 
@@ -58,6 +67,7 @@ describe("useSettingsStore", () => {
         "direction",
         "mode",
         "prListPollMs",
+        "repoStripPrefixes",
       ].sort(),
     );
   });
@@ -120,7 +130,44 @@ describe("settings migration to v2", () => {
     expect(out.defaultViewType).toBe("split");
     expect(out.defaultThreeDot).toBe(true);
     expect(out.botLogins).toBe("");
+    expect(out.repoStripPrefixes).toBe("");
     expect(out.prListPollMs).toBe(0);
+  });
+});
+
+describe("parseRepoStripPrefixes", () => {
+  it("splits on commas, trims, and drops empties (case preserved)", () => {
+    expect(parseRepoStripPrefixes(" philips-internal/Cardiologs- , acme/ ")).toEqual([
+      "philips-internal/Cardiologs-",
+      "acme/",
+    ]);
+    expect(parseRepoStripPrefixes("")).toEqual([]);
+    expect(parseRepoStripPrefixes(" , ,")).toEqual([]);
+  });
+});
+
+describe("stripRepoPrefix", () => {
+  it("strips the first matching prefix (order significant, case-sensitive)", () => {
+    expect(stripRepoPrefix("philips-internal/cardiologs-back", ["philips-internal/cardiologs-"]))
+      .toEqual({ display: "back", stripped: true });
+    // First match wins even if a later prefix would also match.
+    expect(stripRepoPrefix("acme/web", ["acme/", "acme/w"])).toEqual({
+      display: "web",
+      stripped: true,
+    });
+  });
+
+  it("passes through when no prefix matches or the prefix list is empty", () => {
+    expect(stripRepoPrefix("acme/web", [])).toEqual({ display: "acme/web", stripped: false });
+    expect(stripRepoPrefix("acme/web", ["other/"])).toEqual({
+      display: "acme/web",
+      stripped: false,
+    });
+    // Case-sensitive: a case mismatch does not strip.
+    expect(stripRepoPrefix("Acme/web", ["acme/"])).toEqual({
+      display: "Acme/web",
+      stripped: false,
+    });
   });
 });
 

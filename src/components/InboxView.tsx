@@ -7,6 +7,7 @@ import { timeAgo } from "../lib/timeAgo";
 import { useUIStore } from "../store";
 import type { InboxItem } from "../lib/types";
 import { InboxItemRow, type RowVariant } from "./InboxItemRow";
+import { RepoName } from "./RepoName";
 import { Icon, type IconName } from "./icons";
 
 type BucketKey = "needs-you" | "authored" | "team-review" | "bots" | "visited" | "closed";
@@ -177,7 +178,13 @@ export function InboxView() {
       <div className="inbox-layout">
         <aside className="cr-rail">
           <FilterList title="Type" entries={typeEntries} selected={effType} onSelect={setTypeFilter} />
-          <FilterList title="Repositories" entries={repoEntries} selected={effRepo} onSelect={setRepoFilter} mono />
+          <FilterList
+            title="Repositories"
+            entries={repoEntries}
+            selected={effRepo}
+            onSelect={setRepoFilter}
+            renderLabel={(key) => <RepoName className="lbl mono" name={key} />}
+          />
           <FilterList title="Users" entries={authorEntries} selected={effAuthor} onSelect={setAuthorFilter} />
         </aside>
 
@@ -223,12 +230,14 @@ function FilterList({
   selected,
   onSelect,
   mono,
+  renderLabel,
 }: {
   title: string;
   entries: [string, number][];
   selected: string | null;
   onSelect: (v: string | null) => void;
   mono?: boolean;
+  renderLabel?: (key: string) => React.ReactNode;
 }) {
   if (entries.length === 0) return null;
   return (
@@ -247,7 +256,7 @@ function FilterList({
           className={`cr-rail-item${key === selected ? " on" : ""}`}
           onClick={() => onSelect(key === selected ? null : key)}
         >
-          <span className={mono ? "lbl mono" : "lbl"}>{key}</span>
+          {renderLabel ? renderLabel(key) : <span className={mono ? "lbl mono" : "lbl"}>{key}</span>}
           <span className="count">{count}</span>
         </button>
       ))}

@@ -1,6 +1,7 @@
 import { timeAgo } from "../lib/timeAgo";
 import type { InboxItem } from "../lib/types";
 import { CiBadge, ReasonBadge, StatusPill, TypeBadge } from "./InboxBadges";
+import { RepoName } from "./RepoName";
 import { Icon } from "./icons";
 
 interface TopFile {
@@ -55,7 +56,7 @@ export function InboxItemRow({
       <div className="pr-main">
         <div className="pr-meta">
           <TypeBadge type={item.type} />
-          <span className="repo mono">{item.repo}</span>
+          <RepoName className="repo mono" name={item.repo} />
           <span className="mono">#{item.number}</span>
           <StatusPill state={item.state} isDraft={item.is_draft} />
           {item.type === "pr" && <CiBadge state={item.ci_state} />}

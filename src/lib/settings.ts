@@ -24,6 +24,7 @@ type PersistedSettings = Pick<
   | "defaultViewType"
   | "defaultThreeDot"
   | "botLogins"
+  | "repoStripPrefixes"
   | "prListPollMs"
 >;
 
@@ -37,6 +38,8 @@ interface SettingsState {
   defaultThreeDot: boolean;
   /** Comma-separated GitHub logins treated as bots in the inbox "Bots" bucket. */
   botLogins: string;
+  /** Comma-separated prefixes stripped from repo names shown in the inbox. */
+  repoStripPrefixes: string;
   /** PR-list auto-refresh interval in ms; 0 = off. */
   prListPollMs: number;
   setDirection: (d: Direction) => void;
@@ -45,6 +48,7 @@ interface SettingsState {
   setDefaultViewType: (v: DiffViewType) => void;
   setDefaultThreeDot: (b: boolean) => void;
   setBotLogins: (s: string) => void;
+  setRepoStripPrefixes: (s: string) => void;
   setPrListPollMs: (ms: number) => void;
 }
 
@@ -57,6 +61,7 @@ export const useSettingsStore = create<SettingsState>()(
       defaultViewType: "split",
       defaultThreeDot: true,
       botLogins: "",
+      repoStripPrefixes: "",
       prListPollMs: 0,
       setDirection: (direction) => set({ direction }),
       setMode: (mode) => set({ mode }),
@@ -64,6 +69,7 @@ export const useSettingsStore = create<SettingsState>()(
       setDefaultViewType: (defaultViewType) => set({ defaultViewType }),
       setDefaultThreeDot: (defaultThreeDot) => set({ defaultThreeDot }),
       setBotLogins: (botLogins) => set({ botLogins }),
+      setRepoStripPrefixes: (repoStripPrefixes) => set({ repoStripPrefixes }),
       setPrListPollMs: (prListPollMs) => set({ prListPollMs }),
     }),
     {
@@ -76,6 +82,7 @@ export const useSettingsStore = create<SettingsState>()(
         defaultViewType: s.defaultViewType,
         defaultThreeDot: s.defaultThreeDot,
         botLogins: s.botLogins,
+        repoStripPrefixes: s.repoStripPrefixes,
         prListPollMs: s.prListPollMs,
       }),
       // v0 (flat: `theme`) and v1 (`themeMode` + theme slots) collapse the same
@@ -91,6 +98,7 @@ export const useSettingsStore = create<SettingsState>()(
           defaultViewType: (p.defaultViewType as DiffViewType) ?? "split",
           defaultThreeDot: (p.defaultThreeDot as boolean) ?? true,
           botLogins: (p.botLogins as string) ?? "",
+          repoStripPrefixes: (p.repoStripPrefixes as string) ?? "",
           prListPollMs: (p.prListPollMs as number) ?? 0,
         } satisfies PersistedSettings;
       },
@@ -106,6 +114,27 @@ export function parseBotLogins(raw: string): Set<string> {
       .map((s) => s.trim().toLowerCase())
       .filter(Boolean),
   );
+}
+
+/** Parse the configured repo-name prefixes. Case-sensitive and order-significant
+ *  (first match wins in `stripRepoPrefix`), unlike `parseBotLogins`. */
+export function parseRepoStripPrefixes(raw: string): string[] {
+  return raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+/** Strip the first matching prefix from a repo name. Returns the original name
+ *  (and `stripped: false`) when none match. */
+export function stripRepoPrefix(
+  name: string,
+  prefixes: string[],
+): { display: string; stripped: boolean } {
+  for (const p of prefixes) {
+    if (name.startsWith(p)) return { display: name.slice(p.length), stripped: true };
+  }
+  return { display: name, stripped: false };
 }
 
 /** Resolve `"system"` to the OS preference; pass-through otherwise. */

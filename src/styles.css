@@ -1823,6 +1823,10 @@ td.diff-code {
   color: var(--text-2);
   font-variant-numeric: tabular-nums;
 }
+.settings-hint {
+  font-size: 11.5px;
+  line-height: 1.4;
+}
 
 /* --- Settings: direction picker (Phase 1; restyled in Phase 8) ----------- */
 .settings-row-stack {
