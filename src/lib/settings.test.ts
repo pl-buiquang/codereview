@@ -17,6 +17,7 @@ beforeEach(() => {
     botLogins: "",
     repoStripPrefixes: "",
     prListPollMs: 0,
+    inboxPollMs: 0,
   });
 });
 
@@ -43,6 +44,7 @@ describe("useSettingsStore", () => {
     s.setBotLogins("dependabot, renovate");
     s.setRepoStripPrefixes("philips-internal/cardiologs-");
     s.setPrListPollMs(30000);
+    s.setInboxPollMs(300000);
     const n = useSettingsStore.getState();
     expect(n.direction).toBe("c");
     expect(n.mode).toBe("light");
@@ -52,6 +54,7 @@ describe("useSettingsStore", () => {
     expect(n.botLogins).toBe("dependabot, renovate");
     expect(n.repoStripPrefixes).toBe("philips-internal/cardiologs-");
     expect(n.prListPollMs).toBe(30000);
+    expect(n.inboxPollMs).toBe(300000);
   });
 
   it("partialize persists the v2 keys and no setters", () => {
@@ -65,6 +68,7 @@ describe("useSettingsStore", () => {
         "defaultViewType",
         "diffFontSize",
         "direction",
+        "inboxPollMs",
         "mode",
         "prListPollMs",
         "repoStripPrefixes",
@@ -132,6 +136,7 @@ describe("settings migration to v2", () => {
     expect(out.botLogins).toBe("");
     expect(out.repoStripPrefixes).toBe("");
     expect(out.prListPollMs).toBe(0);
+    expect(out.inboxPollMs).toBe(0);
   });
 });
 

@@ -1,8 +1,8 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { toast } from "../lib/toast";
-import { parseBotLogins, useSettingsStore } from "../lib/settings";
+import { INBOX_POLL_OPTIONS, parseBotLogins, useSettingsStore } from "../lib/settings";
 import { timeAgo } from "../lib/timeAgo";
 import { useUIStore } from "../store";
 import type { InboxItem } from "../lib/types";
@@ -52,6 +52,8 @@ export function InboxView() {
   const queryClient = useQueryClient();
   const openReview = useUIStore((s) => s.openReview);
   const botLogins = useSettingsStore((s) => s.botLogins);
+  const inboxPollMs = useSettingsStore((s) => s.inboxPollMs);
+  const setInboxPollMs = useSettingsStore((s) => s.setInboxPollMs);
   const [active, setActive] = useState<BucketKey>("needs-you");
   const [repoFilter, setRepoFilter] = useState<string | null>(null);
   const [authorFilter, setAuthorFilter] = useState<string | null>(null);
@@ -70,13 +72,35 @@ export function InboxView() {
   };
 
   const refresh = useMutation({
-    mutationFn: api.refreshInbox,
-    onSuccess: (r) => {
+    mutationFn: (_opts?: { silent?: boolean }) => api.refreshInbox(),
+    onSuccess: (r, opts) => {
       invalidate();
-      toast.success(`Refreshed: ${r.itemCount} items, ${r.closedCount} closed (${r.durationMs}ms)`);
+      // Auto-refreshes stay quiet (the "updated …" timestamp is feedback enough);
+      // a manual click still confirms with a toast.
+      if (!opts?.silent)
+        toast.success(`Refreshed: ${r.itemCount} items, ${r.closedCount} closed (${r.durationMs}ms)`);
     },
     onError: (e) => toast.error(`Refresh failed:\n${String(e)}`),
   });
+
+  // Keep a live handle to the mutation so the interval below reads the latest
+  // pending state / mutate without resetting the timer every render.
+  const refreshRef = useRef(refresh);
+  useEffect(() => {
+    refreshRef.current = refresh;
+  });
+
+  // Configurable auto-refresh. Gentle by design: skips ticks while the window is
+  // hidden or a refresh is already running, so it never piles up GitHub calls.
+  useEffect(() => {
+    if (inboxPollMs <= 0) return;
+    const id = setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      if (refreshRef.current.isPending) return;
+      refreshRef.current.mutate({ silent: true });
+    }, inboxPollMs);
+    return () => clearInterval(id);
+  }, [inboxPollMs]);
 
   const onErr = (e: unknown) => toast.error(String(e));
   const engage = useMutation({ mutationFn: api.engageItem, onSuccess: invalidate, onError: onErr });
@@ -166,7 +190,21 @@ export function InboxView() {
         </div>
         <div className="cr-spacer" />
         {lastRefresh && <span className="cr-sub">updated {timeAgo(lastRefresh)}</span>}
-        <button className="btn btn-primary" onClick={() => refresh.mutate()} disabled={refresh.isPending}>
+        <label className="sort-control" title="Automatically refresh the inbox on this interval">
+          auto
+          <select
+            className="sort-select"
+            value={inboxPollMs}
+            onChange={(e) => setInboxPollMs(Number(e.target.value))}
+          >
+            {INBOX_POLL_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button className="btn btn-primary" onClick={() => refresh.mutate({})} disabled={refresh.isPending}>
           {refresh.isPending ? (
             <>
               <span className="spinner" /> Refreshing…

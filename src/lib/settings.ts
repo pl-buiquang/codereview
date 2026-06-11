@@ -16,6 +16,15 @@ export const PR_LIST_POLL_OPTIONS: { label: string; value: number }[] = [
   { label: "5m", value: 300_000 },
 ];
 
+/** Inbox auto-refresh choices. Conservative by design — each refresh is a live
+ *  GitHub fan-out (many API calls), so the shortest option is 5 minutes. */
+export const INBOX_POLL_OPTIONS: { label: string; value: number }[] = [
+  { label: "off", value: 0 },
+  { label: "5m", value: 300_000 },
+  { label: "15m", value: 900_000 },
+  { label: "30m", value: 1_800_000 },
+];
+
 type PersistedSettings = Pick<
   SettingsState,
   | "direction"
@@ -26,6 +35,7 @@ type PersistedSettings = Pick<
   | "botLogins"
   | "repoStripPrefixes"
   | "prListPollMs"
+  | "inboxPollMs"
 >;
 
 interface SettingsState {
@@ -42,6 +52,8 @@ interface SettingsState {
   repoStripPrefixes: string;
   /** PR-list auto-refresh interval in ms; 0 = off. */
   prListPollMs: number;
+  /** Inbox auto-refresh interval in ms; 0 = off. */
+  inboxPollMs: number;
   setDirection: (d: Direction) => void;
   setMode: (m: ThemeMode) => void;
   setDiffFontSize: (n: number) => void;
@@ -50,6 +62,7 @@ interface SettingsState {
   setBotLogins: (s: string) => void;
   setRepoStripPrefixes: (s: string) => void;
   setPrListPollMs: (ms: number) => void;
+  setInboxPollMs: (ms: number) => void;
 }
 
 export const useSettingsStore = create<SettingsState>()(
@@ -63,6 +76,7 @@ export const useSettingsStore = create<SettingsState>()(
       botLogins: "",
       repoStripPrefixes: "",
       prListPollMs: 0,
+      inboxPollMs: 0,
       setDirection: (direction) => set({ direction }),
       setMode: (mode) => set({ mode }),
       setDiffFontSize: (diffFontSize) => set({ diffFontSize }),
@@ -71,6 +85,7 @@ export const useSettingsStore = create<SettingsState>()(
       setBotLogins: (botLogins) => set({ botLogins }),
       setRepoStripPrefixes: (repoStripPrefixes) => set({ repoStripPrefixes }),
       setPrListPollMs: (prListPollMs) => set({ prListPollMs }),
+      setInboxPollMs: (inboxPollMs) => set({ inboxPollMs }),
     }),
     {
       name: "codereview-settings",
@@ -84,6 +99,7 @@ export const useSettingsStore = create<SettingsState>()(
         botLogins: s.botLogins,
         repoStripPrefixes: s.repoStripPrefixes,
         prListPollMs: s.prListPollMs,
+        inboxPollMs: s.inboxPollMs,
       }),
       // v0 (flat: `theme`) and v1 (`themeMode` + theme slots) collapse the same
       // way: direction resets to "a", the old mode maps over (custom themes,
@@ -100,6 +116,7 @@ export const useSettingsStore = create<SettingsState>()(
           botLogins: (p.botLogins as string) ?? "",
           repoStripPrefixes: (p.repoStripPrefixes as string) ?? "",
           prListPollMs: (p.prListPollMs as number) ?? 0,
+          inboxPollMs: (p.inboxPollMs as number) ?? 0,
         } satisfies PersistedSettings;
       },
     },
