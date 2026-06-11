@@ -48,7 +48,6 @@ const EXPAND_CHUNK = 20;
 
 export function ReviewView({ reviewId }: { reviewId: number }) {
   const queryClient = useQueryClient();
-  const closeReview = useUIStore((s) => s.closeReview);
   const defaultViewType = useSettingsStore((s) => s.defaultViewType);
   const [viewType, setViewType] = useState<ViewType>(defaultViewType);
   const [saveState, setSaveState] = useState<SaveState>("saved");
@@ -103,7 +102,6 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
         readOnly={readOnly}
         viewType={viewType}
         setViewType={setViewType}
-        onBack={closeReview}
         onSaving={() => setSaveState("saving")}
         onSaved={() => {
           setSaveState("saved");
@@ -169,7 +167,6 @@ function ReviewHeader({
   readOnly,
   viewType,
   setViewType,
-  onBack,
   onSaving,
   onSaved,
 }: {
@@ -178,7 +175,6 @@ function ReviewHeader({
   readOnly: boolean;
   viewType: ViewType;
   setViewType: (v: ViewType) => void;
-  onBack: () => void;
   onSaving: () => void;
   onSaved: () => void;
 }) {
@@ -187,7 +183,7 @@ function ReviewHeader({
   const { review, target } = detail;
   const [body, setBody] = useState(review.body);
   const [showExport, setShowExport] = useState(false);
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(true);
 
   const save = useDebouncedCallback((nextBody: string) => {
     onSaving();
@@ -255,13 +251,11 @@ function ReviewHeader({
     isPr && detail.remote_owner && detail.remote_name && target.github_pr_number != null
       ? githubPrUrl(detail.remote_owner, detail.remote_name, target.github_pr_number)
       : null;
+  const sourceRepo = owner && name ? `${owner}/${name}` : null;
 
   return (
     <header className="review-header">
       <div className="review-header-top">
-        <button className="btn btn-ghost" onClick={onBack}>
-          <Icon name="back" size={13} /> Back
-        </button>
         <button
           className="btn btn-ghost"
           title={collapsed ? "Show review details" : "Hide review details"}
@@ -269,7 +263,15 @@ function ReviewHeader({
         >
           <Icon name="chev" size={13} /> {collapsed ? "Expand" : "Collapse"}
         </button>
-        <h2 className="review-title">{target.title}</h2>
+        <div className="review-title-wrap">
+          <h2 className="review-title">{target.title}</h2>
+          {sourceRepo && (
+            <span className="review-repo mono" title="Source repository">
+              {sourceRepo}
+              {prNumber != null ? ` #${prNumber}` : ""}
+            </span>
+          )}
+        </div>
         <span className={`badge ${review.status === "draft" ? "badge-draft" : "badge-pr"}`}>
           {review.status}
         </span>
