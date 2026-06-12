@@ -88,6 +88,15 @@ describe("api command wrappers", () => {
     await api.publishReview(9);
     expect(invoke).toHaveBeenCalledWith("publish_review", { reviewId: 9 });
 
+    await api.publishReviewPending(9);
+    expect(invoke).toHaveBeenCalledWith("publish_review_pending", { reviewId: 9 });
+
+    await api.submitPendingReview(9);
+    expect(invoke).toHaveBeenCalledWith("submit_pending_review", { reviewId: 9 });
+
+    await api.discardPendingReview(9);
+    expect(invoke).toHaveBeenCalledWith("discard_pending_review", { reviewId: 9 });
+
     await api.replyToThread("o", "n", 5, 1001, "hi");
     expect(invoke).toHaveBeenCalledWith("reply_to_thread", {
       owner: "o",

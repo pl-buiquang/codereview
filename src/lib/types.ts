@@ -35,7 +35,7 @@ export interface Review {
   target_id: number;
   body: string;
   event: ReviewEvent | null;
-  status: "draft" | "published";
+  status: "draft" | "published_pending" | "published";
   published_at: string | null;
   github_review_id: number | null;
   last_exported_at: string | null;
