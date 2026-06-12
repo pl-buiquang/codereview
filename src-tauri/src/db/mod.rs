@@ -93,6 +93,50 @@ mod tests {
     }
 
     #[test]
+    fn migration_0007_upgrades_an_existing_0006_database() {
+        // Apply every migration except the last (simulating a DB created at 0006),
+        // insert a pre-0007 comment, then run the full migrate and confirm the new
+        // column applies cleanly with the old row defaulting to NULL.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        for script in &MIGRATIONS[..MIGRATIONS.len() - 1] {
+            conn.execute_batch(script).unwrap();
+        }
+        conn.pragma_update(None, "user_version", (MIGRATIONS.len() - 1) as i64)
+            .unwrap();
+        conn.execute(
+            "INSERT INTO repository (path, default_branch, added_at) VALUES ('/r', 'main', 'now')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO target (repo_id, kind, title, base_ref, head_ref, created_at)
+             VALUES (1, 'local', 't', 'a', 'b', 'now')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO review (target_id, body, status, created_at, updated_at)
+             VALUES (1, '', 'draft', 'now', 'now')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO comment (review_id, file_path, side, line, body, created_at, updated_at)
+             VALUES (1, 'a.rs', 'RIGHT', 1, 'old', 'now', 'now')",
+            [],
+        )
+        .unwrap();
+
+        migrate(&conn).unwrap();
+
+        let resolved: Option<String> = conn
+            .query_row("SELECT resolved_at FROM comment WHERE id = 1", [], |r| r.get(0))
+            .unwrap();
+        assert!(resolved.is_none(), "old comment defaults to unresolved");
+    }
+
+    #[test]
     fn foreign_keys_are_enforced() {
         let conn = open_memory();
         // Inserting a target for a non-existent repo must fail the FK constraint.
