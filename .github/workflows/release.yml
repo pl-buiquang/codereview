@@ -165,13 +165,13 @@ jobs:
           # See docs/signing.md.
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: "codereview ${{ github.ref_name }}"
+          releaseName: "CodeReview ${{ github.ref_name }}"
           includeUpdaterJson: true
           releaseBody: |
             Unsigned build — see assets below.
 
             macOS: the app is not notarized; after installing, run
-            `xattr -dr com.apple.quarantine /Applications/codereview.app`
+            `xattr -dr com.apple.quarantine /Applications/CodeReview.app`
             (or right-click → Open). Windows: SmartScreen will warn; choose
             "Run anyway".
           releaseDraft: true

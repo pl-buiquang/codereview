@@ -90,8 +90,8 @@ This compiles an optimized release binary and packages platform installers. Outp
 
 - **Standalone binary**: `src-tauri/target/release/codereview` (`.exe` on Windows)
 - **Bundled installers**: `src-tauri/target/release/bundle/`
-  - **Linux** → `deb/`, `rpm/`, `appimage/` (e.g. `bundle/appimage/codereview_0.1.0_amd64.AppImage`)
-  - **macOS** → `dmg/`, `macos/codereview.app`
+  - **Linux** → `deb/`, `rpm/`, `appimage/` (e.g. `bundle/appimage/CodeReview_0.1.0_amd64.AppImage`)
+  - **macOS** → `dmg/`, `macos/CodeReview.app`
   - **Windows** → `nsis/` and/or `msi/`
 
 Run the standalone binary directly:

@@ -14,7 +14,7 @@ a certificate and want to flip signing on without touching the workflow.
 
 - **macOS** — downloads carry the `com.apple.quarantine` xattr; Gatekeeper shows
   "cannot be opened because the developer cannot be verified" (or "is damaged").
-  Fix: `xattr -dr com.apple.quarantine /Applications/codereview.app`.
+  Fix: `xattr -dr com.apple.quarantine /Applications/CodeReview.app`.
   On macOS ≤ 14, right-click → Open → Open also works; on macOS 15+ the
   right-click bypass is gone — after one failed open, use System Settings →
   Privacy & Security → "Open Anyway". (arm64 binaries are ad-hoc signed by the

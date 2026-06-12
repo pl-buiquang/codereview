@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "codereview",
+  "productName": "CodeReview",
   "version": "0.1.0",
   "identifier": "com.codereview.app",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "codereview",
+        "title": "CodeReview",
         "width": 1280,
         "height": 860,
         "dragDropEnabled": false
@@ -29,7 +29,7 @@
     "category": "DeveloperTool",
     "copyright": "Copyright © 2026 Paul Bui-Quang",
     "shortDescription": "Local PR & branch-diff review",
-    "longDescription": "codereview is a local desktop app for reviewing GitHub pull requests and local branch diffs, with inline comments, autosaved drafts, Markdown/JSON export, and publish-to-GitHub via the gh CLI.",
+    "longDescription": "CodeReview is a local desktop app for reviewing GitHub pull requests and local branch diffs, with inline comments, autosaved drafts, Markdown/JSON export, and publish-to-GitHub via the gh CLI.",
     "publisher": "Paul Bui-Quang",
     "icon": [
       "icons/32x32.png",
