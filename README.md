@@ -79,6 +79,9 @@ pnpm exec tsc --noEmit          # typecheck the frontend
 cargo test --manifest-path src-tauri/Cargo.toml   # Rust tests
 ```
 
+> Prefer universal verbs? The committed `ubt.toml` maps them: `ubt start` (= `pnpm tauri dev`),
+> `ubt build` (= `pnpm tauri build`), `ubt check` (tsc), `ubt test` (vitest), `ubt lint` (clippy).
+
 ---
 
 ## Build the final artifact
@@ -112,8 +115,19 @@ chmod +x src-tauri/target/release/bundle/appimage/CodeReview_*_amd64.AppImage
 > To control which installers are produced, edit `bundle.targets` in
 > `src-tauri/tauri.conf.json` (currently `"all"`).
 
-> Release builds are currently **unsigned** — see `docs/signing.md` for what that
-> means on macOS/Windows and how to enable signing.
+**Signing.** `bundle.createUpdaterArtifacts` is on, so `pnpm tauri build` (and `ubt build`) sign
+the update bundle with your minisign key and **fail without it**. Provide the key first:
+
+```bash
+export TAURI_SIGNING_PRIVATE_KEY="$(cat ~/.tauri/codereview.key)"
+read -rs "TAURI_SIGNING_PRIVATE_KEY_PASSWORD?Updater key password: " && export TAURI_SIGNING_PRIVATE_KEY_PASSWORD; echo
+pnpm tauri build
+```
+
+(`read -rs` keeps the password out of your shell history; drop that line if your key has no
+password.) The bundles are **not** OS code-signed (no Apple/Windows certificate yet) — see
+`docs/signing.md`. `pnpm tauri dev` / `ubt start` don't build updater artifacts, so they need none
+of this.
 
 ---
 
