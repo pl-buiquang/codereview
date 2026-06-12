@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MutableRefObject,
+} from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Decoration,
@@ -33,6 +40,7 @@ import {
 import { FileJumpList } from "./FileJumpList";
 import { FileViewPane } from "./FileViewPane";
 import { GithubThread } from "./GithubThread";
+import { ShortcutHelp } from "./ShortcutHelp";
 import { Markdown } from "./Markdown";
 import { OpenPrButton } from "./OpenPrButton";
 import { PublishButton } from "./PublishButton";
@@ -42,6 +50,13 @@ import { githubPrUrl } from "../lib/githubUrl";
 import { useDebouncedCallback } from "../lib/useDebouncedCallback";
 import { useSettingsStore } from "../lib/settings";
 import { useUIStore } from "../store";
+import {
+  isEditableTarget,
+  moveCursorKey,
+  pickThread,
+  type FileKbHandle,
+  type JumpListHandle,
+} from "../lib/keyboard";
 import { groupThreads, type CommentThread } from "../lib/threads";
 import { anchorPin, isCommentOutdated } from "../lib/staleness";
 import { summaryLine } from "../lib/text";
@@ -65,6 +80,18 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [filePanePath, setFilePanePath] = useState<string | null>(null);
   const diffAreaRef = useRef<HTMLDivElement>(null);
+
+  // Keyboard navigation. The single window listener lives here (see the effect
+  // below); FileJumpList and each FileReview publish imperative handles into
+  // these refs so the dispatcher can drive them without re-rendering this heavy
+  // diff subtree on every scrollspy tick.
+  const isActiveTab = useUIStore(
+    (s) => s.activeTabId === `review-${reviewId}`,
+  );
+  const [showHelp, setShowHelp] = useState(false);
+  const jumpListRef = useRef<JumpListHandle | null>(null);
+  const fileKbRef = useRef(new Map<number, FileKbHandle>());
+  const cursorFileRef = useRef<number | null>(null);
 
   const detailQuery = useQuery({
     queryKey: ["review", reviewId],
@@ -95,6 +122,101 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
     queryFn: () => api.prReviewThreads(owner!, name!, prNumber!),
   });
 
+  // n/p: stateless, DOM-query based. Collect rendered thread blocks inside the
+  // scroll container (skipping a .line-widget that holds only an open composer),
+  // then scroll to the first below / last above the current offset.
+  const npThreadNav = useCallback((dir: 1 | -1) => {
+    const root = diffAreaRef.current;
+    if (!root) return;
+    const els = [
+      ...root.querySelectorAll<HTMLElement>(
+        ".line-widget, .github-thread, .file-comments, .orphan-comments",
+      ),
+    ].filter(
+      (el) =>
+        el.classList.contains("github-thread") ||
+        el.querySelector(".comment-item") != null,
+    );
+    if (els.length === 0) return;
+    const rootTop = root.getBoundingClientRect().top;
+    const tops = els.map(
+      (el) => el.getBoundingClientRect().top - rootTop + root.scrollTop,
+    );
+    const idx = pickThread(tops, root.scrollTop, dir);
+    if (idx == null) return;
+    const el = els[idx];
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    el.classList.add("kb-flash");
+    setTimeout(() => el.classList.remove("kb-flash"), 900);
+  }, []);
+
+  useEffect(() => {
+    if (!isActiveTab) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (e.key === "Escape") {
+        if (showHelp) {
+          setShowHelp(false);
+          return;
+        }
+        if (filePanePath) return; // FileViewPane owns its own Escape
+        const i = cursorFileRef.current;
+        if (i != null) fileKbRef.current.get(i)?.clearCursor();
+        return;
+      }
+      if (isEditableTarget(e.target)) return;
+      if (filePanePath || showHelp) {
+        // While help is open, only ? toggles it back off.
+        if (e.key === "?" && !filePanePath) setShowHelp(false);
+        return;
+      }
+      const jl = jumpListRef.current;
+      switch (e.key) {
+        case "]":
+        case "[": {
+          if (!jl || jl.fileCount === 0) return;
+          const delta = e.key === "]" ? 1 : -1;
+          const next = Math.min(
+            jl.fileCount - 1,
+            Math.max(0, jl.activeIndex + delta),
+          );
+          if (next !== jl.activeIndex) jl.jumpTo(next);
+          break;
+        }
+        case "n":
+          npThreadNav(1);
+          break;
+        case "p":
+          npThreadNav(-1);
+          break;
+        case "j":
+        case "k": {
+          const i = jumpListRef.current?.activeIndex ?? 0;
+          const prev = cursorFileRef.current;
+          if (prev != null && prev !== i) {
+            fileKbRef.current.get(prev)?.clearCursor();
+          }
+          fileKbRef.current.get(i)?.moveCursor(e.key === "j" ? 1 : -1);
+          cursorFileRef.current = i;
+          break;
+        }
+        case "c": {
+          const i = cursorFileRef.current;
+          if (i != null) fileKbRef.current.get(i)?.openComposer();
+          break;
+        }
+        case "?":
+          setShowHelp(true);
+          break;
+        default:
+          return;
+      }
+      e.preventDefault();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [isActiveTab, showHelp, filePanePath, npThreadNav]);
+
   if (detailQuery.isLoading) return <section className="main-panel">Loading review…</section>;
   if (detailQuery.isError || !detailQuery.data)
     return (
@@ -122,11 +244,16 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
       />
 
       <div className="review-body">
-        <FileJumpList reviewId={reviewId} scrollRootRef={diffAreaRef} />
+        <FileJumpList
+          reviewId={reviewId}
+          scrollRootRef={diffAreaRef}
+          controlRef={jumpListRef}
+        />
         <div className="diff-area" ref={diffAreaRef}>
           {!readOnly && (
             <p className="hint muted">
               Click a line to comment · shift-click another line on the same side to select a range.
+              · press ? for shortcuts
             </p>
           )}
           {diffQuery.isLoading && <p className="muted">Loading diff…</p>}
@@ -138,6 +265,7 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
               detail={detail}
               threads={threadsQuery.data ?? []}
               readOnly={readOnly}
+              kbHandles={fileKbRef}
               onOpenFilePane={setFilePanePath}
               onSaving={() => setSaveState("saving")}
               onSaved={() => {
@@ -169,6 +297,8 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
           }
         />
       )}
+
+      {showHelp && <ShortcutHelp onClose={() => setShowHelp(false)} />}
     </section>
   );
 }
@@ -417,6 +547,7 @@ function ReviewDiff({
   detail,
   threads,
   readOnly,
+  kbHandles,
   onOpenFilePane,
   onSaving,
   onSaved,
@@ -427,6 +558,7 @@ function ReviewDiff({
   detail: ReviewDetail;
   threads: PrThread[];
   readOnly: boolean;
+  kbHandles: MutableRefObject<Map<number, FileKbHandle>>;
   onOpenFilePane: (path: string) => void;
   onSaving: () => void;
   onSaved: () => void;
@@ -445,6 +577,7 @@ function ReviewDiff({
           detail={detail}
           threads={threads}
           readOnly={readOnly}
+          kbHandles={kbHandles}
           onOpenFilePane={onOpenFilePane}
           onSaving={onSaving}
           onSaved={onSaved}
@@ -469,6 +602,7 @@ function FileReview({
   detail,
   threads,
   readOnly,
+  kbHandles,
   onOpenFilePane,
   onSaving,
   onSaved,
@@ -480,6 +614,7 @@ function FileReview({
   detail: ReviewDetail;
   threads: PrThread[];
   readOnly: boolean;
+  kbHandles: MutableRefObject<Map<number, FileKbHandle>>;
   onOpenFilePane: (path: string) => void;
   onSaving: () => void;
   onSaved: () => void;
@@ -507,11 +642,21 @@ function FileReview({
     }
   };
 
+  // The .diff-file element; scoped queries for the keyboard line cursor scroll
+  // to *this* file's `.kb-focus` row, never another (hidden) tab's duplicate.
+  const rootRef = useRef<HTMLDivElement>(null);
+  // The j/k line cursor, local so its churn never re-renders the diff subtree of
+  // other files. Exposed to ReviewView's dispatcher through the registry handle.
+  const [kbFocusKey, setKbFocusKey] = useState<string | null>(null);
+
   // Hunks the user has expanded sit alongside the parsed ones; this state feeds
   // BOTH rendering and anchoring so revealed lines are clickable/commentable.
   // Ephemeral by design — reparsing (a new diff) resets it.
   const [hunks, setHunks] = useState<HunkData[]>(file.hunks);
-  useEffect(() => setHunks(file.hunks), [file]);
+  useEffect(() => {
+    setHunks(file.hunks);
+    setKbFocusKey(null);
+  }, [file]);
   const [rawSource, setRawSource] = useState<string | null>(null);
   const [expanding, setExpanding] = useState(false);
   const [expandError, setExpandError] = useState<string | null>(null);
@@ -593,6 +738,72 @@ function FileReview({
   const [selection, setSelection] = useState<Selection | null>(null);
   const viewed = detail.viewed_files.includes(path);
   const [fileComposerOpen, setFileComposerOpen] = useState(false);
+
+  // indexFile walks hunks (and user-expanded context) in document order, so the
+  // map's key order is the visible top-to-bottom line order j/k steps through.
+  const orderedKeys = useMemo(() => [...metaByKey.keys()], [metaByKey]);
+
+  // Register this file's keyboard handle. Dep-less so it always closes over the
+  // latest state/handlers; cleaned up by index on unmount.
+  useEffect(() => {
+    const handle: FileKbHandle = {
+      moveCursor: (d) => {
+        if (viewed) return; // collapsed: FileBody isn't rendered, nothing to outline
+        setKbFocusKey((cur) => moveCursorKey(orderedKeys, cur, d));
+      },
+      openComposer: () => {
+        if (readOnly || !kbFocusKey) return;
+        const meta = metaByKey.get(kbFocusKey);
+        if (!meta) return;
+        setSelection({
+          side: meta.side,
+          anchorLine: meta.line,
+          focusLine: meta.line,
+          focusKey: kbFocusKey,
+        });
+      },
+      clearCursor: () => {
+        if (selection) {
+          setSelection(null);
+          return true;
+        }
+        if (kbFocusKey) {
+          setKbFocusKey(null);
+          return true;
+        }
+        return false;
+      },
+    };
+    kbHandles.current.set(index, handle);
+    return () => void kbHandles.current.delete(index);
+  });
+
+  // Focused-row outline, same generateLineClassName API the full-file pane uses.
+  // Works in unified and split (split rows carry both sides' changes).
+  const generateLineClassName = useCallback(
+    ({
+      changes,
+      defaultGenerate,
+    }: {
+      changes: ChangeData[];
+      defaultGenerate: () => string;
+    }): string | undefined => {
+      const base = defaultGenerate();
+      if (kbFocusKey == null || !changes.some((c) => changeKeyOf(c) === kbFocusKey))
+        return base;
+      return base ? `${base} kb-focus` : "kb-focus";
+    },
+    [kbFocusKey],
+  );
+
+  // Keep the cursor in view. Scope to rootRef — never document — since hidden
+  // tabs render duplicate `#file-N` subtrees.
+  useEffect(() => {
+    if (kbFocusKey == null) return;
+    rootRef.current
+      ?.querySelector(".kb-focus")
+      ?.scrollIntoView({ block: "nearest" });
+  }, [kbFocusKey]);
 
   const setViewed = useMutation({
     mutationFn: (v: boolean) => api.setFileViewed(reviewId, path, v),
@@ -812,7 +1023,7 @@ function FileReview({
   }, [detail.comments, path]);
 
   return (
-    <div className="diff-file" id={`file-${index}`}>
+    <div className="diff-file" id={`file-${index}`} ref={rootRef}>
       <div className="diff-file-header">
         <span className="file-path mono">{path}</span>
         <span className="diff-stats">
@@ -911,6 +1122,7 @@ function FileReview({
           expanding={expanding}
           expandError={expandError}
           oldLineCount={oldLineCount}
+          generateLineClassName={generateLineClassName}
           onExpandBetween={expandBetween}
           onExpandLeading={expandLeading}
           onExpandTrailing={expandTrailing}
@@ -941,6 +1153,7 @@ function FileBody({
   expanding,
   expandError,
   oldLineCount,
+  generateLineClassName,
   onExpandBetween,
   onExpandLeading,
   onExpandTrailing,
@@ -965,6 +1178,10 @@ function FileBody({
   expanding: boolean;
   expandError: string | null;
   oldLineCount: number | null; // null until the base source is fetched
+  generateLineClassName: (args: {
+    changes: ChangeData[];
+    defaultGenerate: () => string;
+  }) => string | undefined;
   onExpandBetween: (prev: HunkData, next: HunkData, n: number) => void;
   onExpandLeading: (n: number) => void;
   onExpandTrailing: (n: number) => void;
@@ -1018,6 +1235,7 @@ function FileBody({
           tokens={tokens}
           widgets={widgets}
           selectedChanges={selectedChanges}
+          generateLineClassName={generateLineClassName}
           gutterEvents={{ onClick: onLineClick }}
           codeEvents={{ onClick: onLineClick }}
         >

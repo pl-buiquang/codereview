@@ -1870,6 +1870,26 @@ td.diff-code {
   border-radius: var(--radius-s);
 }
 
+/* keyboard line cursor (j/k) — outlines the row without touching the
+   selected-range fills driven by the --diff-*-selected-* variables */
+tr.kb-focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* n/p landing flash */
+@keyframes kb-flash {
+  from {
+    box-shadow: 0 0 0 2px var(--accent);
+  }
+  to {
+    box-shadow: none;
+  }
+}
+.kb-flash {
+  animation: kb-flash 0.9s ease-out;
+}
+
 /* --- Update banner -------------------------------------------------------- */
 .update-banner {
   display: flex;
