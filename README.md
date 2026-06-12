@@ -110,6 +110,9 @@ chmod +x src-tauri/target/release/bundle/appimage/codereview_*_amd64.AppImage
 > To control which installers are produced, edit `bundle.targets` in
 > `src-tauri/tauri.conf.json` (currently `"all"`).
 
+> Release builds are currently **unsigned** — see `docs/signing.md` for what that
+> means on macOS/Windows and how to enable signing.
+
 ---
 
 ## Usage
