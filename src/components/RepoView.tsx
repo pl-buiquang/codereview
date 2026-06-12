@@ -12,6 +12,7 @@ import { Icon } from "./icons";
 import { githubPrUrl } from "../lib/githubUrl";
 import { useUIStore } from "../store";
 import type { PrSummary, Repository, ReviewSummary } from "../lib/types";
+import { statusLabel, statusBadgeClass } from "../lib/status";
 
 interface Comparison {
   base: string;
@@ -376,8 +377,8 @@ function ReviewRow({
         </div>
       </div>
       {prUrl && <OpenPrButton url={prUrl} size="xs" />}
-      <span className={`badge ${review.status === "draft" ? "badge-draft" : "badge-pr"}`}>
-        {review.status}
+      <span className={`badge ${statusBadgeClass(review.status)}`}>
+        {statusLabel(review.status)}
       </span>
       <button
         className="btn-icon"

@@ -203,6 +203,12 @@ button:hover {
   color: var(--accent);
   background: var(--accent-soft);
 }
+/* PENDING (draft) GitHub review — staged but not yet submitted ("in flight"). */
+.badge-pending {
+  color: var(--warning);
+  background: var(--warning-soft);
+  border: 1px solid var(--warning);
+}
 .chip {
   display: inline-flex;
   align-items: center;
@@ -1037,6 +1043,10 @@ td.diff-code {
 .status-badge.published {
   color: var(--success);
   border-color: var(--success);
+}
+.status-badge.published_pending {
+  color: var(--warning);
+  border-color: var(--warning);
 }
 .save-state {
   color: var(--text-3);
