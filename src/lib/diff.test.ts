@@ -3,6 +3,8 @@ import {
   expandFromRawCode,
   getCollapsedLinesCountBetween,
   parseDiff,
+  type ChangeData,
+  type HunkData,
   type TokenNode,
 } from "react-diff-view";
 import {
@@ -14,7 +16,9 @@ import {
   countChanges,
   hunkContextSnippet,
   leadingExpandRange,
+  rightLinesText,
   sourceLineCount,
+  suggestionFence,
   tokenizeFile,
   trailingExpandRange,
   trailingGap,
@@ -215,6 +219,77 @@ describe("hunkContextSnippet", () => {
     const snippet = hunkContextSnippet(file.hunks[0], "RIGHT", 999, 999, 3);
     expect(snippet).toContain("@@ -1,7 +1,7 @@");
     expect(snippet.split("\n")).toHaveLength(1);
+  });
+});
+
+// HunkData literal builder mirroring buildFullFileFile's change shape, so tests
+// can place specific normal/insert/delete changes at chosen line numbers.
+function normal(n: number, content: string): ChangeData {
+  return { type: "normal", isNormal: true, content, oldLineNumber: n, newLineNumber: n };
+}
+function insert(n: number, content: string): ChangeData {
+  return { type: "insert", isInsert: true, content, lineNumber: n };
+}
+function del(n: number, content: string): ChangeData {
+  return { type: "delete", isDelete: true, content, lineNumber: n };
+}
+function hunkOf(changes: ChangeData[]): HunkData {
+  return {
+    content: "@@ -1,1 +1,1 @@",
+    oldStart: 1,
+    newStart: 1,
+    oldLines: changes.length,
+    newLines: changes.length,
+    changes,
+  };
+}
+
+describe("rightLinesText", () => {
+  it("returns a single normal line's content without a diff sign", () => {
+    const hunks = [hunkOf([normal(1, "a"), normal(2, "  const x = 1;"), normal(3, "c")])];
+    expect(rightLinesText(hunks, 2, 2)).toEqual(["  const x = 1;"]);
+  });
+
+  it("resolves insert lines via their lineNumber", () => {
+    const hunks = [hunkOf([normal(1, "a"), insert(2, "new line")])];
+    expect(rightLinesText(hunks, 2, 2)).toEqual(["new line"]);
+  });
+
+  it("returns a range spanning insert + normal in lo→hi order", () => {
+    const hunks = [hunkOf([insert(1, "first"), normal(2, "second"), insert(3, "third")])];
+    expect(rightLinesText(hunks, 1, 3)).toEqual(["first", "second", "third"]);
+  });
+
+  it("returns null for a line in a collapsed gap", () => {
+    const hunks = [hunkOf([normal(1, "a"), normal(2, "b")])];
+    expect(rightLinesText(hunks, 5, 5)).toBeNull();
+  });
+
+  it("returns null when a range is only partially present", () => {
+    const hunks = [hunkOf([normal(1, "a"), normal(2, "b")])];
+    expect(rightLinesText(hunks, 2, 3)).toBeNull();
+  });
+
+  it("ignores delete changes (no RIGHT presence)", () => {
+    const hunks = [hunkOf([normal(1, "a"), del(2, "gone"), normal(2, "b")])];
+    // Delete at "line 2" must not satisfy a RIGHT request for line 2…
+    expect(rightLinesText(hunks, 2, 2)).toEqual(["b"]);
+    // …and a RIGHT line that only a delete occupies is unresolvable.
+    const onlyDelete = [hunkOf([del(2, "gone")])];
+    expect(rightLinesText(onlyDelete, 2, 2)).toBeNull();
+  });
+});
+
+describe("suggestionFence", () => {
+  it("wraps lines in a basic 3-backtick suggestion fence", () => {
+    expect(suggestionFence(["let x = 1;"])).toBe("```suggestion\nlet x = 1;\n```");
+    expect(suggestionFence(["a", "b"])).toBe("```suggestion\na\nb\n```");
+  });
+
+  it("grows the fence past a triple-backtick run inside the content", () => {
+    expect(suggestionFence(["before ``` after"])).toBe(
+      "````suggestion\nbefore ``` after\n````",
+    );
   });
 });
 
