@@ -4,16 +4,17 @@ use serde::Serialize;
 
 use crate::error::AppResult;
 use crate::gh::GhRepo;
+use crate::provider::provider_for;
 use crate::{gh, tools};
 
 #[tauri::command]
 pub fn gh_auth_status() -> bool {
-    gh::auth_status()
+    provider_for().auth_status()
 }
 
 #[tauri::command]
 pub fn list_prs(repo_path: String) -> AppResult<Vec<gh::PrSummary>> {
-    gh::list_prs(&GhRepo::Local(PathBuf::from(repo_path)))
+    provider_for().list_prs(&GhRepo::Local(PathBuf::from(repo_path)))
 }
 
 /// `async` so Tauri runs the slow `gh` GraphQL call off the main (UI) thread,
@@ -22,7 +23,7 @@ pub fn list_prs(repo_path: String) -> AppResult<Vec<gh::PrSummary>> {
 /// DB lock.
 #[tauri::command]
 pub async fn pr_meta(owner: String, name: String, number: i64) -> AppResult<gh::PrMeta> {
-    gh::pr_meta(&owner, &name, number)
+    provider_for().pr_meta(&owner, &name, number)
 }
 
 /// `async` for the same reason as `pr_meta` — keeps the (paginated) review-thread
@@ -33,7 +34,7 @@ pub async fn pr_review_threads(
     name: String,
     number: i64,
 ) -> AppResult<Vec<gh::PrThread>> {
-    gh::pr_review_threads(&owner, &name, number)
+    provider_for().pr_review_threads(&owner, &name, number)
 }
 
 /// Reply to an existing GitHub review thread. `comment_id` is the databaseId of
@@ -46,13 +47,13 @@ pub async fn reply_to_thread(
     comment_id: i64,
     body: String,
 ) -> AppResult<i64> {
-    gh::reply_to_thread(&owner, &name, number, comment_id, &body)
+    provider_for().reply_to_thread(&owner, &name, number, comment_id, &body)
 }
 
 /// Resolve/unresolve a GitHub review thread by node id. Returns new isResolved.
 #[tauri::command]
 pub async fn set_pr_thread_resolved(thread_id: String, resolved: bool) -> AppResult<bool> {
-    gh::set_thread_resolved(&thread_id, resolved)
+    provider_for().set_thread_resolved(&thread_id, resolved)
 }
 
 /// Detected external-tool environment, for the Settings diagnostics panel.
@@ -69,6 +70,6 @@ pub fn check_environment() -> ToolEnv {
     ToolEnv {
         git: tools::git_path(),
         gh: tools::gh_path(),
-        gh_authed: gh::auth_status(),
+        gh_authed: provider_for().auth_status(),
     }
 }

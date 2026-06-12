@@ -7,6 +7,7 @@ mod gh;
 mod git;
 mod inbox;
 mod path_env;
+mod provider;
 mod tools;
 
 use std::sync::Mutex;
