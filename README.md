@@ -105,8 +105,8 @@ Run the standalone binary directly:
 Or, on Linux, the portable AppImage:
 
 ```bash
-chmod +x src-tauri/target/release/bundle/appimage/codereview_*_amd64.AppImage
-./src-tauri/target/release/bundle/appimage/codereview_*_amd64.AppImage
+chmod +x src-tauri/target/release/bundle/appimage/CodeReview_*_amd64.AppImage
+./src-tauri/target/release/bundle/appimage/CodeReview_*_amd64.AppImage
 ```
 
 > To control which installers are produced, edit `bundle.targets` in
