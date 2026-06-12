@@ -4,15 +4,20 @@ How to land the remaining specs with parallel implementation agents in isolated 
 merged into `main` by an integration step in a fixed order, gated by the standard suite at every
 step.
 
-**Status (2026-06):** Specs **00–03 are shipped** (head-SHA freshness) and **Wave 1 is merged** —
-specs **04, 05, 09, 10, 15, 20** landed on `main` (executed merge order `04 → 05 → 15 → 20 → 09 →
-10`, CI green). The spec files for those implemented specs have been removed (git history keeps
-them). What remains is **Waves 2–6** (specs 06–08, 11–14, 16–19, 21 + release verification).
+**Status (2026-06):** Specs **00–03 are shipped** and **Waves 1–5 are merged** — every spec
+**04–21** has landed on `main`, CI green after each merge (per-wave final tips: W1 via
+`specs/workflows/`; **W2 `7475358`**, merge order `17→11→12→06→07→08`; **W3 `d925d45`**, order
+`18→13→16`; **W4 `ad2dbb2`**, order `19→14`; **W5 `f6a7aa7`**, spec `21`). The implemented specs'
+files have been removed (git history keeps them); **only 06/07/08 remain in `specs/`** as the
+Wave-6 reference. The app was also renamed to **CodeReview** (display name only — technical
+identifiers stay lowercase), and the real updater pubkey + `TAURI_SIGNING_PRIVATE_KEY{,_PASSWORD}`
+CI secrets are in place. What remains is **Wave 6** — the USER-GATED release verification (§9).
 
 **Execution:** each wave runs as one invocation of the **Workflow tool** — a parallel `Implement`
 phase (one `agent({isolation:'worktree'})` per track) followed by a sequential `Integrate` phase
-(one agent that merges into `main`). The runnable scripts live in `specs/workflows/` (Wave 1 ran
-this way; `specs/workflows/wave-2.js` is the next). See §7 for the model and §8 for integration.
+(one agent that merges into `main`). The runnable scripts live in `specs/workflows/` —
+`wave-2.js`…`wave-5.js` all ran (Waves 1–5 done). Wave 6 has no script; it is the user-gated
+runbook in §9. See §7 for the model and §8 for integration.
 
 All decisions below were locked with the user; the **Discrepancies** section at the end records
 where a spec's own text disagrees with this plan — do not silently fix those, resolve them as
@@ -20,9 +25,10 @@ written there.
 
 ## 1. Spec index (remaining specs only)
 
-Specs 00–03 (shipped) and 04/05/09/10/15/20 (Wave 1, merged) are implemented; their spec files
-were removed after landing — see git history / the `main` commit log. The 12 specs below are the
-remaining work, by wave:
+Specs 00–21 are now all implemented and merged (Waves 1–5). The spec files for the implemented
+specs were removed after landing — see git history / the `main` commit log — **except 06/07/08,
+kept as the Wave-6 reference**. The table below is retained as the historical wave map; only
+**Wave 6** (release verification, §9) is still pending:
 
 | Spec | Wave | Title | Size | Primary files |
 |---|---|---|---|---|
@@ -112,7 +118,7 @@ Specs 04, 05, 09, 10, 15, 20 merged to `main` via `specs/workflows/` (the wave-1
 executed merge order `04 → 05 → 15 → 20 → 09 → 10`, gates green after each merge and CI green.
 Spec files removed. The remaining waves below are the active plan.
 
-### Wave 2 — threads, publish-id capture, release pipeline
+### Wave 2 — threads, publish-id capture, release pipeline — ✅ DONE (merged 17→11→12→06→07→08, main 7475358)
 
 | Track | Spec(s) | Branch | Files claimed |
 |---|---|---|---|
@@ -141,7 +147,7 @@ verification of the release workflow is deferred to wave 6 unless the user opts 
 throwaway RC tags (see Discrepancies #5). Manual smoke: reply/resolve a local thread, export
 nesting, publish a scratch PR and check the `[publish.capture_ids]` stderr line.
 
-### Wave 3 — LEFT re-anchoring, suggestions, GitHub thread actions
+### Wave 3 — LEFT re-anchoring, suggestions, GitHub thread actions — ✅ DONE (merged 18→13→16, main d925d45)
 
 | Track | Spec(s) | Branch | Files claimed |
 |---|---|---|---|
@@ -159,7 +165,7 @@ filter now lives there, not in `build_publish_payload` — see Discrepancies #4)
 `grep -rn "remap_right_line" src-tauri/src` empty after 16; manual smoke of LEFT re-anchor
 (local three-dot), suggestion fence end-to-end, GitHub thread reply/resolve on a scratch PR.
 
-### Wave 4 — pending reviews, keyboard nav
+### Wave 4 — pending reviews, keyboard nav — ✅ DONE (merged 19→14, main ad2dbb2)
 
 | Track | Spec(s) | Branch | Files claimed |
 |---|---|---|---|
@@ -174,7 +180,7 @@ filter now lives there, not in `build_publish_payload` — see Discrepancies #4)
 scratch PR; keyboard matrix (`?`, `]`/`[`, `n`/`p`, `j`/`k`, `c`, Esc) incl. published-review
 read-only behaviour.
 
-### Wave 5 — provider seam (solo)
+### Wave 5 — provider seam (solo) — ✅ DONE (merged 21, main f6a7aa7)
 
 | Track | Spec | Branch | Files claimed |
 |---|---|---|---|
