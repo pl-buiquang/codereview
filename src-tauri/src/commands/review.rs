@@ -132,6 +132,18 @@ fn ensure_draft(conn: &Connection, review_id: i64) -> AppResult<()> {
     Ok(())
 }
 
+/// The SHA whose file contents the LEFT side of this local diff shows: the
+/// merge-base for three-dot (GitHub-PR semantics), the base tip for two-dot.
+/// This is the coordinate system a LEFT comment's line numbers are valid in, so
+/// it is what `anchored_base_sha` pins to.
+fn local_old_side_sha(repo: &Path, base_ref: &str, head_ref: &str, three_dot: bool) -> Option<String> {
+    if three_dot {
+        git::merge_base(repo, base_ref, head_ref).ok()
+    } else {
+        git::rev_parse(repo, base_ref).ok()
+    }
+}
+
 /// Reuse one `target` per (repo, base, head) comparison so several reviews can
 /// share it. Refreshes the resolved SHAs each time the comparison is opened.
 fn get_or_create_local_target(
@@ -142,7 +154,7 @@ fn get_or_create_local_target(
     head_ref: &str,
     three_dot: bool,
 ) -> AppResult<Target> {
-    let base_sha = git::rev_parse(Path::new(repo_path), base_ref).ok();
+    let base_sha = local_old_side_sha(Path::new(repo_path), base_ref, head_ref, three_dot);
     let head_sha = git::rev_parse(Path::new(repo_path), head_ref).ok();
 
     let existing: Option<i64> = conn
@@ -280,7 +292,8 @@ fn refresh_target_shas(db: &Db, target: &Target) -> AppResult<FreshnessResult> {
                 path
             };
             let repo = Path::new(&repo_path);
-            let base_sha = git::rev_parse(repo, &target.base_ref).ok();
+            let base_sha =
+                local_old_side_sha(repo, &target.base_ref, &target.head_ref, target.three_dot);
             let head_sha = git::rev_parse(repo, &target.head_ref).ok();
             let conn = db.0.lock().unwrap();
             conn.execute(
@@ -324,37 +337,98 @@ pub struct ReanchorResult {
     pub skipped_no_change: usize,
 }
 
-/// Re-anchor a review's RIGHT-side diff comments from their stored
-/// `anchored_head_sha` to the target's current `head_sha` using the intervening
-/// per-file diff. Pure helper: the caller holds the DB lock.
-fn reanchor_review_comments(conn: &Connection, detail: &ReviewDetail) -> AppResult<ReanchorResult> {
-    let mut result = ReanchorResult {
-        reanchored: 0,
-        lost: 0,
-        skipped_no_change: 0,
-    };
+/// Which anchor a re-anchor pass operates on: the comment side it selects, the
+/// pin column it reads/advances, and the target SHA it maps onto. The RIGHT/head
+/// pass maps `anchored_head_sha → target.head_sha`; the LEFT/base pass maps
+/// `anchored_base_sha → target.base_sha`. Both feed the same `remap_line`, whose
+/// input always lives on the patch's old side.
+#[derive(Clone, Copy)]
+enum AnchorPass {
+    Head,
+    Base,
+}
 
-    let Some(current) = detail.target.head_sha.as_deref() else {
-        return Ok(result);
-    };
+impl AnchorPass {
+    fn comment_side(self) -> &'static str {
+        match self {
+            AnchorPass::Head => "RIGHT",
+            AnchorPass::Base => "LEFT",
+        }
+    }
 
+    fn pin(self, c: &Comment) -> Option<&str> {
+        match self {
+            AnchorPass::Head => c.anchored_head_sha.as_deref(),
+            AnchorPass::Base => c.anchored_base_sha.as_deref(),
+        }
+    }
+
+    fn current(self, t: &Target) -> Option<&str> {
+        match self {
+            AnchorPass::Head => t.head_sha.as_deref(),
+            AnchorPass::Base => t.base_sha.as_deref(),
+        }
+    }
+
+    /// UPDATE advancing the root's line/start and this pass's pin column.
+    fn root_update_sql(self) -> &'static str {
+        match self {
+            AnchorPass::Head => "UPDATE comment SET line = ?1, start_line = ?2, anchored_head_sha = ?3, updated_at = ?4 WHERE id = ?5",
+            AnchorPass::Base => "UPDATE comment SET line = ?1, start_line = ?2, anchored_base_sha = ?3, updated_at = ?4 WHERE id = ?5",
+        }
+    }
+
+    /// Same UPDATE cascaded onto the root's replies (spec 11): the whole thread
+    /// moves together since replies inherit the root's anchor.
+    fn reply_update_sql(self) -> &'static str {
+        match self {
+            AnchorPass::Head => "UPDATE comment SET line = ?1, start_line = ?2, anchored_head_sha = ?3, updated_at = ?4 WHERE parent_id = ?5",
+            AnchorPass::Base => "UPDATE comment SET line = ?1, start_line = ?2, anchored_base_sha = ?3, updated_at = ?4 WHERE parent_id = ?5",
+        }
+    }
+}
+
+/// One side's re-anchor pass: walk this side's root diff comments from their
+/// pinned SHA to the target's current SHA for that side through the intervening
+/// per-file diff, advancing line numbers and the pin column. Replies ride along
+/// with their root. Accumulates into `result`. The diff is always fetched in the
+/// direction pin → current so `remap_line` reads its input on the patch's old
+/// side. A missing current SHA counts every pinned candidate as
+/// `skipped_no_change` and touches nothing.
+fn reanchor_pass(
+    conn: &Connection,
+    detail: &ReviewDetail,
+    pass: AnchorPass,
+    result: &mut ReanchorResult,
+) -> AppResult<()> {
     let candidates: Vec<&Comment> = detail
         .comments
         .iter()
         .filter(|c| {
-            c.side == "RIGHT"
+            c.side == pass.comment_side()
                 && c.subject_type == "line"
                 && c.origin != "file_view"
                 && c.parent_id.is_none()
         })
         .collect();
 
-    // Group the comments that need remapping by (anchored_sha, file) so each
+    let Some(current) = pass.current(&detail.target) else {
+        // Current SHA unresolved (head unresolved, or base_sha NULL on a PR row
+        // spec 10 hasn't backfilled): every pinned candidate is left untouched.
+        for c in &candidates {
+            if pass.pin(c).is_some() {
+                result.skipped_no_change += 1;
+            }
+        }
+        return Ok(());
+    };
+
+    // Group the comments that need remapping by (pinned_sha, file) so each
     // intervening per-file diff is fetched at most once.
     let mut groups: std::collections::HashMap<(String, String), Vec<&Comment>> =
         std::collections::HashMap::new();
     for c in candidates {
-        match c.anchored_head_sha.as_deref() {
+        match pass.pin(c) {
             None => result.skipped_no_change += 1,
             Some(sha) if sha == current => result.skipped_no_change += 1,
             Some(sha) => groups
@@ -368,7 +442,7 @@ fn reanchor_review_comments(conn: &Connection, detail: &ReviewDetail) -> AppResu
     let mut compare_cache: std::collections::HashMap<String, Vec<gh::ComparedFile>> =
         std::collections::HashMap::new();
 
-    for ((anchored_sha, file_path), comments) in &groups {
+    for ((pinned_sha, file_path), comments) in &groups {
         let patch: Option<String> = if is_remote {
             let (owner, name) = match (&detail.remote_owner, &detail.remote_name) {
                 (Some(o), Some(n)) => (o.clone(), n.clone()),
@@ -378,11 +452,11 @@ fn reanchor_review_comments(conn: &Connection, detail: &ReviewDetail) -> AppResu
                     ))
                 }
             };
-            let files = match compare_cache.get(anchored_sha) {
+            let files = match compare_cache.get(pinned_sha) {
                 Some(f) => f,
                 None => {
-                    let f = gh::compare(&owner, &name, anchored_sha, current)?;
-                    compare_cache.entry(anchored_sha.clone()).or_insert(f)
+                    let f = gh::compare(&owner, &name, pinned_sha, current)?;
+                    compare_cache.entry(pinned_sha.clone()).or_insert(f)
                 }
             };
             files
@@ -392,7 +466,7 @@ fn reanchor_review_comments(conn: &Connection, detail: &ReviewDetail) -> AppResu
         } else {
             Some(git::diff_shas_path(
                 Path::new(&detail.repo_path),
-                anchored_sha,
+                pinned_sha,
                 current,
                 file_path,
             )?)
@@ -416,7 +490,7 @@ fn reanchor_review_comments(conn: &Connection, detail: &ReviewDetail) -> AppResu
             // A true multi-line range remaps both endpoints; otherwise only `line`.
             let range_start = c.start_line.filter(|&s| s != c.line);
 
-            let new_line = match anchor::remap_right_line(c.line, hunks) {
+            let new_line = match anchor::remap_line(c.line, hunks) {
                 Remap::Shifted(l) => l,
                 Remap::Lost => {
                     result.lost += 1;
@@ -424,7 +498,7 @@ fn reanchor_review_comments(conn: &Connection, detail: &ReviewDetail) -> AppResu
                 }
             };
             let new_start = match range_start {
-                Some(s) => match anchor::remap_right_line(s, hunks) {
+                Some(s) => match anchor::remap_line(s, hunks) {
                     Remap::Shifted(l) => Some(l),
                     Remap::Lost => {
                         result.lost += 1;
@@ -435,19 +509,35 @@ fn reanchor_review_comments(conn: &Connection, detail: &ReviewDetail) -> AppResu
             };
 
             conn.execute(
-                "UPDATE comment SET line = ?1, start_line = ?2, anchored_head_sha = ?3, updated_at = ?4 WHERE id = ?5",
+                pass.root_update_sql(),
                 params![new_line, new_start, current, now(), c.id],
             )?;
             // The whole thread moves with its root: replies inherit the root's
-            // anchor, so overwriting their line/start/sha wholesale is correct.
+            // anchor, so overwriting their line/start/pin wholesale is correct.
             conn.execute(
-                "UPDATE comment SET line = ?1, start_line = ?2, anchored_head_sha = ?3, updated_at = ?4 WHERE parent_id = ?5",
+                pass.reply_update_sql(),
                 params![new_line, new_start, current, now(), c.id],
             )?;
             result.reanchored += 1;
         }
     }
 
+    Ok(())
+}
+
+/// Re-anchor a review's diff comments onto the target's current SHAs: RIGHT-side
+/// comments from `anchored_head_sha → head_sha`, LEFT-side from
+/// `anchored_base_sha → base_sha`, each through the intervening per-file diff.
+/// Two passes over one shared helper; the result aggregates both. Pure helper:
+/// the caller holds the DB lock.
+fn reanchor_review_comments(conn: &Connection, detail: &ReviewDetail) -> AppResult<ReanchorResult> {
+    let mut result = ReanchorResult {
+        reanchored: 0,
+        lost: 0,
+        skipped_no_change: 0,
+    };
+    reanchor_pass(conn, detail, AnchorPass::Head, &mut result)?;
+    reanchor_pass(conn, detail, AnchorPass::Base, &mut result)?;
     Ok(result)
 }
 
@@ -775,13 +865,20 @@ pub fn update_review(
 /// GitHub's bulk reviews API can't anchor file-level comments (each comment
 /// needs a `path` + `line`/`position`), so file comments are folded into the
 /// review body under a "File-level comments" section instead.
-/// Whether a comment is anchored to the given (fresh) head SHA and so safe to
-/// post inline. A `None` `anchored_head_sha` is treated as anchored — legacy and
-/// local rows keep today's behaviour.
-fn is_anchored_to(c: &Comment, head_sha: Option<&str>) -> bool {
-    match c.anchored_head_sha.as_deref() {
+/// Whether a comment is pinned to the SHA its side's line numbers are valid
+/// against (LEFT → target.base_sha, RIGHT → target.head_sha) and so safe to
+/// post inline. A NULL pin is treated as anchored — legacy rows keep today's
+/// behaviour. LEFT comments therefore stop folding into the body just because
+/// the head moved (their line numbers live in base coordinates).
+fn is_anchored_to(c: &Comment, target: &Target) -> bool {
+    let (pin, current) = if c.side == "LEFT" {
+        (c.anchored_base_sha.as_deref(), target.base_sha.as_deref())
+    } else {
+        (c.anchored_head_sha.as_deref(), target.head_sha.as_deref())
+    };
+    match pin {
         None => true,
-        Some(sha) => Some(sha) == head_sha,
+        Some(sha) => Some(sha) == current,
     }
 }
 
@@ -800,7 +897,7 @@ fn inline_publish_comments(detail: &ReviewDetail) -> Vec<(&Comment, String)> {
             c.subject_type != "file"
                 && c.origin != "file_view"
                 && c.parent_id.is_none()
-                && is_anchored_to(c, detail.target.head_sha.as_deref())
+                && is_anchored_to(c, &detail.target)
         })
         .map(|c| {
             let body = export::fold_replies(
@@ -904,7 +1001,7 @@ fn body_with_file_comments(detail: &ReviewDetail) -> String {
             c.subject_type != "file"
                 && c.origin != "file_view"
                 && c.parent_id.is_none()
-                && !is_anchored_to(c, detail.target.head_sha.as_deref())
+                && !is_anchored_to(c, &detail.target)
         })
         .collect();
     if !lost_comments.is_empty() {
@@ -1202,11 +1299,23 @@ fn add_comment_impl(
     let ts = now();
     match parent_id {
         None => {
+            // LEFT line numbers live in the base/merge-base coordinate system, so
+            // pin them to the review's current target.base_sha (read from the same
+            // DB snapshot ensure_draft just saw). RIGHT comments store NULL.
+            let anchored_base_sha: Option<String> = if side == "LEFT" {
+                conn.query_row(
+                    "SELECT t.base_sha FROM target t JOIN review r ON r.target_id = t.id WHERE r.id = ?1",
+                    params![review_id],
+                    |r| r.get(0),
+                )?
+            } else {
+                None
+            };
             conn.execute(
                 "INSERT INTO comment
-                    (review_id, file_path, side, line, start_line, diff_hunk, body, anchored_head_sha, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)",
-                params![review_id, file_path, side, line, start_line, diff_hunk, body, anchored_head_sha, ts],
+                    (review_id, file_path, side, line, start_line, diff_hunk, body, anchored_head_sha, anchored_base_sha, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10)",
+                params![review_id, file_path, side, line, start_line, diff_hunk, body, anchored_head_sha, anchored_base_sha, ts],
             )?;
         }
         Some(pid) => {
@@ -1214,8 +1323,8 @@ fn add_comment_impl(
             conn.execute(
                 "INSERT INTO comment
                     (review_id, file_path, subject_type, origin, side, line, start_line,
-                     diff_hunk, body, parent_id, anchored_head_sha, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12)",
+                     diff_hunk, body, parent_id, anchored_head_sha, anchored_base_sha, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?13)",
                 params![
                     review_id,
                     p.file_path,
@@ -1228,6 +1337,7 @@ fn add_comment_impl(
                     body,
                     pid,
                     p.anchored_head_sha,
+                    p.anchored_base_sha,
                     ts,
                 ],
             )?;
@@ -1451,6 +1561,29 @@ mod tests {
         conn.last_insert_rowid()
     }
 
+    /// Like `seed_comment_anchored` but pins `anchored_base_sha` instead, so the
+    /// LEFT/base re-anchor pass sees a prior base revision to remap from. Stored
+    /// with `side = "LEFT"` and a NULL `anchored_head_sha` (the head pass ignores
+    /// it).
+    fn seed_comment_anchored_base(
+        conn: &Connection,
+        review_id: i64,
+        file_path: &str,
+        line: i64,
+        start_line: Option<i64>,
+        body: &str,
+        anchored_base_sha: Option<&str>,
+    ) -> i64 {
+        conn.execute(
+            "INSERT INTO comment
+                (review_id, file_path, side, line, start_line, diff_hunk, body, anchored_base_sha, created_at, updated_at)
+             VALUES (?1, ?2, 'LEFT', ?3, ?4, '@@ hunk @@', ?5, ?6, 'now', 'now')",
+            params![review_id, file_path, line, start_line, body, anchored_base_sha],
+        )
+        .unwrap();
+        conn.last_insert_rowid()
+    }
+
     /// Insert a reply row directly under `parent_id`, inheriting the parent's
     /// anchor columns (mirrors add_comment_impl's reply branch).
     fn seed_reply(conn: &Connection, review_id: i64, parent_id: i64, body: &str) -> i64 {
@@ -1458,8 +1591,8 @@ mod tests {
         conn.execute(
             "INSERT INTO comment
                 (review_id, file_path, subject_type, origin, side, line, start_line,
-                 diff_hunk, body, parent_id, anchored_head_sha, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 'now', 'now')",
+                 diff_hunk, body, parent_id, anchored_head_sha, anchored_base_sha, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 'now', 'now')",
             params![
                 review_id,
                 p.file_path,
@@ -1472,6 +1605,7 @@ mod tests {
                 body,
                 parent_id,
                 p.anchored_head_sha,
+                p.anchored_base_sha,
             ],
         )
         .unwrap();
@@ -1646,6 +1780,98 @@ mod tests {
         )
         .unwrap();
         (conn, review.id, root.id)
+    }
+
+    #[test]
+    fn add_comment_left_pins_target_base_sha() {
+        let conn = open_memory();
+        let repo = seed_repo(&conn, None, None);
+        let target =
+            get_or_create_local_target(&conn, repo, "/nope", "main", "feature", true).unwrap();
+        conn.execute(
+            "UPDATE target SET base_sha = 'basesha' WHERE id = ?1",
+            params![target.id],
+        )
+        .unwrap();
+        let review = new_review_for_target(&conn, target.id).unwrap();
+
+        let left = add_comment_impl(
+            &conn,
+            review.id,
+            "a.rs".into(),
+            "LEFT".into(),
+            7,
+            None,
+            None,
+            "on the old side".into(),
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(left.anchored_base_sha.as_deref(), Some("basesha"));
+
+        let right = add_comment_impl(
+            &conn,
+            review.id,
+            "a.rs".into(),
+            "RIGHT".into(),
+            9,
+            None,
+            None,
+            "on the new side".into(),
+            Some("headsha".into()),
+            None,
+        )
+        .unwrap();
+        assert_eq!(right.anchored_base_sha, None, "RIGHT comments store no base pin");
+    }
+
+    #[test]
+    fn reply_inherits_anchored_base_sha() {
+        let conn = open_memory();
+        let repo = seed_repo(&conn, None, None);
+        let target =
+            get_or_create_local_target(&conn, repo, "/nope", "main", "feature", true).unwrap();
+        conn.execute(
+            "UPDATE target SET base_sha = 'basesha' WHERE id = ?1",
+            params![target.id],
+        )
+        .unwrap();
+        let review = new_review_for_target(&conn, target.id).unwrap();
+
+        let root = add_comment_impl(
+            &conn,
+            review.id,
+            "a.rs".into(),
+            "LEFT".into(),
+            7,
+            None,
+            None,
+            "left root".into(),
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(root.anchored_base_sha.as_deref(), Some("basesha"));
+
+        let reply = add_comment_impl(
+            &conn,
+            review.id,
+            "".into(),
+            "RIGHT".into(),
+            0,
+            None,
+            None,
+            "reply".into(),
+            None,
+            Some(root.id),
+        )
+        .unwrap();
+        assert_eq!(
+            reply.anchored_base_sha.as_deref(),
+            Some("basesha"),
+            "reply copies the root's base pin (spec 11 inheritance)"
+        );
     }
 
     #[test]
@@ -2042,6 +2268,7 @@ mod tests {
             body: "comment body".into(),
             parent_id: None,
             anchored_head_sha: None,
+            anchored_base_sha: None,
             github_comment_id: None,
             resolved_at: None,
             created_at: "now".into(),
@@ -2254,6 +2481,48 @@ mod tests {
         let body = p["body"].as_str().unwrap();
         assert!(body.contains("## Comments that could not be re-anchored"));
         assert!(body.contains("**src/lib.rs** L7: comment body"));
+    }
+
+    #[test]
+    fn publish_gate_is_side_aware() {
+        // base_sha = "freshbase", head_sha = "freshhead".
+        let mut stale_left = payload_comment(7, None, "LEFT");
+        stale_left.id = 1;
+        stale_left.anchored_base_sha = Some("oldbase".into());
+
+        let mut fresh_left = payload_comment(9, None, "LEFT");
+        fresh_left.id = 2;
+        fresh_left.anchored_base_sha = Some("freshbase".into());
+
+        // A LEFT comment whose head pin is stale but whose base pin is current:
+        // it must still post inline (the behaviour change — head is irrelevant to
+        // LEFT line numbers).
+        let mut left_stale_head = payload_comment(11, None, "LEFT");
+        left_stale_head.id = 3;
+        left_stale_head.anchored_base_sha = Some("freshbase".into());
+        left_stale_head.anchored_head_sha = Some("stalehead".into());
+
+        let mut d = detail_with(None, "", vec![stale_left, fresh_left, left_stale_head]);
+        d.target.base_sha = Some("freshbase".into());
+        d.target.head_sha = Some("freshhead".into());
+
+        let p = build_publish_payload(&d);
+        let comments = p["comments"].as_array().unwrap();
+        // The stale-LEFT comment is excluded; the two current-base LEFT comments post inline.
+        assert_eq!(comments.len(), 2);
+        let lines: Vec<i64> = comments.iter().map(|c| c["line"].as_i64().unwrap()).collect();
+        assert!(lines.contains(&9));
+        assert!(lines.contains(&11), "stale-head/current-base LEFT still posts inline");
+        assert!(!lines.contains(&7), "stale-base LEFT must not post inline");
+        for c in comments {
+            assert_eq!(c["side"], "LEFT");
+        }
+
+        let body = p["body"].as_str().unwrap();
+        assert!(body.contains("## Comments that could not be re-anchored"));
+        assert!(body.contains("**src/lib.rs** L7: comment body"));
+        assert!(!body.contains("L9"), "fresh LEFT comment is not in the lost section");
+        assert!(!body.contains("L11"), "current-base LEFT comment is not in the lost section");
     }
 
     // ---- comment-id capture (Spec 17): inline selection, matcher, store ----
@@ -2581,6 +2850,70 @@ mod tests {
         assert!(!again.head_moved, "second refresh is a no-op");
     }
 
+    /// A repo whose `main` and `feature` branches diverge from a common fork
+    /// point: each adds a distinct line. Returns `(dir, fork_sha)` where
+    /// `fork_sha` is the merge-base of the two tips (and the LEFT side a three-dot
+    /// `main...feature` diff shows). The base tip (`main`) differs from it.
+    fn fixture_diverged_branches() -> (TempDir, String) {
+        let dir = TempDir::new().unwrap();
+        let p = dir.path();
+        git(p, &["init", "-q", "-b", "main"]);
+        git(p, &["config", "user.email", "test@example.com"]);
+        git(p, &["config", "user.name", "Test"]);
+        fs::write(p.join("file.txt"), "shared\n").unwrap();
+        git(p, &["add", "."]);
+        git(p, &["commit", "-q", "-m", "fork point"]);
+        let fork = git::rev_parse(p, "HEAD").unwrap();
+
+        git(p, &["checkout", "-q", "-b", "feature"]);
+        fs::write(p.join("file.txt"), "shared\nfeature\n").unwrap();
+        git(p, &["commit", "-q", "-am", "feature work"]);
+
+        git(p, &["checkout", "-q", "main"]);
+        fs::write(p.join("file.txt"), "shared\nmain\n").unwrap();
+        git(p, &["commit", "-q", "-am", "main work"]);
+        (dir, fork)
+    }
+
+    #[test]
+    fn local_target_base_sha_is_merge_base_when_three_dot() {
+        let (dir, fork) = fixture_diverged_branches();
+        let repo_path = dir.path().to_str().unwrap().to_string();
+        let base_tip = git::rev_parse(dir.path(), "main").unwrap();
+        assert_ne!(fork, base_tip, "fixture must actually diverge");
+
+        let conn = open_memory();
+        let repo = seed_repo_at(&conn, &repo_path);
+
+        // Three-dot: base_sha is the merge-base (fork), not the base branch tip.
+        let three =
+            get_or_create_local_target(&conn, repo, &repo_path, "main", "feature", true).unwrap();
+        assert_eq!(three.base_sha.as_deref(), Some(fork.as_str()));
+
+        // Two-dot: base_sha is the literal base tip.
+        let two =
+            get_or_create_local_target(&conn, repo, &repo_path, "main", "feature", false).unwrap();
+        assert_eq!(two.base_sha.as_deref(), Some(base_tip.as_str()));
+
+        // refresh_target_shas reproduces the same coordinate choice from three_dot.
+        conn.execute(
+            "UPDATE target SET three_dot = 1, base_sha = NULL WHERE id = ?1",
+            params![three.id],
+        )
+        .unwrap();
+        let db = Db(Mutex::new(conn));
+        let pinned = {
+            let conn = db.0.lock().unwrap();
+            get_target(&conn, three.id).unwrap()
+        };
+        refresh_target_shas(&db, &pinned).unwrap();
+        let stored = {
+            let conn = db.0.lock().unwrap();
+            get_target(&conn, three.id).unwrap()
+        };
+        assert_eq!(stored.base_sha.as_deref(), Some(fork.as_str()));
+    }
+
     #[test]
     fn refresh_local_target_no_move_reports_false() {
         let (dir, _h1, h2) = fixture_repo_two_heads();
@@ -2712,7 +3045,10 @@ mod tests {
     }
 
     #[test]
-    fn reanchor_ignores_left_side_comments() {
+    fn head_pass_never_touches_left_side_comments() {
+        // A LEFT comment pinned only on the head column is wrong-side for the head
+        // pass and has a NULL base pin, so neither pass moves it; the base pass
+        // counts the NULL pin as skipped_no_change.
         let (dir, h1, h2) = fixture_repo_insert_and_replace();
         let repo_path = dir.path().to_str().unwrap().to_string();
 
@@ -2742,11 +3078,12 @@ mod tests {
         let result = reanchor_review_comments(&conn, &detail).unwrap();
         assert_eq!(result.reanchored, 0);
         assert_eq!(result.lost, 0);
-        assert_eq!(result.skipped_no_change, 0);
+        assert_eq!(result.skipped_no_change, 1, "base pass skips the NULL base pin");
 
         let c = comment_row(&conn, id);
         assert_eq!(c.line, 2);
         assert_eq!(c.anchored_head_sha.as_deref(), Some(h1.as_str()));
+        assert_eq!(c.anchored_base_sha, None);
     }
 
     #[test]
@@ -2855,5 +3192,187 @@ mod tests {
         assert_eq!(reply.line, 3);
         assert_eq!(root.anchored_head_sha.as_deref(), Some(h1.as_str()));
         assert_eq!(reply.anchored_head_sha.as_deref(), Some(h1.as_str()));
+    }
+
+    // ---- LEFT/base re-anchor pass (spec 16) ----
+
+    /// Set up a two-dot local review where the base advanced B1 -> B2 (the
+    /// insert+replace fixture). LEFT comments pinned to B1 should remap through the
+    /// B1 -> B2 diff onto B2. Returns `(dir, conn, review_id, b1, b2)`.
+    fn left_base_review() -> (TempDir, Connection, i64, String, String) {
+        let (dir, b1, b2) = fixture_repo_insert_and_replace();
+        let repo_path = dir.path().to_str().unwrap().to_string();
+        let conn = open_memory();
+        let repo = seed_repo_at(&conn, &repo_path);
+        // Two-dot local target; pin base_sha to the *current* base B2 (head is
+        // irrelevant to the LEFT pass) while comments still point at B1.
+        let target =
+            get_or_create_local_target(&conn, repo, &repo_path, "main", "main", false).unwrap();
+        conn.execute(
+            "UPDATE target SET base_sha = ?1, head_sha = ?2 WHERE id = ?3",
+            params![b2, b2, target.id],
+        )
+        .unwrap();
+        let review = new_review_for_target(&conn, target.id).unwrap();
+        (dir, conn, review.id, b1, b2)
+    }
+
+    #[test]
+    fn left_reanchor_shifts_comment_and_advances_base_sha() {
+        let (_dir, conn, review_id, b1, b2) = left_base_review();
+        // beta (B1 line 2) shifts to line 3 in B2; head pin left NULL.
+        let id = seed_comment_anchored_base(&conn, review_id, "file.txt", 2, None, "on beta", Some(&b1));
+
+        let detail = load_detail(&conn, review_id).unwrap();
+        let result = reanchor_review_comments(&conn, &detail).unwrap();
+        assert_eq!(result.reanchored, 1);
+        assert_eq!(result.lost, 0);
+        assert_eq!(result.skipped_no_change, 0);
+
+        let c = comment_row(&conn, id);
+        assert_eq!(c.line, 3);
+        assert_eq!(c.anchored_base_sha.as_deref(), Some(b2.as_str()));
+        assert_eq!(c.anchored_head_sha, None, "head pin untouched");
+    }
+
+    #[test]
+    fn left_reanchor_replaced_line_is_lost() {
+        let (_dir, conn, review_id, b1, _b2) = left_base_review();
+        // gamma (B1 line 3) is replaced in B2 -> Lost.
+        let id = seed_comment_anchored_base(&conn, review_id, "file.txt", 3, None, "on gamma", Some(&b1));
+
+        let detail = load_detail(&conn, review_id).unwrap();
+        let result = reanchor_review_comments(&conn, &detail).unwrap();
+        assert_eq!(result.lost, 1);
+        assert_eq!(result.reanchored, 0);
+
+        let c = comment_row(&conn, id);
+        assert_eq!(c.line, 3, "lost comment's line is left untouched");
+        assert_eq!(c.anchored_base_sha.as_deref(), Some(b1.as_str()), "pin stays at B1");
+    }
+
+    #[test]
+    fn left_reanchor_range_moves_both_endpoints() {
+        let (_dir, conn, review_id, b1, b2) = left_base_review();
+        // Range alpha..beta (B1 lines 1-2) -> 1-3 (beta shifts, alpha unmoved).
+        let moved =
+            seed_comment_anchored_base(&conn, review_id, "file.txt", 2, Some(1), "range", Some(&b1));
+        // Range with one endpoint on gamma (replaced) -> whole comment Lost.
+        let lost =
+            seed_comment_anchored_base(&conn, review_id, "file.txt", 3, Some(1), "spans gamma", Some(&b1));
+
+        let detail = load_detail(&conn, review_id).unwrap();
+        let result = reanchor_review_comments(&conn, &detail).unwrap();
+        assert_eq!(result.reanchored, 1);
+        assert_eq!(result.lost, 1);
+
+        let m = comment_row(&conn, moved);
+        assert_eq!(m.start_line, Some(1));
+        assert_eq!(m.line, 3);
+        assert_eq!(m.anchored_base_sha.as_deref(), Some(b2.as_str()));
+
+        let l = comment_row(&conn, lost);
+        assert_eq!(l.start_line, Some(1));
+        assert_eq!(l.line, 3, "lost range untouched");
+        assert_eq!(l.anchored_base_sha.as_deref(), Some(b1.as_str()));
+    }
+
+    #[test]
+    fn left_pass_skips_null_pin_and_current_pin() {
+        let (_dir, conn, review_id, _b1, b2) = left_base_review();
+        // NULL base pin and a pin already at B2 must both be skipped, untouched.
+        let null_pin =
+            seed_comment_anchored_base(&conn, review_id, "file.txt", 2, None, "null pin", None);
+        let current_pin =
+            seed_comment_anchored_base(&conn, review_id, "file.txt", 2, None, "already current", Some(&b2));
+
+        let detail = load_detail(&conn, review_id).unwrap();
+        let result = reanchor_review_comments(&conn, &detail).unwrap();
+        assert_eq!(result.skipped_no_change, 2);
+        assert_eq!(result.reanchored, 0);
+        assert_eq!(result.lost, 0);
+
+        assert_eq!(comment_row(&conn, null_pin).line, 2);
+        assert_eq!(comment_row(&conn, null_pin).anchored_base_sha, None);
+        assert_eq!(comment_row(&conn, current_pin).line, 2);
+        assert_eq!(comment_row(&conn, current_pin).anchored_base_sha.as_deref(), Some(b2.as_str()));
+    }
+
+    #[test]
+    fn left_pass_noop_when_target_base_sha_null() {
+        let (_dir, conn, review_id, b1, _b2) = left_base_review();
+        // Wipe the current base SHA: the pass must not error, just skip.
+        conn.execute(
+            "UPDATE target SET base_sha = NULL WHERE id = (SELECT target_id FROM review WHERE id = ?1)",
+            params![review_id],
+        )
+        .unwrap();
+        let id = seed_comment_anchored_base(&conn, review_id, "file.txt", 2, None, "on beta", Some(&b1));
+
+        let detail = load_detail(&conn, review_id).unwrap();
+        let result = reanchor_review_comments(&conn, &detail).unwrap();
+        assert_eq!(result.skipped_no_change, 1);
+        assert_eq!(result.reanchored, 0);
+        assert_eq!(result.lost, 0);
+
+        let c = comment_row(&conn, id);
+        assert_eq!(c.line, 2);
+        assert_eq!(c.anchored_base_sha.as_deref(), Some(b1.as_str()));
+    }
+
+    #[test]
+    fn passes_do_not_cross_sides() {
+        // One stale RIGHT comment (head moved) and one fresh LEFT comment in the
+        // same review: only the RIGHT row moves; counts aggregate across passes.
+        let (dir, b1, b2) = fixture_repo_insert_and_replace();
+        let repo_path = dir.path().to_str().unwrap().to_string();
+        let conn = open_memory();
+        let repo = seed_repo_at(&conn, &repo_path);
+        let target =
+            get_or_create_local_target(&conn, repo, &repo_path, "main", "main", false).unwrap();
+        // head advanced B1 -> B2; base is already current (B2).
+        conn.execute(
+            "UPDATE target SET base_sha = ?1, head_sha = ?2 WHERE id = ?3",
+            params![b2, b2, target.id],
+        )
+        .unwrap();
+        let review = new_review_for_target(&conn, target.id).unwrap();
+
+        let right = seed_comment_anchored(
+            &conn, review.id, "file.txt", "RIGHT", 2, None, "right beta", Some(&b1),
+        );
+        let left = seed_comment_anchored_base(&conn, review.id, "file.txt", 1, None, "left alpha", Some(&b2));
+
+        let detail = load_detail(&conn, review.id).unwrap();
+        let result = reanchor_review_comments(&conn, &detail).unwrap();
+        assert_eq!(result.reanchored, 1, "only the RIGHT row moves");
+        assert_eq!(result.lost, 0);
+        assert_eq!(result.skipped_no_change, 1, "the current LEFT pin is skipped");
+
+        let r = comment_row(&conn, right);
+        assert_eq!(r.line, 3);
+        assert_eq!(r.anchored_head_sha.as_deref(), Some(b2.as_str()));
+        let l = comment_row(&conn, left);
+        assert_eq!(l.line, 1, "current LEFT comment untouched");
+    }
+
+    #[test]
+    fn left_reanchor_moves_replies_with_root() {
+        let (_dir, conn, review_id, b1, b2) = left_base_review();
+        let root_id =
+            seed_comment_anchored_base(&conn, review_id, "file.txt", 2, None, "on beta", Some(&b1));
+        let reply_id = seed_reply(&conn, review_id, root_id, "agreed");
+
+        let detail = load_detail(&conn, review_id).unwrap();
+        let result = reanchor_review_comments(&conn, &detail).unwrap();
+        assert_eq!(result.reanchored, 1, "only the root counts");
+        assert_eq!(result.lost, 0);
+
+        let root = comment_row(&conn, root_id);
+        let reply = comment_row(&conn, reply_id);
+        assert_eq!(root.line, 3);
+        assert_eq!(reply.line, 3);
+        assert_eq!(root.anchored_base_sha.as_deref(), Some(b2.as_str()));
+        assert_eq!(reply.anchored_base_sha.as_deref(), Some(b2.as_str()));
     }
 }

@@ -21,6 +21,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("migrations/0005_repo_remote_index.sql"),
     include_str!("migrations/0006_inbox.sql"),
     include_str!("migrations/0007_comment_resolved.sql"),
+    include_str!("migrations/0008_comment_anchored_base_sha.sql"),
 ];
 
 pub fn open(path: &Path) -> AppResult<Connection> {
@@ -134,6 +135,50 @@ mod tests {
             .query_row("SELECT resolved_at FROM comment WHERE id = 1", [], |r| r.get(0))
             .unwrap();
         assert!(resolved.is_none(), "old comment defaults to unresolved");
+    }
+
+    #[test]
+    fn migration_0008_upgrades_an_existing_0007_database() {
+        // Apply every migration except the last (simulating a DB created at 0007),
+        // insert a pre-0008 comment, then run the full migrate and confirm the new
+        // anchored_base_sha column applies cleanly with the old row defaulting to NULL.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        for script in &MIGRATIONS[..MIGRATIONS.len() - 1] {
+            conn.execute_batch(script).unwrap();
+        }
+        conn.pragma_update(None, "user_version", (MIGRATIONS.len() - 1) as i64)
+            .unwrap();
+        conn.execute(
+            "INSERT INTO repository (path, default_branch, added_at) VALUES ('/r', 'main', 'now')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO target (repo_id, kind, title, base_ref, head_ref, created_at)
+             VALUES (1, 'local', 't', 'a', 'b', 'now')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO review (target_id, body, status, created_at, updated_at)
+             VALUES (1, '', 'draft', 'now', 'now')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO comment (review_id, file_path, side, line, body, created_at, updated_at)
+             VALUES (1, 'a.rs', 'LEFT', 1, 'old', 'now', 'now')",
+            [],
+        )
+        .unwrap();
+
+        migrate(&conn).unwrap();
+
+        let base_sha: Option<String> = conn
+            .query_row("SELECT anchored_base_sha FROM comment WHERE id = 1", [], |r| r.get(0))
+            .unwrap();
+        assert!(base_sha.is_none(), "old comment defaults to NULL base pin");
     }
 
     #[test]

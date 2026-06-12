@@ -43,6 +43,7 @@ import { useDebouncedCallback } from "../lib/useDebouncedCallback";
 import { useSettingsStore } from "../lib/settings";
 import { useUIStore } from "../store";
 import { groupThreads, type CommentThread } from "../lib/threads";
+import { anchorPin, isCommentOutdated } from "../lib/staleness";
 import { summaryLine } from "../lib/text";
 import type {
   Comment,
@@ -253,11 +254,8 @@ function ReviewHeader({
 
   const isPr = target.kind === "github_pr";
   const published = review.status === "published";
-  const headMoved = detail.comments.some(
-    (c) =>
-      c.anchored_head_sha &&
-      target.head_sha &&
-      c.anchored_head_sha !== target.head_sha,
+  const anchorsStale = detail.comments.some((c) =>
+    isCommentOutdated(c, target.base_sha, target.head_sha),
   );
   const prUrl =
     isPr && detail.remote_owner && detail.remote_name && target.github_pr_number != null
@@ -303,13 +301,13 @@ function ReviewHeader({
           </button>
         </div>
         {prUrl && <OpenPrButton url={prUrl} />}
-        {headMoved && (
+        {anchorsStale && (
           <span className="head-moved">
             <span
               className="head-moved-badge"
-              title="The head has moved since some comments were written — they may no longer line up with the code."
+              title="The base or head has moved since some comments were written — they may no longer line up with the code."
             >
-              ⚠ head moved
+              ⚠ target moved
             </span>
             <button
               className="btn btn-sm"
@@ -317,7 +315,7 @@ function ReviewHeader({
               title={
                 readOnly
                   ? "Published reviews cannot be re-anchored"
-                  : "Move comments onto the current head and clear outdated badges"
+                  : "Move comments onto the current base/head and clear outdated badges"
               }
               onClick={() => reanchorComments.mutate()}
             >
@@ -779,6 +777,7 @@ function FileReview({
         <LineWidget
           threads={commentsByKey.get(key) ?? []}
           headSha={detail.target.head_sha}
+          baseSha={detail.target.base_sha}
           composerOpen={!!composerOpen}
           rangeLabel={rangeLabel}
           composerSuggestionSeed={composerOpen ? composerSuggestionSeed : null}
@@ -877,6 +876,7 @@ function FileReview({
               key={t.root.id}
               thread={t}
               headSha={detail.target.head_sha}
+              baseSha={detail.target.base_sha}
               readOnly={readOnly}
               canReply={false}
               onSaving={onSaving}
@@ -905,6 +905,7 @@ function FileReview({
           orphanThreads={orphanThreads}
           threadCtx={threadCtx}
           headSha={detail.target.head_sha}
+          baseSha={detail.target.base_sha}
           readOnly={readOnly}
           canExpand={canExpand}
           expanding={expanding}
@@ -934,6 +935,7 @@ function FileBody({
   orphanThreads,
   threadCtx,
   headSha,
+  baseSha,
   readOnly,
   canExpand,
   expanding,
@@ -957,6 +959,7 @@ function FileBody({
   orphanThreads: PrThread[];
   threadCtx: PrThreadCtx | null;
   headSha: string | null;
+  baseSha: string | null;
   readOnly: boolean;
   canExpand: boolean;
   expanding: boolean;
@@ -987,6 +990,7 @@ function FileBody({
               key={t.root.id}
               thread={t}
               headSha={headSha}
+              baseSha={baseSha}
               readOnly={readOnly}
               canReply={false}
               onSaving={onSaving}
@@ -1120,6 +1124,7 @@ function ExpandControl({
 export function LineWidget({
   threads,
   headSha,
+  baseSha,
   composerOpen,
   rangeLabel,
   composerSuggestionSeed,
@@ -1135,6 +1140,7 @@ export function LineWidget({
 }: {
   threads: CommentThread[];
   headSha: string | null;
+  baseSha: string | null;
   composerOpen: boolean;
   rangeLabel?: string;
   composerSuggestionSeed?: string | null;
@@ -1155,6 +1161,7 @@ export function LineWidget({
           key={t.root.id}
           thread={t}
           headSha={headSha}
+          baseSha={baseSha}
           readOnly={readOnly}
           showOrigin={showOrigin}
           canReply={canReply && !readOnly}
@@ -1184,6 +1191,7 @@ export function LineWidget({
 export function ThreadItem({
   thread,
   headSha,
+  baseSha,
   readOnly,
   showOrigin,
   canReply,
@@ -1194,6 +1202,7 @@ export function ThreadItem({
 }: {
   thread: CommentThread;
   headSha: string | null;
+  baseSha: string | null;
   readOnly: boolean;
   showOrigin?: boolean;
   canReply?: boolean;
@@ -1250,6 +1259,7 @@ export function ThreadItem({
       <CommentItem
         comment={root}
         headSha={headSha}
+        baseSha={baseSha}
         readOnly={readOnly}
         showOrigin={showOrigin}
         replyCount={replies.length}
@@ -1266,6 +1276,7 @@ export function ThreadItem({
               key={r.id}
               comment={r}
               headSha={headSha}
+              baseSha={baseSha}
               readOnly={readOnly}
               showOrigin={showOrigin}
               onSaving={onSaving}
@@ -1289,6 +1300,7 @@ export function ThreadItem({
 export function CommentItem({
   comment,
   headSha,
+  baseSha,
   readOnly,
   showOrigin,
   onReply,
@@ -1300,6 +1312,7 @@ export function CommentItem({
 }: {
   comment: Comment;
   headSha: string | null;
+  baseSha: string | null;
   readOnly: boolean;
   showOrigin?: boolean;
   onReply?: () => void;
@@ -1319,13 +1332,11 @@ export function CommentItem({
       .catch((e) => toast.error(String(e)));
   }, 400);
 
-  // The comment was anchored to a head that has since moved, so its line may no
-  // longer point at the code it was written against. Flag it rather than
-  // silently mislanding it (real re-anchoring is future work — see ROADMAP §2).
-  const outdated =
-    !!comment.anchored_head_sha &&
-    !!headSha &&
-    comment.anchored_head_sha !== headSha;
+  // The comment was anchored to a SHA its side has since moved past (LEFT → base,
+  // RIGHT → head), so its line may no longer point at the code it was written
+  // against. Flag it rather than silently mislanding it; Re-anchor clears it.
+  const outdated = isCommentOutdated(comment, baseSha, headSha);
+  const pin = anchorPin(comment);
 
   return (
     <div className="comment-item">
@@ -1337,15 +1348,14 @@ export function CommentItem({
           in summary
         </span>
       )}
-      {outdated && (
+      {outdated && pin && (
         <span
           className="stale-badge"
-          title={`Anchored to ${comment.anchored_head_sha!.slice(
-            0,
-            7,
-          )}, but the head has since moved — this comment may no longer line up with the code.`}
+          title={`Anchored to ${pin.slice(0, 7)}, but the ${
+            comment.side === "LEFT" ? "base" : "head"
+          } has since moved — this comment may no longer line up with the code.`}
         >
-          outdated · {comment.anchored_head_sha!.slice(0, 7)}
+          outdated · {pin.slice(0, 7)}
         </span>
       )}
       {readOnly ? (

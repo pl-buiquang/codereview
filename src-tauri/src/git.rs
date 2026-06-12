@@ -115,6 +115,11 @@ pub fn rev_parse(path: &Path, rev: &str) -> AppResult<String> {
     Ok(run_git(path, &["rev-parse", rev])?.trim().to_string())
 }
 
+/// First merge-base of two revs (`git merge-base a b`).
+pub fn merge_base(repo: &Path, a: &str, b: &str) -> AppResult<String> {
+    Ok(run_git(repo, &["merge-base", a, b])?.trim().to_string())
+}
+
 /// Full contents of `file_path` as of `sha` (`git show <sha>:<file_path>`),
 /// used to reveal collapsed context lines around a diff.
 pub fn show_file(path: &Path, sha: &str, file_path: &str) -> AppResult<String> {
@@ -349,5 +354,32 @@ mod tests {
         let out = diff_shas_path(repo.path(), &h1, &h2, "file.txt").unwrap();
         assert!(out.contains("+INSERTED"), "diff was: {out}");
         assert!(out.contains("file.txt"));
+    }
+
+    #[test]
+    fn merge_base_of_diverged_branches() {
+        let dir = TempDir::new().unwrap();
+        let p = dir.path();
+        git(p, &["init", "-q", "-b", "main"]);
+        git(p, &["config", "user.email", "test@example.com"]);
+        git(p, &["config", "user.name", "Test"]);
+        fs::write(p.join("file.txt"), "a\n").unwrap();
+        git(p, &["add", "."]);
+        git(p, &["commit", "-q", "-m", "fork point"]);
+        let fork = rev_parse(p, "HEAD").unwrap();
+
+        // Branch `feat` off the fork point, then advance both branches so they
+        // diverge — the merge-base must remain the fork commit.
+        git(p, &["checkout", "-q", "-b", "feat"]);
+        fs::write(p.join("file.txt"), "a\nfeat\n").unwrap();
+        git(p, &["commit", "-q", "-am", "feat work"]);
+
+        git(p, &["checkout", "-q", "main"]);
+        fs::write(p.join("file.txt"), "a\nmain\n").unwrap();
+        git(p, &["commit", "-q", "-am", "main work"]);
+
+        let mb = merge_base(p, "main", "feat").unwrap();
+        assert_eq!(mb, fork);
+        assert_eq!(mb, rev_parse(p, "main~1").unwrap());
     }
 }

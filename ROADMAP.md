@@ -25,10 +25,11 @@ on a 3-direction (Continuity / Modern / Terminal) × dark/light token-based desi
 
 ## 2. Comment anchoring & staleness
 
-- **Re-anchor LEFT/base-side comments** — RIGHT-side comments now re-anchor to a moved head via the
-  intervening diff (`anchor.rs` + `reanchor_comments`); base-side comments are still left untouched
-  (would need an `anchored_base_sha` to map across base/merge-base movement). Content/context-based
-  anchoring remains an alternative to line-mapping.
+- **Content/context-based anchoring** — both RIGHT (head→head) and LEFT (base→base) comments now
+  re-anchor through the intervening diff (`anchor.rs::remap_line` + the two-pass `reanchor_pass`,
+  with `anchored_head_sha`/`anchored_base_sha` pins). A future alternative to pure line-mapping
+  would match a comment's `diff_hunk` text against the new revision, so it survives rewrites that
+  the line-mapper marks `Lost`.
 
 ## 3. GitHub integration depth
 

@@ -56,6 +56,7 @@ export interface Comment {
   body: string;
   parent_id: number | null;
   anchored_head_sha: string | null;
+  anchored_base_sha: string | null;
   github_comment_id: number | null;
   resolved_at: string | null;
   created_at: string;

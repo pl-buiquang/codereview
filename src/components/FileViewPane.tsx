@@ -172,6 +172,7 @@ export function FileViewPane({
       <LineWidget
         threads={commentsByKey.get(key) ?? []}
         headSha={detail.target.head_sha}
+        baseSha={detail.target.base_sha}
         composerOpen={!!composerOpen}
         rangeLabel={rangeLabel}
         readOnly={readOnly}
@@ -232,6 +233,7 @@ export function FileViewPane({
                     key={t.root.id}
                     thread={t}
                     headSha={detail.target.head_sha}
+                    baseSha={detail.target.base_sha}
                     readOnly={readOnly}
                     showOrigin
                     canReply={false}
