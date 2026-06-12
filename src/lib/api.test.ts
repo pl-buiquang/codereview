@@ -117,6 +117,12 @@ describe("api command wrappers", () => {
 
     await api.deleteComment(2);
     expect(invoke).toHaveBeenCalledWith("delete_comment", { commentId: 2 });
+
+    await api.setCommentResolved(3, true);
+    expect(invoke).toHaveBeenCalledWith("set_comment_resolved", {
+      commentId: 3,
+      resolved: true,
+    });
   });
 
   it("wraps export commands", async () => {
