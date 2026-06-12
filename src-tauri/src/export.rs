@@ -74,8 +74,9 @@ pub fn render_markdown(detail: &ReviewDetail, repo_label: &str) -> String {
                 continue; // replies nest under their root, never top-level
             }
             let folded = fold_replies(&c.body, replies.get(&c.id).map_or(&[][..], Vec::as_slice));
+            let resolved = if c.resolved_at.is_some() { " (resolved)" } else { "" };
             if c.subject_type == "file" {
-                out.push_str(&format!("### {} (whole file)\n\n", c.file_path));
+                out.push_str(&format!("### {} (whole file){resolved}\n\n", c.file_path));
                 out.push_str(&folded);
                 out.push_str("\n\n");
                 continue;
@@ -87,7 +88,7 @@ pub fn render_markdown(detail: &ReviewDetail, repo_label: &str) -> String {
                     }
                     _ => format!("{}:L{}", c.file_path, c.line),
                 };
-                out.push_str(&format!("### {loc} (file view)\n\n"));
+                out.push_str(&format!("### {loc} (file view){resolved}\n\n"));
                 out.push_str(&folded);
                 out.push_str("\n\n");
                 continue;
@@ -98,7 +99,7 @@ pub fn render_markdown(detail: &ReviewDetail, repo_label: &str) -> String {
                 }
                 _ => format!("{}:{}", c.file_path, c.line),
             };
-            out.push_str(&format!("### {} ({})\n\n", loc, c.side));
+            out.push_str(&format!("### {} ({}){resolved}\n\n", loc, c.side));
             if let Some(hunk) = &c.diff_hunk {
                 if !hunk.trim().is_empty() {
                     out.push_str("```diff\n");
@@ -139,6 +140,7 @@ pub fn render_json(detail: &ReviewDetail, repo_label: &str) -> String {
                 "start_line": c.start_line,
                 "diff_hunk": c.diff_hunk,
                 "body": c.body,
+                "resolved_at": c.resolved_at,
                 "replies": nested,
             })
         })
@@ -429,5 +431,51 @@ mod tests {
         let json = render_json(&detail(vec![comment(5, None)]), "owner/repo");
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(v["comments"][0]["replies"].as_array().unwrap().len(), 0);
+    }
+
+    // ---- resolve markers (spec 12) ----
+
+    fn resolved(mut c: Comment, at: &str) -> Comment {
+        c.resolved_at = Some(at.into());
+        c
+    }
+
+    #[test]
+    fn markdown_marks_resolved_comment() {
+        let md = render_markdown(
+            &detail(vec![resolved(comment(3, None), "2026-01-01T00:00:00Z")]),
+            "owner/repo",
+        );
+        assert!(md.contains("### src/main.rs:3 (RIGHT) (resolved)"), "got: {md}");
+        assert!(md.contains("Consider renaming this."));
+    }
+
+    #[test]
+    fn markdown_marks_resolved_file_comment() {
+        let md = render_markdown(
+            &detail(vec![resolved(file_comment("note"), "2026-01-01T00:00:00Z")]),
+            "owner/repo",
+        );
+        assert!(md.contains("### src/main.rs (whole file) (resolved)"), "got: {md}");
+    }
+
+    #[test]
+    fn markdown_unresolved_has_no_marker() {
+        let md = render_markdown(&detail(vec![comment(3, None)]), "owner/repo");
+        assert!(!md.contains("(resolved)"));
+    }
+
+    #[test]
+    fn json_carries_resolved_at() {
+        let json = render_json(
+            &detail(vec![resolved(comment(5, None), "2026-01-02T03:04:05Z")]),
+            "owner/repo",
+        );
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["comments"][0]["resolved_at"], "2026-01-02T03:04:05Z");
+
+        let json2 = render_json(&detail(vec![comment(5, None)]), "owner/repo");
+        let v2: serde_json::Value = serde_json::from_str(&json2).unwrap();
+        assert!(v2["comments"][0]["resolved_at"].is_null());
     }
 }
