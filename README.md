@@ -21,6 +21,8 @@ Built with **Tauri v2** (Rust) + **React/TypeScript**.
   "viewed" collapse.
 - **Inline review comments** — click a line to comment; **shift-click** another line on the
   same side to comment on a **multi-line range**.
+- **Keyboard shortcuts** — `]`/`[` next/previous file, `n`/`p` next/previous comment thread,
+  `j`/`k` move a line cursor, `c` comment on the focused line, `?` for the full list.
 - **Reviews are a first-class, autosaved model**
   - Every comment / summary / verdict change persists immediately (no save button).
   - Close the app and reopen — a review is fully reconstructed.

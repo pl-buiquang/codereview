@@ -3,6 +3,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type MutableRefObject,
   type ReactNode,
   type RefObject,
 } from "react";
@@ -10,6 +11,7 @@ import { useQuery } from "@tanstack/react-query";
 import { parseDiff } from "react-diff-view";
 import { api } from "../lib/api";
 import { countChanges, fileDisplayPath } from "../lib/diff";
+import type { JumpListHandle } from "../lib/keyboard";
 import { Icon } from "./icons";
 
 interface Row {
@@ -95,9 +97,11 @@ function Chevron({ open }: { open: boolean }) {
 export function FileJumpList({
   reviewId,
   scrollRootRef,
+  controlRef,
 }: {
   reviewId: number;
   scrollRootRef: RefObject<HTMLElement | null>;
+  controlRef?: MutableRefObject<JumpListHandle | null>;
 }) {
   const detailQuery = useQuery({
     queryKey: ["review", reviewId],
@@ -227,6 +231,18 @@ export function FileJumpList({
       ?.querySelector(`#file-${index}`)
       ?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
+
+  // Publish the live nav state so ReviewView's keyboard handler can drive
+  // file-nav off the same scrollspy (`jumpTo` keeps its lock/release behaviour).
+  // Dep-less so it republishes after every render (activeIndex changes as the
+  // user scrolls); nulled on unmount.
+  useEffect(() => {
+    if (!controlRef) return;
+    controlRef.current = { activeIndex, fileCount: rows.length, jumpTo };
+    return () => {
+      controlRef.current = null;
+    };
+  });
 
   const tree = useMemo(() => buildTree(rows), [rows]);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
