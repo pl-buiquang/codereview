@@ -102,13 +102,14 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Spec 07 adds here:
-          #   TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          #   TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # Spec 07: minisign updater signing keys (set via `gh secret set`).
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           # Spec 08 adds the conditional Apple/Windows signing env here.
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "codereview ${{ github.ref_name }}"
+          includeUpdaterJson: true
           releaseBody: |
             Unsigned build — see assets below.
 
