@@ -36,6 +36,25 @@ pub async fn pr_review_threads(
     gh::pr_review_threads(&owner, &name, number)
 }
 
+/// Reply to an existing GitHub review thread. `comment_id` is the databaseId of
+/// the thread's first comment. Acts on GitHub directly; nothing touches SQLite.
+#[tauri::command]
+pub async fn reply_to_thread(
+    owner: String,
+    name: String,
+    number: i64,
+    comment_id: i64,
+    body: String,
+) -> AppResult<i64> {
+    gh::reply_to_thread(&owner, &name, number, comment_id, &body)
+}
+
+/// Resolve/unresolve a GitHub review thread by node id. Returns new isResolved.
+#[tauri::command]
+pub async fn set_pr_thread_resolved(thread_id: String, resolved: bool) -> AppResult<bool> {
+    gh::set_thread_resolved(&thread_id, resolved)
+}
+
 /// Detected external-tool environment, for the Settings diagnostics panel.
 /// `git`/`gh` are the resolved absolute paths (or `null` if not found).
 #[derive(Debug, Serialize)]
