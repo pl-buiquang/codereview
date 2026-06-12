@@ -136,6 +136,40 @@ pub fn post_review(owner: &str, name: &str, number: i64, payload_json: &str) -> 
     parse_rest_id(&out, "review")
 }
 
+/// Submit a PENDING review with the given event (APPROVE | REQUEST_CHANGES | COMMENT).
+/// Body/comments were attached at creation, so the payload carries only the event.
+pub fn submit_pending_review(
+    owner: &str,
+    name: &str,
+    number: i64,
+    review_id: i64,
+    event: &str,
+) -> AppResult<()> {
+    let endpoint = format!("repos/{owner}/{name}/pulls/{number}/reviews/{review_id}/events");
+    let ctx = GhRepo::Remote {
+        owner: owner.to_string(),
+        name: name.to_string(),
+    };
+    let payload = serde_json::json!({ "event": event }).to_string();
+    run_gh_stdin(
+        &ctx,
+        &["api", &endpoint, "--method", "POST", "--input", "-"],
+        &payload,
+    )?;
+    Ok(())
+}
+
+/// Delete a PENDING (never-submitted) review. GitHub rejects this for submitted reviews.
+pub fn delete_pending_review(owner: &str, name: &str, number: i64, review_id: i64) -> AppResult<()> {
+    let endpoint = format!("repos/{owner}/{name}/pulls/{number}/reviews/{review_id}");
+    let ctx = GhRepo::Remote {
+        owner: owner.to_string(),
+        name: name.to_string(),
+    };
+    run_gh(&ctx, &["api", &endpoint, "--method", "DELETE"])?;
+    Ok(())
+}
+
 /// Shared by post_review and reply_to_thread: pull the integer `id` out of a
 /// REST creation response.
 fn parse_rest_id(out: &str, what: &str) -> AppResult<i64> {
