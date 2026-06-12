@@ -6,6 +6,7 @@ import { RepoView } from "./components/RepoView";
 import { ReviewView } from "./components/ReviewView";
 import { Toaster } from "./components/Toaster";
 import { ConfirmDialog } from "./components/ConfirmDialog";
+import { UpdateBanner } from "./components/UpdateBanner";
 import { SettingsView } from "./components/SettingsView";
 import { api } from "./lib/api";
 import { useApplySettings } from "./lib/useApplySettings";
@@ -42,6 +43,7 @@ function App() {
 
   return (
     <div className="app-shell">
+      <UpdateBanner />
       <TabBar />
       <TabPanes />
       <Toaster />
