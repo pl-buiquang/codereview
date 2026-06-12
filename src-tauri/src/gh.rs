@@ -133,8 +133,14 @@ pub fn post_review(owner: &str, name: &str, number: i64, payload_json: &str) -> 
         &["api", &endpoint, "--method", "POST", "--input", "-"],
         payload_json,
     )?;
-    let value: serde_json::Value = serde_json::from_str(&out)
-        .map_err(|e| AppError::Gh(format!("failed to parse review response: {e}")))?;
+    parse_rest_id(&out, "review")
+}
+
+/// Shared by post_review and reply_to_thread: pull the integer `id` out of a
+/// REST creation response.
+fn parse_rest_id(out: &str, what: &str) -> AppResult<i64> {
+    let value: serde_json::Value = serde_json::from_str(out)
+        .map_err(|e| AppError::Gh(format!("failed to parse {what} response: {e}")))?;
     Ok(value.get("id").and_then(|v| v.as_i64()).unwrap_or_default())
 }
 
@@ -887,6 +893,85 @@ pub fn pr_review_threads(owner: &str, name: &str, number: i64) -> AppResult<Vec<
     Ok(threads)
 }
 
+// ---------------------------------------------------------------------------
+// PR review-thread mutations (reply, resolve/unresolve)
+// ---------------------------------------------------------------------------
+
+/// Reply to an existing PR review thread. `comment_id` is the REST databaseId of
+/// the thread's FIRST (root) comment — GitHub attaches the reply to that
+/// comment's thread. Clone-less; returns the new reply's database id.
+pub fn reply_to_thread(
+    owner: &str,
+    name: &str,
+    number: i64,
+    comment_id: i64,
+    body: &str,
+) -> AppResult<i64> {
+    let endpoint = format!("repos/{owner}/{name}/pulls/{number}/comments/{comment_id}/replies");
+    let ctx = GhRepo::Remote {
+        owner: owner.to_string(),
+        name: name.to_string(),
+    };
+    let payload = serde_json::json!({ "body": body }).to_string();
+    let out = run_gh_stdin(
+        &ctx,
+        &["api", &endpoint, "--method", "POST", "--input", "-"],
+        &payload,
+    )?;
+    parse_rest_id(&out, "reply")
+}
+
+// Both mutations alias their payload object to `result` so one deserializer
+// (ThreadMutationData) serves resolve and unresolve alike.
+const RESOLVE_THREAD_MUTATION: &str = r#"
+mutation ResolveThread($threadId: ID!) {
+  result: resolveReviewThread(input: { threadId: $threadId }) {
+    thread { id isResolved }
+  }
+}
+"#;
+
+const UNRESOLVE_THREAD_MUTATION: &str = r#"
+mutation UnresolveThread($threadId: ID!) {
+  result: unresolveReviewThread(input: { threadId: $threadId }) {
+    thread { id isResolved }
+  }
+}
+"#;
+
+#[derive(Debug, Deserialize)]
+struct ThreadMutationData {
+    result: Option<ThreadMutationResult>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ThreadMutationResult {
+    thread: Option<ThreadStateNode>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ThreadStateNode {
+    #[allow(dead_code)]
+    id: String,
+    is_resolved: bool,
+}
+
+/// Resolve or unresolve a PR review thread by its GraphQL node id (PrThread.id).
+/// Requires push access to the repository. Returns the thread's new isResolved.
+pub fn set_thread_resolved(thread_id: &str, resolved: bool) -> AppResult<bool> {
+    let query = if resolved {
+        RESOLVE_THREAD_MUTATION
+    } else {
+        UNRESOLVE_THREAD_MUTATION
+    };
+    let data: ThreadMutationData = graphql(query, serde_json::json!({ "threadId": thread_id }))?;
+    data.result
+        .and_then(|r| r.thread)
+        .map(|t| t.is_resolved)
+        .ok_or_else(|| AppError::Gh("thread mutation returned no thread".into()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1104,6 +1189,43 @@ mod tests {
         assert!(outdated.comments[0].outdated);
         assert_eq!(outdated.comments[1].id, "C3");
         assert!(outdated.comments[1].author.is_none());
+    }
+
+    #[test]
+    fn parse_rest_id_extracts_id() {
+        let id = parse_rest_id(r#"{"id": 12345, "body": "x"}"#, "reply").expect("parses");
+        assert_eq!(id, 12345);
+
+        let err = parse_rest_id("not json", "reply").expect_err("garbage errors");
+        match err {
+            AppError::Gh(msg) => assert!(msg.contains("reply"), "message names the label: {msg}"),
+            other => panic!("expected AppError::Gh, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn thread_mutation_parses_resolved() {
+        let data: ThreadMutationData =
+            serde_json::from_str(r#"{"result":{"thread":{"id":"T1","isResolved":true}}}"#)
+                .expect("parses");
+        let resolved = data.result.unwrap().thread.unwrap().is_resolved;
+        assert!(resolved);
+    }
+
+    #[test]
+    fn thread_mutation_parses_unresolved() {
+        let data: ThreadMutationData =
+            serde_json::from_str(r#"{"result":{"thread":{"id":"T1","isResolved":false}}}"#)
+                .expect("parses");
+        let resolved = data.result.unwrap().thread.unwrap().is_resolved;
+        assert!(!resolved);
+    }
+
+    #[test]
+    fn thread_mutation_null_result_is_none() {
+        let data: ThreadMutationData =
+            serde_json::from_str(r#"{"result": null}"#).expect("parses");
+        assert!(data.result.is_none());
     }
 
     const COMPARE_FIXTURE: &str = r#"{
