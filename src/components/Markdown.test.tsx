@@ -56,4 +56,37 @@ describe("Markdown", () => {
     expect(container.querySelector("img[onerror]")).toBeNull();
     expect(container.textContent).toContain("<script>alert(1)</script>");
   });
+
+  it("renders suggestion fences as a panel", () => {
+    const { container } = render(
+      <Markdown source={"```suggestion\nlet x = 1;\n```"} />,
+    );
+
+    const block = container.querySelector(".suggestion-block");
+    expect(block).not.toBeNull();
+    expect(screen.getByText("Suggested change")).toBeTruthy();
+    const newCode = container.querySelector(".suggestion-block-new");
+    expect(newCode?.textContent).toContain("let x = 1;");
+    // The fence is upgraded, not left as a default highlighted code block.
+    expect(container.querySelector("pre > code.language-suggestion")).toBeNull();
+  });
+
+  it("leaves other code fences alone", () => {
+    const { container } = render(
+      <Markdown source={"```ts\nconst a = 1;\n```"} />,
+    );
+
+    expect(container.querySelector(".suggestion-block")).toBeNull();
+    const pre = container.querySelector("pre");
+    expect(pre).not.toBeNull();
+    expect(pre?.querySelector("code")?.textContent).toContain("const a = 1;");
+  });
+
+  it("renders empty suggestion as removal", () => {
+    const { container } = render(<Markdown source={"```suggestion\n```"} />);
+
+    const empty = container.querySelector(".suggestion-block-empty");
+    expect(empty).not.toBeNull();
+    expect(empty?.textContent).toBe("(removes the selected lines)");
+  });
 });

@@ -225,6 +225,43 @@ export function hunkContextSnippet(
 }
 
 /**
+ * The current (RIGHT/head-side) text of lines [lo, hi], read from the rendered
+ * hunks. Returns null unless EVERY line in the range is present (normal lines
+ * use newLineNumber, inserts use lineNumber; deletes have no RIGHT presence).
+ */
+export function rightLinesText(
+  hunks: HunkData[],
+  lo: number,
+  hi: number,
+): string[] | null {
+  const byLine = new Map<number, string>();
+  for (const hunk of hunks) {
+    for (const c of hunk.changes) {
+      if (c.type === "normal") byLine.set(c.newLineNumber, c.content);
+      else if (c.type === "insert") byLine.set(c.lineNumber, c.content);
+    }
+  }
+  const out: string[] = [];
+  for (let n = lo; n <= hi; n++) {
+    const text = byLine.get(n);
+    if (text === undefined) return null;
+    out.push(text);
+  }
+  return out;
+}
+
+/** A ```suggestion fence around `lines`, lengthening the fence past any
+ *  backtick run inside the content (min 3, GitHub-compatible). */
+export function suggestionFence(lines: string[]): string {
+  const longestRun = Math.max(
+    0,
+    ...lines.flatMap((l) => [...l.matchAll(/`+/g)].map((m) => m[0].length)),
+  );
+  const fence = "`".repeat(Math.max(3, longestRun + 1));
+  return `${fence}suggestion\n${lines.join("\n")}\n${fence}`;
+}
+
+/**
  * Build a synthetic single-file diff where the entire `source` is one hunk of
  * `normal` (unchanged) lines. Feeding this to `<Diff>`/`tokenizeFile`/`indexFile`
  * gives the full-file pane gutters, click-to-comment, widget injection and syntax

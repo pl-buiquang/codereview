@@ -23,7 +23,9 @@ import {
   hunkContextSnippet,
   indexFile,
   leadingExpandRange,
+  rightLinesText,
   sourceLineCount,
+  suggestionFence,
   tokenizeFile,
   trailingExpandRange,
   trailingGap,
@@ -700,6 +702,27 @@ function FileReview({
     return keys;
   }, [selection, range, metaByKey]);
 
+  // A suggestion seed for the open composer: only for a RIGHT-side selection
+  // whose every line resolves to current head text. null hides the button.
+  const composerSuggestionSeed = useMemo(() => {
+    if (!selection || !range || selection.side !== "RIGHT") return null;
+    const lines = rightLinesText(hunks, range.lo, range.hi);
+    return lines ? suggestionFence(lines) : null;
+  }, [selection, range, hunks]);
+
+  // A seed for an existing RIGHT-side line/diff comment, from its anchored
+  // range — null (hidden button) for non-RIGHT, file/file-view, outdated, or
+  // unresolvable lines (collapsed gaps).
+  const suggestionSeedFor = useCallback(
+    (c: Comment): string | null => {
+      if (c.side !== "RIGHT" || c.subject_type !== "line" || c.origin !== "diff") return null;
+      if (c.anchored_head_sha && c.anchored_head_sha !== detail.target.head_sha) return null;
+      const lines = rightLinesText(hunks, c.start_line ?? c.line, c.line);
+      return lines ? suggestionFence(lines) : null;
+    },
+    [hunks, detail.target.head_sha],
+  );
+
   const submitSelectionComment = async (text: string) => {
     if (!selection || !range) return;
     const header = metaByKey.get(selection.focusKey)?.hunk ?? "";
@@ -758,6 +781,8 @@ function FileReview({
           headSha={detail.target.head_sha}
           composerOpen={!!composerOpen}
           rangeLabel={rangeLabel}
+          composerSuggestionSeed={composerOpen ? composerSuggestionSeed : null}
+          suggestionSeedFor={suggestionSeedFor}
           readOnly={readOnly}
           canReply={!readOnly}
           onCloseComposer={() => setSelection(null)}
@@ -1097,6 +1122,8 @@ export function LineWidget({
   headSha,
   composerOpen,
   rangeLabel,
+  composerSuggestionSeed,
+  suggestionSeedFor,
   readOnly,
   showOrigin,
   canReply = true,
@@ -1110,6 +1137,8 @@ export function LineWidget({
   headSha: string | null;
   composerOpen: boolean;
   rangeLabel?: string;
+  composerSuggestionSeed?: string | null;
+  suggestionSeedFor?: (c: Comment) => string | null;
   readOnly: boolean;
   showOrigin?: boolean;
   canReply?: boolean;
@@ -1129,13 +1158,19 @@ export function LineWidget({
           readOnly={readOnly}
           showOrigin={showOrigin}
           canReply={canReply && !readOnly}
+          suggestionSeedFor={suggestionSeedFor}
           onSaving={onSaving}
           onSaved={onSaved}
           onCommentsChanged={onCommentsChanged}
         />
       ))}
       {composerOpen && !readOnly && (
-        <Composer onSubmit={onAdd} onCancel={onCloseComposer} rangeLabel={rangeLabel} />
+        <Composer
+          onSubmit={onAdd}
+          onCancel={onCloseComposer}
+          rangeLabel={rangeLabel}
+          suggestionSeed={composerSuggestionSeed}
+        />
       )}
     </div>
   );
@@ -1152,6 +1187,7 @@ export function ThreadItem({
   readOnly,
   showOrigin,
   canReply,
+  suggestionSeedFor,
   onSaving,
   onSaved,
   onCommentsChanged,
@@ -1161,6 +1197,7 @@ export function ThreadItem({
   readOnly: boolean;
   showOrigin?: boolean;
   canReply?: boolean;
+  suggestionSeedFor?: (c: Comment) => string | null;
   onSaving: () => void;
   onSaved: () => void;
   onCommentsChanged: () => void;
@@ -1216,6 +1253,7 @@ export function ThreadItem({
         readOnly={readOnly}
         showOrigin={showOrigin}
         replyCount={replies.length}
+        suggestionSeed={suggestionSeedFor?.(root) ?? null}
         onReply={canReply ? () => setReplyOpen(true) : undefined}
         onSaving={onSaving}
         onSaved={onSaved}
@@ -1255,6 +1293,7 @@ export function CommentItem({
   showOrigin,
   onReply,
   replyCount,
+  suggestionSeed,
   onSaving,
   onSaved,
   onCommentsChanged,
@@ -1265,6 +1304,7 @@ export function CommentItem({
   showOrigin?: boolean;
   onReply?: () => void;
   replyCount?: number;
+  suggestionSeed?: string | null;
   onSaving: () => void;
   onSaved: () => void;
   onCommentsChanged: () => void;
@@ -1327,13 +1367,29 @@ export function CommentItem({
             </button>
           </div>
           {tab === "write" ? (
-            <textarea
-              value={body}
-              onChange={(e) => {
-                setBody(e.target.value);
-                save(e.target.value);
-              }}
-            />
+            <>
+              {suggestionSeed != null && (
+                <button
+                  className="suggest-btn"
+                  title="Insert a suggestion block prefilled with the current line(s)"
+                  onClick={() => {
+                    const next =
+                      body.trim() === "" ? suggestionSeed : `${body}\n\n${suggestionSeed}`;
+                    setBody(next);
+                    save(next);
+                  }}
+                >
+                  ± Insert suggestion
+                </button>
+              )}
+              <textarea
+                value={body}
+                onChange={(e) => {
+                  setBody(e.target.value);
+                  save(e.target.value);
+                }}
+              />
+            </>
           ) : (
             <Markdown source={body} />
           )}
@@ -1395,11 +1451,13 @@ export function Composer({
   onCancel,
   rangeLabel,
   submitLabel = "Add comment",
+  suggestionSeed,
 }: {
   onSubmit: (text: string) => Promise<void>;
   onCancel: () => void;
   rangeLabel?: string;
   submitLabel?: string;
+  suggestionSeed?: string | null;
 }) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
@@ -1413,6 +1471,19 @@ export function Composer({
         onChange={(e) => setText(e.target.value)}
       />
       <div className="composer-actions">
+        {suggestionSeed != null && (
+          <button
+            className="suggest-btn"
+            title="Insert a suggestion block prefilled with the current line(s)"
+            onClick={() =>
+              setText((t) =>
+                t.trim() === "" ? suggestionSeed : `${t}\n\n${suggestionSeed}`,
+              )
+            }
+          >
+            ± Insert suggestion
+          </button>
+        )}
         <button className="btn btn-ghost" onClick={onCancel}>
           Cancel
         </button>
