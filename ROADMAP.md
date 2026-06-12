@@ -19,8 +19,6 @@ on a 3-direction (Continuity / Modern / Terminal) × dark/light token-based desi
   (`getCollapsedLinesCountBetween(null, hunk)` gives the leading count; the trailing size needs
   the fetched base file's line count). Prototyped once, then reverted.
 - **Resolve / unresolve threads** — mark a comment thread resolved; collapse resolved threads.
-- **Keyboard navigation** — next/prev file, next/prev comment, `c` to comment on the focused
-  line, `j`/`k` movement.
 - **Word-level intra-line highlighting** — `markEdits` from `react-diff-view`.
 
 ## 2. Comment anchoring & staleness
