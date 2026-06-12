@@ -75,6 +75,8 @@ pub fn run() {
             commands::gh::list_prs,
             commands::gh::pr_meta,
             commands::gh::pr_review_threads,
+            commands::gh::reply_to_thread,
+            commands::gh::set_pr_thread_resolved,
             commands::gh::check_environment,
             commands::inbox::refresh_inbox,
             commands::inbox::list_inbox,

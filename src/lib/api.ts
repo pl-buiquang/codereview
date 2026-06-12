@@ -66,6 +66,10 @@ export const api = {
     invoke<PrMeta>("pr_meta", { owner, name, number }),
   prReviewThreads: (owner: string, name: string, number: number) =>
     invoke<PrThread[]>("pr_review_threads", { owner, name, number }),
+  replyToThread: (owner: string, name: string, number: number, commentId: number, body: string) =>
+    invoke<number>("reply_to_thread", { owner, name, number, commentId, body }),
+  setPrThreadResolved: (threadId: string, resolved: boolean) =>
+    invoke<boolean>("set_pr_thread_resolved", { threadId, resolved }),
   createReviewForPr: (owner: string, name: string, prNumber: number) =>
     invoke<Review>("create_review_for_pr", { owner, name, prNumber }),
   publishReview: (reviewId: number) => invoke<Review>("publish_review", { reviewId }),

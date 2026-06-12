@@ -42,7 +42,14 @@ import { useSettingsStore } from "../lib/settings";
 import { useUIStore } from "../store";
 import { groupThreads, type CommentThread } from "../lib/threads";
 import { summaryLine } from "../lib/text";
-import type { Comment, PrThread, ReviewDetail, ReviewEvent, Side } from "../lib/types";
+import type {
+  Comment,
+  PrThread,
+  PrThreadCtx,
+  ReviewDetail,
+  ReviewEvent,
+  Side,
+} from "../lib/types";
 
 type SaveState = "idle" | "saving" | "saved";
 
@@ -481,6 +488,14 @@ function FileReview({
   const queryClient = useQueryClient();
   const reviewId = detail.review.id;
   const path = fileDisplayPath(file);
+  const threadCtx: PrThreadCtx | null =
+    detail.remote_owner && detail.remote_name && detail.target.github_pr_number != null
+      ? {
+          owner: detail.remote_owner,
+          name: detail.remote_name,
+          number: detail.target.github_pr_number,
+        }
+      : null;
   const isDeleted = file.type === "delete";
   const openInDefaultApp = async () => {
     if (isDeleted) return;
@@ -752,7 +767,7 @@ function FileReview({
           onCommentsChanged={onCommentsChanged}
         />
         {keyThreads.map((t) => (
-          <GithubThread key={t.id} thread={t} />
+          <GithubThread key={t.id} thread={t} ctx={threadCtx} />
         ))}
       </>
     );
@@ -863,6 +878,7 @@ function FileReview({
           selectedChanges={selectedChanges}
           orphans={orphans}
           orphanThreads={orphanThreads}
+          threadCtx={threadCtx}
           headSha={detail.target.head_sha}
           readOnly={readOnly}
           canExpand={canExpand}
@@ -891,6 +907,7 @@ function FileBody({
   selectedChanges,
   orphans,
   orphanThreads,
+  threadCtx,
   headSha,
   readOnly,
   canExpand,
@@ -913,6 +930,7 @@ function FileBody({
   selectedChanges: string[];
   orphans: CommentThread[];
   orphanThreads: PrThread[];
+  threadCtx: PrThreadCtx | null;
   headSha: string | null;
   readOnly: boolean;
   canExpand: boolean;
@@ -957,7 +975,7 @@ function FileBody({
         <div className="github-orphan-threads">
           <p className="muted">GitHub threads not on the current diff:</p>
           {orphanThreads.map((t) => (
-            <GithubThread key={t.id} thread={t} />
+            <GithubThread key={t.id} thread={t} ctx={threadCtx} />
           ))}
         </div>
       )}

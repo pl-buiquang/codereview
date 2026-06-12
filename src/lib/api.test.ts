@@ -88,6 +88,21 @@ describe("api command wrappers", () => {
     await api.publishReview(9);
     expect(invoke).toHaveBeenCalledWith("publish_review", { reviewId: 9 });
 
+    await api.replyToThread("o", "n", 5, 1001, "hi");
+    expect(invoke).toHaveBeenCalledWith("reply_to_thread", {
+      owner: "o",
+      name: "n",
+      number: 5,
+      commentId: 1001,
+      body: "hi",
+    });
+
+    await api.setPrThreadResolved("T1", true);
+    expect(invoke).toHaveBeenCalledWith("set_pr_thread_resolved", {
+      threadId: "T1",
+      resolved: true,
+    });
+
     const commentArgs = {
       reviewId: 1,
       filePath: "a.ts",
