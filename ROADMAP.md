@@ -42,8 +42,6 @@ on a 3-direction (Continuity / Modern / Terminal) × dark/light token-based desi
   existing pending review, and adopting a pending review created on github.com.
 - **Auto-refresh & polling** — a manual "Refresh" re-resolves SHAs and re-fetches a review's
   diff/threads today; still want PR-list refresh and optional interval polling.
-- **Provider abstraction** — factor `gh.rs` behind a trait so GitLab/Bitbucket/Gitea could be
-  added later.
 
 ## 4. Export
 
