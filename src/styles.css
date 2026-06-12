@@ -1638,6 +1638,58 @@ td.diff-code {
   justify-content: flex-end;
   margin-top: 6px;
 }
+.suggest-btn {
+  margin-right: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  border-radius: var(--radius-m);
+  border: 1px solid var(--border-strong);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 12px;
+  cursor: pointer;
+}
+.suggest-btn:hover {
+  color: var(--text);
+  border-color: var(--accent-border);
+}
+
+/* GitHub-style suggested-change panel (rendered for ```suggestion fences). */
+.suggestion-block {
+  margin: 0 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-m);
+  overflow: hidden;
+}
+.suggestion-block-header {
+  padding: 4px 10px;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-2);
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+}
+.suggestion-block-new {
+  margin: 0;
+  padding: 8px 10px;
+  overflow: auto;
+  background: rgba(46, 160, 67, 0.15);
+  font-family: var(--font-mono);
+}
+.suggestion-block-new code {
+  padding: 0;
+  background: none;
+  border: none;
+  white-space: pre;
+}
+.suggestion-block-empty {
+  margin: 0;
+  padding: 8px 10px;
+  font-size: 12px;
+}
 
 /* Full-file review pane (v2) */
 .file-view-pane {
