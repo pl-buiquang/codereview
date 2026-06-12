@@ -151,6 +151,14 @@ export interface PrThreadComment {
   outdated: boolean;
 }
 
+/** Which PR a GitHub thread belongs to — needed by thread mutations and for
+ *  invalidating the ["pr-threads", owner, name, number] query. */
+export interface PrThreadCtx {
+  owner: string;
+  name: string;
+  number: number;
+}
+
 export interface PrThread {
   id: string;
   isResolved: boolean;
