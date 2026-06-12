@@ -10,8 +10,12 @@ use crate::db::models::{Comment, Repository, Review, ReviewDetail, ReviewSummary
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
 use crate::export;
-use crate::gh::{self, GhRepo};
+use crate::gh::ComparedFile;
+use crate::gh::GhRepo;
+use crate::gh::PrInfo;
+use crate::gh::ReviewComment;
 use crate::git;
+use crate::provider::provider_for;
 
 fn now() -> String {
     Utc::now().to_rfc3339()
@@ -204,7 +208,7 @@ pub(crate) fn get_or_create_pr_target(
     conn: &Connection,
     repo_id: i64,
     pr_number: i64,
-    info: &gh::PrInfo,
+    info: &PrInfo,
     merge_base_sha: Option<&str>,
 ) -> AppResult<Target> {
     let existing: Option<i64> = conn
@@ -278,12 +282,15 @@ fn refresh_target_shas(db: &Db, target: &Target) -> AppResult<FreshnessResult> {
                     repo_owner_name(&conn, target.repo_id)?,
                 )
             };
-            let info = gh::pr_view(&ctx, number)?;
+            let info = provider_for().pr_view(&ctx, number)?;
             // PR diffs are three-dot: the LEFT side is the merge-base, not the
             // base-branch tip. Resolution failure degrades to None and the
             // stored base_sha is preserved (COALESCE).
-            let merge_base = owner_name
-                .and_then(|(o, n)| gh::merge_base_sha(&o, &n, &info.base_ref, &info.head_sha).ok());
+            let merge_base = owner_name.and_then(|(o, n)| {
+                provider_for()
+                    .merge_base_sha(&o, &n, &info.base_ref, &info.head_sha)
+                    .ok()
+            });
             let conn = db.0.lock().unwrap();
             conn.execute(
                 "UPDATE target SET title = ?1, base_ref = ?2, head_ref = ?3, head_sha = ?4,
@@ -451,7 +458,7 @@ fn reanchor_pass(
     }
 
     let is_remote = detail.repo_path.starts_with("github:");
-    let mut compare_cache: std::collections::HashMap<String, Vec<gh::ComparedFile>> =
+    let mut compare_cache: std::collections::HashMap<String, Vec<ComparedFile>> =
         std::collections::HashMap::new();
 
     for ((pinned_sha, file_path), comments) in &groups {
@@ -467,7 +474,7 @@ fn reanchor_pass(
             let files = match compare_cache.get(pinned_sha) {
                 Some(f) => f,
                 None => {
-                    let f = gh::compare(&owner, &name, pinned_sha, current)?;
+                    let f = provider_for().compare(&owner, &name, pinned_sha, current)?;
                     compare_cache.entry(pinned_sha.clone()).or_insert(f)
                 }
             };
@@ -608,12 +615,14 @@ pub fn create_review_for_pr(
         let ctx = gh_ctx_for_repo(&conn, repo.id)?;
         (repo.id, ctx)
     };
-    let info = gh::pr_view(&ctx, pr_number)?;
+    let info = provider_for().pr_view(&ctx, pr_number)?;
     // PR diffs are three-dot, so the LEFT side is the merge-base — resolve it
     // here (lock still dropped) and store it as the target's base_sha. Failure
     // degrades to None: the stored value is preserved (COALESCE) and a NULL
     // heals later via file_source's lazy backfill.
-    let merge_base = gh::merge_base_sha(&owner, &name, &info.base_ref, &info.head_sha).ok();
+    let merge_base = provider_for()
+        .merge_base_sha(&owner, &name, &info.base_ref, &info.head_sha)
+        .ok();
     let conn = db.0.lock().unwrap();
     let target = get_or_create_pr_target(&conn, repo_id, pr_number, &info, merge_base.as_deref())?;
     new_review_for_target(&conn, target.id)
@@ -632,7 +641,7 @@ pub fn review_diff(review_id: i64, db: State<Db>) -> AppResult<String> {
                 .github_pr_number
                 .ok_or_else(|| AppError::Other("PR target missing number".into()))?;
             let ctx = gh_ctx_for_repo(&conn, detail.target.repo_id)?;
-            gh::pr_diff(&ctx, number)
+            provider_for().pr_diff(&ctx, number)
         }
         _ => git::diff(
             std::path::Path::new(&detail.repo_path),
@@ -672,7 +681,9 @@ pub fn file_source(
         (None, "LEFT", "github_pr") => {
             let resolved = repo_owner_name(&conn, detail.target.repo_id)?.and_then(|(o, n)| {
                 let head = detail.target.head_sha.as_deref().unwrap_or(&detail.target.head_ref);
-                gh::merge_base_sha(&o, &n, &detail.target.base_ref, head).ok()
+                provider_for()
+                    .merge_base_sha(&o, &n, &detail.target.base_ref, head)
+                    .ok()
             });
             if let Some(mb) = &resolved {
                 conn.execute(
@@ -711,7 +722,7 @@ pub fn file_source(
         |r| Ok((r.get(0)?, r.get(1)?)),
     )?;
     match (owner, name) {
-        (Some(owner), Some(name)) => gh::file_at_ref(&owner, &name, &file_path, &sha),
+        (Some(owner), Some(name)) => provider_for().file_at_ref(&owner, &name, &file_path, &sha),
         _ => Err(AppError::Other(
             "file source unavailable: no local clone and no GitHub remote".into(),
         )),
@@ -1071,7 +1082,7 @@ impl AnchorKey {
     }
 
     /// None when the remote item lacks side/line (defensive; such items are skipped).
-    fn remote(rc: &gh::ReviewComment) -> Option<Self> {
+    fn remote(rc: &ReviewComment) -> Option<Self> {
         let side = rc.side.clone()?;
         let line = rc.line?;
         Some(Self {
@@ -1089,7 +1100,7 @@ impl AnchorKey {
 /// consumed at most once; anything ambiguous is left out (caller leaves NULL).
 fn match_review_comments(
     local: &[(i64, AnchorKey, String)],
-    remote: &[gh::ReviewComment],
+    remote: &[ReviewComment],
 ) -> Vec<(i64, i64)> {
     use std::collections::HashMap;
 
@@ -1184,7 +1195,7 @@ fn capture_github_comment_ids(
     number: i64,
     gh_review_id: i64,
 ) -> AppResult<usize> {
-    let remote = gh::review_comments(owner, name, number, gh_review_id)?;
+    let remote = provider_for().review_comments(owner, name, number, gh_review_id)?;
     let local: Vec<(i64, AnchorKey, String)> = inline_publish_comments(detail)
         .into_iter()
         .map(|(c, body)| (c.id, AnchorKey::local(c), body))
@@ -1262,7 +1273,7 @@ pub async fn publish_review(review_id: i64, db: State<'_, Db>) -> AppResult<Revi
 
     let payload = build_publish_payload(&detail);
 
-    let gh_id = gh::post_review(&owner, &name, number, &payload.to_string())?;
+    let gh_id = provider_for().post_review(&owner, &name, number, &payload.to_string())?;
 
     let ts = now();
     conn.execute(
@@ -1339,7 +1350,8 @@ pub fn publish_review_pending(review_id: i64, db: State<Db>) -> AppResult<Review
     let (detail, owner, name, number) = prepare_publish(review_id, &db)?;
     let conn = db.0.lock().unwrap();
     let payload = build_pending_payload(&detail);
-    let gh_id = gh::post_review(&owner, &name, number, &payload.to_string())
+    let gh_id = provider_for()
+        .post_review(&owner, &name, number, &payload.to_string())
         .map_err(map_pending_conflict)?;
     let ts = now();
     conn.execute(
@@ -1361,7 +1373,7 @@ pub fn submit_pending_review(review_id: i64, db: State<Db>) -> AppResult<Review>
         .github_pr_number
         .ok_or_else(|| AppError::Other("PR target missing number".into()))?;
     let (owner, name) = pr_remote(&conn, detail.target.repo_id)?;
-    gh::submit_pending_review(
+    provider_for().submit_pending_review(
         &owner,
         &name,
         number,
@@ -1383,7 +1395,7 @@ pub fn discard_pending_review(review_id: i64, db: State<Db>) -> AppResult<Review
         .github_pr_number
         .ok_or_else(|| AppError::Other("PR target missing number".into()))?;
     let (owner, name) = pr_remote(&conn, detail.target.repo_id)?;
-    gh::delete_pending_review(&owner, &name, number, gh_id)?;
+    provider_for().delete_pending_review(&owner, &name, number, gh_id)?;
     mark_discarded(&conn, review_id)?;
     get_review_row(&conn, review_id)
 }
@@ -1761,8 +1773,8 @@ mod tests {
         conn.last_insert_rowid()
     }
 
-    fn pr_info() -> gh::PrInfo {
-        gh::PrInfo {
+    fn pr_info() -> PrInfo {
+        PrInfo {
             title: "My PR".into(),
             base_ref: "main".into(),
             head_ref: "feature".into(),
@@ -2898,8 +2910,8 @@ mod tests {
         start_line: Option<i64>,
         side: Option<&str>,
         body: &str,
-    ) -> gh::ReviewComment {
-        gh::ReviewComment {
+    ) -> ReviewComment {
+        ReviewComment {
             id,
             path: "src/lib.rs".into(),
             side: side.map(Into::into),
