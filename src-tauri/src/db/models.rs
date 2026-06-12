@@ -106,6 +106,7 @@ pub struct Comment {
     pub parent_id: Option<i64>,
     pub anchored_head_sha: Option<String>,
     pub github_comment_id: Option<i64>,
+    pub resolved_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -126,6 +127,7 @@ impl Comment {
             parent_id: row.get("parent_id")?,
             anchored_head_sha: row.get("anchored_head_sha")?,
             github_comment_id: row.get("github_comment_id")?,
+            resolved_at: row.get("resolved_at")?,
             created_at: row.get("created_at")?,
             updated_at: row.get("updated_at")?,
         })

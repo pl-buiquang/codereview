@@ -1769,6 +1769,7 @@ mod tests {
             parent_id: None,
             anchored_head_sha: None,
             github_comment_id: None,
+            resolved_at: None,
             created_at: "now".into(),
             updated_at: "now".into(),
         }
