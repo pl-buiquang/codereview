@@ -15,6 +15,7 @@ function comment(over: Partial<Comment> & { id: number }): Comment {
     body: `body ${over.id}`,
     parent_id: null,
     anchored_head_sha: null,
+    anchored_base_sha: null,
     github_comment_id: null,
     resolved_at: null,
     created_at: "2026-01-01T00:00:00Z",

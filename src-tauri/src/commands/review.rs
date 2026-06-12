@@ -132,6 +132,18 @@ fn ensure_draft(conn: &Connection, review_id: i64) -> AppResult<()> {
     Ok(())
 }
 
+/// The SHA whose file contents the LEFT side of this local diff shows: the
+/// merge-base for three-dot (GitHub-PR semantics), the base tip for two-dot.
+/// This is the coordinate system a LEFT comment's line numbers are valid in, so
+/// it is what `anchored_base_sha` pins to.
+fn local_old_side_sha(repo: &Path, base_ref: &str, head_ref: &str, three_dot: bool) -> Option<String> {
+    if three_dot {
+        git::merge_base(repo, base_ref, head_ref).ok()
+    } else {
+        git::rev_parse(repo, base_ref).ok()
+    }
+}
+
 /// Reuse one `target` per (repo, base, head) comparison so several reviews can
 /// share it. Refreshes the resolved SHAs each time the comparison is opened.
 fn get_or_create_local_target(
@@ -142,7 +154,7 @@ fn get_or_create_local_target(
     head_ref: &str,
     three_dot: bool,
 ) -> AppResult<Target> {
-    let base_sha = git::rev_parse(Path::new(repo_path), base_ref).ok();
+    let base_sha = local_old_side_sha(Path::new(repo_path), base_ref, head_ref, three_dot);
     let head_sha = git::rev_parse(Path::new(repo_path), head_ref).ok();
 
     let existing: Option<i64> = conn
@@ -280,7 +292,8 @@ fn refresh_target_shas(db: &Db, target: &Target) -> AppResult<FreshnessResult> {
                 path
             };
             let repo = Path::new(&repo_path);
-            let base_sha = git::rev_parse(repo, &target.base_ref).ok();
+            let base_sha =
+                local_old_side_sha(repo, &target.base_ref, &target.head_ref, target.three_dot);
             let head_sha = git::rev_parse(repo, &target.head_ref).ok();
             let conn = db.0.lock().unwrap();
             conn.execute(
@@ -2042,6 +2055,7 @@ mod tests {
             body: "comment body".into(),
             parent_id: None,
             anchored_head_sha: None,
+            anchored_base_sha: None,
             github_comment_id: None,
             resolved_at: None,
             created_at: "now".into(),
@@ -2579,6 +2593,70 @@ mod tests {
         // The command path resolves the same review's target.
         let again = refresh_review_impl(review.id, &db).unwrap();
         assert!(!again.head_moved, "second refresh is a no-op");
+    }
+
+    /// A repo whose `main` and `feature` branches diverge from a common fork
+    /// point: each adds a distinct line. Returns `(dir, fork_sha)` where
+    /// `fork_sha` is the merge-base of the two tips (and the LEFT side a three-dot
+    /// `main...feature` diff shows). The base tip (`main`) differs from it.
+    fn fixture_diverged_branches() -> (TempDir, String) {
+        let dir = TempDir::new().unwrap();
+        let p = dir.path();
+        git(p, &["init", "-q", "-b", "main"]);
+        git(p, &["config", "user.email", "test@example.com"]);
+        git(p, &["config", "user.name", "Test"]);
+        fs::write(p.join("file.txt"), "shared\n").unwrap();
+        git(p, &["add", "."]);
+        git(p, &["commit", "-q", "-m", "fork point"]);
+        let fork = git::rev_parse(p, "HEAD").unwrap();
+
+        git(p, &["checkout", "-q", "-b", "feature"]);
+        fs::write(p.join("file.txt"), "shared\nfeature\n").unwrap();
+        git(p, &["commit", "-q", "-am", "feature work"]);
+
+        git(p, &["checkout", "-q", "main"]);
+        fs::write(p.join("file.txt"), "shared\nmain\n").unwrap();
+        git(p, &["commit", "-q", "-am", "main work"]);
+        (dir, fork)
+    }
+
+    #[test]
+    fn local_target_base_sha_is_merge_base_when_three_dot() {
+        let (dir, fork) = fixture_diverged_branches();
+        let repo_path = dir.path().to_str().unwrap().to_string();
+        let base_tip = git::rev_parse(dir.path(), "main").unwrap();
+        assert_ne!(fork, base_tip, "fixture must actually diverge");
+
+        let conn = open_memory();
+        let repo = seed_repo_at(&conn, &repo_path);
+
+        // Three-dot: base_sha is the merge-base (fork), not the base branch tip.
+        let three =
+            get_or_create_local_target(&conn, repo, &repo_path, "main", "feature", true).unwrap();
+        assert_eq!(three.base_sha.as_deref(), Some(fork.as_str()));
+
+        // Two-dot: base_sha is the literal base tip.
+        let two =
+            get_or_create_local_target(&conn, repo, &repo_path, "main", "feature", false).unwrap();
+        assert_eq!(two.base_sha.as_deref(), Some(base_tip.as_str()));
+
+        // refresh_target_shas reproduces the same coordinate choice from three_dot.
+        conn.execute(
+            "UPDATE target SET three_dot = 1, base_sha = NULL WHERE id = ?1",
+            params![three.id],
+        )
+        .unwrap();
+        let db = Db(Mutex::new(conn));
+        let pinned = {
+            let conn = db.0.lock().unwrap();
+            get_target(&conn, three.id).unwrap()
+        };
+        refresh_target_shas(&db, &pinned).unwrap();
+        let stored = {
+            let conn = db.0.lock().unwrap();
+            get_target(&conn, three.id).unwrap()
+        };
+        assert_eq!(stored.base_sha.as_deref(), Some(fork.as_str()));
     }
 
     #[test]

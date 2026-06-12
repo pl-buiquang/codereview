@@ -214,6 +214,7 @@ mod tests {
             body: "Consider renaming this.".into(),
             parent_id: None,
             anchored_head_sha: None,
+            anchored_base_sha: None,
             github_comment_id: None,
             resolved_at: None,
             created_at: "2026-01-01T00:00:00Z".into(),
