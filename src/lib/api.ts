@@ -94,7 +94,18 @@ export const api = {
     diffHunk?: string | null;
     body: string;
     anchoredHeadSha?: string | null;
+    parentId?: number | null;
   }) => invoke<Comment>("add_comment", args),
+
+  /** Reply to a root comment. Anchor args are placeholders — the backend copies
+   *  the parent's anchor columns and ignores these. */
+  addReply: (args: { reviewId: number; parentId: number; body: string }) =>
+    invoke<Comment>("add_comment", {
+      ...args,
+      filePath: "",
+      side: "RIGHT" as Side,
+      line: 0,
+    }),
   addFileComment: (args: { reviewId: number; filePath: string; body: string }) =>
     invoke<Comment>("add_file_comment", args),
   addFileViewComment: (args: {

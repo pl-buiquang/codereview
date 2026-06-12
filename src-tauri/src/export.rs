@@ -1,11 +1,43 @@
+use std::collections::HashMap;
+
 use serde_json::json;
 
-use crate::db::models::ReviewDetail;
+use crate::db::models::{Comment, ReviewDetail};
 
 fn short_sha(sha: &Option<String>) -> String {
     sha.as_ref()
         .map(|s| s.chars().take(8).collect())
         .unwrap_or_else(|| "?".into())
+}
+
+/// Map root comment id -> its replies, in `created_at` (then `id`) order. The
+/// single source of thread structure shared by publish and Markdown/JSON export.
+pub fn replies_by_root(comments: &[Comment]) -> HashMap<i64, Vec<&Comment>> {
+    let mut map: HashMap<i64, Vec<&Comment>> = HashMap::new();
+    for c in comments {
+        if let Some(pid) = c.parent_id {
+            map.entry(pid).or_default().push(c);
+        }
+    }
+    for replies in map.values_mut() {
+        replies.sort_by(|a, b| a.created_at.cmp(&b.created_at).then(a.id.cmp(&b.id)));
+    }
+    map
+}
+
+/// Append each reply to `body` as a `> **reply by me:**` blockquote block — the
+/// single locked folding format shared by publish and Markdown export. With no
+/// replies, returns the trimmed body unchanged.
+pub fn fold_replies(body: &str, replies: &[&Comment]) -> String {
+    let mut out = body.trim().to_string();
+    for r in replies {
+        out.push_str("\n\n> **reply by me:**");
+        for line in r.body.trim().lines() {
+            out.push_str("\n> ");
+            out.push_str(line);
+        }
+    }
+    out
 }
 
 /// Render a review to deterministic, AI-friendly Markdown: location + diff hunk
@@ -35,11 +67,16 @@ pub fn render_markdown(detail: &ReviewDetail, repo_label: &str) -> String {
     }
 
     if !detail.comments.is_empty() {
+        let replies = replies_by_root(&detail.comments);
         out.push_str("## Comments\n\n");
         for c in &detail.comments {
+            if c.parent_id.is_some() {
+                continue; // replies nest under their root, never top-level
+            }
+            let folded = fold_replies(&c.body, replies.get(&c.id).map_or(&[][..], Vec::as_slice));
             if c.subject_type == "file" {
                 out.push_str(&format!("### {} (whole file)\n\n", c.file_path));
-                out.push_str(c.body.trim());
+                out.push_str(&folded);
                 out.push_str("\n\n");
                 continue;
             }
@@ -51,7 +88,7 @@ pub fn render_markdown(detail: &ReviewDetail, repo_label: &str) -> String {
                     _ => format!("{}:L{}", c.file_path, c.line),
                 };
                 out.push_str(&format!("### {loc} (file view)\n\n"));
-                out.push_str(c.body.trim());
+                out.push_str(&folded);
                 out.push_str("\n\n");
                 continue;
             }
@@ -69,7 +106,7 @@ pub fn render_markdown(detail: &ReviewDetail, repo_label: &str) -> String {
                     out.push_str("\n```\n\n");
                 }
             }
-            out.push_str(c.body.trim());
+            out.push_str(&folded);
             out.push_str("\n\n");
         }
     }
@@ -81,10 +118,18 @@ pub fn render_markdown(detail: &ReviewDetail, repo_label: &str) -> String {
 pub fn render_json(detail: &ReviewDetail, repo_label: &str) -> String {
     let r = &detail.review;
     let t = &detail.target;
+    let replies = replies_by_root(&detail.comments);
     let comments: Vec<_> = detail
         .comments
         .iter()
+        .filter(|c| c.parent_id.is_none())
         .map(|c| {
+            let nested: Vec<_> = replies
+                .get(&c.id)
+                .map_or(&[][..], Vec::as_slice)
+                .iter()
+                .map(|r| json!({ "body": r.body, "created_at": r.created_at }))
+                .collect();
             json!({
                 "file": c.file_path,
                 "subject_type": c.subject_type,
@@ -94,6 +139,7 @@ pub fn render_json(detail: &ReviewDetail, repo_label: &str) -> String {
                 "start_line": c.start_line,
                 "diff_hunk": c.diff_hunk,
                 "body": c.body,
+                "replies": nested,
             })
         })
         .collect();
@@ -326,5 +372,61 @@ mod tests {
         let json = render_json(&detail(vec![comment(5, None)]), "owner/repo");
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert!(v["comments"][0]["start_line"].is_null());
+    }
+
+    // ---- threaded replies (spec 11) ----
+
+    fn reply(id: i64, parent_id: i64, body: &str) -> Comment {
+        Comment {
+            id,
+            parent_id: Some(parent_id),
+            body: body.into(),
+            created_at: format!("2026-01-01T00:00:0{id}Z"),
+            ..comment(5, None)
+        }
+    }
+
+    #[test]
+    fn fold_replies_quotes_multiline_bodies() {
+        let r1 = reply(2, 1, "first line\nsecond line");
+        let r2 = reply(3, 1, "another");
+        let folded = fold_replies("root body", &[&r1, &r2]);
+        assert!(folded.starts_with("root body"));
+        assert!(folded.contains("\n\n> **reply by me:**\n> first line\n> second line"));
+        assert!(folded.contains("\n\n> **reply by me:**\n> another"));
+        // No replies returns the trimmed body unchanged.
+        assert_eq!(fold_replies("  spaced  ", &[]), "spaced");
+    }
+
+    #[test]
+    fn markdown_nests_replies_under_root() {
+        let md = render_markdown(
+            &detail(vec![comment(3, None), reply(2, 1, "a quoted reply")]),
+            "owner/repo",
+        );
+        // One root section; the reply text appears quoted, not as its own heading.
+        assert_eq!(md.matches("### ").count(), 1, "got: {md}");
+        assert!(md.contains("> **reply by me:**"));
+        assert!(md.contains("> a quoted reply"));
+    }
+
+    #[test]
+    fn json_groups_replies_under_root() {
+        let json = render_json(
+            &detail(vec![comment(5, None), reply(2, 1, "nested reply")]),
+            "owner/repo",
+        );
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let comments = v["comments"].as_array().unwrap();
+        assert_eq!(comments.len(), 1, "reply excluded from top-level");
+        assert_eq!(v["comments"][0]["replies"][0]["body"], "nested reply");
+        assert!(v["comments"][0]["replies"][0]["created_at"].is_string());
+    }
+
+    #[test]
+    fn json_root_without_replies_has_empty_array() {
+        let json = render_json(&detail(vec![comment(5, None)]), "owner/repo");
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["comments"][0]["replies"].as_array().unwrap().len(), 0);
     }
 }

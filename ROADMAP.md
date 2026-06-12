@@ -18,8 +18,6 @@ on a 3-direction (Continuity / Modern / Terminal) × dark/light token-based desi
   Frontend-only via `react-diff-view`'s `expandFromRawCode` over old-side line ranges
   (`getCollapsedLinesCountBetween(null, hunk)` gives the leading count; the trailing size needs
   the fetched base file's line count). Prototyped once, then reverted.
-- **Threaded replies** — the `comment.parent_id` column already exists but is unused. Render
-  replies under a root comment and let the user reply, like a GitHub thread.
 - **Resolve / unresolve threads** — mark a comment thread resolved; collapse resolved threads.
 - **Suggested changes** — GitHub-style ```suggestion blocks that publish as suggestions.
 - **Keyboard navigation** — next/prev file, next/prev comment, `c` to comment on the focused

@@ -9,6 +9,7 @@ use crate::anchor::{self, Remap};
 use crate::db::models::{Comment, Repository, Review, ReviewDetail, ReviewSummary, Target};
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
+use crate::export;
 use crate::gh::{self, GhRepo};
 use crate::git;
 
@@ -340,7 +341,12 @@ fn reanchor_review_comments(conn: &Connection, detail: &ReviewDetail) -> AppResu
     let candidates: Vec<&Comment> = detail
         .comments
         .iter()
-        .filter(|c| c.side == "RIGHT" && c.subject_type == "line" && c.origin != "file_view")
+        .filter(|c| {
+            c.side == "RIGHT"
+                && c.subject_type == "line"
+                && c.origin != "file_view"
+                && c.parent_id.is_none()
+        })
         .collect();
 
     // Group the comments that need remapping by (anchored_sha, file) so each
@@ -430,6 +436,12 @@ fn reanchor_review_comments(conn: &Connection, detail: &ReviewDetail) -> AppResu
 
             conn.execute(
                 "UPDATE comment SET line = ?1, start_line = ?2, anchored_head_sha = ?3, updated_at = ?4 WHERE id = ?5",
+                params![new_line, new_start, current, now(), c.id],
+            )?;
+            // The whole thread moves with its root: replies inherit the root's
+            // anchor, so overwriting their line/start/sha wholesale is correct.
+            conn.execute(
+                "UPDATE comment SET line = ?1, start_line = ?2, anchored_head_sha = ?3, updated_at = ?4 WHERE parent_id = ?5",
                 params![new_line, new_start, current, now(), c.id],
             )?;
             result.reanchored += 1;
@@ -776,19 +788,27 @@ fn is_anchored_to(c: &Comment, head_sha: Option<&str>) -> bool {
 /// The comments publish posts inline, each paired with the exact body text sent
 /// to GitHub. Single source of truth shared by `build_publish_payload` and the
 /// post-publish id capture (Spec 17), so the matcher compares like-for-like.
-/// Today the posted body is `c.body` verbatim; Spec 11's `fold_replies` and Spec
-/// 13's suggestion handling must apply their transforms HERE — keep the filter
-/// literal in this one place.
+/// The posted body folds each root's replies (Spec 11) in below it; Spec 13's
+/// suggestion handling must apply its transforms HERE too — keep the roots-only
+/// filter and the body projection in this one place.
 fn inline_publish_comments(detail: &ReviewDetail) -> Vec<(&Comment, String)> {
+    let replies = export::replies_by_root(&detail.comments);
     detail
         .comments
         .iter()
         .filter(|c| {
             c.subject_type != "file"
                 && c.origin != "file_view"
+                && c.parent_id.is_none()
                 && is_anchored_to(c, detail.target.head_sha.as_deref())
         })
-        .map(|c| (c, c.body.clone()))
+        .map(|c| {
+            let body = export::fold_replies(
+                &c.body,
+                replies.get(&c.id).map_or(&[][..], Vec::as_slice),
+            );
+            (c, body)
+        })
         .collect()
 }
 
@@ -835,11 +855,15 @@ fn build_publish_payload(detail: &ReviewDetail) -> serde_json::Value {
 /// the body instead.
 fn body_with_file_comments(detail: &ReviewDetail) -> String {
     let mut body = detail.review.body.trim().to_string();
+    let replies = export::replies_by_root(&detail.comments);
+    let folded = |c: &Comment| {
+        export::fold_replies(&c.body, replies.get(&c.id).map_or(&[][..], Vec::as_slice))
+    };
 
     let file_comments: Vec<&Comment> = detail
         .comments
         .iter()
-        .filter(|c| c.subject_type == "file")
+        .filter(|c| c.subject_type == "file" && c.parent_id.is_none())
         .collect();
     if !file_comments.is_empty() {
         if !body.is_empty() {
@@ -847,14 +871,14 @@ fn body_with_file_comments(detail: &ReviewDetail) -> String {
         }
         body.push_str("## File-level comments");
         for c in file_comments {
-            body.push_str(&format!("\n\n**{}**\n\n{}", c.file_path, c.body.trim()));
+            body.push_str(&format!("\n\n**{}**\n\n{}", c.file_path, folded(c)));
         }
     }
 
     let file_view_comments: Vec<&Comment> = detail
         .comments
         .iter()
-        .filter(|c| c.origin == "file_view")
+        .filter(|c| c.origin == "file_view" && c.parent_id.is_none())
         .collect();
     if !file_view_comments.is_empty() {
         if !body.is_empty() {
@@ -867,7 +891,7 @@ fn body_with_file_comments(detail: &ReviewDetail) -> String {
                 body.push_str(&format!("\n\n**{}**", c.file_path));
                 current = &c.file_path;
             }
-            body.push_str(&format!("\n- {}: {}", line_label(c), c.body.trim()));
+            body.push_str(&format!("\n- {}: {}", line_label(c), folded(c)));
         }
     }
 
@@ -879,6 +903,7 @@ fn body_with_file_comments(detail: &ReviewDetail) -> String {
         .filter(|c| {
             c.subject_type != "file"
                 && c.origin != "file_view"
+                && c.parent_id.is_none()
                 && !is_anchored_to(c, detail.target.head_sha.as_deref())
         })
         .collect();
@@ -892,7 +917,7 @@ fn body_with_file_comments(detail: &ReviewDetail) -> String {
                 "\n- **{}** {}: {}",
                 c.file_path,
                 line_label(c),
-                c.body.trim()
+                folded(c)
             ));
         }
     }
@@ -1130,6 +1155,91 @@ pub fn delete_review(review_id: i64, db: State<Db>) -> AppResult<()> {
     Ok(())
 }
 
+/// Validate a reply target: the parent must exist, belong to `review_id`, and be
+/// a root comment (one level of nesting, GitHub-style). Returns the parent row so
+/// the caller inherits its anchor columns.
+fn parent_for_reply(conn: &Connection, review_id: i64, parent_id: i64) -> AppResult<Comment> {
+    let parent = match conn
+        .query_row("SELECT * FROM comment WHERE id = ?1", params![parent_id], Comment::from_row)
+    {
+        Ok(p) => p,
+        Err(rusqlite::Error::QueryReturnedNoRows) => {
+            return Err(AppError::Other("reply parent not found".into()))
+        }
+        Err(e) => return Err(e.into()),
+    };
+    if parent.review_id != review_id {
+        return Err(AppError::Other(
+            "reply parent belongs to a different review".into(),
+        ));
+    }
+    if parent.parent_id.is_some() {
+        return Err(AppError::Other(
+            "replies can only target a top-level comment".into(),
+        ));
+    }
+    Ok(parent)
+}
+
+/// Insert a comment (or a reply when `parent_id` is set). Replies inherit every
+/// anchor column from their root, so the caller-supplied anchor args are ignored
+/// for them — the thread can never straddle two anchors. Plain helper so tests
+/// can drive it with a bare `Connection`.
+#[allow(clippy::too_many_arguments)]
+fn add_comment_impl(
+    conn: &Connection,
+    review_id: i64,
+    file_path: String,
+    side: String,
+    line: i64,
+    start_line: Option<i64>,
+    diff_hunk: Option<String>,
+    body: String,
+    anchored_head_sha: Option<String>,
+    parent_id: Option<i64>,
+) -> AppResult<Comment> {
+    ensure_draft(conn, review_id)?;
+    let ts = now();
+    match parent_id {
+        None => {
+            conn.execute(
+                "INSERT INTO comment
+                    (review_id, file_path, side, line, start_line, diff_hunk, body, anchored_head_sha, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)",
+                params![review_id, file_path, side, line, start_line, diff_hunk, body, anchored_head_sha, ts],
+            )?;
+        }
+        Some(pid) => {
+            let p = parent_for_reply(conn, review_id, pid)?;
+            conn.execute(
+                "INSERT INTO comment
+                    (review_id, file_path, subject_type, origin, side, line, start_line,
+                     diff_hunk, body, parent_id, anchored_head_sha, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12)",
+                params![
+                    review_id,
+                    p.file_path,
+                    p.subject_type,
+                    p.origin,
+                    p.side,
+                    p.line,
+                    p.start_line,
+                    p.diff_hunk,
+                    body,
+                    pid,
+                    p.anchored_head_sha,
+                    ts,
+                ],
+            )?;
+        }
+    }
+    conn.execute(
+        "UPDATE review SET updated_at = ?1 WHERE id = ?2",
+        params![ts, review_id],
+    )?;
+    get_comment(conn, conn.last_insert_rowid())
+}
+
 #[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub fn add_comment(
@@ -1141,22 +1251,22 @@ pub fn add_comment(
     diff_hunk: Option<String>,
     body: String,
     anchored_head_sha: Option<String>,
+    parent_id: Option<i64>,
     db: State<Db>,
 ) -> AppResult<Comment> {
     let conn = db.0.lock().unwrap();
-    ensure_draft(&conn, review_id)?;
-    let ts = now();
-    conn.execute(
-        "INSERT INTO comment
-            (review_id, file_path, side, line, start_line, diff_hunk, body, anchored_head_sha, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)",
-        params![review_id, file_path, side, line, start_line, diff_hunk, body, anchored_head_sha, ts],
-    )?;
-    conn.execute(
-        "UPDATE review SET updated_at = ?1 WHERE id = ?2",
-        params![ts, review_id],
-    )?;
-    get_comment(&conn, conn.last_insert_rowid())
+    add_comment_impl(
+        &conn,
+        review_id,
+        file_path,
+        side,
+        line,
+        start_line,
+        diff_hunk,
+        body,
+        anchored_head_sha,
+        parent_id,
+    )
 }
 
 /// Add a comment attached to a whole file rather than a specific line. Stored
@@ -1307,6 +1417,33 @@ mod tests {
         conn.last_insert_rowid()
     }
 
+    /// Insert a reply row directly under `parent_id`, inheriting the parent's
+    /// anchor columns (mirrors add_comment_impl's reply branch).
+    fn seed_reply(conn: &Connection, review_id: i64, parent_id: i64, body: &str) -> i64 {
+        let p = get_comment(conn, parent_id).unwrap();
+        conn.execute(
+            "INSERT INTO comment
+                (review_id, file_path, subject_type, origin, side, line, start_line,
+                 diff_hunk, body, parent_id, anchored_head_sha, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 'now', 'now')",
+            params![
+                review_id,
+                p.file_path,
+                p.subject_type,
+                p.origin,
+                p.side,
+                p.line,
+                p.start_line,
+                p.diff_hunk,
+                body,
+                parent_id,
+                p.anchored_head_sha,
+            ],
+        )
+        .unwrap();
+        conn.last_insert_rowid()
+    }
+
     fn pr_info() -> gh::PrInfo {
         gh::PrInfo {
             title: "My PR".into(),
@@ -1450,6 +1587,204 @@ mod tests {
         .unwrap();
         let err = ensure_draft(&conn, review.id).unwrap_err();
         assert!(matches!(err, AppError::Other(_)));
+    }
+
+    // ---- threaded replies (spec 11) ----
+
+    /// A draft local review with one root diff comment. Returns (conn, review_id, root_id).
+    fn review_with_root_comment() -> (Connection, i64, i64) {
+        let conn = open_memory();
+        let repo = seed_repo(&conn, None, None);
+        let target =
+            get_or_create_local_target(&conn, repo, "/nope", "main", "feature", true).unwrap();
+        let review = new_review_for_target(&conn, target.id).unwrap();
+        let root = add_comment_impl(
+            &conn,
+            review.id,
+            "a.rs".into(),
+            "RIGHT".into(),
+            5,
+            Some(3),
+            Some("@@ root hunk @@".into()),
+            "root note".into(),
+            Some("rootsha".into()),
+            None,
+        )
+        .unwrap();
+        (conn, review.id, root.id)
+    }
+
+    #[test]
+    fn reply_inherits_root_anchor_columns() {
+        let (conn, review_id, root_id) = review_with_root_comment();
+        // Junk anchors must be ignored entirely in favour of the root's.
+        let reply = add_comment_impl(
+            &conn,
+            review_id,
+            "".into(),
+            "LEFT".into(),
+            0,
+            None,
+            None,
+            "a reply".into(),
+            None,
+            Some(root_id),
+        )
+        .unwrap();
+
+        assert_eq!(reply.parent_id, Some(root_id));
+        assert_eq!(reply.file_path, "a.rs");
+        assert_eq!(reply.side, "RIGHT");
+        assert_eq!(reply.line, 5);
+        assert_eq!(reply.start_line, Some(3));
+        assert_eq!(reply.diff_hunk.as_deref(), Some("@@ root hunk @@"));
+        assert_eq!(reply.subject_type, "line");
+        assert_eq!(reply.origin, "diff");
+        assert_eq!(reply.anchored_head_sha.as_deref(), Some("rootsha"));
+        assert_eq!(reply.body, "a reply");
+    }
+
+    #[test]
+    fn reply_to_reply_is_rejected() {
+        let (conn, review_id, root_id) = review_with_root_comment();
+        let reply_id = seed_reply(&conn, review_id, root_id, "first reply");
+        let err = add_comment_impl(
+            &conn,
+            review_id,
+            "".into(),
+            "RIGHT".into(),
+            0,
+            None,
+            None,
+            "second level".into(),
+            None,
+            Some(reply_id),
+        )
+        .unwrap_err();
+        match err {
+            AppError::Other(m) => assert!(m.contains("top-level"), "got: {m}"),
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn reply_across_reviews_is_rejected() {
+        let (conn, _review_id, root_id) = review_with_root_comment();
+        // A second review under the same repo/target.
+        let target = get_target(&conn, get_review_row(&conn, 1).unwrap().target_id).unwrap();
+        let other = new_review_for_target(&conn, target.id).unwrap();
+        let err = add_comment_impl(
+            &conn,
+            other.id,
+            "".into(),
+            "RIGHT".into(),
+            0,
+            None,
+            None,
+            "wrong review".into(),
+            None,
+            Some(root_id),
+        )
+        .unwrap_err();
+        assert!(matches!(err, AppError::Other(_)));
+    }
+
+    #[test]
+    fn reply_to_missing_parent_is_rejected() {
+        let (conn, review_id, _root_id) = review_with_root_comment();
+        let err = add_comment_impl(
+            &conn,
+            review_id,
+            "".into(),
+            "RIGHT".into(),
+            0,
+            None,
+            None,
+            "no parent".into(),
+            None,
+            Some(9999),
+        )
+        .unwrap_err();
+        match err {
+            AppError::Other(m) => assert!(m.contains("not found"), "got: {m}"),
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn reply_on_published_review_is_rejected() {
+        let (conn, review_id, root_id) = review_with_root_comment();
+        conn.execute(
+            "UPDATE review SET status = 'published' WHERE id = ?1",
+            params![review_id],
+        )
+        .unwrap();
+        let err = add_comment_impl(
+            &conn,
+            review_id,
+            "".into(),
+            "RIGHT".into(),
+            0,
+            None,
+            None,
+            "late reply".into(),
+            None,
+            Some(root_id),
+        )
+        .unwrap_err();
+        assert!(matches!(err, AppError::Other(_)));
+    }
+
+    #[test]
+    fn reply_to_file_comment_inherits_subject_type() {
+        let conn = open_memory();
+        let repo = seed_repo(&conn, None, None);
+        let target =
+            get_or_create_local_target(&conn, repo, "/nope", "main", "feature", true).unwrap();
+        let review = new_review_for_target(&conn, target.id).unwrap();
+        // Seed a whole-file root via a direct INSERT mirroring add_file_comment.
+        conn.execute(
+            "INSERT INTO comment (review_id, file_path, subject_type, body, line, created_at, updated_at)
+             VALUES (?1, 'a.rs', 'file', 'whole file', 0, 'now', 'now')",
+            params![review.id],
+        )
+        .unwrap();
+        let root_id = conn.last_insert_rowid();
+
+        let reply = add_comment_impl(
+            &conn,
+            review.id,
+            "".into(),
+            "RIGHT".into(),
+            0,
+            None,
+            None,
+            "reply to file".into(),
+            None,
+            Some(root_id),
+        )
+        .unwrap();
+        assert_eq!(reply.subject_type, "file");
+        assert_eq!(reply.origin, "diff");
+        assert_eq!(reply.file_path, "a.rs");
+    }
+
+    #[test]
+    fn deleting_root_cascades_replies() {
+        let (conn, review_id, root_id) = review_with_root_comment();
+        seed_reply(&conn, review_id, root_id, "reply one");
+        seed_reply(&conn, review_id, root_id, "reply two");
+        let before: i64 = conn
+            .query_row("SELECT COUNT(*) FROM comment", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(before, 3);
+
+        conn.execute("DELETE FROM comment WHERE id = ?1", params![root_id])
+            .unwrap();
+        let after: i64 = conn
+            .query_row("SELECT COUNT(*) FROM comment", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(after, 0, "replies cascade with their root");
     }
 
     #[test]
@@ -1994,6 +2329,57 @@ mod tests {
         assert_eq!(before, after, "store must not touch updated_at");
     }
 
+    // ---- threaded replies (Spec 11): publish folds replies under their root ----
+
+    /// A reply Comment literal whose anchor mirrors its root (id 1).
+    fn reply_comment(id: i64, parent_id: i64, body: &str) -> Comment {
+        Comment {
+            id,
+            parent_id: Some(parent_id),
+            body: body.into(),
+            ..payload_comment(5, None, "RIGHT")
+        }
+    }
+
+    #[test]
+    fn publish_payload_excludes_replies_and_folds_them() {
+        let p = build_publish_payload(&detail_with(
+            None,
+            "",
+            vec![
+                payload_comment(5, None, "RIGHT"),
+                reply_comment(2, 1, "I disagree"),
+            ],
+        ));
+        assert_eq!(
+            p["comments"].as_array().unwrap().len(),
+            1,
+            "the reply must not be a separate inline comment"
+        );
+        let body = p["comments"][0]["body"].as_str().unwrap();
+        assert!(body.contains("comment body"));
+        assert!(body.contains("> **reply by me:**"), "got: {body}");
+        assert!(body.contains("> I disagree"), "got: {body}");
+    }
+
+    #[test]
+    fn publish_body_folds_replies_of_file_and_lost_comments() {
+        let mut root = file_comment("src/lib.rs", "whole-file note");
+        root.id = 10;
+        let p = build_publish_payload(&detail_with(
+            Some("comment"),
+            "Summary",
+            vec![root, reply_comment(11, 10, "follow-up")],
+        ));
+        let body = p["body"].as_str().unwrap();
+        assert!(body.contains("## File-level comments"));
+        assert!(body.contains("whole-file note"));
+        assert!(body.contains("> **reply by me:**"), "got: {body}");
+        assert!(body.contains("> follow-up"), "got: {body}");
+        // The reply must not appear in the inline array either.
+        assert!(p["comments"].as_array().unwrap().is_empty());
+    }
+
     // ---- refresh helper (real git via the two-heads fixture) ----
 
     fn git(dir: &Path, args: &[&str]) {
@@ -2285,5 +2671,75 @@ mod tests {
         let c = comment_row(&conn, id);
         assert_eq!(c.line, 3);
         assert_eq!(c.anchored_head_sha.as_deref(), Some(h2.as_str()));
+    }
+
+    #[test]
+    fn reanchor_moves_replies_with_their_root() {
+        let (dir, h1, h2) = fixture_repo_insert_and_replace();
+        let repo_path = dir.path().to_str().unwrap().to_string();
+
+        let conn = open_memory();
+        let repo = seed_repo_at(&conn, &repo_path);
+        let target =
+            get_or_create_local_target(&conn, repo, &repo_path, "main~1", "main", false).unwrap();
+        conn.execute(
+            "UPDATE target SET head_sha = ?1 WHERE id = ?2",
+            params![h2, target.id],
+        )
+        .unwrap();
+        let review = new_review_for_target(&conn, target.id).unwrap();
+
+        // beta (H1 line 2) shifts to line 3 in H2; the reply rides along.
+        let root_id = seed_comment_anchored(
+            &conn, review.id, "file.txt", "RIGHT", 2, None, "on beta", Some(&h1),
+        );
+        let reply_id = seed_reply(&conn, review.id, root_id, "agreed");
+
+        let detail = load_detail(&conn, review.id).unwrap();
+        let result = reanchor_review_comments(&conn, &detail).unwrap();
+        assert_eq!(result.reanchored, 1, "only the root counts");
+        assert_eq!(result.lost, 0);
+
+        let root = comment_row(&conn, root_id);
+        let reply = comment_row(&conn, reply_id);
+        assert_eq!(root.line, 3);
+        assert_eq!(reply.line, 3);
+        assert_eq!(root.anchored_head_sha.as_deref(), Some(h2.as_str()));
+        assert_eq!(reply.anchored_head_sha.as_deref(), Some(h2.as_str()));
+    }
+
+    #[test]
+    fn reanchor_lost_root_leaves_replies_untouched() {
+        let (dir, h1, h2) = fixture_repo_insert_and_replace();
+        let repo_path = dir.path().to_str().unwrap().to_string();
+
+        let conn = open_memory();
+        let repo = seed_repo_at(&conn, &repo_path);
+        let target =
+            get_or_create_local_target(&conn, repo, &repo_path, "main~1", "main", false).unwrap();
+        conn.execute(
+            "UPDATE target SET head_sha = ?1 WHERE id = ?2",
+            params![h2, target.id],
+        )
+        .unwrap();
+        let review = new_review_for_target(&conn, target.id).unwrap();
+
+        // gamma (H1 line 3) is replaced in H2 -> Lost; the reply stays put.
+        let root_id = seed_comment_anchored(
+            &conn, review.id, "file.txt", "RIGHT", 3, None, "on gamma", Some(&h1),
+        );
+        let reply_id = seed_reply(&conn, review.id, root_id, "still here");
+
+        let detail = load_detail(&conn, review.id).unwrap();
+        let result = reanchor_review_comments(&conn, &detail).unwrap();
+        assert_eq!(result.lost, 1);
+        assert_eq!(result.reanchored, 0);
+
+        let root = comment_row(&conn, root_id);
+        let reply = comment_row(&conn, reply_id);
+        assert_eq!(root.line, 3);
+        assert_eq!(reply.line, 3);
+        assert_eq!(root.anchored_head_sha.as_deref(), Some(h1.as_str()));
+        assert_eq!(reply.anchored_head_sha.as_deref(), Some(h1.as_str()));
     }
 }
