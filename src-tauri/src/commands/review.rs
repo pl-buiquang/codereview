@@ -1182,6 +1182,40 @@ pub fn delete_comment(comment_id: i64, db: State<Db>) -> AppResult<()> {
     Ok(())
 }
 
+/// Mark a root comment's thread resolved/unresolved. Pure helper; caller holds
+/// the lock. Idempotent: resolving an already-resolved root refreshes the
+/// timestamp, unresolving an unresolved one is a no-op UPDATE.
+fn set_resolved(conn: &Connection, comment_id: i64, resolved: bool) -> AppResult<()> {
+    let (review_id, parent_id): (i64, Option<i64>) = conn.query_row(
+        "SELECT review_id, parent_id FROM comment WHERE id = ?1",
+        params![comment_id],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )?;
+    ensure_draft(conn, review_id)?;
+    if parent_id.is_some() {
+        return Err(AppError::Other(
+            "only the root comment of a thread can be resolved".into(),
+        ));
+    }
+    let ts = now();
+    let resolved_at: Option<&str> = resolved.then_some(ts.as_str());
+    conn.execute(
+        "UPDATE comment SET resolved_at = ?1, updated_at = ?2 WHERE id = ?3",
+        params![resolved_at, ts, comment_id],
+    )?;
+    conn.execute(
+        "UPDATE review SET updated_at = ?1 WHERE id = ?2",
+        params![ts, review_id],
+    )?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn set_comment_resolved(comment_id: i64, resolved: bool, db: State<Db>) -> AppResult<()> {
+    let conn = db.0.lock().unwrap();
+    set_resolved(&conn, comment_id, resolved)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1615,6 +1649,74 @@ mod tests {
         assert_eq!(after, 0, "replies cascade with their root");
     }
 
+    // ---- resolve / unresolve threads (spec 12) ----
+
+    fn resolved_at_of(conn: &Connection, id: i64) -> Option<String> {
+        conn.query_row(
+            "SELECT resolved_at FROM comment WHERE id = ?1",
+            params![id],
+            |r| r.get(0),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn set_resolved_roundtrip() {
+        let (conn, _review_id, root_id) = review_with_root_comment();
+        assert!(resolved_at_of(&conn, root_id).is_none());
+
+        set_resolved(&conn, root_id, true).unwrap();
+        assert!(resolved_at_of(&conn, root_id).is_some());
+
+        set_resolved(&conn, root_id, false).unwrap();
+        assert!(resolved_at_of(&conn, root_id).is_none());
+    }
+
+    #[test]
+    fn set_resolved_rejects_reply() {
+        let (conn, review_id, root_id) = review_with_root_comment();
+        let reply_id = seed_reply(&conn, review_id, root_id, "a reply");
+        let err = set_resolved(&conn, reply_id, true).unwrap_err();
+        match err {
+            AppError::Other(m) => assert!(m.contains("root"), "got: {m}"),
+            other => panic!("unexpected error: {other:?}"),
+        }
+        assert!(resolved_at_of(&conn, reply_id).is_none(), "row untouched");
+    }
+
+    #[test]
+    fn set_resolved_blocked_when_published() {
+        let (conn, review_id, root_id) = review_with_root_comment();
+        conn.execute(
+            "UPDATE review SET status = 'published' WHERE id = ?1",
+            params![review_id],
+        )
+        .unwrap();
+        let err = set_resolved(&conn, root_id, true).unwrap_err();
+        assert!(matches!(err, AppError::Other(_)));
+    }
+
+    #[test]
+    fn set_resolved_idempotent() {
+        let (conn, _review_id, root_id) = review_with_root_comment();
+        set_resolved(&conn, root_id, true).unwrap();
+        let first = resolved_at_of(&conn, root_id);
+        // A second resolve refreshes the timestamp without error.
+        set_resolved(&conn, root_id, true).unwrap();
+        assert!(first.is_some());
+        assert!(resolved_at_of(&conn, root_id).is_some());
+        // Unresolving an unresolved root is also a no-op (no error).
+        set_resolved(&conn, root_id, false).unwrap();
+        set_resolved(&conn, root_id, false).unwrap();
+        assert!(resolved_at_of(&conn, root_id).is_none());
+    }
+
+    #[test]
+    fn new_comment_defaults_unresolved() {
+        let (conn, _review_id, root_id) = review_with_root_comment();
+        assert!(resolved_at_of(&conn, root_id).is_none());
+    }
+
     #[test]
     fn load_detail_returns_comments_ordered_by_file_line() {
         let conn = open_memory();
@@ -1990,6 +2092,17 @@ mod tests {
             body: body.into(),
             ..payload_comment(5, None, "RIGHT")
         }
+    }
+
+    #[test]
+    fn publish_payload_includes_resolved_comments() {
+        // A resolved RIGHT diff comment still publishes inline (GitHub has no
+        // resolved-at-creation concept).
+        let mut c = payload_comment(5, None, "RIGHT");
+        c.resolved_at = Some("2026-01-01T00:00:00Z".into());
+        let p = build_publish_payload(&detail_with(None, "", vec![c]));
+        assert_eq!(p["comments"].as_array().unwrap().len(), 1);
+        assert_eq!(p["comments"][0]["line"], 5);
     }
 
     #[test]
