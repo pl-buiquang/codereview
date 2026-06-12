@@ -98,6 +98,60 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
+      # Spec 08: stage code-signing secrets ONLY when non-empty. Do NOT move
+      # these into the tauri-action env: block — a missing GH secret resolves
+      # to "" and tauri-bundler gates signing on env-var *presence* (var_os,
+      # no is_empty), so a set-but-empty APPLE_CERTIFICATE fails the build
+      # importing an empty .p12. Unset vars => unsigned build, green run.
+      # See docs/signing.md.
+      - name: Stage code-signing secrets (unsigned build when absent)
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+        run: |
+          present() { [ -n "${!1}" ]; }
+          stage() {
+            name="$1"
+            if present "$name"; then
+              eof="EOF_${name}_${RANDOM}${RANDOM}"
+              { echo "${name}<<${eof}"; echo "${!name}"; echo "${eof}"; } >> "$GITHUB_ENV"
+              echo "staged ${name}"
+            fi
+          }
+          count() { local n=0 v; for v in "$@"; do if present "$v"; then n=$((n+1)); fi; done; echo "$n"; }
+
+          # Pair/trio guards — partial sets are operator error; fail fast here
+          # with a readable message instead of mid-cargo (or silently unsigned).
+          pair="$(count APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD)"
+          if [ "$pair" = "1" ]; then
+            echo "::error::APPLE_CERTIFICATE and APPLE_CERTIFICATE_PASSWORD must be set together (docs/signing.md §2)"; exit 1
+          fi
+          trio="$(count APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID)"
+          if [ "$trio" != "0" ] && [ "$trio" != "3" ]; then
+            echo "::error::set all of APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID, or none (docs/signing.md §2)"; exit 1
+          fi
+          az="$(count AZURE_TENANT_ID AZURE_CLIENT_ID AZURE_CLIENT_SECRET)"
+          if [ "$az" != "0" ] && [ "$az" != "3" ]; then
+            echo "::error::set all of AZURE_TENANT_ID / AZURE_CLIENT_ID / AZURE_CLIENT_SECRET, or none (docs/signing.md §3)"; exit 1
+          fi
+          if [ "$trio" = "3" ] && [ "$pair" = "0" ]; then
+            echo "::warning::notarization secrets set without APPLE_CERTIFICATE — notarization only runs on signed builds (docs/signing.md §2)"
+          fi
+
+          for v in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY \
+                   APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID \
+                   AZURE_TENANT_ID AZURE_CLIENT_ID AZURE_CLIENT_SECRET; do
+            stage "$v"
+          done
+
       - name: Build and upload to draft release
         uses: tauri-apps/tauri-action@v0
         env:
@@ -105,7 +159,10 @@ jobs:
           # Spec 07: minisign updater signing keys (set via `gh secret set`).
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          # Spec 08 adds the conditional Apple/Windows signing env here.
+          # Apple/Windows signing env arrives via GITHUB_ENV from the
+          # "Stage code-signing secrets" step above — never reference those
+          # secrets here directly (empty string != unset for tauri-bundler).
+          # See docs/signing.md.
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "codereview ${{ github.ref_name }}"
