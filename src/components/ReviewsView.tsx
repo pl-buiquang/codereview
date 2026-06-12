@@ -7,6 +7,7 @@ import { timeAgo } from "../lib/timeAgo";
 import { githubPrUrl } from "../lib/githubUrl";
 import { useUIStore } from "../store";
 import type { ReviewSummary } from "../lib/types";
+import { statusLabel, statusBadgeClass } from "../lib/status";
 import { OpenPrButton } from "./OpenPrButton";
 import { Icon } from "./icons";
 
@@ -21,7 +22,11 @@ const SORTS: { key: SortKey; label: string }[] = [
 
 // Filter axes derived from each review. `key` is matched against the value the
 // extractor returns; `label` is what the sidebar shows.
-const STATUS_LABELS: Record<string, string> = { draft: "Draft", published: "Published" };
+const STATUS_LABELS: Record<string, string> = {
+  draft: "Draft",
+  published_pending: "Pending on GitHub",
+  published: "Published",
+};
 const ORIGIN_LABELS: Record<string, string> = { github_pr: "GitHub", local: "Local" };
 const VERDICT_LABELS: Record<string, string> = {
   approve: "Approve",
@@ -210,8 +215,8 @@ function ReviewRow({
         </div>
       </div>
       {prUrl && <OpenPrButton url={prUrl} size="xs" />}
-      <span className={`badge ${review.status === "draft" ? "badge-draft" : "badge-pr"}`}>
-        {review.status}
+      <span className={`badge ${statusBadgeClass(review.status)}`}>
+        {statusLabel(review.status)}
       </span>
       <button
         className="btn-icon"

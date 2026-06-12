@@ -73,6 +73,12 @@ export const api = {
   createReviewForPr: (owner: string, name: string, prNumber: number) =>
     invoke<Review>("create_review_for_pr", { owner, name, prNumber }),
   publishReview: (reviewId: number) => invoke<Review>("publish_review", { reviewId }),
+  publishReviewPending: (reviewId: number) =>
+    invoke<Review>("publish_review_pending", { reviewId }),
+  submitPendingReview: (reviewId: number) =>
+    invoke<Review>("submit_pending_review", { reviewId }),
+  discardPendingReview: (reviewId: number) =>
+    invoke<Review>("discard_pending_review", { reviewId }),
 
   // GitHub inbox
   refreshInbox: () => invoke<RefreshResult>("refresh_inbox"),

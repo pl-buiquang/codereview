@@ -45,6 +45,7 @@ import { useUIStore } from "../store";
 import { groupThreads, type CommentThread } from "../lib/threads";
 import { anchorPin, isCommentOutdated } from "../lib/staleness";
 import { summaryLine } from "../lib/text";
+import { statusLabel, statusBadgeClass } from "../lib/status";
 import type {
   Comment,
   PrThread,
@@ -104,7 +105,7 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
     );
 
   const detail = detailQuery.data;
-  const readOnly = detail.review.status === "published";
+  const readOnly = detail.review.status !== "draft";
 
   return (
     <section className="main-panel review-panel">
@@ -229,6 +230,44 @@ function ReviewHeader({
     onError: (e) => toast.error(`Publish failed:\n${String(e)}`),
   });
 
+  const invalidateReview = () => {
+    queryClient.invalidateQueries({ queryKey: ["review", review.id] });
+    queryClient.invalidateQueries({ queryKey: ["reviews"] });
+  };
+
+  const publishPending = useMutation({
+    // Persist the verdict + summary first, same as a normal publish — the pending
+    // payload is built from the stored review, just with the event omitted.
+    mutationFn: async (event: ReviewEvent) => {
+      await api.updateReview(review.id, body, event);
+      return api.publishReviewPending(review.id);
+    },
+    onSuccess: () => {
+      invalidateReview();
+      toast.success("Draft review staged on GitHub as pending.");
+    },
+    onError: (e) => toast.error(`Publish as draft failed:\n${String(e)}`),
+  });
+
+  const submitPending = useMutation({
+    mutationFn: () => api.submitPendingReview(review.id),
+    onSuccess: () => {
+      invalidateReview();
+      toast.success("Pending review submitted.");
+      closeReview();
+    },
+    onError: (e) => toast.error(`Submit failed:\n${String(e)}`),
+  });
+
+  const discardPending = useMutation({
+    mutationFn: () => api.discardPendingReview(review.id),
+    onSuccess: () => {
+      invalidateReview();
+      toast.success("Pending review discarded — draft unlocked.");
+    },
+    onError: (e) => toast.error(`Discard failed:\n${String(e)}`),
+  });
+
   const owner = detail.remote_owner ?? null;
   const name = detail.remote_name ?? null;
   const prNumber = target.github_pr_number ?? null;
@@ -254,6 +293,14 @@ function ReviewHeader({
 
   const isPr = target.kind === "github_pr";
   const published = review.status === "published";
+  const pending = review.status === "published_pending";
+  const isDraft = review.status === "draft";
+  const verdictLabel =
+    review.event === "approve"
+      ? "Approve"
+      : review.event === "request_changes"
+        ? "Request changes"
+        : "Comment";
   const anchorsStale = detail.comments.some((c) =>
     isCommentOutdated(c, target.base_sha, target.head_sha),
   );
@@ -282,8 +329,8 @@ function ReviewHeader({
             </span>
           )}
         </div>
-        <span className={`badge ${review.status === "draft" ? "badge-draft" : "badge-pr"}`}>
-          {review.status}
+        <span className={`badge ${statusBadgeClass(review.status)}`}>
+          {statusLabel(review.status)}
         </span>
         <span className="save-state">{saveState === "saving" ? "Saving…" : "Saved"}</span>
         <div className="view-toggle">
@@ -346,15 +393,94 @@ function ReviewHeader({
         <button className="btn" onClick={() => setShowExport(true)}>
           Export
         </button>
-        {isPr && (
-          <PublishButton
-            published={published}
-            pending={publishReview.isPending}
-            onPublish={(event) => publishReview.mutate(event)}
-          />
+        {isPr && isDraft && (
+          <>
+            <PublishButton
+              published={published}
+              pending={publishReview.isPending}
+              onPublish={(event) => publishReview.mutate(event)}
+            />
+            <button
+              className="btn"
+              disabled={publishPending.isPending}
+              title="Stage this review on GitHub as a pending (draft) review, visible only to you"
+              onClick={async () => {
+                if (
+                  await confirmDialog({
+                    title: "Publish as draft",
+                    message:
+                      "Stage this review on GitHub as a pending (draft) review? It will be visible only to you until submitted.",
+                    confirmLabel: "Publish as draft",
+                  })
+                )
+                  publishPending.mutate(review.event ?? "comment");
+              }}
+            >
+              {publishPending.isPending ? (
+                <>
+                  <span className="spinner" /> Staging…
+                </>
+              ) : (
+                "Publish as draft to GitHub"
+              )}
+            </button>
+          </>
+        )}
+        {isPr && pending && (
+          <>
+            <button
+              className="btn btn-primary"
+              disabled={submitPending.isPending}
+              title="Submit the pending review to the PR with the stored verdict"
+              onClick={async () => {
+                if (
+                  await confirmDialog({
+                    title: "Submit review",
+                    message: `Submit the pending review to the PR with verdict “${verdictLabel}”? This cannot be undone.`,
+                    confirmLabel: "Submit review",
+                    danger: true,
+                  })
+                )
+                  submitPending.mutate();
+              }}
+            >
+              {submitPending.isPending ? (
+                <>
+                  <span className="spinner" /> Submitting…
+                </>
+              ) : (
+                "Submit review"
+              )}
+            </button>
+            <button
+              className="btn"
+              disabled={discardPending.isPending}
+              title="Delete the pending review from GitHub; your local draft is kept"
+              onClick={async () => {
+                if (
+                  await confirmDialog({
+                    title: "Discard pending review",
+                    message:
+                      "Delete the pending review from GitHub? Your local draft is kept and unlocked.",
+                    confirmLabel: "Discard pending review",
+                    danger: true,
+                  })
+                )
+                  discardPending.mutate();
+              }}
+            >
+              {discardPending.isPending ? "Discarding…" : "Discard pending review"}
+            </button>
+          </>
         )}
         <button
           className="btn btn-danger"
+          disabled={pending}
+          title={
+            pending
+              ? "Discard the pending GitHub review before deleting this review"
+              : "Delete this review and all its comments"
+          }
           onClick={async () => {
             if (
               await confirmDialog({

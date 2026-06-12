@@ -36,8 +36,12 @@ on a 3-direction (Continuity / Modern / Terminal) × dark/light token-based desi
 - **Reply to existing threads** and **resolve** them via the API. (GitHub comment ids are now
   captured at publish time onto `comment.github_comment_id`, so our own published inline comments
   can be targeted — prerequisite done.)
-- **PENDING (draft) GitHub reviews** — support GitHub's draft-review flow (add comments to a
-  pending review, then submit) in addition to one-shot publish.
+- **PENDING (draft) GitHub reviews** — ~~support GitHub's draft-review flow (add comments to a
+  pending review, then submit) in addition to one-shot publish.~~ Done (narrow v1): "Publish as
+  draft to GitHub" stages the whole local draft as a PENDING review (`event` omitted), then
+  **Submit** (with the stored verdict) or **Discard** (deletes it, unlocks the local draft). The
+  review is locked locally while pending. Still TODO: incremental comment-by-comment sync onto an
+  existing pending review, and adopting a pending review created on github.com.
 - **Auto-refresh & polling** — a manual "Refresh" re-resolves SHAs and re-fetches a review's
   diff/threads today; still want PR-list refresh and optional interval polling.
 - **Provider abstraction** — factor `gh.rs` behind a trait so GitLab/Bitbucket/Gitea could be

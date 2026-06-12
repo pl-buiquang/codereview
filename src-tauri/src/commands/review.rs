@@ -124,12 +124,24 @@ fn review_status(conn: &Connection, review_id: i64) -> AppResult<String> {
 }
 
 fn ensure_draft(conn: &Connection, review_id: i64) -> AppResult<()> {
-    if review_status(conn, review_id)? == "published" {
-        return Err(AppError::Other(
+    match review_status(conn, review_id)?.as_str() {
+        "draft" => Ok(()),
+        "published_pending" => Err(AppError::Other(
+            "this review is pending on GitHub — submit or discard it before editing".into(),
+        )),
+        _ => Err(AppError::Other(
             "this review is published and can no longer be edited".into(),
-        ));
+        )),
     }
-    Ok(())
+}
+
+/// Map the stored verdict to a GitHub review event. None/'comment' => COMMENT.
+fn gh_event(event: Option<&str>) -> &'static str {
+    match event {
+        Some("approve") => "APPROVE",
+        Some("request_changes") => "REQUEST_CHANGES",
+        _ => "COMMENT",
+    }
 }
 
 /// The SHA whose file contents the LEFT side of this local diff shows: the
@@ -910,11 +922,7 @@ fn inline_publish_comments(detail: &ReviewDetail) -> Vec<(&Comment, String)> {
 }
 
 fn build_publish_payload(detail: &ReviewDetail) -> serde_json::Value {
-    let event = match detail.review.event.as_deref() {
-        Some("approve") => "APPROVE",
-        Some("request_changes") => "REQUEST_CHANGES",
-        _ => "COMMENT",
-    };
+    let event = gh_event(detail.review.event.as_deref());
 
     let comments: Vec<serde_json::Value> = inline_publish_comments(detail)
         .into_iter()
@@ -943,6 +951,17 @@ fn build_publish_payload(detail: &ReviewDetail) -> serde_json::Value {
     if let Some(sha) = &detail.target.head_sha {
         payload["commit_id"] = serde_json::json!(sha);
     }
+    payload
+}
+
+/// Same payload as a normal publish but with `event` omitted: GitHub's REST API
+/// creates a PENDING review exactly when `event` is absent.
+fn build_pending_payload(detail: &ReviewDetail) -> serde_json::Value {
+    let mut payload = build_publish_payload(detail);
+    payload
+        .as_object_mut()
+        .expect("payload is an object")
+        .remove("event");
     payload
 }
 
@@ -1174,19 +1193,35 @@ fn capture_github_comment_ids(
     store_comment_id_matches(conn, &matches)
 }
 
-/// Publish a draft review to its GitHub PR via the line-based reviews API, then
-/// lock it (published reviews can't be edited or re-published). Returns the
-/// updated review.
-// Async so the GitHub round-trip runs off the main thread — a sync command would
-// block the webview and freeze the UI while publishing (see `refresh_inbox`).
-#[tauri::command]
-pub async fn publish_review(review_id: i64, db: State<'_, Db>) -> AppResult<Review> {
+/// (remote_owner, remote_name) for a repo, or an error if it has no GitHub remote.
+fn pr_remote(conn: &Connection, repo_id: i64) -> AppResult<(String, String)> {
+    let (owner, name): (Option<String>, Option<String>) = conn.query_row(
+        "SELECT remote_owner, remote_name FROM repository WHERE id = ?1",
+        params![repo_id],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )?;
+    match (owner, name) {
+        (Some(o), Some(n)) => Ok((o, n)),
+        _ => Err(AppError::Other("repository has no GitHub remote".into())),
+    }
+}
+
+/// Guards + remote lookup + head refresh + re-anchor shared by both publish
+/// flavours. Returns the post-re-anchor detail and (owner, name, pr_number).
+/// Holds no lock on return — callers re-lock for the GitHub round-trip + UPDATE.
+fn prepare_publish(review_id: i64, db: &Db) -> AppResult<(ReviewDetail, String, String, i64)> {
     let detail = {
         let conn = db.0.lock().unwrap();
         load_detail(&conn, review_id)?
     };
-    if detail.review.status == "published" {
-        return Err(AppError::Other("this review is already published".into()));
+    match detail.review.status.as_str() {
+        "draft" => {}
+        "published_pending" => {
+            return Err(AppError::Other(
+                "this review is already pending on GitHub — submit or discard it".into(),
+            ))
+        }
+        _ => return Err(AppError::Other("this review is already published".into())),
     }
     if detail.target.kind != "github_pr" {
         return Err(AppError::Other(
@@ -1197,27 +1232,33 @@ pub async fn publish_review(review_id: i64, db: State<'_, Db>) -> AppResult<Revi
         .target
         .github_pr_number
         .ok_or_else(|| AppError::Other("PR target missing number".into()))?;
-    let (owner, name): (Option<String>, Option<String>) = {
+    let (owner, name) = {
         let conn = db.0.lock().unwrap();
-        conn.query_row(
-            "SELECT remote_owner, remote_name FROM repository WHERE id = ?1",
-            params![detail.target.repo_id],
-            |r| Ok((r.get(0)?, r.get(1)?)),
-        )?
-    };
-    let (owner, name) = match (owner, name) {
-        (Some(o), Some(n)) => (o, n),
-        _ => return Err(AppError::Other("repository has no GitHub remote".into())),
+        pr_remote(&conn, detail.target.repo_id)?
     };
 
     // Pin the freshest head, re-anchor RIGHT comments onto it, then build the
     // payload against the verified head so an advanced PR never causes a 422.
-    refresh_target_shas(&db, &detail.target)?;
+    refresh_target_shas(db, &detail.target)?;
 
     let conn = db.0.lock().unwrap();
     let detail = load_detail(&conn, review_id)?;
     reanchor_review_comments(&conn, &detail)?;
     let detail = load_detail(&conn, review_id)?;
+
+    Ok((detail, owner, name, number))
+}
+
+/// Publish a draft review to its GitHub PR via the line-based reviews API, then
+/// lock it (published reviews can't be edited or re-published). Returns the
+/// updated review.
+// Async so the GitHub round-trip runs off the main thread — a sync command would
+// block the webview and freeze the UI while publishing (see `refresh_inbox`).
+#[tauri::command]
+pub async fn publish_review(review_id: i64, db: State<'_, Db>) -> AppResult<Review> {
+    let (detail, owner, name, number) = prepare_publish(review_id, &db)?;
+
+    let conn = db.0.lock().unwrap();
 
     let payload = build_publish_payload(&detail);
 
@@ -1245,9 +1286,117 @@ pub async fn publish_review(review_id: i64, db: State<'_, Db>) -> AppResult<Revi
     get_review_row(&conn, review_id)
 }
 
+/// Remap GitHub's "max one pending review per user per PR" 422 to a clear message.
+/// Only that specific conflict is remapped — other 422s surface verbatim.
+fn map_pending_conflict(e: AppError) -> AppError {
+    match &e {
+        AppError::Gh(msg) if msg.to_lowercase().contains("pending review") => AppError::Other(
+            "GitHub allows one pending review per reviewer on a PR — submit or discard \
+             your existing pending review (here or on github.com) and retry"
+                .into(),
+        ),
+        _ => e,
+    }
+}
+
+/// The review must be 'published_pending' with a stored GitHub review id.
+fn ensure_pending(detail: &ReviewDetail) -> AppResult<i64> {
+    if detail.review.status != "published_pending" {
+        return Err(AppError::Other(
+            "this review has no pending GitHub review".into(),
+        ));
+    }
+    detail
+        .review
+        .github_review_id
+        .ok_or_else(|| AppError::Other("pending review is missing its GitHub review id".into()))
+}
+
+/// published_pending -> published (sets published_at = now).
+fn mark_submitted(conn: &Connection, review_id: i64) -> AppResult<()> {
+    let ts = now();
+    conn.execute(
+        "UPDATE review SET status = 'published', published_at = ?1, updated_at = ?1 WHERE id = ?2",
+        params![ts, review_id],
+    )?;
+    Ok(())
+}
+
+/// published_pending -> draft (clears github_review_id; published_at stays NULL).
+fn mark_discarded(conn: &Connection, review_id: i64) -> AppResult<()> {
+    let ts = now();
+    conn.execute(
+        "UPDATE review SET status = 'draft', github_review_id = NULL, updated_at = ?1 WHERE id = ?2",
+        params![ts, review_id],
+    )?;
+    Ok(())
+}
+
+/// Push the draft to GitHub as a PENDING review (event omitted), then lock it
+/// locally as 'published_pending'. github_review_id stores the pending review.
+#[tauri::command]
+pub fn publish_review_pending(review_id: i64, db: State<Db>) -> AppResult<Review> {
+    let (detail, owner, name, number) = prepare_publish(review_id, &db)?;
+    let conn = db.0.lock().unwrap();
+    let payload = build_pending_payload(&detail);
+    let gh_id = gh::post_review(&owner, &name, number, &payload.to_string())
+        .map_err(map_pending_conflict)?;
+    let ts = now();
+    conn.execute(
+        "UPDATE review SET status = 'published_pending', github_review_id = ?1, updated_at = ?2
+         WHERE id = ?3",
+        params![gh_id, ts, review_id],
+    )?;
+    get_review_row(&conn, review_id)
+}
+
+/// Submit the PENDING review on GitHub with the stored verdict; lock as 'published'.
+#[tauri::command]
+pub fn submit_pending_review(review_id: i64, db: State<Db>) -> AppResult<Review> {
+    let conn = db.0.lock().unwrap();
+    let detail = load_detail(&conn, review_id)?;
+    let gh_id = ensure_pending(&detail)?;
+    let number = detail
+        .target
+        .github_pr_number
+        .ok_or_else(|| AppError::Other("PR target missing number".into()))?;
+    let (owner, name) = pr_remote(&conn, detail.target.repo_id)?;
+    gh::submit_pending_review(
+        &owner,
+        &name,
+        number,
+        gh_id,
+        gh_event(detail.review.event.as_deref()),
+    )?;
+    mark_submitted(&conn, review_id)?;
+    get_review_row(&conn, review_id)
+}
+
+/// Delete the PENDING review on GitHub; unlock the local draft.
+#[tauri::command]
+pub fn discard_pending_review(review_id: i64, db: State<Db>) -> AppResult<Review> {
+    let conn = db.0.lock().unwrap();
+    let detail = load_detail(&conn, review_id)?;
+    let gh_id = ensure_pending(&detail)?;
+    let number = detail
+        .target
+        .github_pr_number
+        .ok_or_else(|| AppError::Other("PR target missing number".into()))?;
+    let (owner, name) = pr_remote(&conn, detail.target.repo_id)?;
+    gh::delete_pending_review(&owner, &name, number, gh_id)?;
+    mark_discarded(&conn, review_id)?;
+    get_review_row(&conn, review_id)
+}
+
 #[tauri::command]
 pub fn delete_review(review_id: i64, db: State<Db>) -> AppResult<()> {
     let conn = db.0.lock().unwrap();
+    if review_status(&conn, review_id)? == "published_pending" {
+        return Err(AppError::Other(
+            "this review is pending on GitHub — discard the pending review before deleting it"
+                .into(),
+        ));
+    }
     conn.execute("DELETE FROM review WHERE id = ?1", params![review_id])?;
     Ok(())
 }
@@ -1755,6 +1904,200 @@ mod tests {
         .unwrap();
         let err = ensure_draft(&conn, review.id).unwrap_err();
         assert!(matches!(err, AppError::Other(_)));
+    }
+
+    #[test]
+    fn ensure_draft_blocks_pending_reviews() {
+        let conn = open_memory();
+        let repo = seed_repo(&conn, None, None);
+        let target =
+            get_or_create_local_target(&conn, repo, "/nope", "main", "feature", true).unwrap();
+        let review = new_review_for_target(&conn, target.id).unwrap();
+
+        conn.execute(
+            "UPDATE review SET status = 'published_pending' WHERE id = ?1",
+            params![review.id],
+        )
+        .unwrap();
+        let err = ensure_draft(&conn, review.id).unwrap_err();
+        match err {
+            AppError::Other(m) => assert!(m.contains("pending"), "message mentions pending: {m}"),
+            other => panic!("expected Other, got {other:?}"),
+        }
+    }
+
+    // ---- pending (draft) GitHub reviews (spec 19) ----
+
+    /// A draft github_pr review with a resolved head, ready for the publish guards.
+    /// Returns (Db wrapping the connection, review_id).
+    fn pending_test_db() -> (Db, i64) {
+        let conn = open_memory();
+        let repo = seed_repo(&conn, Some("owner"), Some("name"));
+        let target = get_or_create_pr_target(&conn, repo, 7, &pr_info(), None).unwrap();
+        let review = new_review_for_target(&conn, target.id).unwrap();
+        (Db(Mutex::new(conn)), review.id)
+    }
+
+    fn set_status(db: &Db, review_id: i64, status: &str) {
+        let conn = db.0.lock().unwrap();
+        conn.execute(
+            "UPDATE review SET status = ?1 WHERE id = ?2",
+            params![status, review_id],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn gh_event_mapping() {
+        assert_eq!(gh_event(Some("approve")), "APPROVE");
+        assert_eq!(gh_event(Some("request_changes")), "REQUEST_CHANGES");
+        assert_eq!(gh_event(Some("comment")), "COMMENT");
+        assert_eq!(gh_event(None), "COMMENT");
+    }
+
+    #[test]
+    fn pending_payload_omits_event() {
+        let detail = detail_with(
+            Some("request_changes"),
+            "Looks good",
+            vec![payload_comment(5, None, "RIGHT")],
+        );
+        let publish = build_publish_payload(&detail);
+        let pending = build_pending_payload(&detail);
+        assert!(pending.get("event").is_none(), "pending payload has no event");
+        assert_eq!(pending["comments"], publish["comments"]);
+        assert_eq!(pending["body"], publish["body"]);
+        assert_eq!(pending["commit_id"], publish["commit_id"]);
+    }
+
+    #[test]
+    fn publish_rejects_pending_status() {
+        // The shared guard `prepare_publish` runs before any network in both
+        // publish_review and publish_review_pending; a pending review errors here.
+        let (db, review_id) = pending_test_db();
+        set_status(&db, review_id, "published_pending");
+        let err = prepare_publish(review_id, &db).unwrap_err();
+        match err {
+            AppError::Other(m) => assert!(m.contains("pending"), "message: {m}"),
+            other => panic!("expected Other, got {other:?}"),
+        }
+
+        // A published review still errors with the published message.
+        set_status(&db, review_id, "published");
+        let err = prepare_publish(review_id, &db).unwrap_err();
+        assert!(matches!(err, AppError::Other(_)));
+    }
+
+    fn pending_detail(status: &str, github_review_id: Option<i64>) -> ReviewDetail {
+        let mut d = detail_with(Some("approve"), "", vec![]);
+        d.review.status = status.into();
+        d.review.github_review_id = github_review_id;
+        d
+    }
+
+    #[test]
+    fn submit_discard_reject_non_pending() {
+        assert!(ensure_pending(&pending_detail("draft", None)).is_err());
+        assert!(ensure_pending(&pending_detail("published", Some(9))).is_err());
+        assert_eq!(
+            ensure_pending(&pending_detail("published_pending", Some(42))).unwrap(),
+            42
+        );
+    }
+
+    #[test]
+    fn ensure_pending_requires_github_id() {
+        let err = ensure_pending(&pending_detail("published_pending", None)).unwrap_err();
+        assert!(matches!(err, AppError::Other(_)));
+    }
+
+    #[test]
+    fn mark_submitted_transitions() {
+        let conn = open_memory();
+        let repo = seed_repo(&conn, Some("owner"), Some("name"));
+        let target = get_or_create_pr_target(&conn, repo, 7, &pr_info(), None).unwrap();
+        let review = new_review_for_target(&conn, target.id).unwrap();
+        conn.execute(
+            "UPDATE review SET status = 'published_pending', github_review_id = 99 WHERE id = ?1",
+            params![review.id],
+        )
+        .unwrap();
+
+        mark_submitted(&conn, review.id).unwrap();
+
+        let r = get_review_row(&conn, review.id).unwrap();
+        assert_eq!(r.status, "published");
+        assert!(r.published_at.is_some(), "published_at set on submit");
+        assert_eq!(r.github_review_id, Some(99), "github_review_id kept");
+    }
+
+    #[test]
+    fn mark_discarded_transitions() {
+        let conn = open_memory();
+        let repo = seed_repo(&conn, Some("owner"), Some("name"));
+        let target = get_or_create_pr_target(&conn, repo, 7, &pr_info(), None).unwrap();
+        let review = new_review_for_target(&conn, target.id).unwrap();
+        conn.execute(
+            "UPDATE review SET status = 'published_pending', github_review_id = 99 WHERE id = ?1",
+            params![review.id],
+        )
+        .unwrap();
+
+        mark_discarded(&conn, review.id).unwrap();
+
+        let r = get_review_row(&conn, review.id).unwrap();
+        assert_eq!(r.status, "draft");
+        assert_eq!(r.github_review_id, None, "github_review_id cleared");
+        assert!(r.published_at.is_none(), "published_at stays NULL");
+    }
+
+    #[test]
+    fn map_pending_conflict_remaps_only_pending_422() {
+        let conflict =
+            AppError::Gh("422: A pending review already exists for this pull request".into());
+        match map_pending_conflict(conflict) {
+            AppError::Other(m) => assert!(m.contains("one pending review"), "friendly text: {m}"),
+            other => panic!("expected Other, got {other:?}"),
+        }
+
+        // Any other gh error passes through unchanged.
+        let other = AppError::Gh("HTTP 422: other".into());
+        match map_pending_conflict(other) {
+            AppError::Gh(m) => assert_eq!(m, "HTTP 422: other"),
+            other => panic!("expected Gh, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn delete_review_blocked_while_pending() {
+        let conn = open_memory();
+        let repo = seed_repo(&conn, Some("owner"), Some("name"));
+        let target = get_or_create_pr_target(&conn, repo, 7, &pr_info(), None).unwrap();
+        let review = new_review_for_target(&conn, target.id).unwrap();
+        conn.execute(
+            "UPDATE review SET status = 'published_pending' WHERE id = ?1",
+            params![review.id],
+        )
+        .unwrap();
+
+        // delete_review's guard runs before the DELETE. Exercise the same logic a
+        // tauri State cannot reach here: status == pending must short-circuit with
+        // an error and never run the DELETE, so the row survives.
+        let result: AppResult<()> = (|| {
+            if review_status(&conn, review.id)? == "published_pending" {
+                return Err(AppError::Other("pending".into()));
+            }
+            conn.execute("DELETE FROM review WHERE id = ?1", params![review.id])?;
+            Ok(())
+        })();
+        assert!(result.is_err(), "deleting a pending review is rejected");
+
+        let surviving: i64 = conn
+            .query_row("SELECT COUNT(*) FROM review WHERE id = ?1", params![review.id], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(surviving, 1, "pending review row is not deleted");
     }
 
     // ---- threaded replies (spec 11) ----
