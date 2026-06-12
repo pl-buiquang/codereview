@@ -1,15 +1,50 @@
 import { useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
+import { toast } from "../lib/toast";
 import { timeAgo } from "../lib/timeAgo";
 import { Markdown } from "./Markdown";
-import type { PrThread, PrThreadComment } from "../lib/types";
+import { Composer } from "./ReviewView";
+import type { PrThread, PrThreadComment, PrThreadCtx } from "../lib/types";
 
-/** Read-only display of an existing GitHub PR review thread. Never editable,
- *  never published or exported — it's fetched ephemerally and shown "from
- *  GitHub" so it can't be confused with a local draft. */
-export function GithubThread({ thread }: { thread: PrThread }) {
+/** Display of an existing GitHub PR review thread. Never persisted or exported —
+ *  it's fetched ephemerally and shown "from GitHub" so it can't be confused with
+ *  a local draft. When `ctx` is supplied the thread can be replied to and
+ *  resolved/unresolved, acting on GitHub state directly (no local storage). */
+export function GithubThread({
+  thread,
+  ctx,
+}: {
+  thread: PrThread;
+  ctx?: PrThreadCtx | null;
+}) {
   const collapsible = thread.isResolved && thread.isCollapsed;
   const [expanded, setExpanded] = useState(!collapsible);
+  const [replying, setReplying] = useState(false);
+  const queryClient = useQueryClient();
+
+  const invalidate = () =>
+    queryClient.invalidateQueries({
+      queryKey: ["pr-threads", ctx!.owner, ctx!.name, ctx!.number],
+    });
+
+  const setResolved = useMutation({
+    mutationFn: (resolved: boolean) => api.setPrThreadResolved(thread.id, resolved),
+    onSuccess: invalidate,
+    onError: (e) => toast.error(`Thread update failed:\n${String(e)}`),
+  });
+
+  const rootId = thread.comments[0]?.databaseId ?? null;
+
+  const reply = useMutation({
+    mutationFn: (body: string) =>
+      api.replyToThread(ctx!.owner, ctx!.name, ctx!.number, rootId!, body),
+    onSuccess: () => {
+      setReplying(false);
+      invalidate();
+    },
+    onError: (e) => toast.error(`Reply failed:\n${String(e)}`),
+  });
 
   return (
     <div className="github-thread">
@@ -35,9 +70,38 @@ export function GithubThread({ thread }: { thread: PrThread }) {
                 }`}
           </button>
         )}
+        {ctx && (
+          <button
+            className="github-thread-action"
+            disabled={setResolved.isPending}
+            onClick={() => setResolved.mutate(!thread.isResolved)}
+          >
+            {thread.isResolved ? "Unresolve" : "Resolve"}
+          </button>
+        )}
       </div>
       {expanded &&
         thread.comments.map((c) => <ThreadComment key={c.id} comment={c} />)}
+      {expanded && ctx && rootId != null && (
+        <div className="github-thread-reply">
+          {!replying ? (
+            <button
+              className="github-thread-action"
+              onClick={() => setReplying(true)}
+            >
+              Reply…
+            </button>
+          ) : (
+            <Composer
+              submitLabel="Reply"
+              onSubmit={async (text) => {
+                await reply.mutateAsync(text);
+              }}
+              onCancel={() => setReplying(false)}
+            />
+          )}
+        </div>
+      )}
     </div>
   );
 }
