@@ -40,6 +40,7 @@ import { githubPrUrl } from "../lib/githubUrl";
 import { useDebouncedCallback } from "../lib/useDebouncedCallback";
 import { useSettingsStore } from "../lib/settings";
 import { useUIStore } from "../store";
+import { groupThreads, type CommentThread } from "../lib/threads";
 import type { Comment, PrThread, ReviewDetail, ReviewEvent, Side } from "../lib/types";
 
 type SaveState = "idle" | "saving" | "saved";
@@ -601,26 +602,36 @@ function FileReview({
     },
   });
 
-  // Comments attached to the whole file rather than a specific line.
+  // Comments attached to the whole file rather than a specific line, grouped into
+  // threads so pre-existing replies to file comments still nest (no reply
+  // affordance on these per spec).
   const fileComments = useMemo(
-    () => detail.comments.filter((c) => c.file_path === path && c.subject_type === "file"),
+    () =>
+      groupThreads(
+        detail.comments.filter((c) => c.file_path === path && c.subject_type === "file"),
+      ),
     [detail.comments, path],
   );
 
-  // Group this file's line comments by the change key they anchor to.
+  // Group this file's line comments into threads, then key each thread by the
+  // root's anchor.
   const { commentsByKey, orphans } = useMemo(() => {
-    const byKey = new Map<string, Comment[]>();
-    const orphan: Comment[] = [];
-    for (const c of detail.comments) {
-      if (c.file_path !== path || c.subject_type === "file") continue;
-      if (c.origin === "file_view") continue; // shown in the full-file pane, not the diff
-      const key = keyByAnchor.get(`${c.side}:${c.line}`);
+    const byKey = new Map<string, CommentThread[]>();
+    const orphan: CommentThread[] = [];
+    const lineComments = detail.comments.filter(
+      (c) =>
+        c.file_path === path &&
+        c.subject_type !== "file" &&
+        c.origin !== "file_view", // shown in the full-file pane, not the diff
+    );
+    for (const thread of groupThreads(lineComments)) {
+      const key = keyByAnchor.get(`${thread.root.side}:${thread.root.line}`);
       if (!key) {
-        orphan.push(c);
+        orphan.push(thread);
         continue;
       }
       const arr = byKey.get(key) ?? [];
-      arr.push(c);
+      arr.push(thread);
       byKey.set(key, arr);
     }
     return { commentsByKey: byKey, orphans: orphan };
@@ -727,11 +738,12 @@ function FileReview({
     widgets[key] = (
       <>
         <LineWidget
-          comments={commentsByKey.get(key) ?? []}
+          threads={commentsByKey.get(key) ?? []}
           headSha={detail.target.head_sha}
           composerOpen={!!composerOpen}
           rangeLabel={rangeLabel}
           readOnly={readOnly}
+          canReply={!readOnly}
           onCloseComposer={() => setSelection(null)}
           onAdd={submitSelectionComment}
           onSaving={onSaving}
@@ -801,12 +813,13 @@ function FileReview({
       </div>
       {(fileComments.length > 0 || fileComposerOpen) && (
         <div className="file-comments">
-          {fileComments.map((c) => (
-            <CommentItem
-              key={c.id}
-              comment={c}
+          {fileComments.map((t) => (
+            <ThreadItem
+              key={t.root.id}
+              thread={t}
               headSha={detail.target.head_sha}
               readOnly={readOnly}
+              canReply={false}
               onSaving={onSaving}
               onSaved={onSaved}
               onCommentsChanged={onCommentsChanged}
@@ -879,7 +892,7 @@ function FileBody({
   tokens: ReturnType<typeof tokenizeFile>;
   widgets: Record<string, React.ReactNode>;
   selectedChanges: string[];
-  orphans: Comment[];
+  orphans: CommentThread[];
   orphanThreads: PrThread[];
   headSha: string | null;
   readOnly: boolean;
@@ -907,12 +920,13 @@ function FileBody({
           <p className="muted">
             Comments not matching the current diff (head may have changed):
           </p>
-          {orphans.map((c) => (
-            <CommentItem
-              key={c.id}
-              comment={c}
+          {orphans.map((t) => (
+            <ThreadItem
+              key={t.root.id}
+              thread={t}
               headSha={headSha}
               readOnly={readOnly}
+              canReply={false}
               onSaving={onSaving}
               onSaved={onSaved}
               onCommentsChanged={onCommentsChanged}
@@ -1042,24 +1056,26 @@ function ExpandControl({
 }
 
 export function LineWidget({
-  comments,
+  threads,
   headSha,
   composerOpen,
   rangeLabel,
   readOnly,
   showOrigin,
+  canReply = true,
   onCloseComposer,
   onAdd,
   onSaving,
   onSaved,
   onCommentsChanged,
 }: {
-  comments: Comment[];
+  threads: CommentThread[];
   headSha: string | null;
   composerOpen: boolean;
   rangeLabel?: string;
   readOnly: boolean;
   showOrigin?: boolean;
+  canReply?: boolean;
   onCloseComposer: () => void;
   onAdd: (text: string) => Promise<void>;
   onSaving: () => void;
@@ -1068,13 +1084,14 @@ export function LineWidget({
 }) {
   return (
     <div className="line-widget">
-      {comments.map((c) => (
-        <CommentItem
-          key={c.id}
-          comment={c}
+      {threads.map((t) => (
+        <ThreadItem
+          key={t.root.id}
+          thread={t}
           headSha={headSha}
           readOnly={readOnly}
           showOrigin={showOrigin}
+          canReply={canReply && !readOnly}
           onSaving={onSaving}
           onSaved={onSaved}
           onCommentsChanged={onCommentsChanged}
@@ -1087,11 +1104,88 @@ export function LineWidget({
   );
 }
 
+/**
+ * A root comment plus its (one level of) replies, indented, with a Reply
+ * affordance on anchored threads. Replies inherit the root's anchor server-side,
+ * so the composer only needs the root id.
+ */
+export function ThreadItem({
+  thread,
+  headSha,
+  readOnly,
+  showOrigin,
+  canReply,
+  onSaving,
+  onSaved,
+  onCommentsChanged,
+}: {
+  thread: CommentThread;
+  headSha: string | null;
+  readOnly: boolean;
+  showOrigin?: boolean;
+  canReply?: boolean;
+  onSaving: () => void;
+  onSaved: () => void;
+  onCommentsChanged: () => void;
+}) {
+  const [replyOpen, setReplyOpen] = useState(false);
+  const { root, replies } = thread;
+
+  const submitReply = async (text: string) => {
+    onSaving();
+    await api.addReply({ reviewId: root.review_id, parentId: root.id, body: text });
+    setReplyOpen(false);
+    onSaved();
+    onCommentsChanged();
+  };
+
+  return (
+    <div className="comment-thread">
+      <CommentItem
+        comment={root}
+        headSha={headSha}
+        readOnly={readOnly}
+        showOrigin={showOrigin}
+        replyCount={replies.length}
+        onReply={canReply ? () => setReplyOpen(true) : undefined}
+        onSaving={onSaving}
+        onSaved={onSaved}
+        onCommentsChanged={onCommentsChanged}
+      />
+      {replies.length > 0 && (
+        <div className="comment-replies">
+          {replies.map((r) => (
+            <CommentItem
+              key={r.id}
+              comment={r}
+              headSha={headSha}
+              readOnly={readOnly}
+              showOrigin={showOrigin}
+              onSaving={onSaving}
+              onSaved={onSaved}
+              onCommentsChanged={onCommentsChanged}
+            />
+          ))}
+        </div>
+      )}
+      {replyOpen && !readOnly && (
+        <Composer
+          onSubmit={submitReply}
+          onCancel={() => setReplyOpen(false)}
+          submitLabel="Reply"
+        />
+      )}
+    </div>
+  );
+}
+
 export function CommentItem({
   comment,
   headSha,
   readOnly,
   showOrigin,
+  onReply,
+  replyCount,
   onSaving,
   onSaved,
   onCommentsChanged,
@@ -1100,6 +1194,8 @@ export function CommentItem({
   headSha: string | null;
   readOnly: boolean;
   showOrigin?: boolean;
+  onReply?: () => void;
+  replyCount?: number;
   onSaving: () => void;
   onSaved: () => void;
   onCommentsChanged: () => void;
@@ -1174,15 +1270,26 @@ export function CommentItem({
           )}
         </div>
       )}
+      {!readOnly && onReply && (
+        <button className="btn-sm btn-ghost comment-reply-btn" onClick={onReply}>
+          Reply
+        </button>
+      )}
       {!readOnly && (
         <button
           className="btn-icon"
           title="Delete comment"
           onClick={async () => {
+            const message =
+              replyCount && replyCount > 0
+                ? `Delete this comment and its ${replyCount} ${
+                    replyCount === 1 ? "reply" : "replies"
+                  }?`
+                : "Delete this comment?";
             if (
               await confirmDialog({
                 title: "Delete comment",
-                message: "Delete this comment?",
+                message,
                 confirmLabel: "Delete",
                 danger: true,
               })
@@ -1203,10 +1310,12 @@ export function Composer({
   onSubmit,
   onCancel,
   rangeLabel,
+  submitLabel = "Add comment",
 }: {
   onSubmit: (text: string) => Promise<void>;
   onCancel: () => void;
   rangeLabel?: string;
+  submitLabel?: string;
 }) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
@@ -1235,7 +1344,7 @@ export function Composer({
             }
           }}
         >
-          Add comment
+          {submitLabel}
         </button>
       </div>
     </div>

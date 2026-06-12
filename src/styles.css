@@ -1306,6 +1306,16 @@ td.diff-code {
   align-items: flex-start;
   margin-bottom: 8px;
 }
+/* Replies render indented under their root, read as nesting via a left border. */
+.comment-replies {
+  margin-left: 16px;
+  padding-left: 12px;
+  border-left: 2px solid var(--border);
+}
+.comment-reply-btn {
+  flex: none;
+  align-self: center;
+}
 .stale-badge {
   flex: none;
   align-self: center;

@@ -16,8 +16,9 @@ import {
   indexFile,
   tokenizeFile,
 } from "../lib/diff";
-import { CommentItem, LineWidget } from "./ReviewView";
-import type { Comment, ReviewDetail } from "../lib/types";
+import { LineWidget, ThreadItem } from "./ReviewView";
+import { groupThreads, type CommentThread } from "../lib/threads";
+import type { ReviewDetail } from "../lib/types";
 
 interface Selection {
   anchorLine: number;
@@ -94,17 +95,19 @@ export function FileViewPane({
   // grouped by the change key they anchor to. LEFT/deletion comments don't map
   // to head lines, so they stay in the diff view only.
   const { commentsByKey, orphans } = useMemo(() => {
-    const byKey = new Map<string, Comment[]>();
-    const orphan: Comment[] = [];
-    for (const c of detail.comments) {
-      if (c.file_path !== filePath || c.subject_type === "file" || c.side !== "RIGHT") continue;
-      const key = keyByAnchor.get(`RIGHT:${c.line}`);
+    const byKey = new Map<string, CommentThread[]>();
+    const orphan: CommentThread[] = [];
+    const rightComments = detail.comments.filter(
+      (c) => c.file_path === filePath && c.subject_type !== "file" && c.side === "RIGHT",
+    );
+    for (const thread of groupThreads(rightComments)) {
+      const key = keyByAnchor.get(`RIGHT:${thread.root.line}`);
       if (!key) {
-        orphan.push(c);
+        orphan.push(thread);
         continue;
       }
       const arr = byKey.get(key) ?? [];
-      arr.push(c);
+      arr.push(thread);
       byKey.set(key, arr);
     }
     return { commentsByKey: byKey, orphans: orphan };
@@ -167,12 +170,13 @@ export function FileViewPane({
         : undefined;
     widgets[key] = (
       <LineWidget
-        comments={commentsByKey.get(key) ?? []}
+        threads={commentsByKey.get(key) ?? []}
         headSha={detail.target.head_sha}
         composerOpen={!!composerOpen}
         rangeLabel={rangeLabel}
         readOnly={readOnly}
         showOrigin
+        canReply={!readOnly}
         onCloseComposer={() => setSelection(null)}
         onAdd={submitComment}
         onSaving={onSaving}
@@ -223,13 +227,14 @@ export function FileViewPane({
                 <p className="muted">
                   Comments not matching the current file (head may have changed):
                 </p>
-                {orphans.map((c) => (
-                  <CommentItem
-                    key={c.id}
-                    comment={c}
+                {orphans.map((t) => (
+                  <ThreadItem
+                    key={t.root.id}
+                    thread={t}
                     headSha={detail.target.head_sha}
                     readOnly={readOnly}
                     showOrigin
+                    canReply={false}
                     onSaving={onSaving}
                     onSaved={onSaved}
                     onCommentsChanged={onCommentsChanged}
