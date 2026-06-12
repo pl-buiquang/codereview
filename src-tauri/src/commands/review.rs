@@ -429,7 +429,7 @@ fn reanchor_review_comments(conn: &Connection, detail: &ReviewDetail) -> AppResu
             // A true multi-line range remaps both endpoints; otherwise only `line`.
             let range_start = c.start_line.filter(|&s| s != c.line);
 
-            let new_line = match anchor::remap_right_line(c.line, hunks) {
+            let new_line = match anchor::remap_line(c.line, hunks) {
                 Remap::Shifted(l) => l,
                 Remap::Lost => {
                     result.lost += 1;
@@ -437,7 +437,7 @@ fn reanchor_review_comments(conn: &Connection, detail: &ReviewDetail) -> AppResu
                 }
             };
             let new_start = match range_start {
-                Some(s) => match anchor::remap_right_line(s, hunks) {
+                Some(s) => match anchor::remap_line(s, hunks) {
                     Remap::Shifted(l) => Some(l),
                     Remap::Lost => {
                         result.lost += 1;

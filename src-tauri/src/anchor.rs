@@ -1,5 +1,8 @@
-//! Pure re-anchoring primitives: parse one file's unified diff and remap a
-//! RIGHT-side (new) line from the OLD revision to the NEW revision.
+//! Pure re-anchoring primitives: parse one file's unified diff and remap a line
+//! valid in the patch's OLD revision onto the NEW revision. The same mapping
+//! serves both comment sides: RIGHT comments map across a head→head patch, LEFT
+//! comments across a base→base patch — in both cases the stored line lives on the
+//! patch's old side (see `remap_line`).
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Remap {
@@ -86,7 +89,14 @@ fn parse_range(range: &str) -> Option<(i64, i64)> {
     }
 }
 
-pub fn remap_right_line(line: i64, hunks: &FileHunks) -> Remap {
+/// Map `line` — valid in the patch's OLD revision — onto the NEW revision.
+/// The input is matched against each hunk's `old_start`/`old_len`, so the caller
+/// must always fetch the diff in the direction `old → new` (pin → current).
+/// Used for RIGHT comments through a head→head patch and LEFT comments through a
+/// base→base patch; "old"/"new" here are the patch's two sides, not a comment's
+/// PR side. A line on an untouched gap shifts by the net delta of prior hunks; a
+/// deleted/replaced line is `Lost`.
+pub fn remap_line(line: i64, hunks: &FileHunks) -> Remap {
     let mut delta: i64 = 0;
 
     for hunk in &hunks.hunks {
@@ -133,21 +143,21 @@ mod tests {
     #[test]
     fn identity_empty_patch() {
         let hunks = parse_file_patch("");
-        assert_eq!(remap_right_line(80, &hunks), Remap::Shifted(80));
+        assert_eq!(remap_line(80, &hunks), Remap::Shifted(80));
     }
 
     #[test]
     fn insertion_above() {
         let patch = "@@ -50,0 +50,3 @@\n+a\n+b\n+c\n";
         let hunks = parse_file_patch(patch);
-        assert_eq!(remap_right_line(80, &hunks), Remap::Shifted(83));
+        assert_eq!(remap_line(80, &hunks), Remap::Shifted(83));
     }
 
     #[test]
     fn deletion_above() {
         let patch = "@@ -50,2 +50,0 @@\n-x\n-y\n";
         let hunks = parse_file_patch(patch);
-        assert_eq!(remap_right_line(80, &hunks), Remap::Shifted(78));
+        assert_eq!(remap_line(80, &hunks), Remap::Shifted(78));
     }
 
     #[test]
@@ -155,7 +165,7 @@ mod tests {
         // Replace old line 50 with a new line: delete then add at the same spot.
         let patch = "@@ -50,1 +50,1 @@\n-old\n+new\n";
         let hunks = parse_file_patch(patch);
-        assert_eq!(remap_right_line(50, &hunks), Remap::Lost);
+        assert_eq!(remap_line(50, &hunks), Remap::Lost);
     }
 
     #[test]
@@ -164,7 +174,7 @@ mod tests {
         // old 50 (context) -> new 52.
         let patch = "@@ -50,1 +50,3 @@\n+a\n+b\n ctx\n";
         let hunks = parse_file_patch(patch);
-        assert_eq!(remap_right_line(50, &hunks), Remap::Shifted(52));
+        assert_eq!(remap_line(50, &hunks), Remap::Shifted(52));
     }
 
     #[test]
@@ -172,14 +182,14 @@ mod tests {
         // Two hunks, each adding one line, both before line 200.
         let patch = "@@ -10,1 +10,2 @@\n ctx\n+added\n@@ -100,1 +101,2 @@\n ctx\n+added\n";
         let hunks = parse_file_patch(patch);
-        assert_eq!(remap_right_line(200, &hunks), Remap::Shifted(202));
+        assert_eq!(remap_line(200, &hunks), Remap::Shifted(202));
     }
 
     #[test]
     fn past_all_hunks() {
         let patch = "@@ -5,1 +5,2 @@\n ctx\n+added\n";
         let hunks = parse_file_patch(patch);
-        assert_eq!(remap_right_line(500, &hunks), Remap::Shifted(501));
+        assert_eq!(remap_line(500, &hunks), Remap::Shifted(501));
     }
 
     #[test]
@@ -187,8 +197,8 @@ mod tests {
         // start_line in an untouched gap, line inside a replacement: caller marks Lost.
         let patch = "@@ -100,1 +100,1 @@\n-old\n+new\n";
         let hunks = parse_file_patch(patch);
-        let start = remap_right_line(50, &hunks);
-        let end = remap_right_line(100, &hunks);
+        let start = remap_line(50, &hunks);
+        let end = remap_line(100, &hunks);
         assert_eq!(start, Remap::Shifted(50));
         assert_eq!(end, Remap::Lost);
         let lost = matches!(start, Remap::Lost) || matches!(end, Remap::Lost);
@@ -205,7 +215,22 @@ index abc123..def456 100644\n\
 +a\n+b\n+c\n\
 \\ No newline at end of file\n";
         let hunks = parse_file_patch(patch);
-        assert_eq!(remap_right_line(80, &hunks), Remap::Shifted(83));
+        assert_eq!(remap_line(80, &hunks), Remap::Shifted(83));
+    }
+
+    #[test]
+    fn old_to_new_direction_worked_example() {
+        // B1 -> B2 inserts 3 lines above old line 50; a LEFT comment at old line
+        // 80 must shift to 83 (insertion above pushes it down).
+        let forward = parse_file_patch("@@ -50,0 +50,3 @@\n+a\n+b\n+c\n");
+        assert_eq!(remap_line(80, &forward), Remap::Shifted(83));
+
+        // The trap: fetching the diff reversed (B2 -> B1) reads three deletions,
+        // so line 80 would map to 77 and new lines 50-52 would falsely be Lost.
+        // This documents why the caller must always diff pin -> current.
+        let reversed = parse_file_patch("@@ -50,3 +50,0 @@\n-a\n-b\n-c\n");
+        assert_eq!(remap_line(80, &reversed), Remap::Shifted(77));
+        assert_eq!(remap_line(50, &reversed), Remap::Lost);
     }
 
     #[test]
@@ -213,6 +238,6 @@ index abc123..def456 100644\n\
         // No comma in either range -> length 1 each. Pure context line at old 50.
         let patch = "@@ -50 +60 @@\n ctx\n";
         let hunks = parse_file_patch(patch);
-        assert_eq!(remap_right_line(50, &hunks), Remap::Shifted(60));
+        assert_eq!(remap_line(50, &hunks), Remap::Shifted(60));
     }
 }
