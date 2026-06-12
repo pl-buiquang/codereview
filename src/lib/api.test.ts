@@ -98,6 +98,20 @@ describe("api command wrappers", () => {
     await api.addComment(commentArgs);
     expect(invoke).toHaveBeenCalledWith("add_comment", commentArgs);
 
+    const replyArgs = { ...commentArgs, parentId: 7 };
+    await api.addComment(replyArgs);
+    expect(invoke).toHaveBeenCalledWith("add_comment", replyArgs);
+
+    await api.addReply({ reviewId: 1, parentId: 7, body: "a reply" });
+    expect(invoke).toHaveBeenCalledWith("add_comment", {
+      reviewId: 1,
+      parentId: 7,
+      body: "a reply",
+      filePath: "",
+      side: "RIGHT",
+      line: 0,
+    });
+
     await api.updateComment(2, "edited");
     expect(invoke).toHaveBeenCalledWith("update_comment", { commentId: 2, body: "edited" });
 
