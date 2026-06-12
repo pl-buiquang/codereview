@@ -465,6 +465,17 @@ mod tests {
         assert!(!md.contains("(resolved)"));
     }
 
+    // ---- suggested changes (spec 13): publish/export pass the body verbatim ----
+
+    #[test]
+    fn markdown_preserves_suggestion_fence_verbatim() {
+        let mut c = comment(3, None);
+        c.body = "fix:\n\n```suggestion\nlet x = 1;\n```".into();
+        let md = render_markdown(&detail(vec![c]), "owner/repo");
+        // The fence must survive character-for-character (no escaping/re-fencing).
+        assert!(md.contains("fix:\n\n```suggestion\nlet x = 1;\n```"), "got: {md}");
+    }
+
     #[test]
     fn json_carries_resolved_at() {
         let json = render_json(
