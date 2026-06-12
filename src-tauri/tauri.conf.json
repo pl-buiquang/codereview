@@ -24,6 +24,7 @@
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "targets": "all",
     "category": "DeveloperTool",
     "copyright": "Copyright © 2026 Paul Bui-Quang",
@@ -37,5 +38,13 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "PLACEHOLDER_PUBKEY__TODO_user_replace_with_real_base64_pubkey_from_tauri_signer_generate__see_specs_08_code_signing_readiness_md_and_ORCHESTRATION_Discrepancy_8",
+      "endpoints": [
+        "https://github.com/pl-buiquang/codereview/releases/latest/download/latest.json"
+      ]
+    }
   }
 }

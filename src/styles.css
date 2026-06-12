@@ -1763,6 +1763,22 @@ td.diff-code {
   margin-top: 12px;
 }
 
+/* --- Update banner -------------------------------------------------------- */
+.update-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  background: var(--accent-soft);
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+.update-banner-text {
+  flex: 1;
+  color: var(--text);
+  font-weight: 600;
+}
+
 /* --- Toasts --------------------------------------------------------------- */
 .toast-stack {
   position: fixed;
