@@ -773,14 +773,14 @@ fn is_anchored_to(c: &Comment, head_sha: Option<&str>) -> bool {
     }
 }
 
-fn build_publish_payload(detail: &ReviewDetail) -> serde_json::Value {
-    let event = match detail.review.event.as_deref() {
-        Some("approve") => "APPROVE",
-        Some("request_changes") => "REQUEST_CHANGES",
-        _ => "COMMENT",
-    };
-
-    let comments: Vec<serde_json::Value> = detail
+/// The comments publish posts inline, each paired with the exact body text sent
+/// to GitHub. Single source of truth shared by `build_publish_payload` and the
+/// post-publish id capture (Spec 17), so the matcher compares like-for-like.
+/// Today the posted body is `c.body` verbatim; Spec 11's `fold_replies` and Spec
+/// 13's suggestion handling must apply their transforms HERE — keep the filter
+/// literal in this one place.
+fn inline_publish_comments(detail: &ReviewDetail) -> Vec<(&Comment, String)> {
+    detail
         .comments
         .iter()
         .filter(|c| {
@@ -788,12 +788,25 @@ fn build_publish_payload(detail: &ReviewDetail) -> serde_json::Value {
                 && c.origin != "file_view"
                 && is_anchored_to(c, detail.target.head_sha.as_deref())
         })
-        .map(|c| {
+        .map(|c| (c, c.body.clone()))
+        .collect()
+}
+
+fn build_publish_payload(detail: &ReviewDetail) -> serde_json::Value {
+    let event = match detail.review.event.as_deref() {
+        Some("approve") => "APPROVE",
+        Some("request_changes") => "REQUEST_CHANGES",
+        _ => "COMMENT",
+    };
+
+    let comments: Vec<serde_json::Value> = inline_publish_comments(detail)
+        .into_iter()
+        .map(|(c, body)| {
             let mut obj = serde_json::json!({
                 "path": c.file_path,
                 "side": c.side,
                 "line": c.line,
-                "body": c.body,
+                "body": body,
             });
             if let Some(start) = c.start_line {
                 if start != c.line {
@@ -895,6 +908,150 @@ fn line_label(c: &Comment) -> String {
     }
 }
 
+/// Normalized anchor of a posted inline comment. Locals normalize
+/// `start_line == line` to None because `build_publish_payload` only sends
+/// `start_line` for true ranges and GitHub returns null for single-line comments.
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
+struct AnchorKey {
+    path: String,
+    side: String,
+    line: i64,
+    start_line: Option<i64>,
+}
+
+impl AnchorKey {
+    fn local(c: &Comment) -> Self {
+        Self {
+            path: c.file_path.clone(),
+            side: c.side.clone(),
+            line: c.line,
+            start_line: c.start_line.filter(|s| *s != c.line),
+        }
+    }
+
+    /// None when the remote item lacks side/line (defensive; such items are skipped).
+    fn remote(rc: &gh::ReviewComment) -> Option<Self> {
+        let side = rc.side.clone()?;
+        let line = rc.line?;
+        Some(Self {
+            path: rc.path.clone(),
+            side,
+            line,
+            start_line: rc.start_line,
+        })
+    }
+}
+
+/// Pure matcher pairing local posted comments with the remote review comments
+/// GitHub minted for them. `local` items are `(comment id, anchor, body-as-posted)`.
+/// Returns `(local_comment_id, github_comment_id)` pairs; each remote id is
+/// consumed at most once; anything ambiguous is left out (caller leaves NULL).
+fn match_review_comments(
+    local: &[(i64, AnchorKey, String)],
+    remote: &[gh::ReviewComment],
+) -> Vec<(i64, i64)> {
+    use std::collections::HashMap;
+
+    // Bucket remotes by anchor, preserving API order. Items without an anchor are
+    // skipped entirely (never paired). `consumed` enforces one-id-per-pairing.
+    struct RemoteEntry {
+        github_id: i64,
+        body: String,
+        consumed: bool,
+    }
+    let mut remote_buckets: HashMap<AnchorKey, Vec<RemoteEntry>> = HashMap::new();
+    for rc in remote {
+        if let Some(key) = AnchorKey::remote(rc) {
+            remote_buckets.entry(key).or_default().push(RemoteEntry {
+                github_id: rc.id,
+                body: rc.body.clone(),
+                consumed: false,
+            });
+        }
+    }
+
+    // Bucket locals by anchor, preserving input order.
+    let mut local_buckets: HashMap<AnchorKey, Vec<(i64, &str)>> = HashMap::new();
+    let mut local_order: Vec<AnchorKey> = Vec::new();
+    for (id, key, body) in local {
+        let bucket = local_buckets.entry(key.clone()).or_insert_with(|| {
+            local_order.push(key.clone());
+            Vec::new()
+        });
+        bucket.push((*id, body.as_str()));
+    }
+
+    let mut matches = Vec::new();
+    for key in &local_order {
+        let locals = &local_buckets[key];
+        let Some(remotes) = remote_buckets.get_mut(key) else {
+            continue;
+        };
+
+        // Pass 1: exact body equality (byte equality, no trimming). Identical
+        // duplicates therefore zip in order.
+        let mut unpaired: Vec<(i64, &str)> = Vec::new();
+        for (id, body) in locals {
+            match remotes
+                .iter_mut()
+                .find(|r| !r.consumed && r.body == *body)
+            {
+                Some(r) => {
+                    r.consumed = true;
+                    matches.push((*id, r.github_id));
+                }
+                None => unpaired.push((*id, body)),
+            }
+        }
+
+        // Pass 2: singleton fallback — exactly one unpaired local and exactly one
+        // unconsumed remote on the same anchor pair despite body drift.
+        let remaining: Vec<&mut RemoteEntry> =
+            remotes.iter_mut().filter(|r| !r.consumed).collect();
+        if unpaired.len() == 1 && remaining.len() == 1 {
+            let (id, _) = unpaired[0];
+            let r = remaining.into_iter().next().unwrap();
+            r.consumed = true;
+            matches.push((id, r.github_id));
+        }
+    }
+
+    matches
+}
+
+/// Write matched ids. Plain helper so the SQL is unit-testable without network.
+/// Deliberately bypasses `ensure_draft` (review is already locked) and leaves
+/// `updated_at` alone (bookkeeping about the publish, not a user edit).
+fn store_comment_id_matches(conn: &Connection, matches: &[(i64, i64)]) -> AppResult<usize> {
+    for (comment_id, gh_id) in matches {
+        conn.execute(
+            "UPDATE comment SET github_comment_id = ?1 WHERE id = ?2",
+            params![gh_id, comment_id],
+        )?;
+    }
+    Ok(matches.len())
+}
+
+/// Best-effort post-publish capture: fetch the inline comments GitHub created for
+/// the just-posted review and store their ids on the matching local rows. Errors
+/// bubble to the caller, which logs and swallows them.
+fn capture_github_comment_ids(
+    conn: &Connection,
+    detail: &ReviewDetail, // the post-reanchor detail the payload was built from
+    owner: &str,
+    name: &str,
+    number: i64,
+    gh_review_id: i64,
+) -> AppResult<usize> {
+    let remote = gh::review_comments(owner, name, number, gh_review_id)?;
+    let local: Vec<(i64, AnchorKey, String)> = inline_publish_comments(detail)
+        .into_iter()
+        .map(|(c, body)| (c.id, AnchorKey::local(c), body))
+        .collect();
+    let matches = match_review_comments(&local, &remote);
+    store_comment_id_matches(conn, &matches)
+}
+
 /// Publish a draft review to its GitHub PR via the line-based reviews API, then
 /// lock it (published reviews can't be edited or re-published). Returns the
 /// updated review.
@@ -950,6 +1107,19 @@ pub async fn publish_review(review_id: i64, db: State<'_, Db>) -> AppResult<Revi
          WHERE id = ?3",
         params![ts, gh_id, review_id],
     )?;
+
+    // Best-effort: correlate the inline comments GitHub just minted back to our
+    // local rows so future thread reply/resolve calls have a comment id. Never
+    // fails the publish — the review is already locked at this point.
+    match capture_github_comment_ids(&conn, &detail, &owner, &name, number, gh_id) {
+        Ok(n) => {
+            eprintln!("[publish.capture_ids] stored {n} github comment ids for review {review_id}")
+        }
+        Err(e) => eprintln!(
+            "[publish.capture_ids] best-effort capture failed for review {review_id}: {e}"
+        ),
+    }
+
     get_review_row(&conn, review_id)
 }
 
@@ -1646,6 +1816,182 @@ mod tests {
         let body = p["body"].as_str().unwrap();
         assert!(body.contains("## Comments that could not be re-anchored"));
         assert!(body.contains("**src/lib.rs** L7: comment body"));
+    }
+
+    // ---- comment-id capture (Spec 17): inline selection, matcher, store ----
+
+    #[test]
+    fn inline_publish_comments_matches_payload_filter() {
+        let detail = detail_with(
+            None,
+            "",
+            vec![
+                payload_comment(5, None, "RIGHT"),
+                file_comment("src/lib.rs", "whole-file note"),
+                file_view_comment("src/lib.rs", 12, None, "pane note"),
+                anchored_payload_comment(7, None, Some("stalesha")),
+            ],
+        );
+        // The single inline-eligible comment is the anchored line comment; file,
+        // file-view, and not-anchored-to-head rows are excluded.
+        let inline = inline_publish_comments(&detail);
+        assert_eq!(inline.len(), 1);
+        let (c, body) = &inline[0];
+        assert_eq!(c.line, 5);
+        assert_eq!(body, "comment body");
+        assert_eq!(*body, c.body, "posted body equals c.body verbatim");
+    }
+
+    fn remote_comment(
+        id: i64,
+        line: Option<i64>,
+        start_line: Option<i64>,
+        side: Option<&str>,
+        body: &str,
+    ) -> gh::ReviewComment {
+        gh::ReviewComment {
+            id,
+            path: "src/lib.rs".into(),
+            side: side.map(Into::into),
+            line,
+            start_line,
+            body: body.into(),
+        }
+    }
+
+    fn local_key(id: i64, line: i64, start_line: Option<i64>, body: &str) -> (i64, AnchorKey, String) {
+        let c = Comment {
+            line,
+            start_line,
+            body: body.into(),
+            ..payload_comment(line, start_line, "RIGHT")
+        };
+        (id, AnchorKey::local(&c), body.into())
+    }
+
+    #[test]
+    fn match_singleton_anchor_pairs_despite_body_drift() {
+        let local = vec![(1, AnchorKey::local(&payload_comment(5, None, "RIGHT")), "local body".into())];
+        let remote = vec![remote_comment(9001, Some(5), None, Some("RIGHT"), "drifted body")];
+        assert_eq!(match_review_comments(&local, &remote), vec![(1, 9001)]);
+    }
+
+    #[test]
+    fn match_body_tiebreak_on_shared_anchor() {
+        // Two locals on the same anchor with bodies A/B; two remotes B/A → each
+        // pairs with its body twin regardless of order.
+        let local = vec![local_key(1, 5, None, "A"), local_key(2, 5, None, "B")];
+        let remote = vec![
+            remote_comment(9002, Some(5), None, Some("RIGHT"), "B"),
+            remote_comment(9001, Some(5), None, Some("RIGHT"), "A"),
+        ];
+        let mut got = match_review_comments(&local, &remote);
+        got.sort();
+        assert_eq!(got, vec![(1, 9001), (2, 9002)]);
+    }
+
+    #[test]
+    fn match_identical_duplicates_zip_in_order() {
+        // Two locals, same anchor + same body; two identical remotes → paired in
+        // order, distinct gh ids, each remote consumed once.
+        let local = vec![
+            (1, AnchorKey::local(&payload_comment(5, None, "RIGHT")), "dup".into()),
+            (2, AnchorKey::local(&payload_comment(5, None, "RIGHT")), "dup".into()),
+        ];
+        let remote = vec![
+            remote_comment(9001, Some(5), None, Some("RIGHT"), "dup"),
+            remote_comment(9002, Some(5), None, Some("RIGHT"), "dup"),
+        ];
+        assert_eq!(match_review_comments(&local, &remote), vec![(1, 9001), (2, 9002)]);
+    }
+
+    #[test]
+    fn match_ambiguous_bucket_left_unmatched() {
+        // Two locals same anchor, two remotes, no body equality, not a singleton
+        // bucket → nothing paired.
+        let local = vec![
+            (1, AnchorKey::local(&payload_comment(5, None, "RIGHT")), "A".into()),
+            (2, AnchorKey::local(&payload_comment(5, None, "RIGHT")), "B".into()),
+        ];
+        let remote = vec![
+            remote_comment(9001, Some(5), None, Some("RIGHT"), "X"),
+            remote_comment(9002, Some(5), None, Some("RIGHT"), "Y"),
+        ];
+        assert!(match_review_comments(&local, &remote).is_empty());
+    }
+
+    #[test]
+    fn match_tolerates_count_mismatch() {
+        // Two locals on distinct anchors, one remote matching the first → exactly
+        // one pair (folded-comment scenario: the second local has no remote).
+        let local = vec![
+            (1, AnchorKey::local(&payload_comment(5, None, "RIGHT")), "first".into()),
+            (2, AnchorKey::local(&payload_comment(9, None, "RIGHT")), "second".into()),
+        ];
+        let remote = vec![remote_comment(9001, Some(5), None, Some("RIGHT"), "first")];
+        assert_eq!(match_review_comments(&local, &remote), vec![(1, 9001)]);
+    }
+
+    #[test]
+    fn match_normalizes_single_line_start() {
+        // Local with start_line == line normalizes to None and matches a remote
+        // single-line comment (start_line: None).
+        let local = vec![(1, AnchorKey::local(&payload_comment(5, Some(5), "RIGHT")), "comment body".into())];
+        let remote = vec![remote_comment(9001, Some(5), None, Some("RIGHT"), "comment body")];
+        assert_eq!(match_review_comments(&local, &remote), vec![(1, 9001)]);
+    }
+
+    #[test]
+    fn match_multiline_range_key() {
+        // Local range (start=3, line=5) matches the range remote, never the
+        // single-line remote at line 5.
+        let local = vec![(1, AnchorKey::local(&payload_comment(5, Some(3), "RIGHT")), "ranged".into())];
+        let remote = vec![
+            remote_comment(9001, Some(5), None, Some("RIGHT"), "single"),
+            remote_comment(9002, Some(5), Some(3), Some("RIGHT"), "ranged"),
+        ];
+        assert_eq!(match_review_comments(&local, &remote), vec![(1, 9002)]);
+    }
+
+    #[test]
+    fn match_skips_remote_without_anchor() {
+        let local = vec![(1, AnchorKey::local(&payload_comment(5, None, "RIGHT")), "comment body".into())];
+        // Remote missing side and line has no AnchorKey → never paired.
+        let remote = vec![remote_comment(9001, None, None, None, "comment body")];
+        assert!(match_review_comments(&local, &remote).is_empty());
+    }
+
+    #[test]
+    fn store_comment_id_matches_writes_only_matched_rows() {
+        let conn = open_memory();
+        let repo = seed_repo(&conn, Some("owner"), Some("repo"));
+        let target =
+            get_or_create_local_target(&conn, repo, "/nope", "main", "feature", true).unwrap();
+        let review = new_review_for_target(&conn, target.id).unwrap();
+
+        let c1 = seed_comment(&conn, review.id, "a.rs", "RIGHT", 5, None, "one");
+        let c2 = seed_comment(&conn, review.id, "a.rs", "RIGHT", 9, None, "two");
+
+        let before: String = conn
+            .query_row("SELECT updated_at FROM comment WHERE id = ?1", params![c2], |r| r.get(0))
+            .unwrap();
+
+        let n = store_comment_id_matches(&conn, &[(c1, 9001)]).unwrap();
+        assert_eq!(n, 1);
+
+        let id1: Option<i64> = conn
+            .query_row("SELECT github_comment_id FROM comment WHERE id = ?1", params![c1], |r| r.get(0))
+            .unwrap();
+        let id2: Option<i64> = conn
+            .query_row("SELECT github_comment_id FROM comment WHERE id = ?1", params![c2], |r| r.get(0))
+            .unwrap();
+        assert_eq!(id1, Some(9001));
+        assert_eq!(id2, None, "the unmatched row stays NULL");
+
+        let after: String = conn
+            .query_row("SELECT updated_at FROM comment WHERE id = ?1", params![c2], |r| r.get(0))
+            .unwrap();
+        assert_eq!(before, after, "store must not touch updated_at");
     }
 
     // ---- refresh helper (real git via the two-heads fixture) ----

@@ -138,6 +138,55 @@ pub fn post_review(owner: &str, name: &str, number: i64, payload_json: &str) -> 
     Ok(value.get("id").and_then(|v| v.as_i64()).unwrap_or_default())
 }
 
+/// One inline comment of a submitted review, from the REST
+/// `pulls/{n}/reviews/{review_id}/comments` API. Anchor fields are Option-typed
+/// defensively: the matcher skips items missing side/line rather than erroring.
+#[derive(Debug, Deserialize)]
+pub struct ReviewComment {
+    pub id: i64,
+    pub path: String,
+    #[serde(default)]
+    pub side: Option<String>, // "LEFT" | "RIGHT"
+    #[serde(default)]
+    pub line: Option<i64>,
+    #[serde(default)]
+    pub start_line: Option<i64>, // null for single-line comments
+    #[serde(default)]
+    pub body: String,
+}
+
+/// All inline comments belonging to one review. Explicit per_page/page loop;
+/// stops when a page returns fewer than 100 items (mirrors `pr_review_threads`'
+/// house style rather than relying on `gh api --paginate`). Clone-less.
+pub fn review_comments(
+    owner: &str,
+    name: &str,
+    number: i64,
+    review_id: i64,
+) -> AppResult<Vec<ReviewComment>> {
+    let ctx = GhRepo::Remote {
+        owner: owner.to_string(),
+        name: name.to_string(),
+    };
+    let mut all = Vec::new();
+    let mut page = 1u32;
+    loop {
+        let endpoint = format!(
+            "repos/{owner}/{name}/pulls/{number}/reviews/{review_id}/comments?per_page=100&page={page}"
+        );
+        let out = run_gh(&ctx, &["api", &endpoint])?;
+        let batch: Vec<ReviewComment> = serde_json::from_str(&out)
+            .map_err(|e| AppError::Gh(format!("failed to parse review comments: {e}")))?;
+        let n = batch.len();
+        all.extend(batch);
+        if n < 100 {
+            break;
+        }
+        page += 1;
+    }
+    Ok(all)
+}
+
 /// Full contents of `file_path` at `git_ref` via the GitHub contents API,
 /// requesting the raw media type so the body is the file itself (not base64 JSON).
 /// Used as a fallback when a PR's commit isn't present in the local clone, and as
@@ -1116,5 +1165,47 @@ mod tests {
         let raw: CompareRaw = serde_json::from_str(json).expect("parses");
         assert!(raw.merge_base_commit.is_none());
         assert_eq!(raw.files.len(), 1);
+    }
+
+    const REVIEW_COMMENTS_FIXTURE: &str = r#"[
+      {
+        "id": 9001,
+        "path": "src/lib.rs",
+        "side": "RIGHT",
+        "line": 5,
+        "start_line": 3,
+        "body": "ranged note"
+      },
+      {
+        "id": 9002,
+        "path": "src/lib.rs",
+        "side": null,
+        "line": null,
+        "start_line": null,
+        "body": ""
+      }
+    ]"#;
+
+    #[test]
+    fn review_comments_parse_fixture() {
+        let comments: Vec<ReviewComment> =
+            serde_json::from_str(REVIEW_COMMENTS_FIXTURE).expect("fixture parses");
+        assert_eq!(comments.len(), 2);
+
+        let full = &comments[0];
+        assert_eq!(full.id, 9001);
+        assert_eq!(full.path, "src/lib.rs");
+        assert_eq!(full.side.as_deref(), Some("RIGHT"));
+        assert_eq!(full.line, Some(5));
+        assert_eq!(full.start_line, Some(3));
+        assert_eq!(full.body, "ranged note");
+
+        // Minimal item: null anchor fields land as None, body defaults to "".
+        let minimal = &comments[1];
+        assert_eq!(minimal.id, 9002);
+        assert!(minimal.side.is_none());
+        assert!(minimal.line.is_none());
+        assert!(minimal.start_line.is_none());
+        assert_eq!(minimal.body, "");
     }
 }

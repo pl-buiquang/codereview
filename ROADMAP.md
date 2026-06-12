@@ -35,7 +35,9 @@ on a 3-direction (Continuity / Modern / Terminal) × dark/light token-based desi
 
 ## 3. GitHub integration depth
 
-- **Reply to existing threads** and **resolve** them via the API.
+- **Reply to existing threads** and **resolve** them via the API. (GitHub comment ids are now
+  captured at publish time onto `comment.github_comment_id`, so our own published inline comments
+  can be targeted — prerequisite done.)
 - **PENDING (draft) GitHub reviews** — support GitHub's draft-review flow (add comments to a
   pending review, then submit) in addition to one-shot publish.
 - **Auto-refresh & polling** — a manual "Refresh" re-resolves SHAs and re-fetches a review's
