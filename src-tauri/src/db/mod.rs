@@ -22,6 +22,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("migrations/0006_inbox.sql"),
     include_str!("migrations/0007_comment_resolved.sql"),
     include_str!("migrations/0008_comment_anchored_base_sha.sql"),
+    include_str!("migrations/0009_review_status_pending.sql"),
 ];
 
 pub fn open(path: &Path) -> AppResult<Connection> {
@@ -179,6 +180,148 @@ mod tests {
             .query_row("SELECT anchored_base_sha FROM comment WHERE id = 1", [], |r| r.get(0))
             .unwrap();
         assert!(base_sha.is_none(), "old comment defaults to NULL base pin");
+    }
+
+    #[test]
+    fn migration_0009_rebuilds_review_preserving_rows() {
+        // Apply migrations through 0008 (a DB created at schema version 8), seed
+        // a review + comment + file_view_state, then apply the 0009 table rebuild
+        // and confirm the rebuild preserved every row and broke no FK.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        for script in &MIGRATIONS[..8] {
+            conn.execute_batch(script).unwrap();
+        }
+        conn.pragma_update(None, "user_version", 8_i64).unwrap();
+
+        conn.execute(
+            "INSERT INTO repository (path, default_branch, added_at) VALUES ('/r', 'main', 'now')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO target (repo_id, kind, title, base_ref, head_ref, created_at)
+             VALUES (1, 'local', 't', 'a', 'b', 'now')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO review (id, target_id, body, status, created_at, updated_at)
+             VALUES (42, 1, 'b', 'published', 'now', 'now')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO comment (review_id, file_path, side, line, body, created_at, updated_at)
+             VALUES (42, 'a.rs', 'RIGHT', 1, 'c', 'now', 'now')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO file_view_state (review_id, file_path, viewed, updated_at)
+             VALUES (42, 'a.rs', 1, 'now')",
+            [],
+        )
+        .unwrap();
+
+        conn.execute_batch(MIGRATIONS[8]).unwrap();
+
+        let (id, status): (i64, String) = conn
+            .query_row("SELECT id, status FROM review", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap();
+        assert_eq!(id, 42, "review row keeps its id through the rebuild");
+        assert_eq!(status, "published", "review status survives the rebuild");
+
+        let comments: i64 = conn
+            .query_row("SELECT COUNT(*) FROM comment", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(comments, 1, "comment rows are NOT cascade-deleted");
+        let views: i64 = conn
+            .query_row("SELECT COUNT(*) FROM file_view_state", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(views, 1, "file_view_state rows are NOT cascade-deleted");
+
+        let violations: i64 = conn
+            .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(violations, 0, "no dangling foreign keys after the rebuild");
+    }
+
+    #[test]
+    fn migration_0009_check_accepts_pending_rejects_bogus() {
+        let conn = open_memory();
+        conn.execute(
+            "INSERT INTO repository (path, default_branch, added_at) VALUES ('/r', 'main', 'now')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO target (repo_id, kind, title, base_ref, head_ref, created_at)
+             VALUES (1, 'local', 't', 'a', 'b', 'now')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO review (target_id, body, status, created_at, updated_at)
+             VALUES (1, '', 'published_pending', 'now', 'now')",
+            [],
+        )
+        .expect("published_pending passes the rebuilt CHECK");
+        let bogus = conn.execute(
+            "INSERT INTO review (target_id, body, status, created_at, updated_at)
+             VALUES (1, '', 'bogus', 'now', 'now')",
+            [],
+        );
+        assert!(bogus.is_err(), "an unknown status fails the CHECK");
+    }
+
+    #[test]
+    fn migration_0009_cascade_still_works() {
+        let conn = open_memory();
+        conn.execute(
+            "INSERT INTO repository (path, default_branch, added_at) VALUES ('/r', 'main', 'now')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO target (repo_id, kind, title, base_ref, head_ref, created_at)
+             VALUES (1, 'local', 't', 'a', 'b', 'now')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO review (id, target_id, body, status, created_at, updated_at)
+             VALUES (7, 1, '', 'draft', 'now', 'now')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO comment (review_id, file_path, side, line, body, created_at, updated_at)
+             VALUES (7, 'a.rs', 'RIGHT', 1, 'c', 'now', 'now')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO file_view_state (review_id, file_path, viewed, updated_at)
+             VALUES (7, 'a.rs', 1, 'now')",
+            [],
+        )
+        .unwrap();
+
+        conn.execute("DELETE FROM review WHERE id = 7", []).unwrap();
+
+        let comments: i64 = conn
+            .query_row("SELECT COUNT(*) FROM comment", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(comments, 0, "deleting a review cascades to its comments");
+        let views: i64 = conn
+            .query_row("SELECT COUNT(*) FROM file_view_state", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(views, 0, "deleting a review cascades to file_view_state");
     }
 
     #[test]
