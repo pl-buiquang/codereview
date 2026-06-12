@@ -120,6 +120,8 @@ export const api = {
     invoke<void>("update_comment", { commentId, body }),
   deleteComment: (commentId: number) =>
     invoke<void>("delete_comment", { commentId }),
+  setCommentResolved: (commentId: number, resolved: boolean) =>
+    invoke<void>("set_comment_resolved", { commentId, resolved }),
 
   // Export
   previewReview: (reviewId: number, format: "markdown" | "json") =>

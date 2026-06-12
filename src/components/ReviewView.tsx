@@ -41,6 +41,7 @@ import { useDebouncedCallback } from "../lib/useDebouncedCallback";
 import { useSettingsStore } from "../lib/settings";
 import { useUIStore } from "../store";
 import { groupThreads, type CommentThread } from "../lib/threads";
+import { summaryLine } from "../lib/text";
 import type { Comment, PrThread, ReviewDetail, ReviewEvent, Side } from "../lib/types";
 
 type SaveState = "idle" | "saving" | "saved";
@@ -759,6 +760,18 @@ function FileReview({
 
   const { add, del } = useMemo(() => countChanges(file), [file]);
 
+  // Resolution progress for this file: count roots (file-view roots belong to the
+  // file even though they render in the pane) and how many are resolved.
+  const { rootCount, resolvedCount } = useMemo(() => {
+    const roots = detail.comments.filter(
+      (c) => c.file_path === path && c.parent_id == null,
+    );
+    return {
+      rootCount: roots.length,
+      resolvedCount: roots.filter((c) => c.resolved_at != null).length,
+    };
+  }, [detail.comments, path]);
+
   return (
     <div className="diff-file" id={`file-${index}`}>
       <div className="diff-file-header">
@@ -766,6 +779,12 @@ function FileReview({
         <span className="diff-stats">
           <span className="delta-add">+{add}</span>
           <span className="delta-del">−{del}</span>
+          {rootCount > 0 && (
+            <span className="comment-count muted">
+              · {rootCount} comments
+              {resolvedCount > 0 ? `, ${resolvedCount} resolved` : ""}
+            </span>
+          )}
           {!readOnly && (
             <button
               className="btn btn-sm btn-ghost file-comment-btn"
@@ -1131,6 +1150,18 @@ export function ThreadItem({
   const [replyOpen, setReplyOpen] = useState(false);
   const { root, replies } = thread;
 
+  // Resolved threads default to a collapsed one-line bar; re-derive when the
+  // resolved state flips so resolving collapses and unresolving expands.
+  const isResolved = root.resolved_at != null;
+  const [expanded, setExpanded] = useState(() => !isResolved);
+  const prevResolved = useRef(isResolved);
+  useEffect(() => {
+    if (prevResolved.current !== isResolved) {
+      setExpanded(!isResolved);
+      prevResolved.current = isResolved;
+    }
+  }, [isResolved]);
+
   const submitReply = async (text: string) => {
     onSaving();
     await api.addReply({ reviewId: root.review_id, parentId: root.id, body: text });
@@ -1139,8 +1170,28 @@ export function ThreadItem({
     onCommentsChanged();
   };
 
+  if (isResolved && !expanded) {
+    return (
+      <button className="resolved-bar" onClick={() => setExpanded(true)}>
+        <span className="resolved-bar-text">
+          ✓ Resolved — {summaryLine(root.body)}
+        </span>
+        <span className="resolved-bar-caret">▸</span>
+      </button>
+    );
+  }
+
   return (
     <div className="comment-thread">
+      {isResolved && (
+        <button
+          className="resolved-collapse"
+          title="Collapse resolved thread"
+          onClick={() => setExpanded(false)}
+        >
+          ▾ Hide resolved thread
+        </button>
+      )}
       <CommentItem
         comment={root}
         headSha={headSha}
@@ -1273,6 +1324,21 @@ export function CommentItem({
       {!readOnly && onReply && (
         <button className="btn-sm btn-ghost comment-reply-btn" onClick={onReply}>
           Reply
+        </button>
+      )}
+      {!readOnly && comment.parent_id == null && (
+        <button
+          className="btn-sm btn-ghost btn-resolve"
+          onClick={async () => {
+            try {
+              await api.setCommentResolved(comment.id, !comment.resolved_at);
+              onCommentsChanged();
+            } catch (e) {
+              toast.error(String(e));
+            }
+          }}
+        >
+          {comment.resolved_at ? "Unresolve" : "Resolve"}
         </button>
       )}
       {!readOnly && (

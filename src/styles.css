@@ -1316,6 +1316,53 @@ td.diff-code {
   flex: none;
   align-self: center;
 }
+.btn-resolve {
+  flex: none;
+  align-self: center;
+}
+/* Collapsed bar for a resolved thread: full width, muted, single line. */
+.resolved-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 8px;
+  margin-bottom: 8px;
+  text-align: left;
+  font-size: 12px;
+  color: var(--text-2);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-s);
+  cursor: pointer;
+}
+.resolved-bar:hover {
+  background: var(--surface-3);
+}
+.resolved-bar-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.resolved-bar-caret {
+  flex: none;
+  color: var(--text-2);
+}
+.resolved-collapse {
+  align-self: flex-start;
+  margin-bottom: 6px;
+  padding: 2px 6px;
+  font-size: 11px;
+  color: var(--text-2);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+.resolved-collapse:hover {
+  color: var(--text);
+}
 .stale-badge {
   flex: none;
   align-self: center;
