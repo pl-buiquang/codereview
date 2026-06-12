@@ -41,7 +41,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "PLACEHOLDER_PUBKEY__TODO_user_replace_with_real_base64_pubkey_from_tauri_signer_generate__see_specs_08_code_signing_readiness_md_and_ORCHESTRATION_Discrepancy_8",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEYzRkE5MTQxNTk4MDFEMDgKUldRSUhZQlpRWkg2ODBYSEtQNXFUeWlJN1VicytSUVpXc284RFFyQVBNR2RzTUpRZ3BadGN1M1kK",
       "endpoints": [
         "https://github.com/pl-buiquang/codereview/releases/latest/download/latest.json"
       ]
