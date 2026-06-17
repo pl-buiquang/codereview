@@ -2147,6 +2147,44 @@ tr.kb-focus {
   min-height: 0;
   overflow-y: auto;
 }
+
+/* Find-in-diff (Cmd/Ctrl+F): a floating bar that sticks to the top-right of the
+   scrolling diff area, plus row tints for matches and the current match. */
+.diff-search-bar {
+  position: sticky;
+  top: 6px;
+  z-index: 20;
+  margin-left: auto;
+  width: fit-content;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-m);
+  box-shadow: var(--shadow-pop);
+}
+.diff-search-bar .diff-search-input {
+  width: 220px;
+}
+.diff-search-count {
+  min-width: 52px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+tr.search-match td[class*="diff-code"] {
+  background-color: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+tr.search-current td[class*="diff-code"] {
+  background-color: color-mix(in srgb, var(--accent) 30%, transparent);
+}
+tr.search-current {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
 .jump-list {
   flex: 0 0 248px;
   min-height: 0;

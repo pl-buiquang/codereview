@@ -10,8 +10,9 @@ export const BINDINGS: Binding[] = [
   { keys: ["n", "p"], description: "Next / previous comment thread" },
   { keys: ["j", "k"], description: "Move line cursor down / up (active file)" },
   { keys: ["c"], description: "Comment on the focused line" },
+  { keys: ["⌘/Ctrl + F"], description: "Find in the diff" },
   { keys: ["?"], description: "Toggle this help" },
-  { keys: ["Esc"], description: "Close help / composer / line cursor" },
+  { keys: ["Esc"], description: "Close find / help / composer / line cursor" },
 ];
 
 /** True when keyboard shortcuts must not fire because the user is typing in a
