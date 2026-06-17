@@ -26,20 +26,24 @@ export function InboxItemRow({
   item,
   variant,
   busy,
+  existingReviewId,
   onEngage,
   onUnengage,
   onUntrack,
   onRetrack,
   onOpenReview,
+  onOpenExisting,
 }: {
   item: InboxItem;
   variant: RowVariant;
   busy: boolean;
+  existingReviewId?: number;
   onEngage: () => void;
   onUnengage: () => void;
   onUntrack: () => void;
   onRetrack: () => void;
   onOpenReview: () => void;
+  onOpenExisting?: () => void;
 }) {
   const topFiles = parseTopFiles(item.top_files_json);
 
@@ -108,11 +112,31 @@ export function InboxItemRow({
           {timeAgo(item.updated_at)}
         </span>
         <div className="pr-actions">
-          {item.type === "pr" && (
-            <button className="btn btn-sm btn-primary" disabled={busy} onClick={onOpenReview}>
-              Open as review
-            </button>
-          )}
+          {item.type === "pr" &&
+            (existingReviewId != null ? (
+              <>
+                <button
+                  className="btn btn-sm btn-primary"
+                  disabled={busy}
+                  onClick={onOpenExisting}
+                  title="Open your existing review of this PR"
+                >
+                  Resume review
+                </button>
+                <button
+                  className="btn btn-sm"
+                  disabled={busy}
+                  onClick={onOpenReview}
+                  title="Start a new review of this PR"
+                >
+                  New review
+                </button>
+              </>
+            ) : (
+              <button className="btn btn-sm btn-primary" disabled={busy} onClick={onOpenReview}>
+                Open as review
+              </button>
+            ))}
           {(variant === "inbox" || variant === "visited") && (
             <>
               {variant === "inbox" ? (

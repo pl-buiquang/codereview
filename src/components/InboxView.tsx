@@ -63,6 +63,20 @@ export function InboxView() {
   const inboxQuery = useQuery({ queryKey: ["inbox"], queryFn: api.listInbox });
   const closedQuery = useQuery({ queryKey: ["closed"], queryFn: api.listClosed });
   const metaQuery = useQuery({ queryKey: ["inbox-meta"], queryFn: api.inboxMeta });
+  const reviewsQuery = useQuery({ queryKey: ["reviews", null], queryFn: () => api.listReviews(null) });
+
+  // Latest existing review per GitHub PR, keyed "owner/name#number" (repo_label
+  // is owner/name for remote targets, matching InboxItem.repo). list_reviews is
+  // newest-first, so the first id seen per key is the most recent review.
+  const reviewByPr = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const s of reviewsQuery.data ?? []) {
+      if (s.target.kind !== "github_pr" || s.target.github_pr_number == null) continue;
+      const key = `${s.repo_label}#${s.target.github_pr_number}`;
+      if (!m.has(key)) m.set(key, s.review.id);
+    }
+    return m;
+  }, [reviewsQuery.data]);
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ["inbox"] });
@@ -114,6 +128,7 @@ export function InboxView() {
     },
     onSuccess: (review) => {
       invalidate();
+      queryClient.invalidateQueries({ queryKey: ["reviews"] });
       openReview(review.id);
     },
     onError: (e) => toast.error(`Could not open review:\n${String(e)}`),
@@ -273,17 +288,20 @@ export function InboxView() {
           )}
           {items.map((item) => {
             const tab = TABS.find((t) => t.key === active)!;
+            const existingReviewId = reviewByPr.get(`${item.repo}#${item.number}`);
             return (
               <InboxItemRow
                 key={item.id}
                 item={item}
                 variant={tab.variant}
                 busy={busy}
+                existingReviewId={existingReviewId}
                 onEngage={() => engage.mutate(item.id)}
                 onUnengage={() => unengage.mutate(item.id)}
                 onUntrack={() => untrack.mutate(item.id)}
                 onRetrack={() => {}}
                 onOpenReview={() => openPr.mutate(item)}
+                onOpenExisting={() => existingReviewId != null && openReview(existingReviewId)}
               />
             );
           })}
