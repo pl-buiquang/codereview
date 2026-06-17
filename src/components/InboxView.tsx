@@ -44,6 +44,9 @@ function bucketFor(item: InboxItem, bots: Set<string>): BucketKey {
   if (reasons.includes("mention") || reasons.includes("direct_review") || reasons.includes("assigned")) {
     return "needs-you";
   }
+  // Your own PRs belong in Authored even when a team you're on is also requested
+  // for review — otherwise the team_review reason would pull them into Team review.
+  if (reasons.includes("author")) return "authored";
   if (reasons.includes("team_review")) return "team-review";
   return "authored";
 }
