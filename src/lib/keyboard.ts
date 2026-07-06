@@ -3,9 +3,9 @@ export interface Binding {
   description: string;
 }
 
-/** Single source of truth: drives BOTH the dispatch table and the help overlay,
- *  so they cannot drift. Order = display order. */
+/** Single source of truth for the help overlay. Order = display order. */
 export const BINDINGS: Binding[] = [
+  { keys: ["⌘/Ctrl + W"], description: "Close current tab" },
   { keys: ["]", "["], description: "Next / previous file" },
   { keys: ["n", "p"], description: "Next / previous comment thread" },
   { keys: ["j", "k"], description: "Move line cursor down / up (active file)" },
@@ -21,6 +21,17 @@ export function isEditableTarget(target: EventTarget | null): boolean {
   return (
     target instanceof Element &&
     target.closest("input, textarea, select, [contenteditable]") != null
+  );
+}
+
+export function isCloseTabShortcut(
+  event: Pick<KeyboardEvent, "key" | "ctrlKey" | "metaKey" | "altKey" | "shiftKey">,
+): boolean {
+  return (
+    (event.ctrlKey || event.metaKey) &&
+    !event.altKey &&
+    !event.shiftKey &&
+    event.key.toLowerCase() === "w"
   );
 }
 

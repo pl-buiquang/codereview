@@ -1,5 +1,6 @@
 import { memo, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { listen } from "@tauri-apps/api/event";
 import { TabBar } from "./components/TabBar";
 import { DashboardPanel } from "./components/DashboardPanel";
 import { RepoView } from "./components/RepoView";
@@ -9,13 +10,59 @@ import { ConfirmDialog } from "./components/ConfirmDialog";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { SettingsView } from "./components/SettingsView";
 import { api } from "./lib/api";
+import { isCloseTabShortcut } from "./lib/keyboard";
 import { useApplySettings } from "./lib/useApplySettings";
 import { useUIStore, type Tab } from "./store";
+
+const CLOSE_ACTIVE_TAB_EVENT = "close-active-tab";
+
+function closeActiveTab() {
+  const { activeTabId, closeTab } = useUIStore.getState();
+  closeTab(activeTabId);
+}
+
+function isTauriRuntime(): boolean {
+  return "__TAURI_INTERNALS__" in window;
+}
+
+function registerCloseTabKeydown() {
+  const onKey = (e: KeyboardEvent) => {
+    if (!isCloseTabShortcut(e)) return;
+    e.preventDefault();
+    closeActiveTab();
+  };
+  window.addEventListener("keydown", onKey);
+  return () => window.removeEventListener("keydown", onKey);
+}
 
 function App() {
   useApplySettings();
   const tabs = useUIStore((s) => s.tabs);
   const closeTab = useUIStore((s) => s.closeTab);
+
+  useEffect(() => {
+    if (isTauriRuntime()) {
+      let disposed = false;
+      let unlisten: (() => void) | undefined;
+      let unlistenFallback: (() => void) | undefined;
+      listen(CLOSE_ACTIVE_TAB_EVENT, closeActiveTab)
+        .then((dispose) => {
+          if (disposed) dispose();
+          else unlisten = dispose;
+        })
+        .catch((e) => {
+          console.warn("Could not register close-tab menu shortcut", e);
+          if (!disposed) unlistenFallback = registerCloseTabKeydown();
+        });
+      return () => {
+        disposed = true;
+        unlisten?.();
+        unlistenFallback?.();
+      };
+    }
+
+    return registerCloseTabKeydown();
+  }, []);
 
   const reposQuery = useQuery({
     queryKey: ["repositories"],

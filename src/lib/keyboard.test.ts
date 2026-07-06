@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { isEditableTarget, pickThread, moveCursorKey } from "./keyboard";
+import {
+  isCloseTabShortcut,
+  isEditableTarget,
+  pickThread,
+  moveCursorKey,
+} from "./keyboard";
 
 describe("isEditableTarget", () => {
   it("is true for editable fields and elements inside [contenteditable]", () => {
@@ -24,6 +29,59 @@ describe("isEditableTarget", () => {
     expect(isEditableTarget(td)).toBe(false);
     expect(isEditableTarget(button)).toBe(false);
     expect(isEditableTarget(null)).toBe(false);
+  });
+});
+
+describe("isCloseTabShortcut", () => {
+  it("matches Cmd/Ctrl+W without other modifiers", () => {
+    expect(
+      isCloseTabShortcut({
+        key: "w",
+        ctrlKey: true,
+        metaKey: false,
+        altKey: false,
+        shiftKey: false,
+      }),
+    ).toBe(true);
+    expect(
+      isCloseTabShortcut({
+        key: "W",
+        ctrlKey: false,
+        metaKey: true,
+        altKey: false,
+        shiftKey: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("ignores plain W and modified variants", () => {
+    expect(
+      isCloseTabShortcut({
+        key: "w",
+        ctrlKey: false,
+        metaKey: false,
+        altKey: false,
+        shiftKey: false,
+      }),
+    ).toBe(false);
+    expect(
+      isCloseTabShortcut({
+        key: "w",
+        ctrlKey: true,
+        metaKey: false,
+        altKey: true,
+        shiftKey: false,
+      }),
+    ).toBe(false);
+    expect(
+      isCloseTabShortcut({
+        key: "w",
+        ctrlKey: false,
+        metaKey: true,
+        altKey: false,
+        shiftKey: true,
+      }),
+    ).toBe(false);
   });
 });
 
