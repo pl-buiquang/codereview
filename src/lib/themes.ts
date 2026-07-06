@@ -6,7 +6,7 @@
 export type Direction = "a" | "b" | "c";
 
 export const DIRECTIONS: { id: Direction; label: string; blurb: string }[] = [
-  { id: "a", label: "Continuity", blurb: "IBM Plex · blue · slate-navy" },
-  { id: "b", label: "Modern", blurb: "Manrope · indigo · near-black" },
+  { id: "a", label: "Continuity", blurb: "Atkinson Hyperlegible · blue · slate-navy" },
+  { id: "b", label: "Modern", blurb: "Inter · indigo · near-black" },
   { id: "c", label: "Terminal", blurb: "JetBrains Mono · green · sharp" },
 ];

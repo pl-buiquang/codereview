@@ -1,8 +1,8 @@
 /* ============================================================
    CodeReview — design tokens (vendored from the design handoff)
    3 directions × 2 modes. Apply: class="cr cr-a dark" etc.
-   A · Continuity  — IBM Plex, blue accent, slate-navy darks
-   B · Modern      — Manrope, indigo accent, near-black darks, soft radii
+   A · Continuity  — Atkinson Hyperlegible (+ Mono), blue accent, slate-navy darks
+   B · Modern      — Inter + JetBrains Mono, indigo accent, near-black darks, soft radii
    C · Terminal    — JetBrains Mono everywhere, green accent, sharp
 
    Sourced from specs/design_handoff_codereview_redesign/tokens.css with two
@@ -23,9 +23,9 @@
 
 /* ---------------- Direction A · Continuity ---------------- */
 .cr-a {
-  --font-ui: "IBM Plex Sans", sans-serif;
-  --font-display: "IBM Plex Mono", monospace;
-  --font-mono: "IBM Plex Mono", monospace;
+  --font-ui: "Atkinson Hyperlegible", sans-serif;
+  --font-display: "Atkinson Hyperlegible Mono", monospace;
+  --font-mono: "Atkinson Hyperlegible Mono", monospace;
   --radius-s: 4px; --radius-m: 6px; --radius-l: 8px;
 }
 .cr-a.dark {
@@ -109,8 +109,8 @@
 
 /* ---------------- Direction B · Modern ---------------- */
 .cr-b {
-  --font-ui: "Manrope", sans-serif;
-  --font-display: "Manrope", sans-serif;
+  --font-ui: "Inter", sans-serif;
+  --font-display: "Inter", sans-serif;
   --font-mono: "JetBrains Mono", monospace;
   --radius-s: 6px; --radius-m: 10px; --radius-l: 14px;
 }
