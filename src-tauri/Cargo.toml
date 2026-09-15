@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Local desktop app for reviewing GitHub PRs and local branch diffs"
 authors = ["Paul Bui-Quang"]
 edition = "2021"
+default-run = "codereview"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
