@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api } from "../lib/api";
+import { api, pickJsonFile } from "../lib/api";
 import { toast } from "../lib/toast";
 import { confirmDialog } from "../lib/confirm";
 import { timeAgo } from "../lib/timeAgo";
@@ -65,6 +65,21 @@ export function ReviewsView() {
     mutationFn: (id: number) => api.deleteReview(id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["reviews"] }),
     onError: (e) => toast.error(`Could not delete review:\n${String(e)}`),
+  });
+
+  const importReview = useMutation({
+    mutationFn: async () => {
+      const path = await pickJsonFile();
+      if (!path) return null;
+      return api.importReview(path);
+    },
+    onSuccess: (review) => {
+      if (!review) return;
+      queryClient.invalidateQueries({ queryKey: ["reviews"] });
+      toast.success("Review imported");
+      openReview(review.id);
+    },
+    onError: (e) => toast.error(`Import failed:\n${String(e)}`),
   });
 
   const [sort, setSort] = useState<SortKey>("modified");
@@ -133,6 +148,15 @@ export function ReviewsView() {
           </p>
         </div>
         <div className="cr-spacer" />
+        <button
+          className="btn btn-sm"
+          title="Import a review from a JSON file"
+          disabled={importReview.isPending}
+          onClick={() => importReview.mutate()}
+        >
+          <Icon name="upload" size={14} />
+          Import
+        </button>
         <label className="sort-control">
           Sort
           <select className="sort-select" value={sort} onChange={(e) => setSort(e.target.value as SortKey)}>

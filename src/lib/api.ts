@@ -138,6 +138,10 @@ export const api = {
     invoke<string>("preview_review", { reviewId, format }),
   exportReview: (reviewId: number, destPath: string, format: "markdown" | "json") =>
     invoke<void>("export_review", { reviewId, destPath, format }),
+
+  // Import
+  importReview: (srcPath: string) =>
+    invoke<Review>("import_review", { srcPath }),
 };
 
 /** Native save dialog; returns chosen path or null. */
@@ -157,5 +161,14 @@ export type { ReviewEvent };
 /** Open a native folder picker; returns the chosen absolute path or null. */
 export async function pickFolder(): Promise<string | null> {
   const selected = await open({ directory: true, multiple: false });
+  return typeof selected === "string" ? selected : null;
+}
+
+/** Open a native file picker for JSON files; returns the chosen path or null. */
+export async function pickJsonFile(): Promise<string | null> {
+  const selected = await open({
+    multiple: false,
+    filters: [{ name: "JSON", extensions: ["json"] }],
+  });
   return typeof selected === "string" ? selected : null;
 }

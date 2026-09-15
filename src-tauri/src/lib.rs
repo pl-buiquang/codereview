@@ -82,6 +82,7 @@ pub fn run() {
             commands::review::reanchor_comments,
             commands::export::preview_review,
             commands::export::export_review,
+            commands::export::import_review,
             commands::editor::open_in_default_app,
             commands::editor::open_url,
             commands::gh::gh_auth_status,

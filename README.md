@@ -147,6 +147,105 @@ The Reviews list shows every saved review for the repo — open to resume, or �
 
 ---
 
+## Import / Export
+
+### Export
+
+From a review, export it as **Markdown** (AI-readable) or **JSON** (machine-readable). Exporting
+is repeatable and never locks the review.
+
+### Import
+
+Click **Import** in the Reviews list header to load a JSON file and create a new draft review
+from it. The format matches the JSON export, so you can round-trip: export → edit → re-import.
+
+You can also **create a review JSON from scratch** — useful for feeding AI-generated reviews
+into the app, or for seeding reviews from an external tool.
+
+#### Minimal example
+
+Only `title` is required; everything else has sensible defaults:
+
+```json
+{
+  "title": "Quick note on the parser"
+}
+```
+
+#### Full example
+
+```json
+{
+  "title": "Improve error handling in parser",
+  "repo": "owner/name",
+  "kind": "github_pr",
+  "github_pr_number": 42,
+  "base_ref": "main",
+  "head_ref": "feature/parser",
+  "base_sha": "abcdef1234567890",
+  "head_sha": "1234567890abcdef",
+  "verdict": "request_changes",
+  "summary": "A few issues to fix before merging.",
+  "comments": [
+    {
+      "file": "src/parser.rs",
+      "side": "RIGHT",
+      "line": 15,
+      "start_line": 12,
+      "diff_hunk": "@@ -10,5 +10,8 @@\n fn parse() {\n+    let x = 1;",
+      "body": "This should handle the empty-input case.",
+      "subject_type": "line",
+      "origin": "diff",
+      "resolved_at": null,
+      "replies": [
+        { "body": "Good catch, will fix." }
+      ]
+    },
+    {
+      "file": "src/parser.rs",
+      "subject_type": "file",
+      "body": "Overall the module needs a doc comment."
+    }
+  ]
+}
+```
+
+#### Field reference
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `title` | string | **required** | Review title (shown in the reviews list) |
+| `repo` | string | `"imported"` | Repository label (`"owner/name"` for GitHub, or a path). Matched to an existing repo if possible, otherwise a placeholder is created. |
+| `kind` | `"github_pr"` \| `"local"` | `"local"` | Whether this targets a GitHub PR or a local branch comparison |
+| `github_pr_number` | number \| null | `null` | PR number (only meaningful when `kind` is `"github_pr"`) |
+| `base_ref` | string | `"unknown"` | Base branch/ref name |
+| `head_ref` | string | `"unknown"` | Head branch/ref name |
+| `base_sha` | string \| null | `null` | Resolved base commit SHA |
+| `head_sha` | string \| null | `null` | Resolved head commit SHA |
+| `verdict` | `"approve"` \| `"request_changes"` \| `"comment"` \| null | `null` | Review verdict |
+| `summary` | string | `""` | Review body / summary text (Markdown) |
+| `comments` | array | `[]` | Inline comments (see below) |
+
+**Comment fields:**
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `file` | string | **required** | File path the comment is anchored to |
+| `body` | string | **required** | Comment text (Markdown; supports `` ```suggestion `` fences) |
+| `side` | `"LEFT"` \| `"RIGHT"` | `"RIGHT"` | Which diff side (`LEFT` = old/base, `RIGHT` = new/head) |
+| `line` | number | `0` | Line number the comment points at |
+| `start_line` | number \| null | `null` | Start line for multi-line range comments |
+| `diff_hunk` | string \| null | `null` | The diff hunk context for the comment |
+| `subject_type` | `"line"` \| `"file"` | `"line"` | `"file"` for whole-file comments (line is ignored) |
+| `origin` | `"diff"` \| `"file_view"` | `"diff"` | Where the comment was authored; `"file_view"` comments fold into the body on publish |
+| `resolved_at` | string \| null | `null` | ISO-8601 timestamp if the thread is resolved |
+| `replies` | array | `[]` | Thread replies: `[{ "body": "..." }]` |
+
+The imported review is always created as a **draft** — you can edit it, add more comments, then
+export or publish it.
+
+---
+
 ## Architecture
 
 ```
