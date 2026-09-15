@@ -16,7 +16,7 @@
           var raw = localStorage.getItem("codereview-settings");
           if (raw) {
             var s = (JSON.parse(raw) || {}).state || {};
-            if (s.direction === "a" || s.direction === "b" || s.direction === "c") dir = s.direction;
+            if (s.direction === "a" || s.direction === "b" || s.direction === "c" || s.direction === "d") dir = s.direction;
             mode = s.mode || s.themeMode || null; // v2 uses `mode`; v1 used `themeMode`
           }
           if (mode !== "dark" && mode !== "light" && mode !== "system") mode = "system";
