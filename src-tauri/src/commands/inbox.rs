@@ -253,17 +253,14 @@ pub struct RefreshResult {
 /// Declared `async` so Tauri runs it off the main (UI) thread — the body is
 /// synchronous and contains no `.await`, but the `gh` fan-out is slow and would
 /// otherwise freeze the webview.
-#[tauri::command]
-pub async fn refresh_inbox(db: State<'_, Db>) -> AppResult<RefreshResult> {
+pub fn refresh_inbox_impl(db: &Db) -> AppResult<RefreshResult> {
     let start = Instant::now();
 
-    // Phase 0: cached viewer (brief lock).
     let cached = {
         let conn = db.0.lock().unwrap();
         cached_viewer(&conn)
     };
 
-    // Phase 1: viewer (if stale) + all searches, unlocked.
     let viewer = match cached {
         Some(v) => v,
         None => {
@@ -279,7 +276,6 @@ pub async fn refresh_inbox(db: State<'_, Db>) -> AppResult<RefreshResult> {
     let merged = inbox::run_all_searches(&viewer, scope.as_deref());
     let merged_ids: Vec<String> = merged.iter().map(|r| r.node.id.clone()).collect();
 
-    // Phase 2: which PRs need (re-)enrichment (brief lock).
     let existing = {
         let conn = db.0.lock().unwrap();
         existing_item_stats(&conn, &merged_ids)?
@@ -300,10 +296,8 @@ pub async fn refresh_inbox(db: State<'_, Db>) -> AppResult<RefreshResult> {
         })
         .collect();
 
-    // Phase 3: enrich top files, unlocked.
     let top_files: HashMap<String, Option<String>> = inbox::enrich_all(to_enrich).into_iter().collect();
 
-    // Phase 4: stale ids (brief lock) then refetch, unlocked.
     let stale_ids = {
         let conn = db.0.lock().unwrap();
         stale_inbox_ids(&conn, &merged_ids)?
@@ -314,7 +308,6 @@ pub async fn refresh_inbox(db: State<'_, Db>) -> AppResult<RefreshResult> {
         inbox::refetch_nodes(&stale_ids)
     };
 
-    // Phase 5: single write transaction.
     let ts = now();
     let mut conn = db.0.lock().unwrap();
     let tx = conn.transaction()?;
@@ -336,7 +329,6 @@ pub async fn refresh_inbox(db: State<'_, Db>) -> AppResult<RefreshResult> {
                 }
             }
             None => {
-                // Node deleted/inaccessible — treat as closed.
                 mark_item_closed(&tx, id, &ts)?;
                 closed_count += 1;
             }
@@ -354,10 +346,13 @@ pub async fn refresh_inbox(db: State<'_, Db>) -> AppResult<RefreshResult> {
 }
 
 #[tauri::command]
-pub fn list_inbox(db: State<Db>) -> AppResult<Vec<ItemWithReasons>> {
-    let conn = db.0.lock().unwrap();
+pub async fn refresh_inbox(db: State<'_, Db>) -> AppResult<RefreshResult> {
+    refresh_inbox_impl(&db)
+}
+
+pub fn list_inbox_impl(conn: &Connection) -> AppResult<Vec<ItemWithReasons>> {
     query_items(
-        &conn,
+        conn,
         "SELECT * FROM items
          WHERE untracked_at IS NULL
            AND closed_at IS NULL
@@ -365,6 +360,12 @@ pub fn list_inbox(db: State<Db>) -> AppResult<Vec<ItemWithReasons>> {
          ORDER BY updated_at DESC",
         &[],
     )
+}
+
+#[tauri::command]
+pub fn list_inbox(db: State<Db>) -> AppResult<Vec<ItemWithReasons>> {
+    let conn = db.0.lock().unwrap();
+    list_inbox_impl(&conn)
 }
 
 #[tauri::command]
@@ -457,7 +458,7 @@ pub async fn open_pr_review(
             params![now(), item_id],
         )?;
     }
-    crate::commands::review::create_review_for_pr(owner, name, number, db)
+    crate::commands::review::create_review_for_pr_impl(&db, &owner, &name, number)
 }
 
 #[derive(Debug, Serialize)]
@@ -467,11 +468,15 @@ pub struct InboxMeta {
     pub viewer_login: Option<String>,
 }
 
+pub fn inbox_meta_impl(conn: &Connection) -> AppResult<InboxMeta> {
+    Ok(InboxMeta {
+        last_refresh_at: get_meta(conn, "last_refresh_at"),
+        viewer_login: get_meta(conn, "viewer_login"),
+    })
+}
+
 #[tauri::command]
 pub fn inbox_meta(db: State<Db>) -> AppResult<InboxMeta> {
     let conn = db.0.lock().unwrap();
-    Ok(InboxMeta {
-        last_refresh_at: get_meta(&conn, "last_refresh_at"),
-        viewer_login: get_meta(&conn, "viewer_login"),
-    })
+    inbox_meta_impl(&conn)
 }

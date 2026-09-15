@@ -1,14 +1,15 @@
 mod anchor;
-mod commands;
-mod db;
-mod error;
-mod export;
-mod gh;
-mod git;
-mod inbox;
+pub mod commands;
+pub mod db;
+pub mod db_path;
+pub mod error;
+pub mod export;
+pub mod gh;
+pub mod git;
+pub mod inbox;
 mod path_env;
-mod provider;
-mod tools;
+pub mod provider;
+pub mod tools;
 
 use std::sync::Mutex;
 

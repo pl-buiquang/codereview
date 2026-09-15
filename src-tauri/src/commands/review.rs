@@ -39,7 +39,7 @@ fn get_repository(conn: &Connection, id: i64) -> AppResult<Repository> {
 /// over a clone-less sentinel row, and creating a sentinel row when neither
 /// exists. This lets inbox PRs be reviewed without first adding the repo. A
 /// remote-only row stores `path = "github:{owner}/{name}"`.
-pub(crate) fn get_or_create_remote_repository(
+pub fn get_or_create_remote_repository(
     conn: &Connection,
     owner: &str,
     name: &str,
@@ -581,6 +581,19 @@ fn new_review_for_target(conn: &Connection, target_id: i64) -> AppResult<Review>
 }
 
 /// Start a fresh draft review for a local virtual PR (creating/reusing its target).
+pub fn create_review_impl(
+    conn: &Connection,
+    repo_id: i64,
+    repo_path: &str,
+    base_ref: &str,
+    head_ref: &str,
+    three_dot: bool,
+) -> AppResult<Review> {
+    let target =
+        get_or_create_local_target(conn, repo_id, repo_path, base_ref, head_ref, three_dot)?;
+    new_review_for_target(conn, target.id)
+}
+
 #[tauri::command]
 pub fn create_review(
     repo_id: i64,
@@ -591,15 +604,34 @@ pub fn create_review(
     db: State<Db>,
 ) -> AppResult<Review> {
     let conn = db.0.lock().unwrap();
-    let target =
-        get_or_create_local_target(&conn, repo_id, &repo_path, &base_ref, &head_ref, three_dot)?;
-    new_review_for_target(&conn, target.id)
+    create_review_impl(&conn, repo_id, &repo_path, &base_ref, &head_ref, three_dot)
 }
 
 /// Start a fresh draft review against a real GitHub PR (creating/reusing its
 /// target). Identifies the PR by `owner/name` + number so any inbox PR can be
 /// opened, with no local clone required: the repo is resolved to a local clone
 /// if one is added, otherwise a clone-less remote context.
+pub fn create_review_for_pr_impl(
+    db: &Db,
+    owner: &str,
+    name: &str,
+    pr_number: i64,
+) -> AppResult<Review> {
+    let (repo_id, ctx) = {
+        let conn = db.0.lock().unwrap();
+        let repo = get_or_create_remote_repository(&conn, owner, name)?;
+        let ctx = gh_ctx_for_repo(&conn, repo.id)?;
+        (repo.id, ctx)
+    };
+    let info = provider_for().pr_view(&ctx, pr_number)?;
+    let merge_base = provider_for()
+        .merge_base_sha(owner, name, &info.base_ref, &info.head_sha)
+        .ok();
+    let conn = db.0.lock().unwrap();
+    let target = get_or_create_pr_target(&conn, repo_id, pr_number, &info, merge_base.as_deref())?;
+    new_review_for_target(&conn, target.id)
+}
+
 #[tauri::command]
 pub fn create_review_for_pr(
     owner: String,
@@ -607,40 +639,20 @@ pub fn create_review_for_pr(
     pr_number: i64,
     db: State<Db>,
 ) -> AppResult<Review> {
-    // Resolve the repo and build the gh context before the slow `gh` call so we
-    // don't hold the DB lock across a subprocess.
-    let (repo_id, ctx) = {
-        let conn = db.0.lock().unwrap();
-        let repo = get_or_create_remote_repository(&conn, &owner, &name)?;
-        let ctx = gh_ctx_for_repo(&conn, repo.id)?;
-        (repo.id, ctx)
-    };
-    let info = provider_for().pr_view(&ctx, pr_number)?;
-    // PR diffs are three-dot, so the LEFT side is the merge-base — resolve it
-    // here (lock still dropped) and store it as the target's base_sha. Failure
-    // degrades to None: the stored value is preserved (COALESCE) and a NULL
-    // heals later via file_source's lazy backfill.
-    let merge_base = provider_for()
-        .merge_base_sha(&owner, &name, &info.base_ref, &info.head_sha)
-        .ok();
-    let conn = db.0.lock().unwrap();
-    let target = get_or_create_pr_target(&conn, repo_id, pr_number, &info, merge_base.as_deref())?;
-    new_review_for_target(&conn, target.id)
+    create_review_for_pr_impl(&db, &owner, &name, pr_number)
 }
 
 /// The diff for a review's target: GitHub PR diff via `gh`, or a local
 /// base...head git diff for virtual PRs.
-#[tauri::command]
-pub fn review_diff(review_id: i64, db: State<Db>) -> AppResult<String> {
-    let conn = db.0.lock().unwrap();
-    let detail = load_detail(&conn, review_id)?;
+pub fn review_diff_impl(conn: &Connection, review_id: i64) -> AppResult<String> {
+    let detail = load_detail(conn, review_id)?;
     match detail.target.kind.as_str() {
         "github_pr" => {
             let number = detail
                 .target
                 .github_pr_number
                 .ok_or_else(|| AppError::Other("PR target missing number".into()))?;
-            let ctx = gh_ctx_for_repo(&conn, detail.target.repo_id)?;
+            let ctx = gh_ctx_for_repo(conn, detail.target.repo_id)?;
             provider_for().pr_diff(&ctx, number)
         }
         _ => git::diff(
@@ -650,6 +662,12 @@ pub fn review_diff(review_id: i64, db: State<Db>) -> AppResult<String> {
             detail.target.three_dot,
         ),
     }
+}
+
+#[tauri::command]
+pub fn review_diff(review_id: i64, db: State<Db>) -> AppResult<String> {
+    let conn = db.0.lock().unwrap();
+    review_diff_impl(&conn, review_id)
 }
 
 /// Full source of one side of a file (LEFT→base, RIGHT→head), used to reveal
@@ -730,10 +748,7 @@ pub fn file_source(
 }
 
 /// All reviews (optionally filtered to one repo), newest first, for the Reviews list.
-#[tauri::command]
-pub fn list_reviews(repo_id: Option<i64>, db: State<Db>) -> AppResult<Vec<ReviewSummary>> {
-    let conn = db.0.lock().unwrap();
-
+pub fn list_reviews_impl(conn: &Connection, repo_id: Option<i64>) -> AppResult<Vec<ReviewSummary>> {
     let reviews: Vec<Review> = {
         if let Some(rid) = repo_id {
             let mut stmt = conn.prepare(
@@ -755,8 +770,8 @@ pub fn list_reviews(repo_id: Option<i64>, db: State<Db>) -> AppResult<Vec<Review
 
     let mut out = Vec::with_capacity(reviews.len());
     for review in reviews {
-        let target = get_target(&conn, review.target_id)?;
-        let (repo_id_v, repo_label): (i64, String) = conn.query_row(
+        let target = get_target(conn, review.target_id)?;
+        let (repo_id_v, label): (i64, String) = conn.query_row(
             "SELECT id, COALESCE(remote_owner || '/' || remote_name, path) FROM repository WHERE id = ?1",
             params![target.repo_id],
             |r| Ok((r.get(0)?, r.get(1)?)),
@@ -770,15 +785,21 @@ pub fn list_reviews(repo_id: Option<i64>, db: State<Db>) -> AppResult<Vec<Review
             review,
             target,
             repo_id: repo_id_v,
-            repo_label,
+            repo_label: label,
             comment_count,
         });
     }
     Ok(out)
 }
 
+#[tauri::command]
+pub fn list_reviews(repo_id: Option<i64>, db: State<Db>) -> AppResult<Vec<ReviewSummary>> {
+    let conn = db.0.lock().unwrap();
+    list_reviews_impl(&conn, repo_id)
+}
+
 /// Human-friendly repo label: `owner/name` if known, else the path.
-pub(crate) fn repo_label(conn: &Connection, repo_id: i64) -> AppResult<String> {
+pub fn repo_label(conn: &Connection, repo_id: i64) -> AppResult<String> {
     conn.query_row(
         "SELECT COALESCE(remote_owner || '/' || remote_name, path) FROM repository WHERE id = ?1",
         params![repo_id],
@@ -788,7 +809,7 @@ pub(crate) fn repo_label(conn: &Connection, repo_id: i64) -> AppResult<String> {
 }
 
 /// Load the full review state — shared by the get_review command and exporters.
-pub(crate) fn load_detail(conn: &Connection, review_id: i64) -> AppResult<ReviewDetail> {
+pub fn load_detail(conn: &Connection, review_id: i64) -> AppResult<ReviewDetail> {
     let review = get_review_row(conn, review_id)?;
     let target = get_target(conn, review.target_id)?;
     let (repo_path, remote_owner, remote_name): (String, Option<String>, Option<String>) = conn
@@ -853,15 +874,13 @@ pub fn set_file_viewed(
 }
 
 /// Autosave the review summary and/or verdict. Pass `event = ""` to clear the verdict.
-#[tauri::command]
-pub fn update_review(
+pub fn update_review_impl(
+    conn: &Connection,
     review_id: i64,
     body: Option<String>,
     event: Option<String>,
-    db: State<Db>,
 ) -> AppResult<()> {
-    let conn = db.0.lock().unwrap();
-    ensure_draft(&conn, review_id)?;
+    ensure_draft(conn, review_id)?;
     if let Some(b) = body {
         conn.execute(
             "UPDATE review SET body = ?1, updated_at = ?2 WHERE id = ?3",
@@ -876,6 +895,17 @@ pub fn update_review(
         )?;
     }
     Ok(())
+}
+
+#[tauri::command]
+pub fn update_review(
+    review_id: i64,
+    body: Option<String>,
+    event: Option<String>,
+    db: State<Db>,
+) -> AppResult<()> {
+    let conn = db.0.lock().unwrap();
+    update_review_impl(&conn, review_id, body, event)
 }
 
 /// Build the GitHub "create review" JSON payload from a loaded review detail.
@@ -1401,9 +1431,8 @@ pub fn discard_pending_review(review_id: i64, db: State<Db>) -> AppResult<Review
 }
 
 #[tauri::command]
-pub fn delete_review(review_id: i64, db: State<Db>) -> AppResult<()> {
-    let conn = db.0.lock().unwrap();
-    if review_status(&conn, review_id)? == "published_pending" {
+pub fn delete_review_impl(conn: &Connection, review_id: i64) -> AppResult<()> {
+    if review_status(conn, review_id)? == "published_pending" {
         return Err(AppError::Other(
             "this review is pending on GitHub — discard the pending review before deleting it"
                 .into(),
@@ -1411,6 +1440,12 @@ pub fn delete_review(review_id: i64, db: State<Db>) -> AppResult<()> {
     }
     conn.execute("DELETE FROM review WHERE id = ?1", params![review_id])?;
     Ok(())
+}
+
+#[tauri::command]
+pub fn delete_review(review_id: i64, db: State<Db>) -> AppResult<()> {
+    let conn = db.0.lock().unwrap();
+    delete_review_impl(&conn, review_id)
 }
 
 /// Validate a reply target: the parent must exist, belong to `review_id`, and be
@@ -1444,7 +1479,7 @@ fn parent_for_reply(conn: &Connection, review_id: i64, parent_id: i64) -> AppRes
 /// for them — the thread can never straddle two anchors. Plain helper so tests
 /// can drive it with a bare `Connection`.
 #[allow(clippy::too_many_arguments)]
-fn add_comment_impl(
+pub fn add_comment_impl(
     conn: &Connection,
     review_id: i64,
     file_path: String,
@@ -1543,15 +1578,13 @@ pub fn add_comment(
 /// Add a comment attached to a whole file rather than a specific line. Stored
 /// with `subject_type = 'file'`; side/line keep their column defaults and are
 /// ignored for these.
-#[tauri::command]
-pub fn add_file_comment(
+pub fn add_file_comment_impl(
+    conn: &Connection,
     review_id: i64,
     file_path: String,
     body: String,
-    db: State<Db>,
 ) -> AppResult<Comment> {
-    let conn = db.0.lock().unwrap();
-    ensure_draft(&conn, review_id)?;
+    ensure_draft(conn, review_id)?;
     let ts = now();
     conn.execute(
         "INSERT INTO comment (review_id, file_path, subject_type, body, line, created_at, updated_at)
@@ -1562,7 +1595,18 @@ pub fn add_file_comment(
         "UPDATE review SET updated_at = ?1 WHERE id = ?2",
         params![ts, review_id],
     )?;
-    get_comment(&conn, conn.last_insert_rowid())
+    get_comment(conn, conn.last_insert_rowid())
+}
+
+#[tauri::command]
+pub fn add_file_comment(
+    review_id: i64,
+    file_path: String,
+    body: String,
+    db: State<Db>,
+) -> AppResult<Comment> {
+    let conn = db.0.lock().unwrap();
+    add_file_comment_impl(&conn, review_id, file_path, body)
 }
 
 /// Add a comment authored in the full-file pane, anchored to an absolute
@@ -1596,15 +1640,13 @@ pub fn add_file_view_comment(
     get_comment(&conn, conn.last_insert_rowid())
 }
 
-#[tauri::command]
-pub fn update_comment(comment_id: i64, body: String, db: State<Db>) -> AppResult<()> {
-    let conn = db.0.lock().unwrap();
+pub fn update_comment_impl(conn: &Connection, comment_id: i64, body: String) -> AppResult<()> {
     let review_id: i64 = conn.query_row(
         "SELECT review_id FROM comment WHERE id = ?1",
         params![comment_id],
         |r| r.get(0),
     )?;
-    ensure_draft(&conn, review_id)?;
+    ensure_draft(conn, review_id)?;
     conn.execute(
         "UPDATE comment SET body = ?1, updated_at = ?2 WHERE id = ?3",
         params![body, now(), comment_id],
@@ -1613,22 +1655,32 @@ pub fn update_comment(comment_id: i64, body: String, db: State<Db>) -> AppResult
 }
 
 #[tauri::command]
-pub fn delete_comment(comment_id: i64, db: State<Db>) -> AppResult<()> {
+pub fn update_comment(comment_id: i64, body: String, db: State<Db>) -> AppResult<()> {
     let conn = db.0.lock().unwrap();
+    update_comment_impl(&conn, comment_id, body)
+}
+
+pub fn delete_comment_impl(conn: &Connection, comment_id: i64) -> AppResult<()> {
     let review_id: i64 = conn.query_row(
         "SELECT review_id FROM comment WHERE id = ?1",
         params![comment_id],
         |r| r.get(0),
     )?;
-    ensure_draft(&conn, review_id)?;
+    ensure_draft(conn, review_id)?;
     conn.execute("DELETE FROM comment WHERE id = ?1", params![comment_id])?;
     Ok(())
+}
+
+#[tauri::command]
+pub fn delete_comment(comment_id: i64, db: State<Db>) -> AppResult<()> {
+    let conn = db.0.lock().unwrap();
+    delete_comment_impl(&conn, comment_id)
 }
 
 /// Mark a root comment's thread resolved/unresolved. Pure helper; caller holds
 /// the lock. Idempotent: resolving an already-resolved root refreshes the
 /// timestamp, unresolving an unresolved one is a no-op UPDATE.
-fn set_resolved(conn: &Connection, comment_id: i64, resolved: bool) -> AppResult<()> {
+pub fn set_resolved(conn: &Connection, comment_id: i64, resolved: bool) -> AppResult<()> {
     let (review_id, parent_id): (i64, Option<i64>) = conn.query_row(
         "SELECT review_id, parent_id FROM comment WHERE id = ?1",
         params![comment_id],

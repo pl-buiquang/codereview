@@ -11,7 +11,7 @@ use crate::db::Db;
 use crate::error::{AppError, AppResult};
 use crate::export;
 
-fn render(conn: &rusqlite::Connection, review_id: i64, format: &str) -> AppResult<String> {
+pub fn render(conn: &rusqlite::Connection, review_id: i64, format: &str) -> AppResult<String> {
     let detail = load_detail(conn, review_id)?;
     let label = repo_label(conn, detail.target.repo_id)?;
     match format {
@@ -30,6 +30,21 @@ pub fn preview_review(review_id: i64, format: String, db: State<Db>) -> AppResul
 
 /// Write the export to `dest_path` and stamp `last_exported_at`. Repeatable;
 /// never changes the review's published/draft status.
+pub fn export_review_impl(
+    conn: &rusqlite::Connection,
+    review_id: i64,
+    dest_path: &str,
+    format: &str,
+) -> AppResult<()> {
+    let content = render(conn, review_id, format)?;
+    fs::write(dest_path, content)?;
+    conn.execute(
+        "UPDATE review SET last_exported_at = ?1 WHERE id = ?2",
+        params![Utc::now().to_rfc3339(), review_id],
+    )?;
+    Ok(())
+}
+
 #[tauri::command]
 pub fn export_review(
     review_id: i64,
@@ -38,13 +53,7 @@ pub fn export_review(
     db: State<Db>,
 ) -> AppResult<()> {
     let conn = db.0.lock().unwrap();
-    let content = render(&conn, review_id, &format)?;
-    fs::write(&dest_path, content)?;
-    conn.execute(
-        "UPDATE review SET last_exported_at = ?1 WHERE id = ?2",
-        params![Utc::now().to_rfc3339(), review_id],
-    )?;
-    Ok(())
+    export_review_impl(&conn, review_id, &dest_path, &format)
 }
 
 // ---- import ----
