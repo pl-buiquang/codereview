@@ -74,7 +74,21 @@ export function RepoView({ repo }: { repo: Repository }) {
 
         {reviews.length > 0 && (
           <div className="repo-reviews">
-            <h3 className="repo-section-h">Reviews</h3>
+            <div className="repo-section-row">
+              <h3 className="repo-section-h">Reviews</h3>
+              <button
+                className="btn btn-sm"
+                disabled={reviewsQuery.isFetching}
+                onClick={() => reviewsQuery.refetch()}
+                title="Refresh reviews"
+              >
+                {reviewsQuery.isFetching ? (
+                  <span className="spinner" />
+                ) : (
+                  <Icon name="refresh" size={13} />
+                )}
+              </button>
+            </div>
             {reviews.map((r) => (
               <ReviewRow
                 key={r.review.id}

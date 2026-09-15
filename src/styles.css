@@ -2824,6 +2824,11 @@ input[type="range"] {
   flex-direction: column;
   gap: 10px;
 }
+.repo-section-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 .vpr-card {
   display: flex;
   flex-direction: column;
