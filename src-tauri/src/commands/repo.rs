@@ -42,22 +42,23 @@ fn upsert_repository(
     repo_by_path(conn, path)
 }
 
-#[tauri::command]
-pub fn add_repository(path: String, db: State<Db>) -> AppResult<Repository> {
-    let p = Path::new(&path);
+pub fn add_repository_impl(conn: &Connection, path: &str) -> AppResult<Repository> {
+    let p = Path::new(path);
     if !git::is_git_repo(p) {
-        return Err(AppError::NotARepo(path));
+        return Err(AppError::NotARepo(path.to_string()));
     }
     let remote = git::remote_info(p);
     let default_branch = git::default_branch(p);
-
-    let conn = db.0.lock().unwrap();
-    upsert_repository(&conn, &path, remote.owner, remote.name, default_branch)
+    upsert_repository(conn, path, remote.owner, remote.name, default_branch)
 }
 
 #[tauri::command]
-pub fn list_repositories(db: State<Db>) -> AppResult<Vec<Repository>> {
+pub fn add_repository(path: String, db: State<Db>) -> AppResult<Repository> {
     let conn = db.0.lock().unwrap();
+    add_repository_impl(&conn, &path)
+}
+
+pub fn list_repositories_impl(conn: &Connection) -> AppResult<Vec<Repository>> {
     let mut stmt = conn.prepare("SELECT * FROM repository ORDER BY added_at DESC")?;
     let rows = stmt
         .query_map([], Repository::from_row)?
@@ -66,10 +67,20 @@ pub fn list_repositories(db: State<Db>) -> AppResult<Vec<Repository>> {
 }
 
 #[tauri::command]
-pub fn remove_repository(id: i64, db: State<Db>) -> AppResult<()> {
+pub fn list_repositories(db: State<Db>) -> AppResult<Vec<Repository>> {
     let conn = db.0.lock().unwrap();
+    list_repositories_impl(&conn)
+}
+
+pub fn remove_repository_impl(conn: &Connection, id: i64) -> AppResult<()> {
     conn.execute("DELETE FROM repository WHERE id = ?1", params![id])?;
     Ok(())
+}
+
+#[tauri::command]
+pub fn remove_repository(id: i64, db: State<Db>) -> AppResult<()> {
+    let conn = db.0.lock().unwrap();
+    remove_repository_impl(&conn, id)
 }
 
 #[tauri::command]

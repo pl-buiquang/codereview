@@ -34,4 +34,9 @@ tauri-plugin-window-state = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 which = "6"
+clap = { version = "4", features = ["derive", "env"] }
+
+[[bin]]
+name = "cr"
+path = "src/bin/cr.rs"
 
