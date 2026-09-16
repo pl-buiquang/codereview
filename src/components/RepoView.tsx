@@ -72,24 +72,27 @@ export function RepoView({ repo }: { repo: Repository }) {
           <PrList repo={repo} onOpen={openReview} />
         )}
 
-        {reviews.length > 0 && (
-          <div className="repo-reviews">
-            <div className="repo-section-row">
-              <h3 className="repo-section-h">Reviews</h3>
-              <button
-                className="btn btn-sm"
-                disabled={reviewsQuery.isFetching}
-                onClick={() => reviewsQuery.refetch()}
-                title="Refresh reviews"
-              >
-                {reviewsQuery.isFetching ? (
-                  <span className="spinner" />
-                ) : (
-                  <Icon name="refresh" size={13} />
-                )}
-              </button>
-            </div>
-            {reviews.map((r) => (
+        <div className="repo-reviews">
+          <div className="repo-section-row">
+            <h3 className="repo-section-h">Reviews</h3>
+            <button
+              className="btn btn-sm"
+              disabled={reviewsQuery.isFetching}
+              onClick={() => reviewsQuery.refetch()}
+              title="Refresh reviews"
+            >
+              {reviewsQuery.isFetching ? (
+                <span className="spinner" />
+              ) : (
+                <Icon name="refresh" size={13} />
+              )}
+            </button>
+          </div>
+          {reviewsQuery.isLoading && <p className="muted">Loading…</p>}
+          {reviews.length === 0 && !reviewsQuery.isLoading && (
+            <p className="muted">No reviews yet.</p>
+          )}
+          {reviews.map((r) => (
               <ReviewRow
                 key={r.review.id}
                 summary={r}
@@ -115,8 +118,7 @@ export function RepoView({ repo }: { repo: Repository }) {
                 }}
               />
             ))}
-          </div>
-        )}
+        </div>
       </div>
     </section>
   );
