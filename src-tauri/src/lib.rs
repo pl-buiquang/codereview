@@ -93,6 +93,7 @@ pub fn run() {
             commands::gh::reply_to_thread,
             commands::gh::set_pr_thread_resolved,
             commands::gh::check_environment,
+            commands::gh::fetch_github_image,
             commands::inbox::refresh_inbox,
             commands::inbox::list_inbox,
             commands::inbox::list_archive,

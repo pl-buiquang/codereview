@@ -251,6 +251,42 @@ pub fn auth_status() -> bool {
         .unwrap_or(false)
 }
 
+pub fn auth_token() -> AppResult<String> {
+    let output = Command::new(crate::tools::gh_bin())
+        .args(["auth", "token"])
+        .output()
+        .map_err(|e| AppError::Gh(format!("failed to spawn gh: {e}")))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(AppError::Gh(format!("gh auth token failed: {}", stderr.trim())));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+/// Fetch a URL using curl with GitHub auth. Returns raw bytes.
+/// Used for downloading private-repo image attachments.
+pub fn fetch_authenticated_url(url: &str) -> AppResult<Vec<u8>> {
+    let token = auth_token()?;
+    let output = Command::new(crate::tools::curl_bin())
+        .args([
+            "-fsSL",
+            "--max-time",
+            "30",
+            "--max-filesize",
+            "10485760", // 10 MB
+            "-H",
+            &format!("Authorization: token {token}"),
+            url,
+        ])
+        .output()
+        .map_err(|e| AppError::Gh(format!("failed to spawn curl: {e}")))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(AppError::Gh(format!("curl failed for {url}: {}", stderr.trim())));
+    }
+    Ok(output.stdout)
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PrAuthor {
     pub login: Option<String>,

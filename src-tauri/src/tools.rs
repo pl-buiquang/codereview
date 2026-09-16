@@ -9,6 +9,7 @@ use std::sync::OnceLock;
 
 static GIT: OnceLock<Option<String>> = OnceLock::new();
 static GH: OnceLock<Option<String>> = OnceLock::new();
+static CURL: OnceLock<Option<String>> = OnceLock::new();
 
 fn resolve(name: &str) -> Option<String> {
     which::which(name)
@@ -21,6 +22,7 @@ fn resolve(name: &str) -> Option<String> {
 pub fn init() {
     let _ = GIT.set(resolve("git"));
     let _ = GH.set(resolve("gh"));
+    let _ = CURL.set(resolve("curl"));
 }
 
 /// The resolved absolute path to `git`, or `None` if it wasn't found / `init`
@@ -42,6 +44,14 @@ pub fn git_bin() -> String {
 /// The binary to spawn for `gh`: the resolved absolute path, or `"gh"`.
 pub fn gh_bin() -> String {
     gh_path().unwrap_or_else(|| "gh".to_string())
+}
+
+pub fn curl_path() -> Option<String> {
+    CURL.get().cloned().flatten()
+}
+
+pub fn curl_bin() -> String {
+    curl_path().unwrap_or_else(|| "curl".to_string())
 }
 
 #[cfg(test)]

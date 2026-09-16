@@ -94,6 +94,10 @@ export const api = {
   openPrReview: (itemId: string, owner: string, name: string, number: number) =>
     invoke<Review>("open_pr_review", { itemId, owner, name, number }),
 
+  // Images
+  fetchGithubImage: (url: string) =>
+    invoke<string>("fetch_github_image", { url }),
+
   // Comments
   addComment: (args: {
     reviewId: number;
