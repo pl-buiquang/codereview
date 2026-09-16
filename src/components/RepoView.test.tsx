@@ -73,7 +73,7 @@ describe("RepoView PR list", () => {
     await waitFor(() => expect(screen.getByText(/#42 Fix anchor drift/)).toBeInTheDocument());
     expect(listPrs).toHaveBeenCalledTimes(1);
 
-    await user.click(screen.getByRole("button", { name: /Refresh/ }));
+    await user.click(screen.getByRole("button", { name: "Refresh" }));
     await waitFor(() => expect(listPrs).toHaveBeenCalledTimes(2));
   });
 
@@ -105,6 +105,6 @@ describe("RepoView PR list", () => {
     await waitFor(() =>
       expect(screen.getByText("No open pull requests.")).toBeInTheDocument(),
     );
-    expect(screen.getByRole("button", { name: /Refresh/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Refresh" })).toBeInTheDocument();
   });
 });
