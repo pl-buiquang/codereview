@@ -31,6 +31,7 @@ export function RepoView({ repo }: { repo: Repository }) {
   const reviewsQuery = useQuery({
     queryKey: ["reviews", repo.id],
     queryFn: () => api.listReviews(repo.id),
+    refetchOnWindowFocus: true,
   });
 
   const deleteReview = useMutation({

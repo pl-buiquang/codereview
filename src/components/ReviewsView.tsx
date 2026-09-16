@@ -59,7 +59,7 @@ export function ReviewsView() {
   const queryClient = useQueryClient();
   const openReview = useUIStore((s) => s.openReview);
 
-  const reviewsQuery = useQuery({ queryKey: ["reviews", null], queryFn: () => api.listReviews(null) });
+  const reviewsQuery = useQuery({ queryKey: ["reviews", null], queryFn: () => api.listReviews(null), refetchOnWindowFocus: true });
 
   const deleteReview = useMutation({
     mutationFn: (id: number) => api.deleteReview(id),

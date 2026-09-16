@@ -13,7 +13,7 @@ getCurrentWindow().onFocusChanged(({ payload: focused }) => {
 });
 
 const queryClient = new QueryClient({
-  defaultOptions: { queries: { retry: false } },
+  defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } },
 });
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
