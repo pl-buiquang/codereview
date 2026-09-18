@@ -3,8 +3,16 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { useUIStore, type Tab } from "../store";
 import { repoLabel } from "../lib/repoLabel";
+import { toast } from "../lib/toast";
 import type { Repository } from "../lib/types";
 import { Icon, type IconName } from "./icons";
+
+function tabMagicLink(tab: Tab): string | null {
+  if (tab.kind === "review" && tab.reviewId != null) {
+    return `codereview://review/${tab.reviewId}`;
+  }
+  return null;
+}
 
 /** The type glyph shown on an inactive document tab (active tabs show the dot). */
 function tabIcon(kind: Tab["kind"]): IconName {
@@ -30,24 +38,95 @@ function useTabLabel(tab: Tab, repos: Repository[]): string {
   return repo ? repoLabel(repo) : `repo #${tab.repoId}`;
 }
 
+function TabContextMenu({
+  tab,
+  onClose,
+}: {
+  tab: Tab;
+  onClose: () => void;
+}) {
+  const closeTab = useUIStore((s) => s.closeTab);
+  const ref = useRef<HTMLDivElement>(null);
+  const link = tabMagicLink(tab);
+
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [onClose]);
+
+  return (
+    <div className="tab-context-menu" ref={ref} onClick={(e) => e.stopPropagation()}>
+      {link && (
+        <button
+          className="tab-context-item"
+          onClick={() => {
+            navigator.clipboard.writeText(link).then(() => {
+              toast.success("Link copied");
+            });
+            onClose();
+          }}
+        >
+          <Icon name="link" size={13} />
+          Copy link
+        </button>
+      )}
+      {tab.kind !== "home" && (
+        <>
+          {link && <div className="tab-context-sep" />}
+          <button
+            className="tab-context-item tab-context-item--danger"
+            onClick={() => {
+              closeTab(tab.id);
+              onClose();
+            }}
+          >
+            <Icon name="x" size={13} />
+            Close tab
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
 function TabItem({ tab, repos }: { tab: Tab; repos: Repository[] }) {
   const activeTabId = useUIStore((s) => s.activeTabId);
   const setActiveTab = useUIStore((s) => s.setActiveTab);
   const closeTab = useUIStore((s) => s.closeTab);
   const moveTab = useUIStore((s) => s.moveTab);
   const [dragOver, setDragOver] = useState(false);
+  const [contextOpen, setContextOpen] = useState(false);
 
   // The home tab is pinned: it can't be dragged or accept a drop before it.
   const draggable = tab.kind !== "home";
   const isActive = tab.id === activeTabId;
   const label = useTabLabel(tab, repos);
 
+  // Only show a context menu if there's something to offer.
+  const hasContextMenu = tabMagicLink(tab) !== null || tab.kind !== "home";
+
   return (
     <div
       className={`tab tab-${tab.kind} ${isActive ? "active" : ""} ${
         dragOver ? "drag-over" : ""
       }`}
+      style={{ position: "relative" }}
       onClick={() => setActiveTab(tab.id)}
+      onContextMenu={(e) => {
+        if (!hasContextMenu) return;
+        e.preventDefault();
+        setContextOpen(true);
+      }}
       onAuxClick={(e) => {
         if (e.button === 1 && tab.kind !== "home") {
           e.preventDefault();
@@ -99,6 +178,9 @@ function TabItem({ tab, repos }: { tab: Tab; repos: Repository[] }) {
             <Icon name="x" size={10} />
           </button>
         </>
+      )}
+      {contextOpen && (
+        <TabContextMenu tab={tab} onClose={() => setContextOpen(false)} />
       )}
     </div>
   );

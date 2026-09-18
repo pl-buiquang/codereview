@@ -619,6 +619,47 @@ button:disabled,
   background: var(--surface-3);
 }
 
+.tab-context-menu {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  z-index: 100;
+  min-width: 160px;
+  padding: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-l);
+  box-shadow: var(--shadow-pop);
+}
+.tab-context-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.tab-context-item:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.tab-context-item--danger:hover {
+  color: var(--danger);
+}
+.tab-context-sep {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--border);
+}
+
 .tab-content {
   flex: 1;
   min-height: 0;
