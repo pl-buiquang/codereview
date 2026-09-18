@@ -84,6 +84,11 @@ enum Cmd {
         #[command(subcommand)]
         action: InboxAction,
     },
+    /// Open the CodeReview app via deep link
+    Open {
+        #[command(subcommand)]
+        target: OpenTarget,
+    },
 }
 
 #[derive(Subcommand)]
@@ -170,6 +175,30 @@ enum InboxAction {
     List,
     /// Refresh inbox from GitHub
     Refresh,
+}
+
+#[derive(Subcommand)]
+enum OpenTarget {
+    /// Open an existing review by ID
+    Review { review_id: i64 },
+    /// Open/create a review for a GitHub PR
+    Pr { owner: String, name: String, number: i64 },
+    /// Open/create a review for a local diff
+    Diff {
+        repo_id: i64,
+        base_ref: String,
+        head_ref: String,
+        /// Use three-dot diff (merge-base semantics, default: true)
+        #[arg(long)]
+        three_dot: bool,
+    },
+    /// Navigate to the home tab
+    Home {
+        /// Section: inbox, reviews, archive, repositories
+        section: Option<String>,
+    },
+    /// Open a raw codereview:// URL
+    Url { url: String },
 }
 
 fn main() {
@@ -481,6 +510,29 @@ fn run(cmd: Cmd, json: bool, db: &Db) -> AppResult<()> {
                 }
             }
         },
+
+        Cmd::Open { target } => {
+            let url = match target {
+                OpenTarget::Review { review_id } => format!("codereview://review/{review_id}"),
+                OpenTarget::Pr { owner, name, number } => {
+                    format!("codereview://pr/{owner}/{name}/{number}")
+                }
+                OpenTarget::Diff { repo_id, base_ref, head_ref, three_dot } => format!(
+                    "codereview://diff?repo={repo_id}&base={base_ref}&head={head_ref}&three_dot={three_dot}"
+                ),
+                OpenTarget::Home { section } => match section {
+                    Some(s) => format!("codereview://home/{s}"),
+                    None => "codereview://home".to_string(),
+                },
+                OpenTarget::Url { url } => url,
+            };
+            open::that(&url).map_err(|e| {
+                codereview_lib::error::AppError::Other(format!("failed to open URL: {e}"))
+            })?;
+            if !json {
+                eprintln!("Opened: {url}");
+            }
+        }
 
         Cmd::Inbox { action } => match action {
             InboxAction::List => {

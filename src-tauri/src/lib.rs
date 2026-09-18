@@ -2,6 +2,7 @@ mod anchor;
 pub mod commands;
 pub mod db;
 pub mod db_path;
+pub mod deep_link;
 pub mod error;
 pub mod export;
 pub mod gh;
@@ -14,11 +15,28 @@ pub mod tools;
 use std::sync::Mutex;
 
 use tauri::{Emitter, Manager};
+use tauri_plugin_deep_link::DeepLinkExt;
 
 use db::Db;
 
 const CLOSE_TAB_MENU_ID: &str = "close_tab";
 const CLOSE_ACTIVE_TAB_EVENT: &str = "close-active-tab";
+
+fn handle_deep_link_url<R: tauri::Runtime>(app: &tauri::AppHandle<R>, raw_url: &str) {
+    match deep_link::parse_deep_link(raw_url) {
+        Ok(action) => {
+            let _ = app.emit("deep-link-action", &action);
+        }
+        Err(err) => {
+            eprintln!("[deep-link] failed to parse {raw_url:?}: {err}");
+            let _ = app.emit("deep-link-error", &err);
+        }
+    }
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.set_focus();
+        let _ = w.unminimize();
+    }
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -26,6 +44,16 @@ pub fn run() {
     tools::init();
 
     tauri::Builder::default()
+        // single-instance must come before deep-link
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            if let Some(url) = argv.get(1) {
+                handle_deep_link_url(app, url);
+            } else if let Some(w) = app.get_webview_window("main") {
+                let _ = w.set_focus();
+                let _ = w.unminimize();
+            }
+        }))
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
@@ -52,6 +80,18 @@ pub fn run() {
             }
             let conn = db::open(&db_path)?;
             app.manage(Db(Mutex::new(conn)));
+
+            // Handle deep links delivered while the app is already running
+            // (macOS open-url Apple Events, Linux D-Bus activation).
+            // The plugin buffers any URL received before this listener is
+            // registered and replays it here, covering cold-start URLs too.
+            let handle = app.handle().clone();
+            app.deep_link().on_open_url(move |event| {
+                for url in event.urls() {
+                    handle_deep_link_url(&handle, url.as_str());
+                }
+            });
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

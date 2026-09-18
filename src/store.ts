@@ -23,7 +23,7 @@ interface UIState {
   homeSection: HomeSection;
   openRepoTab: (repoId: number) => void;
   openSettingsTab: () => void;
-  openReview: (reviewId: number) => void;
+  openReview: (reviewId: number, repoId?: number) => void;
   closeReview: () => void;
   closeSettings: () => void;
   closeTab: (id: string) => void;
@@ -60,11 +60,13 @@ export const useUIStore = create<UIState>()(
         })),
 
       // Opened from within a repo tab; the review becomes its own tab parented
-      // to that repo so closing it returns there.
-      openReview: (reviewId) =>
+      // to that repo so closing it returns there. An explicit repoId overrides
+      // the inferred parent (used when opening via deep link with no active repo tab).
+      openReview: (reviewId, explicitRepoId?) =>
         set((s) => {
           const parent = s.tabs.find((t) => t.id === s.activeTabId);
-          const repoId = parent?.kind === "repo" ? parent.repoId : undefined;
+          const repoId =
+            explicitRepoId ?? (parent?.kind === "repo" ? parent.repoId : undefined);
           return {
             tabs: upsertTab(s.tabs, {
               id: reviewTabId(reviewId),

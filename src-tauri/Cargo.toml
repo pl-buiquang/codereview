@@ -34,9 +34,13 @@ tauri-plugin-fs = "2.5.1"
 tauri-plugin-window-state = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
+tauri-plugin-deep-link = "2"
+tauri-plugin-single-instance = "2"
 which = "6"
 base64 = "0.22"
 clap = { version = "4", features = ["derive", "env"] }
+url = "2"
+open = "5"
 
 [[bin]]
 name = "cr"
