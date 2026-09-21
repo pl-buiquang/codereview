@@ -196,7 +196,7 @@ export function FileViewPane({
   }): string | undefined => {
     const base = defaultGenerate();
     const changed = changes.some(
-      (c) => c.type === "normal" && changedLines.has(c.newLineNumber),
+      (c) => c != null && c.type === "normal" && changedLines.has(c.newLineNumber),
     );
     if (!changed) return base;
     return base ? `${base} changed-line` : "changed-line";
