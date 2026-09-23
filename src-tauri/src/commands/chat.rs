@@ -83,11 +83,15 @@ fn call_claude_turn(
     text: &str,
 ) -> AppResult<TurnResult> {
     let mut cmd = Command::new(crate::tools::claude_bin());
+    // Run from the worktree so CLAUDE.md, git context, etc. come from the
+    // reviewed project, not the Tauri app's directory.
+    cmd.current_dir(worktree_path);
     cmd.arg("-p")
         .arg("--output-format")
         .arg("json")
-        .arg("--setting-sources")
-        .arg("")
+        // --strict-mcp-config: don't load MCP servers (they add latency/noise).
+        // Note: we deliberately omit --setting-sources "" so claude can read its
+        // own auth and Bedrock configuration from ~/.claude/.
         .arg("--strict-mcp-config")
         .arg("--allowedTools")
         .arg("Bash Read Glob Grep")
