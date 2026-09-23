@@ -41,6 +41,7 @@ export interface Review {
   last_exported_at: string | null;
   created_at: string;
   updated_at: string;
+  sidebar_collapsed: boolean;
 }
 
 export interface Comment {

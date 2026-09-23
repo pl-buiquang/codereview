@@ -1,8 +1,10 @@
 use std::collections::HashMap;
+use std::path::Path;
 
 use serde_json::json;
 
 use crate::db::models::{Comment, ReviewDetail};
+use crate::git;
 
 fn short_sha(sha: &Option<String>) -> String {
     sha.as_ref()
@@ -164,6 +166,89 @@ pub fn render_json(detail: &ReviewDetail, repo_label: &str) -> String {
     serde_json::to_string_pretty(&value).unwrap_or_else(|_| "{}".into())
 }
 
+const CONTEXT_LINES: usize = 3;
+
+/// Render the review in the VSCode Code Review plugin's JSON format. Writes to
+/// `.vscode/reviews/r{review_id}.json` inside the local repo. File contents are
+/// read via `git show` to build context snippets; failures fall back to empty arrays.
+pub fn render_vscode(detail: &ReviewDetail, repo_path: &Path) -> serde_json::Value {
+    let t = &detail.target;
+    let r = &detail.review;
+    let replies = replies_by_root(&detail.comments);
+
+    // Cache file lines by (sha, path) to avoid redundant git show calls.
+    let mut file_cache: HashMap<(String, String), Vec<String>> = HashMap::new();
+
+    let comments_json: Vec<serde_json::Value> = detail
+        .comments
+        .iter()
+        .filter(|c| c.parent_id.is_none())
+        .map(|c| {
+            let comment_id = format!("c{}", c.id);
+            let body = fold_replies(&c.body, replies.get(&c.id).map_or(&[][..], Vec::as_slice));
+
+            let (start_line, end_line) = if c.subject_type == "file" {
+                (1i64, 1i64)
+            } else {
+                let s = c.start_line.unwrap_or(c.line).max(1);
+                let e = c.line.max(1);
+                (s, e)
+            };
+
+            let (before, anchor, after) = if c.subject_type == "file" {
+                (vec![], vec![], vec![])
+            } else {
+                let sha_opt = if c.side == "LEFT" { &t.base_sha } else { &t.head_sha };
+                sha_opt.as_ref().map_or((vec![], vec![], vec![]), |sha| {
+                    let key = (sha.clone(), c.file_path.clone());
+                    let lines = file_cache.entry(key).or_insert_with(|| {
+                        git::show_file(repo_path, sha, &c.file_path)
+                            .map(|s| s.lines().map(str::to_owned).collect())
+                            .unwrap_or_default()
+                    });
+
+                    let anchor_start = (start_line as usize).saturating_sub(1).min(lines.len());
+                    let anchor_end = (end_line as usize).min(lines.len());
+                    let before_start = anchor_start.saturating_sub(CONTEXT_LINES);
+                    let after_end = (anchor_end + CONTEXT_LINES).min(lines.len());
+
+                    (
+                        lines[before_start..anchor_start].to_vec(),
+                        lines[anchor_start..anchor_end].to_vec(),
+                        lines[anchor_end..after_end].to_vec(),
+                    )
+                })
+            };
+
+            json!({
+                "id": comment_id,
+                "filePath": c.file_path,
+                "range": {
+                    "startLine": start_line,
+                    "startColumn": 1,
+                    "endLine": end_line,
+                    "endColumn": 1,
+                },
+                "body": body,
+                "contextSnippet": {
+                    "beforeLines": before,
+                    "anchorLines": anchor,
+                    "afterLines": after,
+                },
+                "createdAt": c.created_at,
+                "updatedAt": c.updated_at,
+            })
+        })
+        .collect();
+
+    json!({
+        "id": format!("r{}", r.id),
+        "name": t.title,
+        "createdAt": r.created_at,
+        "comments": comments_json,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -197,6 +282,7 @@ mod tests {
             last_exported_at: None,
             created_at: "2026-01-01T00:00:00Z".into(),
             updated_at: "2026-01-01T00:00:00Z".into(),
+            sidebar_collapsed: false,
         }
     }
 

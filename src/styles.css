@@ -631,6 +631,12 @@ button:disabled,
   border-radius: var(--radius-l);
   box-shadow: var(--shadow-pop);
 }
+.tab-context-id {
+  padding: 4px 8px 2px;
+  font-size: 11px;
+  color: var(--text-3);
+  user-select: text;
+}
 .tab-context-item {
   display: flex;
   align-items: center;
@@ -1036,7 +1042,7 @@ td.diff-code {
 
 /* Review header */
 .review-panel {
-  padding-top: 12px;
+  padding: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -1044,8 +1050,8 @@ td.diff-code {
 .review-header {
   flex: 0 0 auto;
   border-bottom: 1px solid var(--border);
+  padding-top: 12px;
   padding-bottom: 12px;
-  margin-bottom: 12px;
 }
 .review-header-top {
   display: flex;
@@ -2204,6 +2210,7 @@ tr.kb-focus {
   min-width: 0;
   min-height: 0;
   overflow-y: auto;
+  margin-top: 12px;
 }
 
 /* Find-in-diff (Cmd/Ctrl+F): a floating bar that sticks to the top-right of the
@@ -2257,7 +2264,26 @@ tr.search-current {
   font-size: 11px;
   font-weight: 700;
   color: var(--text-2);
-  padding: 8px;
+  padding-left: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.jump-list--collapsed {
+  flex: 0 0 36px;
+  padding: 6px 4px;
+  overflow: hidden;
+  align-items: center;
+}
+.sidebar-toggle {
+  padding: 0;
+}
+.sidebar-expand-btn {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 .tree-row {
   display: flex;
@@ -2811,6 +2837,11 @@ tr.search-current {
 }
 .btn-split-menu button:hover {
   background: var(--surface-2);
+}
+.btn-split-menu hr.btn-split-menu-separator {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 4px 0;
 }
 .repo-row {
   display: flex;

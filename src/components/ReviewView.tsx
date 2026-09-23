@@ -81,6 +81,7 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
   const [viewType, setViewType] = useState<ViewType>(defaultViewType);
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [filePanePath, setFilePanePath] = useState<string | null>(null);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const diffAreaRef = useRef<HTMLDivElement>(null);
 
   // Keyboard navigation. The single window listener lives here (see the effect
@@ -118,6 +119,21 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
     enabled: detailQuery.data != null,
     queryFn: () => api.reviewDiff(reviewId),
   });
+
+  useEffect(() => {
+    if (detailQuery.data) {
+      setSidebarCollapsed(detailQuery.data.review.sidebar_collapsed);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detailQuery.data?.review.sidebar_collapsed]);
+
+  const toggleSidebar = useCallback(() => {
+    setSidebarCollapsed((prev) => {
+      const next = !prev;
+      api.setSidebarCollapsed(reviewId, next);
+      return next;
+    });
+  }, [reviewId]);
 
   const target = detailQuery.data?.target;
   const owner = detailQuery.data?.remote_owner ?? null;
@@ -292,6 +308,9 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
           if (i != null) fileKbRef.current.get(i)?.openComposer();
           break;
         }
+        case "b":
+          toggleSidebar();
+          break;
         case "?":
           setShowHelp(true);
           break;
@@ -302,7 +321,7 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [isActiveTab, showHelp, filePanePath, npThreadNav, searchOpen]);
+  }, [isActiveTab, showHelp, filePanePath, npThreadNav, searchOpen, toggleSidebar]);
 
   if (detailQuery.isLoading) return <section className="main-panel">Loading review…</section>;
   if (detailQuery.isError || !detailQuery.data)
@@ -335,6 +354,8 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
           reviewId={reviewId}
           scrollRootRef={diffAreaRef}
           controlRef={jumpListRef}
+          paneCollapsed={sidebarCollapsed}
+          onToggle={toggleSidebar}
         />
         <div className="diff-area" ref={diffAreaRef}>
           {searchOpen && (
@@ -682,37 +703,13 @@ function ReviewHeader({
           Export
         </button>
         {isPr && isDraft && (
-          <>
-            <PublishButton
-              published={published}
-              pending={publishReview.isPending}
-              onPublish={(event) => publishReview.mutate(event)}
-            />
-            <button
-              className="btn"
-              disabled={publishPending.isPending}
-              title="Stage this review on GitHub as a pending (draft) review, visible only to you"
-              onClick={async () => {
-                if (
-                  await confirmDialog({
-                    title: "Publish as draft",
-                    message:
-                      "Stage this review on GitHub as a pending (draft) review? It will be visible only to you until submitted.",
-                    confirmLabel: "Publish as draft",
-                  })
-                )
-                  publishPending.mutate(review.event ?? "comment");
-              }}
-            >
-              {publishPending.isPending ? (
-                <>
-                  <span className="spinner" /> Staging…
-                </>
-              ) : (
-                "Publish as draft to GitHub"
-              )}
-            </button>
-          </>
+          <PublishButton
+            published={published}
+            pending={publishReview.isPending}
+            draftPending={publishPending.isPending}
+            onPublish={(event) => publishReview.mutate(event)}
+            onPublishDraft={(event) => publishPending.mutate(event)}
+          />
         )}
         {isPr && pending && (
           <>
@@ -789,6 +786,7 @@ function ReviewHeader({
         <ExportModal
           reviewId={review.id}
           title={target.title}
+          repoPath={detail.repo_path}
           onClose={() => setShowExport(false)}
           onExported={() => {
             queryClient.invalidateQueries({ queryKey: ["review", review.id] });
@@ -1535,7 +1533,6 @@ function FileBody({
           selectedChanges={selectedChanges}
           generateLineClassName={generateLineClassName}
           gutterEvents={{ onClick: onLineClick }}
-          codeEvents={{ onClick: onLineClick }}
         >
           {(renderedHunks) =>
             renderedHunks.flatMap((hunk, i) => {
@@ -1987,6 +1984,15 @@ export function Composer({
 }) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
+  const handleSubmit = async () => {
+    if (busy || text.trim() === "") return;
+    setBusy(true);
+    try {
+      await onSubmit(text.trim());
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
     <div className="composer">
       {rangeLabel && <div className="composer-range">{rangeLabel}</div>}
@@ -1995,6 +2001,15 @@ export function Composer({
         placeholder="Leave a comment…"
         value={text}
         onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") {
+            e.preventDefault();
+            onCancel();
+          } else if (e.key === "Enter" && (e.metaKey || e.altKey)) {
+            e.preventDefault();
+            handleSubmit();
+          }
+        }}
       />
       <div className="composer-actions">
         {suggestionSeed != null && (
@@ -2016,14 +2031,7 @@ export function Composer({
         <button
           className="btn btn-primary"
           disabled={busy || text.trim() === ""}
-          onClick={async () => {
-            setBusy(true);
-            try {
-              await onSubmit(text.trim());
-            } finally {
-              setBusy(false);
-            }
-          }}
+          onClick={handleSubmit}
         >
           {submitLabel}
         </button>
@@ -2039,14 +2047,19 @@ function safeFileName(title: string): string {
 function ExportModal({
   reviewId,
   title,
+  repoPath,
   onClose,
   onExported,
 }: {
   reviewId: number;
   title: string;
+  repoPath: string;
   onClose: () => void;
   onExported: () => void;
 }) {
+  const [vscodeExporting, setVscodeExporting] = useState(false);
+  const isLocal = !repoPath.startsWith("github:");
+
   const previewQuery = useQuery({
     queryKey: ["preview", reviewId, "markdown"],
     queryFn: () => api.previewReview(reviewId, "markdown"),
@@ -2077,6 +2090,21 @@ function ExportModal({
     }
   };
 
+  const doVscodeExport = async () => {
+    setVscodeExporting(true);
+    try {
+      const path = await api.exportVscodeReview(reviewId);
+      onExported();
+      await navigator.clipboard.writeText(path);
+      toast.success(`Exported to VSCode: ${path} (path copied)`);
+      onClose();
+    } catch (e) {
+      toast.error(String(e));
+    } finally {
+      setVscodeExporting(false);
+    }
+  };
+
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
@@ -2092,6 +2120,11 @@ function ExportModal({
         </pre>
         <div className="modal-actions">
           <button onClick={onClose}>Cancel</button>
+          {isLocal && (
+            <button onClick={doVscodeExport} disabled={vscodeExporting}>
+              {vscodeExporting ? "Exporting…" : "Export to VSCode"}
+            </button>
+          )}
           <button onClick={() => copyToClipboard("json")}>Copy JSON</button>
           <button onClick={() => copyToClipboard("markdown")}>Copy Markdown</button>
           <button onClick={() => doExport("json")}>Save JSON</button>

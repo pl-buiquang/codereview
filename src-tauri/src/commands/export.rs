@@ -1,4 +1,5 @@
 use std::fs;
+use std::path::Path;
 
 use chrono::Utc;
 use rusqlite::{params, Connection, OptionalExtension};
@@ -54,6 +55,42 @@ pub fn export_review(
 ) -> AppResult<()> {
     let conn = db.0.lock().unwrap();
     export_review_impl(&conn, review_id, &dest_path, &format)
+}
+
+/// Export the review to `.vscode/reviews/r{review_id}.json` inside the local
+/// repo checkout, in the format the VSCode Code Review plugin expects. Only
+/// available for locally-cloned repos (path must not start with "github:").
+/// Returns the written file path on success.
+#[tauri::command]
+pub fn export_vscode_review(review_id: i64, db: State<Db>) -> AppResult<String> {
+    let conn = db.0.lock().unwrap();
+    let detail = load_detail(&conn, review_id)?;
+    if detail.repo_path.starts_with("github:") {
+        return Err(AppError::Other(
+            "VSCode export requires a locally-cloned repository".into(),
+        ));
+    }
+    let repo_path = Path::new(&detail.repo_path);
+    if !repo_path.is_dir() {
+        return Err(AppError::Other(format!(
+            "Repository path not found on disk: {}",
+            detail.repo_path
+        )));
+    }
+    let value = export::render_vscode(&detail, repo_path);
+    let review_file_id = value["id"]
+        .as_str()
+        .unwrap_or("review")
+        .to_owned();
+    let reviews_dir = repo_path.join(".vscode").join("reviews");
+    fs::create_dir_all(&reviews_dir)?;
+    let dest = reviews_dir.join(format!("{review_file_id}.json"));
+    fs::write(&dest, serde_json::to_string_pretty(&value).unwrap_or_default())?;
+    conn.execute(
+        "UPDATE review SET last_exported_at = ?1 WHERE id = ?2",
+        params![Utc::now().to_rfc3339(), review_id],
+    )?;
+    Ok(dest.to_string_lossy().into_owned())
 }
 
 // ---- import ----

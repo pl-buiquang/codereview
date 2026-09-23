@@ -98,10 +98,14 @@ export function FileJumpList({
   reviewId,
   scrollRootRef,
   controlRef,
+  paneCollapsed,
+  onToggle,
 }: {
   reviewId: number;
   scrollRootRef: RefObject<HTMLElement | null>;
   controlRef?: MutableRefObject<JumpListHandle | null>;
+  paneCollapsed?: boolean;
+  onToggle?: () => void;
 }) {
   const detailQuery = useQuery({
     queryKey: ["review", reviewId],
@@ -299,9 +303,32 @@ export function FileJumpList({
     });
 
   return (
-    <nav className="jump-list">
-      <div className="jump-list-header">Files ({rows.length})</div>
-      {renderNodes(tree, 0)}
+    <nav className={`jump-list${paneCollapsed ? " jump-list--collapsed" : ""}`}>
+      {paneCollapsed ? (
+        <button
+          className="btn btn-sm btn-ghost sidebar-toggle sidebar-expand-btn"
+          title="Show file list (b)"
+          onClick={onToggle}
+        >
+          <Icon name="menu" size={14} />
+        </button>
+      ) : (
+        <>
+          <div className="jump-list-header">
+            <span>Files ({rows.length})</span>
+            {onToggle && (
+              <button
+                className="btn btn-sm btn-ghost sidebar-toggle"
+                title="Hide file list (b)"
+                onClick={onToggle}
+              >
+                <Icon name="x" size={12} />
+              </button>
+            )}
+          </div>
+          {renderNodes(tree, 0)}
+        </>
+      )}
     </nav>
   );
 }

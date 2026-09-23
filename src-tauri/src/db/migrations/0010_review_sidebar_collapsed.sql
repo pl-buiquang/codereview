@@ -1,0 +1,1 @@
+ALTER TABLE review ADD COLUMN sidebar_collapsed INTEGER NOT NULL DEFAULT 1;

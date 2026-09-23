@@ -873,6 +873,17 @@ pub fn set_file_viewed(
     Ok(())
 }
 
+/// Persist the sidebar collapsed/expanded state. UI state — allowed on published reviews.
+#[tauri::command]
+pub fn set_sidebar_collapsed(review_id: i64, collapsed: bool, db: State<Db>) -> AppResult<()> {
+    let conn = db.0.lock().unwrap();
+    conn.execute(
+        "UPDATE review SET sidebar_collapsed = ?1 WHERE id = ?2",
+        params![collapsed as i64, review_id],
+    )?;
+    Ok(())
+}
+
 /// Autosave the review summary and/or verdict. Pass `event = ""` to clear the verdict.
 pub fn update_review_impl(
     conn: &Connection,
@@ -2639,6 +2650,7 @@ mod tests {
                 last_exported_at: None,
                 created_at: "now".into(),
                 updated_at: "now".into(),
+                sidebar_collapsed: false,
             },
             target: Target {
                 id: 1,

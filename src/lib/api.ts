@@ -43,6 +43,8 @@ export const api = {
     invoke<ReviewDetail>("get_review", { reviewId }),
   setFileViewed: (reviewId: number, filePath: string, viewed: boolean) =>
     invoke<void>("set_file_viewed", { reviewId, filePath, viewed }),
+  setSidebarCollapsed: (reviewId: number, collapsed: boolean) =>
+    invoke<void>("set_sidebar_collapsed", { reviewId, collapsed }),
   reviewDiff: (reviewId: number) => invoke<string>("review_diff", { reviewId }),
   fileSource: (reviewId: number, filePath: string, side: Side) =>
     invoke<string>("file_source", { reviewId, filePath, side }),
@@ -142,6 +144,8 @@ export const api = {
     invoke<string>("preview_review", { reviewId, format }),
   exportReview: (reviewId: number, destPath: string, format: "markdown" | "json") =>
     invoke<void>("export_review", { reviewId, destPath, format }),
+  exportVscodeReview: (reviewId: number) =>
+    invoke<string>("export_vscode_review", { reviewId }),
 
   // Import
   importReview: (srcPath: string) =>

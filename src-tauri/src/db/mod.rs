@@ -23,6 +23,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("migrations/0007_comment_resolved.sql"),
     include_str!("migrations/0008_comment_anchored_base_sha.sql"),
     include_str!("migrations/0009_review_status_pending.sql"),
+    include_str!("migrations/0010_review_sidebar_collapsed.sql"),
 ];
 
 pub fn open(path: &Path) -> AppResult<Connection> {

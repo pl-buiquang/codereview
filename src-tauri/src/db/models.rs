@@ -69,6 +69,7 @@ pub struct Review {
     pub last_exported_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+    pub sidebar_collapsed: bool,
 }
 
 impl Review {
@@ -84,6 +85,7 @@ impl Review {
             last_exported_at: row.get("last_exported_at")?,
             created_at: row.get("created_at")?,
             updated_at: row.get("updated_at")?,
+            sidebar_collapsed: row.get::<_, i64>("sidebar_collapsed")? != 0,
         })
     }
 }
