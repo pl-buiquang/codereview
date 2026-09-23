@@ -10,6 +10,7 @@ use std::sync::OnceLock;
 static GIT: OnceLock<Option<String>> = OnceLock::new();
 static GH: OnceLock<Option<String>> = OnceLock::new();
 static CURL: OnceLock<Option<String>> = OnceLock::new();
+static CLAUDE: OnceLock<Option<String>> = OnceLock::new();
 
 fn resolve(name: &str) -> Option<String> {
     which::which(name)
@@ -23,6 +24,7 @@ pub fn init() {
     let _ = GIT.set(resolve("git"));
     let _ = GH.set(resolve("gh"));
     let _ = CURL.set(resolve("curl"));
+    let _ = CLAUDE.set(resolve("claude"));
 }
 
 /// The resolved absolute path to `git`, or `None` if it wasn't found / `init`
@@ -52,6 +54,14 @@ pub fn curl_path() -> Option<String> {
 
 pub fn curl_bin() -> String {
     curl_path().unwrap_or_else(|| "curl".to_string())
+}
+
+pub fn claude_path() -> Option<String> {
+    CLAUDE.get().cloned().flatten()
+}
+
+pub fn claude_bin() -> String {
+    claude_path().unwrap_or_else(|| "claude".to_string())
 }
 
 #[cfg(test)]

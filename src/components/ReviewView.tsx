@@ -43,6 +43,7 @@ import { FileViewPane } from "./FileViewPane";
 import { GithubThread } from "./GithubThread";
 import { ShortcutHelp } from "./ShortcutHelp";
 import { Markdown } from "./Markdown";
+import { ChatPanel } from "./ChatPanel";
 import { OpenPrButton } from "./OpenPrButton";
 import { PublishButton } from "./PublishButton";
 import { PrMetaPanel } from "./PrMetaPanel";
@@ -82,6 +83,8 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [filePanePath, setFilePanePath] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
+  const [chatCollapsed, setChatCollapsed] = useState(true);
+  const [pendingChatMessage, setPendingChatMessage] = useState<string | null>(null);
   const diffAreaRef = useRef<HTMLDivElement>(null);
 
   // Keyboard navigation. The single window listener lives here (see the effect
@@ -123,15 +126,35 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
   useEffect(() => {
     if (detailQuery.data) {
       setSidebarCollapsed(detailQuery.data.review.sidebar_collapsed);
+      setChatCollapsed(detailQuery.data.review.chat_collapsed);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [detailQuery.data?.review.sidebar_collapsed]);
+  }, [detailQuery.data?.review.sidebar_collapsed, detailQuery.data?.review.chat_collapsed]);
 
   const toggleSidebar = useCallback(() => {
     setSidebarCollapsed((prev) => {
       const next = !prev;
       api.setSidebarCollapsed(reviewId, next);
       return next;
+    });
+  }, [reviewId]);
+
+  const toggleChat = useCallback(() => {
+    setChatCollapsed((prev) => {
+      const next = !prev;
+      api.setChatCollapsed(reviewId, next);
+      return next;
+    });
+  }, [reviewId]);
+
+  const sendToChat = useCallback((formattedMsg: string) => {
+    setPendingChatMessage(formattedMsg);
+    setChatCollapsed((prev) => {
+      if (prev) {
+        api.setChatCollapsed(reviewId, false);
+        return false;
+      }
+      return prev;
     });
   }, [reviewId]);
 
@@ -311,6 +334,9 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
         case "b":
           toggleSidebar();
           break;
+        case "'":
+          toggleChat();
+          break;
         case "?":
           setShowHelp(true);
           break;
@@ -321,7 +347,7 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [isActiveTab, showHelp, filePanePath, npThreadNav, searchOpen, toggleSidebar]);
+  }, [isActiveTab, showHelp, filePanePath, npThreadNav, searchOpen, toggleSidebar, toggleChat]);
 
   if (detailQuery.isLoading) return <section className="main-panel">Loading review…</section>;
   if (detailQuery.isError || !detailQuery.data)
@@ -400,9 +426,17 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
               onCommentsChanged={() =>
                 queryClient.invalidateQueries({ queryKey: ["review", reviewId] })
               }
+              onSendToChat={sendToChat}
             />
           )}
         </div>
+        <ChatPanel
+          reviewId={reviewId}
+          paneCollapsed={chatCollapsed}
+          onToggle={toggleChat}
+          pendingMessage={pendingChatMessage}
+          onPendingConsumed={() => setPendingChatMessage(null)}
+        />
       </div>
 
       {filePanePath && (
@@ -836,6 +870,7 @@ function ReviewDiff({
   onSaving,
   onSaved,
   onCommentsChanged,
+  onSendToChat,
 }: {
   files: FileData[];
   viewType: ViewType;
@@ -849,6 +884,7 @@ function ReviewDiff({
   onSaving: () => void;
   onSaved: () => void;
   onCommentsChanged: () => void;
+  onSendToChat?: (msg: string) => void;
 }) {
   return (
     <div className="diff-files">
@@ -870,6 +906,7 @@ function ReviewDiff({
           onSaving={onSaving}
           onSaved={onSaved}
           onCommentsChanged={onCommentsChanged}
+          onSendToChat={onSendToChat}
         />
       ))}
     </div>
@@ -897,6 +934,7 @@ function FileReview({
   onSaving,
   onSaved,
   onCommentsChanged,
+  onSendToChat,
 }: {
   index: number;
   file: FileData;
@@ -911,6 +949,7 @@ function FileReview({
   onSaving: () => void;
   onSaved: () => void;
   onCommentsChanged: () => void;
+  onSendToChat?: (msg: string) => void;
 }) {
   const queryClient = useQueryClient();
   const reviewId = detail.review.id;
@@ -1260,6 +1299,25 @@ function FileReview({
     onCommentsChanged();
   };
 
+  const sendSelectionToChat = (text: string) => {
+    if (!onSendToChat || !selection || !range) return;
+    const header = metaByKey.get(selection.focusKey)?.hunk ?? "";
+    const focusHunk = hunks.find((h) => h.content === header);
+    const diffHunk = focusHunk
+      ? hunkContextSnippet(focusHunk, selection.side, range.lo, range.hi)
+      : [
+          header,
+          ...[...metaByKey.values()]
+            .filter((m) => m.side === selection.side && m.line >= range.lo && m.line <= range.hi)
+            .sort((a, b) => a.line - b.line)
+            .map((m) => m.lineText),
+        ].join("\n");
+    const lineLabel = range.lo === range.hi ? `line ${range.lo}` : `lines ${range.lo}–${range.hi}`;
+    const msg = `Regarding \`${path}\` ${lineLabel} (${selection.side}):\n\`\`\`\n${diffHunk}\n\`\`\`\n\n${text}`;
+    setSelection(null);
+    onSendToChat(msg);
+  };
+
   const submitFileComment = async (text: string) => {
     onSaving();
     await api.addFileComment({ reviewId: detail.review.id, filePath: path, body: text });
@@ -1293,6 +1351,7 @@ function FileReview({
           canReply={!readOnly}
           onCloseComposer={() => setSelection(null)}
           onAdd={submitSelectionComment}
+          onSendToChat={onSendToChat ? sendSelectionToChat : undefined}
           onSaving={onSaving}
           onSaved={onSaved}
           onCommentsChanged={onCommentsChanged}
@@ -1647,6 +1706,7 @@ export function LineWidget({
   canReply = true,
   onCloseComposer,
   onAdd,
+  onSendToChat,
   onSaving,
   onSaved,
   onCommentsChanged,
@@ -1663,6 +1723,7 @@ export function LineWidget({
   canReply?: boolean;
   onCloseComposer: () => void;
   onAdd: (text: string) => Promise<void>;
+  onSendToChat?: (text: string) => void;
   onSaving: () => void;
   onSaved: () => void;
   onCommentsChanged: () => void;
@@ -1690,6 +1751,7 @@ export function LineWidget({
           onCancel={onCloseComposer}
           rangeLabel={rangeLabel}
           suggestionSeed={composerSuggestionSeed}
+          onSendToChat={onSendToChat}
         />
       )}
     </div>
@@ -1975,12 +2037,14 @@ export function Composer({
   rangeLabel,
   submitLabel = "Add comment",
   suggestionSeed,
+  onSendToChat,
 }: {
   onSubmit: (text: string) => Promise<void>;
   onCancel: () => void;
   rangeLabel?: string;
   submitLabel?: string;
   suggestionSeed?: string | null;
+  onSendToChat?: (text: string) => void;
 }) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
@@ -2023,6 +2087,21 @@ export function Composer({
             }
           >
             ± Insert suggestion
+          </button>
+        )}
+        {onSendToChat && (
+          <button
+            className="btn btn-ghost"
+            disabled={busy || text.trim() === ""}
+            title="Send to Chat panel instead of creating a comment"
+            onClick={() => {
+              if (text.trim()) {
+                onSendToChat(text.trim());
+                onCancel();
+              }
+            }}
+          >
+            Send to Chat
           </button>
         )}
         <button className="btn btn-ghost" onClick={onCancel}>

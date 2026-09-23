@@ -22,6 +22,9 @@ pub enum AppError {
     #[error("not a git repository: {0}")]
     NotARepo(String),
 
+    #[error("chat error: {0}")]
+    Chat(String),
+
     #[error("{0}")]
     Other(String),
 }

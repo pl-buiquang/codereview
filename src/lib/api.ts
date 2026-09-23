@@ -2,6 +2,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import type {
   Branch,
+  ChatMessage,
+  ChatTurnResult,
   Comment,
   FreshnessResult,
   InboxItem,
@@ -45,6 +47,16 @@ export const api = {
     invoke<void>("set_file_viewed", { reviewId, filePath, viewed }),
   setSidebarCollapsed: (reviewId: number, collapsed: boolean) =>
     invoke<void>("set_sidebar_collapsed", { reviewId, collapsed }),
+  setChatCollapsed: (reviewId: number, collapsed: boolean) =>
+    invoke<void>("set_chat_collapsed", { reviewId, collapsed }),
+
+  // Chat
+  chatSend: (reviewId: number, text: string) =>
+    invoke<ChatTurnResult>("chat_send", { reviewId, text }),
+  chatMessages: (reviewId: number) =>
+    invoke<ChatMessage[]>("chat_messages", { reviewId }),
+  chatClear: (reviewId: number) =>
+    invoke<void>("chat_clear", { reviewId }),
   reviewDiff: (reviewId: number) => invoke<string>("review_diff", { reviewId }),
   fileSource: (reviewId: number, filePath: string, side: Side) =>
     invoke<string>("file_source", { reviewId, filePath, side }),

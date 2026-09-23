@@ -2651,6 +2651,7 @@ mod tests {
                 created_at: "now".into(),
                 updated_at: "now".into(),
                 sidebar_collapsed: false,
+                chat_collapsed: true,
             },
             target: Target {
                 id: 1,

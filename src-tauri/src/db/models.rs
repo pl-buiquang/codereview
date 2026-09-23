@@ -70,6 +70,7 @@ pub struct Review {
     pub created_at: String,
     pub updated_at: String,
     pub sidebar_collapsed: bool,
+    pub chat_collapsed: bool,
 }
 
 impl Review {
@@ -86,6 +87,65 @@ impl Review {
             created_at: row.get("created_at")?,
             updated_at: row.get("updated_at")?,
             sidebar_collapsed: row.get::<_, i64>("sidebar_collapsed")? != 0,
+            chat_collapsed: row.get::<_, i64>("chat_collapsed")? != 0,
+        })
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Chat {
+    pub id: i64,
+    pub review_id: i64,
+    pub model: String,
+    pub session_id: Option<String>,
+    pub total_input_tokens: i64,
+    pub total_output_tokens: i64,
+    pub total_cost_usd: f64,
+    pub worktree_path: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+impl Chat {
+    pub fn from_row(row: &Row) -> rusqlite::Result<Self> {
+        Ok(Self {
+            id: row.get("id")?,
+            review_id: row.get("review_id")?,
+            model: row.get("model")?,
+            session_id: row.get("session_id")?,
+            total_input_tokens: row.get("total_input_tokens")?,
+            total_output_tokens: row.get("total_output_tokens")?,
+            total_cost_usd: row.get("total_cost_usd")?,
+            worktree_path: row.get("worktree_path")?,
+            created_at: row.get("created_at")?,
+            updated_at: row.get("updated_at")?,
+        })
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ChatMessage {
+    pub id: i64,
+    pub chat_id: i64,
+    pub role: String,
+    pub content: String,
+    pub input_tokens: Option<i64>,
+    pub output_tokens: Option<i64>,
+    pub cost_usd: Option<f64>,
+    pub created_at: String,
+}
+
+impl ChatMessage {
+    pub fn from_row(row: &Row) -> rusqlite::Result<Self> {
+        Ok(Self {
+            id: row.get("id")?,
+            chat_id: row.get("chat_id")?,
+            role: row.get("role")?,
+            content: row.get("content")?,
+            input_tokens: row.get("input_tokens")?,
+            output_tokens: row.get("output_tokens")?,
+            cost_usd: row.get("cost_usd")?,
+            created_at: row.get("created_at")?,
         })
     }
 }

@@ -42,6 +42,7 @@ export interface Review {
   created_at: string;
   updated_at: string;
   sidebar_collapsed: boolean;
+  chat_collapsed: boolean;
 }
 
 export interface Comment {
@@ -80,6 +81,24 @@ export interface ReviewSummary {
   repo_id: number;
   repo_label: string;
   comment_count: number;
+}
+
+export interface ChatMessage {
+  id: number;
+  chat_id: number;
+  role: "user" | "assistant";
+  content: string;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  cost_usd: number | null;
+  created_at: string;
+}
+
+export interface ChatTurnResult {
+  text: string;
+  input_tokens: number;
+  output_tokens: number;
+  cost_usd: number;
 }
 
 export interface PrSummary {

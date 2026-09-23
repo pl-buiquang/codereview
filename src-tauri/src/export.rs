@@ -283,6 +283,7 @@ mod tests {
             created_at: "2026-01-01T00:00:00Z".into(),
             updated_at: "2026-01-01T00:00:00Z".into(),
             sidebar_collapsed: false,
+            chat_collapsed: true,
         }
     }
 

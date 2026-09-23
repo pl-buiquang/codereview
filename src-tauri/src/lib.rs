@@ -11,6 +11,7 @@ pub mod inbox;
 mod path_env;
 pub mod provider;
 pub mod tools;
+pub mod worktree;
 
 use std::sync::Mutex;
 
@@ -146,6 +147,10 @@ pub fn run() {
             commands::inbox::retrack_item,
             commands::inbox::open_pr_review,
             commands::inbox::inbox_meta,
+            commands::chat::chat_send,
+            commands::chat::chat_messages,
+            commands::chat::chat_clear,
+            commands::chat::set_chat_collapsed,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
