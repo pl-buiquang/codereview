@@ -77,7 +77,6 @@ pub struct ChatTurnResult {
 fn call_claude_turn(
     session_id: &str,
     is_first_turn: bool,
-    model: &str,
     system_prompt: Option<&str>,
     worktree_path: &Path,
     text: &str,
@@ -92,9 +91,13 @@ fn call_claude_turn(
         .arg("--allowedTools")
         .arg("Bash Read Glob Grep")
         .arg("--add-dir")
-        .arg(worktree_path)
-        .arg("--model")
-        .arg(model);
+        .arg(worktree_path);
+
+    // Only pass --model if explicitly set; otherwise let claude pick from its
+    // own env config (e.g. ANTHROPIC_DEFAULT_SONNET_MODEL for Bedrock setups).
+    if let Ok(m) = std::env::var("CODEREVIEW_CHAT_MODEL") {
+        cmd.arg("--model").arg(m);
+    }
 
     if is_first_turn {
         cmd.arg("--session-id").arg(session_id);
@@ -309,7 +312,11 @@ pub async fn chat_send(
         .and_then(|c| c.session_id.clone())
         .unwrap_or_else(new_session_id);
 
-    let model = "claude-sonnet-4-5".to_string();
+    // Use CODEREVIEW_CHAT_MODEL if set, otherwise fall back to whatever
+    // ANTHROPIC_DEFAULT_SONNET_MODEL resolves to (Bedrock ARN, etc.) or "default".
+    let model = std::env::var("CODEREVIEW_CHAT_MODEL")
+        .or_else(|_| std::env::var("ANTHROPIC_DEFAULT_SONNET_MODEL"))
+        .unwrap_or_else(|_| "default".to_string());
 
     let system_prompt = if is_first_turn {
         let diff_summary = diff_file_summary(&diff);
@@ -331,7 +338,6 @@ pub async fn chat_send(
     let turn = call_claude_turn(
         &session_id,
         is_first_turn,
-        &model,
         system_prompt.as_deref(),
         &worktree_path,
         &text,
