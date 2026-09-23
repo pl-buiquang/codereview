@@ -456,7 +456,33 @@ pub fn chat_messages(review_id: i64, db: State<Db>) -> AppResult<Vec<ChatMessage
 #[tauri::command]
 pub fn chat_clear(review_id: i64, db: State<Db>) -> AppResult<()> {
     let conn = db.0.lock().unwrap();
+
+    // Grab worktree + repo paths before deleting so we can clean up.
+    let paths: Option<(Option<String>, String)> = conn
+        .query_row(
+            "SELECT c.worktree_path, r.path
+             FROM chat c
+             JOIN review rv ON rv.id = c.review_id
+             JOIN target t ON t.id = rv.target_id
+             JOIN repository r ON r.id = t.repo_id
+             WHERE c.review_id = ?1",
+            params![review_id],
+            |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, String>(1)?)),
+        )
+        .optional()?;
+
     conn.execute("DELETE FROM chat WHERE review_id = ?1", params![review_id])?;
+    drop(conn);
+
+    // Best-effort worktree cleanup — errors are silently ignored.
+    if let Some((Some(worktree_path), repo_path)) = paths {
+        let repo = std::path::Path::new(&repo_path);
+        let wt = std::path::Path::new(&worktree_path);
+        if wt != repo {
+            let _ = worktree::cleanup_worktree(repo, wt);
+        }
+    }
+
     Ok(())
 }
 

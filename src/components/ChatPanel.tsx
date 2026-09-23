@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import type { ChatMessage } from "../lib/types";
 import { useSettingsStore } from "../lib/settings";
+import { confirmDialog } from "../lib/confirm";
 import { Icon } from "./icons";
 import { Markdown } from "./Markdown";
 
@@ -133,8 +134,16 @@ export function ChatPanel({
             <button
               className="btn btn-sm btn-ghost"
               title="Clear conversation"
-              onClick={() => clearMutation.mutate()}
               disabled={busy || clearMutation.isPending}
+              onClick={async () => {
+                const ok = await confirmDialog({
+                  title: "Clear chat?",
+                  message: "This will delete the conversation history and start a fresh session.",
+                  confirmLabel: "Clear",
+                  danger: true,
+                });
+                if (ok) clearMutation.mutate();
+              }}
             >
               Clear
             </button>
