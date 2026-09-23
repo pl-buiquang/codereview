@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import type { ChatMessage } from "../lib/types";
+import { useSettingsStore } from "../lib/settings";
 import { Icon } from "./icons";
 import { Markdown } from "./Markdown";
 
@@ -22,6 +23,7 @@ export function ChatPanel({
   onPendingConsumed,
 }: ChatPanelProps) {
   const queryClient = useQueryClient();
+  const chatModel = useSettingsStore((s) => s.chatModel);
   const [input, setInput] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -33,7 +35,7 @@ export function ChatPanel({
   });
 
   const sendMutation = useMutation({
-    mutationFn: (text: string) => api.chatSend(reviewId, text),
+    mutationFn: (text: string) => api.chatSend(reviewId, text, chatModel || undefined),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["chat-messages", reviewId] });
     },

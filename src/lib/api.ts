@@ -51,8 +51,8 @@ export const api = {
     invoke<void>("set_chat_collapsed", { reviewId, collapsed }),
 
   // Chat
-  chatSend: (reviewId: number, text: string) =>
-    invoke<ChatTurnResult>("chat_send", { reviewId, text }),
+  chatSend: (reviewId: number, text: string, model?: string) =>
+    invoke<ChatTurnResult>("chat_send", { reviewId, text, model: model || null }),
   chatMessages: (reviewId: number) =>
     invoke<ChatMessage[]>("chat_messages", { reviewId }),
   chatClear: (reviewId: number) =>

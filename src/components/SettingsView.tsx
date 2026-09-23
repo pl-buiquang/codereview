@@ -129,8 +129,10 @@ function GeneralSection() {
   const setDiffFontSize = useSettingsStore((s) => s.setDiffFontSize);
   const setDefaultViewType = useSettingsStore((s) => s.setDefaultViewType);
   const setDefaultThreeDot = useSettingsStore((s) => s.setDefaultThreeDot);
+  const chatModel = useSettingsStore((s) => s.chatModel);
   const setBotLogins = useSettingsStore((s) => s.setBotLogins);
   const setRepoStripPrefixes = useSettingsStore((s) => s.setRepoStripPrefixes);
+  const setChatModel = useSettingsStore((s) => s.setChatModel);
 
   return (
     <div className="settings-section-narrow">
@@ -227,6 +229,24 @@ function GeneralSection() {
           <span className="settings-hint muted">
             Comma-separated prefixes removed from repo names in the inbox. Hovering a stripped
             name shows the full <code>owner/name</code>.
+          </span>
+        </label>
+      </section>
+
+      <section className="settings-group">
+        <h3>Chat</h3>
+        <label className="settings-row settings-row-stack">
+          <span>Model</span>
+          <input
+            type="text"
+            className="input"
+            placeholder="leave empty to use opus (ANTHROPIC_DEFAULT_OPUS_MODEL)"
+            value={chatModel}
+            onChange={(e) => setChatModel(e.target.value)}
+          />
+          <span className="settings-hint muted">
+            Passed as <code>--model</code> to <code>claude -p</code>. Leave empty to use the
+            env-configured default (Bedrock ARN, model name, etc.).
           </span>
         </label>
       </section>

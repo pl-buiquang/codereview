@@ -77,6 +77,7 @@ pub struct ChatTurnResult {
 fn call_claude_turn(
     session_id: &str,
     is_first_turn: bool,
+    model: &str,
     system_prompt: Option<&str>,
     worktree_path: &Path,
     text: &str,
@@ -93,10 +94,8 @@ fn call_claude_turn(
         .arg("--add-dir")
         .arg(worktree_path);
 
-    // Only pass --model if explicitly set; otherwise let claude pick from its
-    // own env config (e.g. ANTHROPIC_DEFAULT_SONNET_MODEL for Bedrock setups).
-    if let Ok(m) = std::env::var("CODEREVIEW_CHAT_MODEL") {
-        cmd.arg("--model").arg(m);
+    if !model.is_empty() {
+        cmd.arg("--model").arg(model);
     }
 
     if is_first_turn {
@@ -270,6 +269,7 @@ fn diff_file_summary(diff: &str) -> String {
 pub async fn chat_send(
     review_id: i64,
     text: String,
+    model: Option<String>,
     db: State<'_, Db>,
 ) -> AppResult<ChatTurnResult> {
     // --- Phase 1: gather context under DB lock ---
@@ -312,11 +312,16 @@ pub async fn chat_send(
         .and_then(|c| c.session_id.clone())
         .unwrap_or_else(new_session_id);
 
-    // Use CODEREVIEW_CHAT_MODEL if set, otherwise fall back to whatever
-    // ANTHROPIC_DEFAULT_SONNET_MODEL resolves to (Bedrock ARN, etc.) or "default".
-    let model = std::env::var("CODEREVIEW_CHAT_MODEL")
-        .or_else(|_| std::env::var("ANTHROPIC_DEFAULT_SONNET_MODEL"))
-        .unwrap_or_else(|_| "default".to_string());
+    // Model resolution priority:
+    // 1. Explicit setting from the app's Settings panel (passed by the frontend)
+    // 2. CODEREVIEW_CHAT_MODEL env var (manual override)
+    // 3. ANTHROPIC_DEFAULT_OPUS_MODEL env var (Bedrock ARN etc.)
+    // 4. Empty → no --model flag; claude uses its own configured default
+    let model = model
+        .filter(|m| !m.is_empty())
+        .or_else(|| std::env::var("CODEREVIEW_CHAT_MODEL").ok())
+        .or_else(|| std::env::var("ANTHROPIC_DEFAULT_OPUS_MODEL").ok())
+        .unwrap_or_default();
 
     let system_prompt = if is_first_turn {
         let diff_summary = diff_file_summary(&diff);
@@ -338,6 +343,7 @@ pub async fn chat_send(
     let turn = call_claude_turn(
         &session_id,
         is_first_turn,
+        &model,
         system_prompt.as_deref(),
         &worktree_path,
         &text,

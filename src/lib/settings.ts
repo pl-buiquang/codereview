@@ -36,6 +36,7 @@ type PersistedSettings = Pick<
   | "repoStripPrefixes"
   | "prListPollMs"
   | "inboxPollMs"
+  | "chatModel"
 >;
 
 interface SettingsState {
@@ -54,6 +55,8 @@ interface SettingsState {
   prListPollMs: number;
   /** Inbox auto-refresh interval in ms; 0 = off. */
   inboxPollMs: number;
+  /** Model passed to `claude -p --model`. Empty = use env default (opus). */
+  chatModel: string;
   setDirection: (d: Direction) => void;
   setMode: (m: ThemeMode) => void;
   setDiffFontSize: (n: number) => void;
@@ -63,6 +66,7 @@ interface SettingsState {
   setRepoStripPrefixes: (s: string) => void;
   setPrListPollMs: (ms: number) => void;
   setInboxPollMs: (ms: number) => void;
+  setChatModel: (s: string) => void;
 }
 
 export const useSettingsStore = create<SettingsState>()(
@@ -77,6 +81,7 @@ export const useSettingsStore = create<SettingsState>()(
       repoStripPrefixes: "",
       prListPollMs: 0,
       inboxPollMs: 0,
+      chatModel: "",
       setDirection: (direction) => set({ direction }),
       setMode: (mode) => set({ mode }),
       setDiffFontSize: (diffFontSize) => set({ diffFontSize }),
@@ -86,10 +91,11 @@ export const useSettingsStore = create<SettingsState>()(
       setRepoStripPrefixes: (repoStripPrefixes) => set({ repoStripPrefixes }),
       setPrListPollMs: (prListPollMs) => set({ prListPollMs }),
       setInboxPollMs: (inboxPollMs) => set({ inboxPollMs }),
+      setChatModel: (chatModel) => set({ chatModel }),
     }),
     {
       name: "codereview-settings",
-      version: 2,
+      version: 3,
       partialize: (s) => ({
         direction: s.direction,
         mode: s.mode,
@@ -100,6 +106,7 @@ export const useSettingsStore = create<SettingsState>()(
         repoStripPrefixes: s.repoStripPrefixes,
         prListPollMs: s.prListPollMs,
         inboxPollMs: s.inboxPollMs,
+        chatModel: s.chatModel,
       }),
       // v0 (flat: `theme`) and v1 (`themeMode` + theme slots) collapse the same
       // way: direction resets to "a", the old mode maps over (custom themes,
@@ -117,6 +124,7 @@ export const useSettingsStore = create<SettingsState>()(
           repoStripPrefixes: (p.repoStripPrefixes as string) ?? "",
           prListPollMs: (p.prListPollMs as number) ?? 0,
           inboxPollMs: (p.inboxPollMs as number) ?? 0,
+          chatModel: (p.chatModel as string) ?? "",
         } satisfies PersistedSettings;
       },
     },
