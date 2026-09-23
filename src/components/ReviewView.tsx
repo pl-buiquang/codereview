@@ -1065,7 +1065,11 @@ function FileReview({
     () => indexFile({ ...file, hunks }),
     [file, hunks],
   );
-  const tokens = useMemo(() => tokenizeFile({ ...file, hunks }), [file, hunks]);
+  const markEditsEnabled = useSettingsStore((s) => s.markEdits);
+  const tokens = useMemo(
+    () => tokenizeFile({ ...file, hunks }, { markEditsMaxChanges: markEditsEnabled ? undefined : 0 }),
+    [file, hunks, markEditsEnabled],
+  );
   const [selection, setSelection] = useState<Selection | null>(null);
   const viewed = detail.viewed_files.includes(path);
   const [fileComposerOpen, setFileComposerOpen] = useState(false);
@@ -1380,7 +1384,7 @@ function FileReview({
   return (
     <div className="diff-file" id={`file-${index}`} ref={rootRef}>
       <div className="diff-file-header">
-        <span className="file-path mono">{path}</span>
+        <span className="file-path mono" title={path}>{path}</span>
         <span className="diff-stats">
           <span className="delta-add">+{add}</span>
           <span className="delta-del">−{del}</span>

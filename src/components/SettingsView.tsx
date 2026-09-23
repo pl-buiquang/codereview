@@ -130,9 +130,11 @@ function GeneralSection() {
   const setDefaultViewType = useSettingsStore((s) => s.setDefaultViewType);
   const setDefaultThreeDot = useSettingsStore((s) => s.setDefaultThreeDot);
   const chatModel = useSettingsStore((s) => s.chatModel);
+  const markEdits = useSettingsStore((s) => s.markEdits);
   const setBotLogins = useSettingsStore((s) => s.setBotLogins);
   const setRepoStripPrefixes = useSettingsStore((s) => s.setRepoStripPrefixes);
   const setChatModel = useSettingsStore((s) => s.setChatModel);
+  const setMarkEdits = useSettingsStore((s) => s.setMarkEdits);
 
   return (
     <div className="settings-section-narrow">
@@ -197,6 +199,14 @@ function GeneralSection() {
             type="checkbox"
             checked={defaultThreeDot}
             onChange={(e) => setDefaultThreeDot(e.target.checked)}
+          />
+        </label>
+        <label className="settings-row">
+          <span>Highlight intra-line changes</span>
+          <input
+            type="checkbox"
+            checked={markEdits}
+            onChange={(e) => setMarkEdits(e.target.checked)}
           />
         </label>
       </section>

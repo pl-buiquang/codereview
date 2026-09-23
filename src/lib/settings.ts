@@ -37,6 +37,7 @@ type PersistedSettings = Pick<
   | "prListPollMs"
   | "inboxPollMs"
   | "chatModel"
+  | "markEdits"
 >;
 
 interface SettingsState {
@@ -55,6 +56,8 @@ interface SettingsState {
   prListPollMs: number;
   /** Inbox auto-refresh interval in ms; 0 = off. */
   inboxPollMs: number;
+  /** Highlight intra-line character-level changes (markEdits). */
+  markEdits: boolean;
   /** Model passed to `claude -p --model`. Empty = use env default (opus). */
   chatModel: string;
   setDirection: (d: Direction) => void;
@@ -67,6 +70,7 @@ interface SettingsState {
   setPrListPollMs: (ms: number) => void;
   setInboxPollMs: (ms: number) => void;
   setChatModel: (s: string) => void;
+  setMarkEdits: (b: boolean) => void;
 }
 
 export const useSettingsStore = create<SettingsState>()(
@@ -82,6 +86,7 @@ export const useSettingsStore = create<SettingsState>()(
       prListPollMs: 0,
       inboxPollMs: 0,
       chatModel: "",
+      markEdits: false,
       setDirection: (direction) => set({ direction }),
       setMode: (mode) => set({ mode }),
       setDiffFontSize: (diffFontSize) => set({ diffFontSize }),
@@ -92,10 +97,11 @@ export const useSettingsStore = create<SettingsState>()(
       setPrListPollMs: (prListPollMs) => set({ prListPollMs }),
       setInboxPollMs: (inboxPollMs) => set({ inboxPollMs }),
       setChatModel: (chatModel) => set({ chatModel }),
+      setMarkEdits: (markEdits) => set({ markEdits }),
     }),
     {
       name: "codereview-settings",
-      version: 3,
+      version: 4,
       partialize: (s) => ({
         direction: s.direction,
         mode: s.mode,
@@ -107,6 +113,7 @@ export const useSettingsStore = create<SettingsState>()(
         prListPollMs: s.prListPollMs,
         inboxPollMs: s.inboxPollMs,
         chatModel: s.chatModel,
+        markEdits: s.markEdits,
       }),
       // v0 (flat: `theme`) and v1 (`themeMode` + theme slots) collapse the same
       // way: direction resets to "a", the old mode maps over (custom themes,
@@ -125,6 +132,7 @@ export const useSettingsStore = create<SettingsState>()(
           prListPollMs: (p.prListPollMs as number) ?? 0,
           inboxPollMs: (p.inboxPollMs as number) ?? 0,
           chatModel: (p.chatModel as string) ?? "",
+          markEdits: (p.markEdits as boolean) ?? false,
         } satisfies PersistedSettings;
       },
     },
