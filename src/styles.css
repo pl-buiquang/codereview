@@ -1057,6 +1057,7 @@ td.diff-code {
   display: flex;
   align-items: center;
   gap: 12px;
+  margin-right: 12px;
 }
 .review-title-wrap {
   display: flex;
