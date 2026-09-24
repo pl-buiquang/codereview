@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useUIStore } from "../store";
-import { effectiveTheme, useSettingsStore, type ThemeMode } from "../lib/settings";
+import { effectiveTheme, parseRepoBasePaths, useSettingsStore, type ThemeMode } from "../lib/settings";
 import { DIRECTIONS } from "../lib/themes";
 import { api } from "../lib/api";
+import { toast } from "../lib/toast";
 import type { ToolEnv } from "../lib/types";
 import { Icon, type IconName } from "./icons";
 
@@ -125,6 +126,7 @@ function GeneralSection() {
   const defaultThreeDot = useSettingsStore((s) => s.defaultThreeDot);
   const botLogins = useSettingsStore((s) => s.botLogins);
   const repoStripPrefixes = useSettingsStore((s) => s.repoStripPrefixes);
+  const repoBasePaths = useSettingsStore((s) => s.repoBasePaths);
   const setMode = useSettingsStore((s) => s.setMode);
   const setDiffFontSize = useSettingsStore((s) => s.setDiffFontSize);
   const setDefaultViewType = useSettingsStore((s) => s.setDefaultViewType);
@@ -133,8 +135,19 @@ function GeneralSection() {
   const markEdits = useSettingsStore((s) => s.markEdits);
   const setBotLogins = useSettingsStore((s) => s.setBotLogins);
   const setRepoStripPrefixes = useSettingsStore((s) => s.setRepoStripPrefixes);
+  const setRepoBasePaths = useSettingsStore((s) => s.setRepoBasePaths);
   const setChatModel = useSettingsStore((s) => s.setChatModel);
   const setMarkEdits = useSettingsStore((s) => s.setMarkEdits);
+
+  const queryClient = useQueryClient();
+  const autoLink = useMutation({
+    mutationFn: () => api.autoLinkRepos(parseRepoBasePaths(repoBasePaths)),
+    onSuccess: (count) => {
+      queryClient.invalidateQueries({ queryKey: ["repositories"] });
+      toast.success(count > 0 ? `Linked ${count} repo${count === 1 ? "" : "s"}` : "No repos to auto-link");
+    },
+    onError: (err) => toast.error(`Auto-link failed:\n${String(err)}`),
+  });
 
   return (
     <div className="settings-section-narrow">
@@ -241,6 +254,34 @@ function GeneralSection() {
             name shows the full <code>owner/name</code>.
           </span>
         </label>
+      </section>
+
+      <section className="settings-group">
+        <h3>Repositories</h3>
+        <label className="settings-row settings-row-stack">
+          <span>Base paths for auto-linking</span>
+          <input
+            type="text"
+            className="input"
+            placeholder="~/projects, ~/work"
+            value={repoBasePaths}
+            onChange={(e) => setRepoBasePaths(e.target.value)}
+          />
+          <span className="settings-hint muted">
+            Comma-separated directories where your git clones live. When a GitHub PR arrives,
+            the app searches here (recursively, 2 levels) to auto-link a local clone.
+          </span>
+        </label>
+        <div className="settings-row">
+          <span />
+          <button
+            className="btn btn-sm"
+            onClick={() => autoLink.mutate()}
+            disabled={autoLink.isPending}
+          >
+            {autoLink.isPending ? "Scanning…" : "Scan now"}
+          </button>
+        </div>
       </section>
 
       <section className="settings-group">

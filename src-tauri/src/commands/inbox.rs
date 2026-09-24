@@ -449,6 +449,7 @@ pub async fn open_pr_review(
     owner: String,
     name: String,
     number: i64,
+    base_paths: Vec<String>,
     db: State<'_, Db>,
 ) -> AppResult<Review> {
     {
@@ -458,7 +459,7 @@ pub async fn open_pr_review(
             params![now(), item_id],
         )?;
     }
-    crate::commands::review::create_review_for_pr_impl(&db, &owner, &name, number)
+    crate::commands::review::create_review_for_pr_impl(&db, &owner, &name, number, &base_paths)
 }
 
 #[derive(Debug, Serialize)]

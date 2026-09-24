@@ -3583,3 +3583,105 @@ input[type="range"] {
 .ci-pending {
   color: var(--warning);
 }
+
+/* --- Command palette ---------------------------------------------------- */
+.command-palette-backdrop {
+  align-items: flex-start;
+  padding-top: 15vh;
+}
+.command-palette {
+  width: min(560px, 90vw);
+  max-height: 420px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.command-palette-input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.command-palette-input-row input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+}
+.command-palette-input-row input::placeholder {
+  color: var(--text-3);
+}
+.command-palette-results {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+.command-palette-section {
+  padding: 4px 14px 2px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.command-palette-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 14px;
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  width: 100%;
+  text-align: left;
+  font: inherit;
+}
+.command-palette-item:hover,
+.command-palette-item.active {
+  background: var(--accent-soft);
+}
+.command-palette-item .title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.command-palette-item .meta {
+  font-size: 11px;
+  color: var(--text-2);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.command-palette-item.action .title {
+  color: var(--accent);
+}
+.command-palette-empty {
+  padding: 16px 14px;
+  color: var(--text-3);
+  text-align: center;
+  font-size: 13px;
+}
+.command-palette-footer {
+  padding: 6px 14px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-3);
+  display: flex;
+  gap: 12px;
+  flex-shrink: 0;
+}
+.command-palette-footer kbd {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 0 4px;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-s);
+}

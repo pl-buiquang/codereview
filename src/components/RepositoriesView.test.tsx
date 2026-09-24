@@ -8,12 +8,16 @@ import type { ReactNode } from "react";
 const listRepositories = vi.fn();
 const addRepository = vi.fn();
 const removeRepository = vi.fn();
+const linkLocalPath = vi.fn();
+const autoLinkRepos = vi.fn();
 const pickFolder = vi.fn();
 vi.mock("../lib/api", () => ({
   api: {
     listRepositories: () => listRepositories(),
     addRepository: (p: string) => addRepository(p),
     removeRepository: (id: number) => removeRepository(id),
+    linkLocalPath: (id: number, p: string) => linkLocalPath(id, p),
+    autoLinkRepos: (paths: string[]) => autoLinkRepos(paths),
   },
   pickFolder: () => pickFolder(),
 }));
@@ -28,7 +32,7 @@ import type { Repository } from "../lib/types";
 
 const repo = (over: Partial<Repository> = {}): Repository => ({
   id: 1,
-  path: "/home/me/projects/widget",
+  local_path: "/home/me/projects/widget",
   remote_owner: null,
   remote_name: null,
   default_branch: "main",
@@ -59,7 +63,7 @@ describe("RepositoriesView", () => {
   it("renders owner/name when a remote is known, else the folder name", async () => {
     listRepositories.mockResolvedValue([
       repo({ id: 1, remote_owner: "acme", remote_name: "widget" }),
-      repo({ id: 2, path: "/home/me/localonly", remote_owner: null, remote_name: null }),
+      repo({ id: 2, local_path: "/home/me/localonly", remote_owner: null, remote_name: null }),
     ]);
     renderHome();
 

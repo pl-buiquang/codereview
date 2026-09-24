@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { toast } from "../lib/toast";
-import { INBOX_POLL_OPTIONS, parseBotLogins, useSettingsStore } from "../lib/settings";
+import { INBOX_POLL_OPTIONS, parseBotLogins, parseRepoBasePaths, useSettingsStore } from "../lib/settings";
 import { timeAgo } from "../lib/timeAgo";
 import { useUIStore } from "../store";
 import type { InboxItem } from "../lib/types";
@@ -55,6 +55,7 @@ export function InboxView() {
   const queryClient = useQueryClient();
   const openReview = useUIStore((s) => s.openReview);
   const botLogins = useSettingsStore((s) => s.botLogins);
+  const repoBasePaths = useSettingsStore((s) => s.repoBasePaths);
   const inboxPollMs = useSettingsStore((s) => s.inboxPollMs);
   const setInboxPollMs = useSettingsStore((s) => s.setInboxPollMs);
   const [active, setActive] = useState<BucketKey>("needs-you");
@@ -127,7 +128,7 @@ export function InboxView() {
   const openPr = useMutation({
     mutationFn: (item: InboxItem) => {
       const [owner, name] = item.repo.split("/");
-      return api.openPrReview(item.id, owner, name, item.number);
+      return api.openPrReview(item.id, owner, name, item.number, parseRepoBasePaths(repoBasePaths));
     },
     onSuccess: (review) => {
       invalidate();

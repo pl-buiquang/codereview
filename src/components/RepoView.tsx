@@ -4,7 +4,7 @@ import type { ViewType } from "react-diff-view";
 import { api } from "../lib/api";
 import { toast } from "../lib/toast";
 import { confirmDialog } from "../lib/confirm";
-import { PR_LIST_POLL_OPTIONS, useSettingsStore } from "../lib/settings";
+import { PR_LIST_POLL_OPTIONS, useSettingsStore, parseRepoBasePaths } from "../lib/settings";
 import { timeAgo } from "../lib/timeAgo";
 import { DiffViewer } from "./DiffViewer";
 import { OpenPrButton } from "./OpenPrButton";
@@ -23,10 +23,9 @@ interface Comparison {
 type Tab = "branches" | "prs";
 
 export function RepoView({ repo }: { repo: Repository }) {
-  const repoPath = repo.path;
   const openReview = useUIStore((s) => s.openReview);
   const queryClient = useQueryClient();
-  const [tab, setTab] = useState<Tab>("branches");
+  const [tab, setTab] = useState<Tab>(repo.local_path ? "branches" : "prs");
 
   const reviewsQuery = useQuery({
     queryKey: ["reviews", repo.id],
@@ -47,14 +46,16 @@ export function RepoView({ repo }: { repo: Repository }) {
         <h1 className="cr-h1 repo-title">
           {repo.remote_owner && repo.remote_name
             ? `${repo.remote_owner}/${repo.remote_name}`
-            : repoPath}
+            : repo.local_path ?? "Repository"}
         </h1>
       </header>
 
       <div className="cr-tabs">
         <button
-          className={`cr-tab${tab === "branches" ? " active" : ""}`}
-          onClick={() => setTab("branches")}
+          className={`cr-tab${tab === "branches" ? " active" : ""}${!repo.local_path ? " disabled" : ""}`}
+          onClick={() => repo.local_path && setTab("branches")}
+          disabled={!repo.local_path}
+          title={!repo.local_path ? "Virtual PR requires a local clone" : undefined}
         >
           Virtual PR
         </button>
@@ -126,13 +127,13 @@ export function RepoView({ repo }: { repo: Repository }) {
 }
 
 function BranchCompare({ repo }: { repo: Repository }) {
-  const repoPath = repo.path;
   const openReview = useUIStore((s) => s.openReview);
   const queryClient = useQueryClient();
 
   const branchesQuery = useQuery({
-    queryKey: ["branches", repoPath],
-    queryFn: () => api.listBranches(repoPath),
+    queryKey: ["branches", repo.id],
+    queryFn: () => api.listBranches(repo.id),
+    enabled: repo.local_path != null,
   });
   const branchNames = useMemo(
     () => (branchesQuery.data ?? []).map((b) => b.name),
@@ -158,15 +159,15 @@ function BranchCompare({ repo }: { repo: Repository }) {
   }, [branchNames, repo.default_branch]);
 
   const diffQuery = useQuery({
-    queryKey: ["diff", repoPath, comparison?.base, comparison?.head, comparison?.threeDot],
+    queryKey: ["diff", repo.id, comparison?.base, comparison?.head, comparison?.threeDot],
     queryFn: () =>
-      api.diffRefs(repoPath, comparison!.base, comparison!.head, comparison!.threeDot),
+      api.diffRefs(repo.id, comparison!.base, comparison!.head, comparison!.threeDot),
     enabled: comparison != null,
   });
 
   const startReview = useMutation({
     mutationFn: () =>
-      api.createReview({ repoId: repo.id, repoPath, baseRef: base, headRef: head, threeDot }),
+      api.createReview({ repoId: repo.id, baseRef: base, headRef: head, threeDot }),
     onSuccess: (review) => {
       queryClient.invalidateQueries({ queryKey: ["reviews", repo.id] });
       openReview(review.id);
@@ -256,8 +257,8 @@ function PrList({ repo, onOpen }: { repo: Repository; onOpen: (id: number) => vo
 
   const authQuery = useQuery({ queryKey: ["gh-auth"], queryFn: api.ghAuthStatus });
   const prsQuery = useQuery({
-    queryKey: ["prs", repo.path],
-    queryFn: () => api.listPrs(repo.path),
+    queryKey: ["prs", repo.id],
+    queryFn: () => api.listPrs(repo.id),
     enabled: authQuery.data === true,
     refetchInterval: prListPollMs > 0 ? prListPollMs : false,
   });
@@ -269,12 +270,14 @@ function PrList({ repo, onOpen }: { repo: Repository; onOpen: (id: number) => vo
     return () => clearInterval(id);
   }, []);
 
+  const repoBasePaths = useSettingsStore((s) => s.repoBasePaths);
+
   const startPrReview = useMutation({
     mutationFn: (prNumber: number) => {
       if (!repo.remote_owner || !repo.remote_name) {
         throw new Error("repository has no GitHub remote");
       }
-      return api.createReviewForPr(repo.remote_owner, repo.remote_name, prNumber);
+      return api.createReviewForPr(repo.remote_owner, repo.remote_name, prNumber, parseRepoBasePaths(repoBasePaths));
     },
     onSuccess: (review) => {
       queryClient.invalidateQueries({ queryKey: ["reviews", repo.id] });

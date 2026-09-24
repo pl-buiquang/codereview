@@ -820,7 +820,7 @@ function ReviewHeader({
         <ExportModal
           reviewId={review.id}
           title={target.title}
-          repoPath={detail.repo_path}
+          repoPath={detail.local_path}
           onClose={() => setShowExport(false)}
           onExported={() => {
             queryClient.invalidateQueries({ queryKey: ["review", review.id] });
@@ -965,7 +965,8 @@ function FileReview({
   const isDeleted = file.type === "delete";
   const openInDefaultApp = async () => {
     if (isDeleted) return;
-    const fullPath = `${detail.repo_path}/${path}`;
+    if (!detail.local_path) return;
+    const fullPath = `${detail.local_path}/${path}`;
     try {
       await api.openInDefaultApp(fullPath);
     } catch (err) {
@@ -2136,12 +2137,12 @@ function ExportModal({
 }: {
   reviewId: number;
   title: string;
-  repoPath: string;
+  repoPath: string | null;
   onClose: () => void;
   onExported: () => void;
 }) {
   const [vscodeExporting, setVscodeExporting] = useState(false);
-  const isLocal = !repoPath.startsWith("github:");
+  const isLocal = repoPath != null;
 
   const previewQuery = useQuery({
     queryKey: ["preview", reviewId, "markdown"],

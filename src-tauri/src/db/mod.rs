@@ -25,6 +25,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("migrations/0009_review_status_pending.sql"),
     include_str!("migrations/0010_review_sidebar_collapsed.sql"),
     include_str!("migrations/0011_chat.sql"),
+    include_str!("migrations/0012_unified_repository.sql"),
 ];
 
 pub fn open(path: &Path) -> AppResult<Connection> {
@@ -257,7 +258,7 @@ mod tests {
     fn migration_0009_check_accepts_pending_rejects_bogus() {
         let conn = open_memory();
         conn.execute(
-            "INSERT INTO repository (path, default_branch, added_at) VALUES ('/r', 'main', 'now')",
+            "INSERT INTO repository (local_path, default_branch, added_at) VALUES ('/r', 'main', 'now')",
             [],
         )
         .unwrap();
@@ -285,7 +286,7 @@ mod tests {
     fn migration_0009_cascade_still_works() {
         let conn = open_memory();
         conn.execute(
-            "INSERT INTO repository (path, default_branch, added_at) VALUES ('/r', 'main', 'now')",
+            "INSERT INTO repository (local_path, default_branch, added_at) VALUES ('/r', 'main', 'now')",
             [],
         )
         .unwrap();

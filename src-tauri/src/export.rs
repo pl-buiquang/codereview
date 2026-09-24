@@ -313,7 +313,7 @@ mod tests {
         ReviewDetail {
             review: review(),
             target: target(),
-            repo_path: "/repo".into(),
+            local_path: Some("/repo".into()),
             remote_owner: Some("owner".into()),
             remote_name: Some("name".into()),
             comments,

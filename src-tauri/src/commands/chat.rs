@@ -297,7 +297,12 @@ pub async fn chat_send(
     };
 
     // --- Phase 2: worktree + system prompt (no DB lock) ---
-    let repo_path = Path::new(&detail.repo_path);
+    let local_path_str = detail.local_path.as_deref().ok_or_else(|| {
+        crate::error::AppError::Chat(
+            "Chat requires a local clone. Link one in the Repositories section.".into(),
+        )
+    })?;
+    let repo_path = Path::new(local_path_str);
     let head_sha = detail
         .target
         .head_sha
@@ -458,16 +463,16 @@ pub fn chat_clear(review_id: i64, db: State<Db>) -> AppResult<()> {
     let conn = db.0.lock().unwrap();
 
     // Grab worktree + repo paths before deleting so we can clean up.
-    let paths: Option<(Option<String>, String)> = conn
+    let paths: Option<(Option<String>, Option<String>)> = conn
         .query_row(
-            "SELECT c.worktree_path, r.path
+            "SELECT c.worktree_path, r.local_path
              FROM chat c
              JOIN review rv ON rv.id = c.review_id
              JOIN target t ON t.id = rv.target_id
              JOIN repository r ON r.id = t.repo_id
              WHERE c.review_id = ?1",
             params![review_id],
-            |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, String>(1)?)),
+            |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, Option<String>>(1)?)),
         )
         .optional()?;
 
@@ -475,7 +480,7 @@ pub fn chat_clear(review_id: i64, db: State<Db>) -> AppResult<()> {
     drop(conn);
 
     // Best-effort worktree cleanup — errors are silently ignored.
-    if let Some((Some(worktree_path), repo_path)) = paths {
+    if let Some((Some(worktree_path), Some(repo_path))) = paths {
         let repo = std::path::Path::new(&repo_path);
         let wt = std::path::Path::new(&worktree_path);
         if wt != repo {

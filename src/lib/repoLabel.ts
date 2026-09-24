@@ -6,5 +6,8 @@ export function repoLabel(repo: Repository): string {
   if (repo.remote_owner && repo.remote_name) {
     return `${repo.remote_owner}/${repo.remote_name}`;
   }
-  return repo.path.split("/").filter(Boolean).pop() ?? repo.path;
+  if (repo.local_path) {
+    return repo.local_path.split("/").filter(Boolean).pop() ?? repo.local_path;
+  }
+  return "unknown";
 }

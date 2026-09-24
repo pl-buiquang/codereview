@@ -34,6 +34,7 @@ type PersistedSettings = Pick<
   | "defaultThreeDot"
   | "botLogins"
   | "repoStripPrefixes"
+  | "repoBasePaths"
   | "prListPollMs"
   | "inboxPollMs"
   | "chatModel"
@@ -52,6 +53,8 @@ interface SettingsState {
   botLogins: string;
   /** Comma-separated prefixes stripped from repo names shown in the inbox. */
   repoStripPrefixes: string;
+  /** Comma-separated base directories where local git clones live (e.g. "~/projects"). */
+  repoBasePaths: string;
   /** PR-list auto-refresh interval in ms; 0 = off. */
   prListPollMs: number;
   /** Inbox auto-refresh interval in ms; 0 = off. */
@@ -67,6 +70,7 @@ interface SettingsState {
   setDefaultThreeDot: (b: boolean) => void;
   setBotLogins: (s: string) => void;
   setRepoStripPrefixes: (s: string) => void;
+  setRepoBasePaths: (s: string) => void;
   setPrListPollMs: (ms: number) => void;
   setInboxPollMs: (ms: number) => void;
   setChatModel: (s: string) => void;
@@ -83,6 +87,7 @@ export const useSettingsStore = create<SettingsState>()(
       defaultThreeDot: true,
       botLogins: "",
       repoStripPrefixes: "",
+      repoBasePaths: "~/projects",
       prListPollMs: 0,
       inboxPollMs: 0,
       chatModel: "",
@@ -94,6 +99,7 @@ export const useSettingsStore = create<SettingsState>()(
       setDefaultThreeDot: (defaultThreeDot) => set({ defaultThreeDot }),
       setBotLogins: (botLogins) => set({ botLogins }),
       setRepoStripPrefixes: (repoStripPrefixes) => set({ repoStripPrefixes }),
+      setRepoBasePaths: (repoBasePaths) => set({ repoBasePaths }),
       setPrListPollMs: (prListPollMs) => set({ prListPollMs }),
       setInboxPollMs: (inboxPollMs) => set({ inboxPollMs }),
       setChatModel: (chatModel) => set({ chatModel }),
@@ -101,7 +107,7 @@ export const useSettingsStore = create<SettingsState>()(
     }),
     {
       name: "codereview-settings",
-      version: 4,
+      version: 5,
       partialize: (s) => ({
         direction: s.direction,
         mode: s.mode,
@@ -110,6 +116,7 @@ export const useSettingsStore = create<SettingsState>()(
         defaultThreeDot: s.defaultThreeDot,
         botLogins: s.botLogins,
         repoStripPrefixes: s.repoStripPrefixes,
+        repoBasePaths: s.repoBasePaths,
         prListPollMs: s.prListPollMs,
         inboxPollMs: s.inboxPollMs,
         chatModel: s.chatModel,
@@ -129,6 +136,7 @@ export const useSettingsStore = create<SettingsState>()(
           defaultThreeDot: (p.defaultThreeDot as boolean) ?? true,
           botLogins: (p.botLogins as string) ?? "",
           repoStripPrefixes: (p.repoStripPrefixes as string) ?? "",
+          repoBasePaths: (p.repoBasePaths as string) ?? "~/projects",
           prListPollMs: (p.prListPollMs as number) ?? 0,
           inboxPollMs: (p.inboxPollMs as number) ?? 0,
           chatModel: (p.chatModel as string) ?? "",
@@ -138,6 +146,14 @@ export const useSettingsStore = create<SettingsState>()(
     },
   ),
 );
+
+/** Parse the configured repository base paths. */
+export function parseRepoBasePaths(raw: string): string[] {
+  return raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
 
 /** Parse the configured bot logins into a lowercased set. */
 export function parseBotLogins(raw: string): Set<string> {

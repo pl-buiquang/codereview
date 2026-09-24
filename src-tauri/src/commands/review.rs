@@ -35,21 +35,19 @@ fn get_repository(conn: &Connection, id: i64) -> AppResult<Repository> {
     .map_err(Into::into)
 }
 
-/// Find a repository row for a GitHub `owner/name`, preferring a real local clone
-/// over a clone-less sentinel row, and creating a sentinel row when neither
-/// exists. This lets inbox PRs be reviewed without first adding the repo. A
-/// remote-only row stores `path = "github:{owner}/{name}"`.
+/// Find a repository row for a GitHub `owner/name`, creating a remote-only row
+/// when neither exists. The partial unique index on (remote_owner, remote_name)
+/// guarantees at most one row per remote. Attempts auto-link from base_paths
+/// before inserting, so new rows may already have a local_path set.
 pub fn get_or_create_remote_repository(
     conn: &Connection,
     owner: &str,
     name: &str,
+    base_paths: &[String],
 ) -> AppResult<Repository> {
     let existing: Option<i64> = conn
         .query_row(
-            "SELECT id FROM repository
-             WHERE remote_owner = ?1 AND remote_name = ?2
-             ORDER BY (path LIKE 'github:%') ASC
-             LIMIT 1",
+            "SELECT id FROM repository WHERE remote_owner = ?1 AND remote_name = ?2",
             params![owner, name],
             |r| r.get(0),
         )
@@ -57,55 +55,49 @@ pub fn get_or_create_remote_repository(
     if let Some(id) = existing {
         return get_repository(conn, id);
     }
-    let sentinel = format!("github:{owner}/{name}");
+    // Auto-link: try to discover a local clone under configured base paths.
+    let auto_path = crate::commands::repo::resolve_local_path(owner, name, base_paths);
+    let default_branch = auto_path
+        .as_deref()
+        .and_then(|p| git::default_branch(std::path::Path::new(p)));
     conn.execute(
-        "INSERT INTO repository (path, remote_owner, remote_name, default_branch, added_at)
-         VALUES (?1, ?2, ?3, NULL, ?4)",
-        params![sentinel, owner, name, now()],
+        "INSERT INTO repository (local_path, remote_owner, remote_name, default_branch, added_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![auto_path, owner, name, default_branch, now()],
     )?;
     get_repository(conn, conn.last_insert_rowid())
 }
 
 /// The `gh` invocation context for a repository: a local clone when one is on
 /// disk, otherwise a clone-less remote context resolved from `owner/name`.
-fn gh_ctx_for_repo(conn: &Connection, repo_id: i64) -> AppResult<GhRepo> {
-    let (path, owner, name): (String, Option<String>, Option<String>) = conn.query_row(
-        "SELECT path, remote_owner, remote_name FROM repository WHERE id = ?1",
-        params![repo_id],
-        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-    )?;
-    match path.strip_prefix("github:") {
-        Some(rest) => {
-            // Prefer the stored remote columns; fall back to parsing the sentinel.
-            let (owner, name) = match (owner, name) {
-                (Some(o), Some(n)) => (o, n),
-                _ => rest
-                    .split_once('/')
-                    .map(|(o, n)| (o.to_string(), n.to_string()))
-                    .ok_or_else(|| AppError::Other("remote-only repo missing owner/name".into()))?,
-            };
+pub(crate) fn gh_ctx_for_repo(conn: &Connection, repo_id: i64) -> AppResult<GhRepo> {
+    let (local_path, owner, name): (Option<String>, Option<String>, Option<String>) =
+        conn.query_row(
+            "SELECT local_path, remote_owner, remote_name FROM repository WHERE id = ?1",
+            params![repo_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )?;
+    match local_path {
+        Some(path) => Ok(GhRepo::Local(PathBuf::from(path))),
+        None => {
+            let owner = owner
+                .ok_or_else(|| AppError::Other("repo has no local clone or GitHub remote".into()))?;
+            let name = name
+                .ok_or_else(|| AppError::Other("repo has no local clone or GitHub remote".into()))?;
             Ok(GhRepo::Remote { owner, name })
         }
-        None => Ok(GhRepo::Local(PathBuf::from(path))),
     }
 }
 
-/// The GitHub owner/name of a repository, if it has one: the stored remote
-/// columns, else parsed from the clone-less `github:owner/name` path sentinel.
+/// The GitHub owner/name of a repository, if it has one.
 /// None for purely local repos (callers skip GitHub-API work gracefully).
 fn repo_owner_name(conn: &Connection, repo_id: i64) -> AppResult<Option<(String, String)>> {
-    let (path, owner, name): (String, Option<String>, Option<String>) = conn.query_row(
-        "SELECT path, remote_owner, remote_name FROM repository WHERE id = ?1",
+    let (owner, name): (Option<String>, Option<String>) = conn.query_row(
+        "SELECT remote_owner, remote_name FROM repository WHERE id = ?1",
         params![repo_id],
-        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        |r| Ok((r.get(0)?, r.get(1)?)),
     )?;
-    if let (Some(o), Some(n)) = (owner, name) {
-        return Ok(Some((o, n)));
-    }
-    Ok(path
-        .strip_prefix("github:")
-        .and_then(|rest| rest.split_once('/'))
-        .map(|(o, n)| (o.to_string(), n.to_string())))
+    Ok(owner.zip(name))
 }
 
 fn get_review_row(conn: &Connection, id: i64) -> AppResult<Review> {
@@ -303,12 +295,14 @@ fn refresh_target_shas(db: &Db, target: &Target) -> AppResult<FreshnessResult> {
         _ => {
             let repo_path = {
                 let conn = db.0.lock().unwrap();
-                let path: String = conn.query_row(
-                    "SELECT path FROM repository WHERE id = ?1",
+                let local_path: Option<String> = conn.query_row(
+                    "SELECT local_path FROM repository WHERE id = ?1",
                     params![target.repo_id],
                     |r| r.get(0),
                 )?;
-                path
+                local_path.ok_or_else(|| {
+                    AppError::Other("refresh requires a local clone for local targets".into())
+                })?
             };
             let repo = Path::new(&repo_path);
             let base_sha =
@@ -457,7 +451,7 @@ fn reanchor_pass(
         }
     }
 
-    let is_remote = detail.repo_path.starts_with("github:");
+    let is_remote = detail.local_path.is_none();
     let mut compare_cache: std::collections::HashMap<String, Vec<ComparedFile>> =
         std::collections::HashMap::new();
 
@@ -483,8 +477,9 @@ fn reanchor_pass(
                 .find(|f| &f.filename == file_path)
                 .and_then(|f| f.patch.clone())
         } else {
+            let local = detail.local_path.as_deref().unwrap();
             Some(git::diff_shas_path(
-                Path::new(&detail.repo_path),
+                Path::new(local),
                 pinned_sha,
                 current,
                 file_path,
@@ -597,13 +592,22 @@ pub fn create_review_impl(
 #[tauri::command]
 pub fn create_review(
     repo_id: i64,
-    repo_path: String,
     base_ref: String,
     head_ref: String,
     three_dot: bool,
     db: State<Db>,
 ) -> AppResult<Review> {
     let conn = db.0.lock().unwrap();
+    let local_path: Option<String> = conn
+        .query_row(
+            "SELECT local_path FROM repository WHERE id = ?1",
+            params![repo_id],
+            |r| r.get(0),
+        )
+        .map_err(AppError::from)?;
+    let repo_path = local_path.ok_or_else(|| {
+        AppError::Other("creating a local review requires a local clone".into())
+    })?;
     create_review_impl(&conn, repo_id, &repo_path, &base_ref, &head_ref, three_dot)
 }
 
@@ -616,10 +620,11 @@ pub fn create_review_for_pr_impl(
     owner: &str,
     name: &str,
     pr_number: i64,
+    base_paths: &[String],
 ) -> AppResult<Review> {
     let (repo_id, ctx) = {
         let conn = db.0.lock().unwrap();
-        let repo = get_or_create_remote_repository(&conn, owner, name)?;
+        let repo = get_or_create_remote_repository(&conn, owner, name, base_paths)?;
         let ctx = gh_ctx_for_repo(&conn, repo.id)?;
         (repo.id, ctx)
     };
@@ -637,9 +642,10 @@ pub fn create_review_for_pr(
     owner: String,
     name: String,
     pr_number: i64,
+    base_paths: Vec<String>,
     db: State<Db>,
 ) -> AppResult<Review> {
-    create_review_for_pr_impl(&db, &owner, &name, pr_number)
+    create_review_for_pr_impl(&db, &owner, &name, pr_number, &base_paths)
 }
 
 /// The diff for a review's target: GitHub PR diff via `gh`, or a local
@@ -655,12 +661,17 @@ pub fn review_diff_impl(conn: &Connection, review_id: i64) -> AppResult<String> 
             let ctx = gh_ctx_for_repo(conn, detail.target.repo_id)?;
             provider_for().pr_diff(&ctx, number)
         }
-        _ => git::diff(
-            std::path::Path::new(&detail.repo_path),
-            &detail.target.base_ref,
-            &detail.target.head_ref,
-            detail.target.three_dot,
-        ),
+        _ => {
+            let local_path = detail.local_path.as_deref().ok_or_else(|| {
+                AppError::Other("local diff requires a local clone".into())
+            })?;
+            git::diff(
+                std::path::Path::new(local_path),
+                &detail.target.base_ref,
+                &detail.target.head_ref,
+                detail.target.three_dot,
+            )
+        }
     }
 }
 
@@ -720,8 +731,8 @@ pub fn file_source(
 
     // Remote-only (clone-less) PR targets have no local blob, so skip the
     // guaranteed-to-fail `git show` and go straight to the GitHub contents API.
-    if !detail.repo_path.starts_with("github:") {
-        let repo = std::path::Path::new(&detail.repo_path);
+    if let Some(ref path) = detail.local_path {
+        let repo = std::path::Path::new(path);
         // Local commit is fastest and works for local targets and PRs that are
         // checked out; for PRs whose commit isn't local, fall through to the API.
         match git::show_file(repo, &sha, &file_path) {
@@ -772,7 +783,7 @@ pub fn list_reviews_impl(conn: &Connection, repo_id: Option<i64>) -> AppResult<V
     for review in reviews {
         let target = get_target(conn, review.target_id)?;
         let (repo_id_v, label): (i64, String) = conn.query_row(
-            "SELECT id, COALESCE(remote_owner || '/' || remote_name, path) FROM repository WHERE id = ?1",
+            "SELECT id, COALESCE(remote_owner || '/' || remote_name, local_path, 'unknown') FROM repository WHERE id = ?1",
             params![target.repo_id],
             |r| Ok((r.get(0)?, r.get(1)?)),
         )?;
@@ -798,10 +809,10 @@ pub fn list_reviews(repo_id: Option<i64>, db: State<Db>) -> AppResult<Vec<Review
     list_reviews_impl(&conn, repo_id)
 }
 
-/// Human-friendly repo label: `owner/name` if known, else the path.
+/// Human-friendly repo label: `owner/name` if known, else the local path.
 pub fn repo_label(conn: &Connection, repo_id: i64) -> AppResult<String> {
     conn.query_row(
-        "SELECT COALESCE(remote_owner || '/' || remote_name, path) FROM repository WHERE id = ?1",
+        "SELECT COALESCE(remote_owner || '/' || remote_name, local_path, 'unknown') FROM repository WHERE id = ?1",
         params![repo_id],
         |r| r.get(0),
     )
@@ -812,9 +823,9 @@ pub fn repo_label(conn: &Connection, repo_id: i64) -> AppResult<String> {
 pub fn load_detail(conn: &Connection, review_id: i64) -> AppResult<ReviewDetail> {
     let review = get_review_row(conn, review_id)?;
     let target = get_target(conn, review.target_id)?;
-    let (repo_path, remote_owner, remote_name): (String, Option<String>, Option<String>) = conn
-        .query_row(
-            "SELECT path, remote_owner, remote_name FROM repository WHERE id = ?1",
+    let (local_path, remote_owner, remote_name): (Option<String>, Option<String>, Option<String>) =
+        conn.query_row(
+            "SELECT local_path, remote_owner, remote_name FROM repository WHERE id = ?1",
             params![target.repo_id],
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )?;
@@ -838,7 +849,7 @@ pub fn load_detail(conn: &Connection, review_id: i64) -> AppResult<ReviewDetail>
     Ok(ReviewDetail {
         review,
         target,
-        repo_path,
+        local_path,
         remote_owner,
         remote_name,
         comments,
@@ -1734,7 +1745,7 @@ mod tests {
     /// Insert a repository row and return its id.
     fn seed_repo(conn: &Connection, owner: Option<&str>, name: Option<&str>) -> i64 {
         conn.execute(
-            "INSERT INTO repository (path, remote_owner, remote_name, default_branch, added_at)
+            "INSERT INTO repository (local_path, remote_owner, remote_name, default_branch, added_at)
              VALUES ('/repo', ?1, ?2, 'main', 'now')",
             params![owner, name],
         )
@@ -1925,10 +1936,10 @@ mod tests {
             Some(("owner".into(), "repo".into()))
         );
 
-        // Clone-less sentinel path with NULL columns parses owner/name.
+        // Remote-only row with remote columns set returns owner/name.
         conn.execute(
-            "INSERT INTO repository (path, default_branch, added_at)
-             VALUES ('github:acme/widget', 'main', 'now')",
+            "INSERT INTO repository (remote_owner, remote_name, default_branch, added_at)
+             VALUES ('acme', 'widget', 'main', 'now')",
             [],
         )
         .unwrap();
@@ -1940,7 +1951,7 @@ mod tests {
 
         // Purely local repo has no GitHub identity.
         conn.execute(
-            "INSERT INTO repository (path, default_branch, added_at)
+            "INSERT INTO repository (local_path, default_branch, added_at)
              VALUES ('/local/only', 'main', 'now')",
             [],
         )
@@ -2552,17 +2563,17 @@ mod tests {
             .map(|c| (c.file_path.as_str(), c.line))
             .collect();
         assert_eq!(order, vec![("a.rs", 2), ("a.rs", 5), ("b.rs", 10)]);
-        assert_eq!(detail.repo_path, "/repo");
+        assert_eq!(detail.local_path.as_deref(), Some("/repo"));
     }
 
     #[test]
-    fn repo_label_prefers_owner_name_then_path() {
+    fn repo_label_prefers_owner_name_then_local_path() {
         let conn = open_memory();
         let with_remote = seed_repo(&conn, Some("acme"), Some("widget"));
         assert_eq!(repo_label(&conn, with_remote).unwrap(), "acme/widget");
 
         conn.execute(
-            "INSERT INTO repository (path, added_at) VALUES ('/only/path', 'now')",
+            "INSERT INTO repository (local_path, added_at) VALUES ('/only/path', 'now')",
             [],
         )
         .unwrap();
@@ -2571,31 +2582,30 @@ mod tests {
     }
 
     #[test]
-    fn remote_repository_creates_sentinel_then_reuses_local_clone() {
+    fn remote_repository_creates_remote_only_then_reuses() {
         let conn = open_memory();
 
-        // No matching row yet: a clone-less sentinel row is created.
-        let r1 = get_or_create_remote_repository(&conn, "acme", "widget").unwrap();
-        assert_eq!(r1.path, "github:acme/widget");
+        // No matching row yet: a remote-only row (local_path = NULL) is created.
+        let r1 = get_or_create_remote_repository(&conn, "acme", "widget", &[]).unwrap();
+        assert!(r1.local_path.is_none(), "should be remote-only");
         assert_eq!(r1.remote_owner.as_deref(), Some("acme"));
         let ctx = gh_ctx_for_repo(&conn, r1.id).unwrap();
         assert!(matches!(ctx, GhRepo::Remote { .. }));
 
         // Calling again reuses the same row (no duplicate).
-        let r2 = get_or_create_remote_repository(&conn, "acme", "widget").unwrap();
+        let r2 = get_or_create_remote_repository(&conn, "acme", "widget", &[]).unwrap();
         assert_eq!(r1.id, r2.id);
 
-        // Once a real local clone is added for that remote, it is preferred and
-        // the context becomes Local.
+        // When add_repository_impl is called with a matching remote, it merges
+        // the local path into the existing remote-only row (same id, local_path set).
         conn.execute(
-            "INSERT INTO repository (path, remote_owner, remote_name, added_at)
-             VALUES ('/clones/widget', 'acme', 'widget', 'now')",
-            [],
+            "UPDATE repository SET local_path = '/clones/widget' WHERE id = ?1",
+            params![r1.id],
         )
         .unwrap();
-        let local_id = conn.last_insert_rowid();
-        let r3 = get_or_create_remote_repository(&conn, "acme", "widget").unwrap();
-        assert_eq!(r3.id, local_id, "should prefer the local clone over the sentinel");
+        let r3 = get_or_create_remote_repository(&conn, "acme", "widget", &[]).unwrap();
+        assert_eq!(r3.id, r1.id, "should reuse the same row");
+        assert_eq!(r3.local_path.as_deref(), Some("/clones/widget"));
         assert!(matches!(gh_ctx_for_repo(&conn, r3.id).unwrap(), GhRepo::Local(_)));
     }
 
@@ -2666,7 +2676,7 @@ mod tests {
                 three_dot: true,
                 created_at: "now".into(),
             },
-            repo_path: "/repo".into(),
+            local_path: Some("/repo".into()),
             remote_owner: Some("owner".into()),
             remote_name: Some("name".into()),
             comments,
@@ -3221,7 +3231,7 @@ mod tests {
     /// Insert a repository row pointing at `path` and return its id.
     fn seed_repo_at(conn: &Connection, path: &str) -> i64 {
         conn.execute(
-            "INSERT INTO repository (path, default_branch, added_at) VALUES (?1, 'main', 'now')",
+            "INSERT INTO repository (local_path, default_branch, added_at) VALUES (?1, 'main', 'now')",
             params![path],
         )
         .unwrap();

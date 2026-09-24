@@ -5,6 +5,7 @@ export interface Binding {
 
 /** Single source of truth for the help overlay. Order = display order. */
 export const BINDINGS: Binding[] = [
+  { keys: ["⌘/Ctrl + P"], description: "Quick access — search reviews" },
   { keys: ["⌘/Ctrl + W"], description: "Close current tab" },
   { keys: ["]", "["], description: "Next / previous file" },
   { keys: ["n", "p"], description: "Next / previous comment thread" },
@@ -22,6 +23,17 @@ export function isEditableTarget(target: EventTarget | null): boolean {
   return (
     target instanceof Element &&
     target.closest("input, textarea, select, [contenteditable]") != null
+  );
+}
+
+export function isCommandPaletteShortcut(
+  event: Pick<KeyboardEvent, "key" | "ctrlKey" | "metaKey" | "altKey" | "shiftKey">,
+): boolean {
+  return (
+    (event.ctrlKey || event.metaKey) &&
+    !event.altKey &&
+    !event.shiftKey &&
+    event.key.toLowerCase() === "p"
   );
 }
 

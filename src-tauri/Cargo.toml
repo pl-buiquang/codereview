@@ -41,6 +41,7 @@ base64 = "0.22"
 clap = { version = "4", features = ["derive", "env"] }
 url = "2"
 open = "5"
+dirs = "5"
 
 [[bin]]
 name = "cr"

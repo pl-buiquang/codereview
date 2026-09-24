@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { useUIStore, type Tab } from "../store";
@@ -40,9 +41,11 @@ function useTabLabel(tab: Tab, repos: Repository[]): string {
 
 function TabContextMenu({
   tab,
+  anchorRect,
   onClose,
 }: {
   tab: Tab;
+  anchorRect: DOMRect;
   onClose: () => void;
 }) {
   const closeTab = useUIStore((s) => s.closeTab);
@@ -64,8 +67,19 @@ function TabContextMenu({
     };
   }, [onClose]);
 
-  return (
-    <div className="tab-context-menu" ref={ref} onClick={(e) => e.stopPropagation()}>
+  return createPortal(
+    <div
+      className="tab-context-menu"
+      ref={ref}
+      style={{ position: "fixed", top: anchorRect.bottom + 2, left: anchorRect.left }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      {tab.kind === "review" && tab.reviewId != null && (
+        <>
+          <div className="tab-context-id">Review #{tab.reviewId}</div>
+          <div className="tab-context-sep" />
+        </>
+      )}
       {link && (
         <button
           className="tab-context-item"
@@ -95,7 +109,8 @@ function TabContextMenu({
           </button>
         </>
       )}
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -105,7 +120,8 @@ function TabItem({ tab, repos }: { tab: Tab; repos: Repository[] }) {
   const closeTab = useUIStore((s) => s.closeTab);
   const moveTab = useUIStore((s) => s.moveTab);
   const [dragOver, setDragOver] = useState(false);
-  const [contextOpen, setContextOpen] = useState(false);
+  const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
+  const tabRef = useRef<HTMLDivElement>(null);
 
   // The home tab is pinned: it can't be dragged or accept a drop before it.
   const draggable = tab.kind !== "home";
@@ -117,15 +133,15 @@ function TabItem({ tab, repos }: { tab: Tab; repos: Repository[] }) {
 
   return (
     <div
+      ref={tabRef}
       className={`tab tab-${tab.kind} ${isActive ? "active" : ""} ${
         dragOver ? "drag-over" : ""
       }`}
-      style={{ position: "relative" }}
       onClick={() => setActiveTab(tab.id)}
       onContextMenu={(e) => {
         if (!hasContextMenu) return;
         e.preventDefault();
-        setContextOpen(true);
+        setAnchorRect(tabRef.current?.getBoundingClientRect() ?? null);
       }}
       onAuxClick={(e) => {
         if (e.button === 1 && tab.kind !== "home") {
@@ -137,7 +153,7 @@ function TabItem({ tab, repos }: { tab: Tab; repos: Repository[] }) {
         // Suppress the middle-click autoscroll cursor.
         if (e.button === 1) e.preventDefault();
       }}
-      title={label}
+      title={tab.kind === "review" && tab.reviewId != null ? `${label} (#${tab.reviewId})` : label}
       draggable={draggable}
       onDragStart={(e) => {
         e.dataTransfer.setData("text/plain", tab.id);
@@ -179,8 +195,8 @@ function TabItem({ tab, repos }: { tab: Tab; repos: Repository[] }) {
           </button>
         </>
       )}
-      {contextOpen && (
-        <TabContextMenu tab={tab} onClose={() => setContextOpen(false)} />
+      {anchorRect && (
+        <TabContextMenu tab={tab} anchorRect={anchorRect} onClose={() => setAnchorRect(null)} />
       )}
     </div>
   );

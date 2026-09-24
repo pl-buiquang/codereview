@@ -35,6 +35,7 @@ export type IconName =
   | "sort"
   | "upload"
   | "link"
+  | "search"
   | "dot";
 
 const STROKE: Record<Exclude<IconName, "dot">, ReactNode> = {
@@ -147,6 +148,12 @@ const STROKE: Record<Exclude<IconName, "dot">, ReactNode> = {
   sort: <path d="M4.5 3v10M4.5 13 2.5 11M4.5 13l2-2M11.5 13V3M11.5 3l-2 2M11.5 3l2 2" />,
   upload: <path d="M8 10V3M8 3 5.5 5.5M8 3l2.5 2.5M3 12.5h10" />,
   link: <path d="M6 4.5H5a3.5 3.5 0 0 0 0 7h1m4-7h1a3.5 3.5 0 0 1 0 7h-1M5.5 8h5" />,
+  search: (
+    <>
+      <circle cx="7" cy="7" r="4" />
+      <path d="m10 10 3.5 3.5" />
+    </>
+  ),
 };
 
 export function Icon({

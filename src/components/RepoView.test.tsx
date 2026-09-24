@@ -13,10 +13,10 @@ const createReviewForPr = vi.fn();
 vi.mock("../lib/api", () => ({
   api: {
     listReviews: (id: number | null) => listReviews(id),
-    listBranches: (p: string) => listBranches(p),
+    listBranches: (id: number) => listBranches(id),
     ghAuthStatus: () => ghAuthStatus(),
-    listPrs: (p: string) => listPrs(p),
-    createReviewForPr: (o: string, n: string, num: number) => createReviewForPr(o, n, num),
+    listPrs: (id: number) => listPrs(id),
+    createReviewForPr: (o: string, n: string, num: number, paths: string[]) => createReviewForPr(o, n, num, paths),
   },
 }));
 
@@ -26,7 +26,7 @@ import type { PrSummary, Repository } from "../lib/types";
 
 const repo: Repository = {
   id: 1,
-  path: "/home/me/projects/widget",
+  local_path: "/home/me/projects/widget",
   remote_owner: "acme",
   remote_name: "widget",
   default_branch: "main",

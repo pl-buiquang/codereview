@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Repository {
     pub id: i64,
-    pub path: String,
+    pub local_path: Option<String>,
     pub remote_owner: Option<String>,
     pub remote_name: Option<String>,
     pub default_branch: Option<String>,
@@ -15,12 +15,16 @@ impl Repository {
     pub fn from_row(row: &Row) -> rusqlite::Result<Self> {
         Ok(Self {
             id: row.get("id")?,
-            path: row.get("path")?,
+            local_path: row.get("local_path")?,
             remote_owner: row.get("remote_owner")?,
             remote_name: row.get("remote_name")?,
             default_branch: row.get("default_branch")?,
             added_at: row.get("added_at")?,
         })
+    }
+
+    pub fn has_local_clone(&self) -> bool {
+        self.local_path.is_some()
     }
 }
 
@@ -204,7 +208,7 @@ impl Comment {
 pub struct ReviewDetail {
     pub review: Review,
     pub target: Target,
-    pub repo_path: String,
+    pub local_path: Option<String>,
     /// GitHub `owner`/`name` of the target's repo, if it has a remote — used to
     /// build the PR's web URL for the "Open PR" action.
     pub remote_owner: Option<String>,

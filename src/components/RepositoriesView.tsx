@@ -6,11 +6,13 @@ import { repoLabel } from "../lib/repoLabel";
 import { useUIStore } from "../store";
 import type { Repository } from "../lib/types";
 import { Icon } from "./icons";
+import { useSettingsStore, parseRepoBasePaths } from "../lib/settings";
 
 export function RepositoriesView() {
   const queryClient = useQueryClient();
   const openRepoTab = useUIStore((s) => s.openRepoTab);
   const closeTab = useUIStore((s) => s.closeTab);
+  const repoBasePaths = useSettingsStore((s) => s.repoBasePaths);
 
   const reposQuery = useQuery({
     queryKey: ["repositories"],
@@ -47,13 +49,48 @@ export function RepositoriesView() {
     },
   });
 
+  const linkPath = useMutation({
+    mutationFn: async (repoId: number) => {
+      const path = await pickFolder();
+      if (!path) return null;
+      return api.linkLocalPath(repoId, path);
+    },
+    onSuccess: (repo) => {
+      if (repo) {
+        queryClient.invalidateQueries({ queryKey: ["repositories"] });
+        toast.success(`Linked local clone for ${repoLabel(repo)}`);
+      }
+    },
+    onError: (err) => toast.error(`Could not link path:\n${String(err)}`),
+  });
+
+  const autoLink = useMutation({
+    mutationFn: () => api.autoLinkRepos(parseRepoBasePaths(repoBasePaths)),
+    onSuccess: (count) => {
+      queryClient.invalidateQueries({ queryKey: ["repositories"] });
+      toast.success(count > 0 ? `Auto-linked ${count} repo${count === 1 ? "" : "s"}` : "No new repos to auto-link");
+    },
+    onError: (err) => toast.error(`Auto-link failed:\n${String(err)}`),
+  });
+
   const repos = reposQuery.data ?? [];
+  const hasRemoteOnly = repos.some((r) => !r.local_path);
 
   return (
     <section className="cr-main">
       <header className="cr-pagehead">
         <h1 className="cr-h1">Repositories</h1>
         <div className="cr-spacer" />
+        {hasRemoteOnly && (
+          <button
+            className="btn btn-sm"
+            onClick={() => autoLink.mutate()}
+            disabled={autoLink.isPending}
+            title="Scan base paths and link local clones to remote-only repos"
+          >
+            {autoLink.isPending ? "Scanning…" : "Auto-link"}
+          </button>
+        )}
         <button className="btn btn-primary" onClick={() => addRepo.mutate()} disabled={addRepo.isPending}>
           <Icon name="plus" size={13} /> {addRepo.isPending ? "Adding…" : "Add repo"}
         </button>
@@ -71,10 +108,22 @@ export function RepositoriesView() {
             </span>
             <div className="repo-row-main">
               <span className="repo-row-name">{repoLabel(repo)}</span>
-              <span className="repo-row-path" title={repo.path}>
-                {repo.path}
+              <span className="repo-row-path" title={repo.local_path ?? undefined}>
+                {repo.local_path ?? <em className="muted">No local clone</em>}
               </span>
             </div>
+            {!repo.local_path && (
+              <button
+                className="btn btn-sm"
+                title="Link a local clone for this repo"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  linkPath.mutate(repo.id);
+                }}
+              >
+                Link
+              </button>
+            )}
             <button
               className="btn-icon"
               title="Remove repository"

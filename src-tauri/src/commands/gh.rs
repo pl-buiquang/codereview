@@ -1,10 +1,9 @@
-use std::path::PathBuf;
-
 use base64::{engine::general_purpose::STANDARD, Engine};
 use serde::Serialize;
+use tauri::State;
 
+use crate::db::Db;
 use crate::error::AppResult;
-use crate::gh::GhRepo;
 use crate::provider::provider_for;
 use crate::{gh, tools};
 
@@ -14,8 +13,10 @@ pub fn gh_auth_status() -> bool {
 }
 
 #[tauri::command]
-pub fn list_prs(repo_path: String) -> AppResult<Vec<gh::PrSummary>> {
-    provider_for().list_prs(&GhRepo::Local(PathBuf::from(repo_path)))
+pub fn list_prs(repo_id: i64, db: State<Db>) -> AppResult<Vec<gh::PrSummary>> {
+    let conn = db.0.lock().unwrap();
+    let ctx = crate::commands::review::gh_ctx_for_repo(&conn, repo_id)?;
+    provider_for().list_prs(&ctx)
 }
 
 /// `async` so Tauri runs the slow `gh` GraphQL call off the main (UI) thread,

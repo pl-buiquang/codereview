@@ -59,22 +59,19 @@ pub fn export_review(
 
 /// Export the review to `.vscode/reviews/r{review_id}.json` inside the local
 /// repo checkout, in the format the VSCode Code Review plugin expects. Only
-/// available for locally-cloned repos (path must not start with "github:").
+/// available for locally-cloned repos.
 /// Returns the written file path on success.
 #[tauri::command]
 pub fn export_vscode_review(review_id: i64, db: State<Db>) -> AppResult<String> {
     let conn = db.0.lock().unwrap();
     let detail = load_detail(&conn, review_id)?;
-    if detail.repo_path.starts_with("github:") {
-        return Err(AppError::Other(
-            "VSCode export requires a locally-cloned repository".into(),
-        ));
-    }
-    let repo_path = Path::new(&detail.repo_path);
+    let local_path = detail.local_path.as_deref().ok_or_else(|| {
+        AppError::Other("VSCode export requires a locally-cloned repository".into())
+    })?;
+    let repo_path = Path::new(local_path);
     if !repo_path.is_dir() {
         return Err(AppError::Other(format!(
-            "Repository path not found on disk: {}",
-            detail.repo_path
+            "Repository path not found on disk: {local_path}"
         )));
     }
     let value = export::render_vscode(&detail, repo_path);
@@ -174,17 +171,16 @@ fn find_or_create_repo(conn: &Connection, label: &str) -> AppResult<i64> {
         if let Some(id) = existing {
             return Ok(id);
         }
-        let sentinel = format!("github:{owner}/{name}");
         let ts = Utc::now().to_rfc3339();
         conn.execute(
-            "INSERT INTO repository (path, remote_owner, remote_name, added_at) VALUES (?1, ?2, ?3, ?4)",
-            params![sentinel, owner, name, ts],
+            "INSERT INTO repository (local_path, remote_owner, remote_name, added_at) VALUES (NULL, ?1, ?2, ?3)",
+            params![owner, name, ts],
         )?;
         return Ok(conn.last_insert_rowid());
     }
     let existing: Option<i64> = conn
         .query_row(
-            "SELECT id FROM repository WHERE path = ?1 LIMIT 1",
+            "SELECT id FROM repository WHERE local_path = ?1 LIMIT 1",
             params![label],
             |r| r.get(0),
         )
@@ -194,7 +190,7 @@ fn find_or_create_repo(conn: &Connection, label: &str) -> AppResult<i64> {
     }
     let ts = Utc::now().to_rfc3339();
     conn.execute(
-        "INSERT INTO repository (path, added_at) VALUES (?1, ?2)",
+        "INSERT INTO repository (local_path, added_at) VALUES (?1, ?2)",
         params![label, ts],
     )?;
     Ok(conn.last_insert_rowid())
@@ -316,7 +312,7 @@ mod tests {
     /// Seed a minimal repo → local target → draft review, returning the review id.
     fn seed_review(conn: &rusqlite::Connection) -> i64 {
         conn.execute(
-            "INSERT INTO repository (path, remote_owner, remote_name, added_at)
+            "INSERT INTO repository (local_path, remote_owner, remote_name, added_at)
              VALUES ('/repo', 'owner', 'name', 'now')",
             [],
         )
@@ -446,8 +442,8 @@ mod tests {
     fn import_reuses_existing_repo() {
         let conn = open_memory();
         conn.execute(
-            "INSERT INTO repository (path, remote_owner, remote_name, added_at)
-             VALUES ('github:owner/name', 'owner', 'name', 'now')",
+            "INSERT INTO repository (local_path, remote_owner, remote_name, added_at)
+             VALUES (NULL, 'owner', 'name', 'now')",
             [],
         )
         .unwrap();

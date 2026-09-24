@@ -7,10 +7,12 @@ import { RepoView } from "./components/RepoView";
 import { ReviewView } from "./components/ReviewView";
 import { Toaster } from "./components/Toaster";
 import { ConfirmDialog } from "./components/ConfirmDialog";
+import { CommandPalette } from "./components/CommandPalette";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { SettingsView } from "./components/SettingsView";
 import { api } from "./lib/api";
-import { isCloseTabShortcut } from "./lib/keyboard";
+import { isCloseTabShortcut, isCommandPaletteShortcut } from "./lib/keyboard";
+import { toggleCommandPalette } from "./lib/commandPalette";
 import { useApplySettings } from "./lib/useApplySettings";
 import { useDeepLinkListener } from "./lib/deepLink";
 import { useUIStore, type Tab } from "./store";
@@ -66,6 +68,16 @@ function App() {
     return registerCloseTabKeydown();
   }, []);
 
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!isCommandPaletteShortcut(e)) return;
+      e.preventDefault();
+      toggleCommandPalette();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   const reposQuery = useQuery({
     queryKey: ["repositories"],
     queryFn: api.listRepositories,
@@ -97,6 +109,7 @@ function App() {
       <TabPanes />
       <Toaster />
       <ConfirmDialog />
+      <CommandPalette />
     </div>
   );
 }

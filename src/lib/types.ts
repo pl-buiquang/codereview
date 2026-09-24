@@ -1,6 +1,6 @@
 export interface Repository {
   id: number;
-  path: string;
+  local_path: string | null;
   remote_owner: string | null;
   remote_name: string | null;
   default_branch: string | null;
@@ -68,7 +68,7 @@ export interface Comment {
 export interface ReviewDetail {
   review: Review;
   target: Target;
-  repo_path: string;
+  local_path: string | null;
   remote_owner: string | null;
   remote_name: string | null;
   comments: Comment[];

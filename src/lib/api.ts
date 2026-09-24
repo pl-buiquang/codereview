@@ -26,15 +26,14 @@ export const api = {
   listRepositories: () => invoke<Repository[]>("list_repositories"),
   addRepository: (path: string) => invoke<Repository>("add_repository", { path }),
   removeRepository: (id: number) => invoke<void>("remove_repository", { id }),
-  listBranches: (repoPath: string) =>
-    invoke<Branch[]>("list_branches", { repoPath }),
-  diffRefs: (repoPath: string, base: string, head: string, threeDot: boolean) =>
-    invoke<string>("diff_refs", { repoPath, base, head, threeDot }),
+  listBranches: (repoId: number) =>
+    invoke<Branch[]>("list_branches", { repoId }),
+  diffRefs: (repoId: number, base: string, head: string, threeDot: boolean) =>
+    invoke<string>("diff_refs", { repoId, base, head, threeDot }),
 
   // Reviews
   createReview: (args: {
     repoId: number;
-    repoPath: string;
     baseRef: string;
     headRef: string;
     threeDot: boolean;
@@ -75,7 +74,7 @@ export const api = {
   // GitHub
   ghAuthStatus: () => invoke<boolean>("gh_auth_status"),
   checkEnvironment: () => invoke<ToolEnv>("check_environment"),
-  listPrs: (repoPath: string) => invoke<PrSummary[]>("list_prs", { repoPath }),
+  listPrs: (repoId: number) => invoke<PrSummary[]>("list_prs", { repoId }),
   prMeta: (owner: string, name: string, number: number) =>
     invoke<PrMeta>("pr_meta", { owner, name, number }),
   prReviewThreads: (owner: string, name: string, number: number) =>
@@ -84,8 +83,8 @@ export const api = {
     invoke<number>("reply_to_thread", { owner, name, number, commentId, body }),
   setPrThreadResolved: (threadId: string, resolved: boolean) =>
     invoke<boolean>("set_pr_thread_resolved", { threadId, resolved }),
-  createReviewForPr: (owner: string, name: string, prNumber: number) =>
-    invoke<Review>("create_review_for_pr", { owner, name, prNumber }),
+  createReviewForPr: (owner: string, name: string, prNumber: number, basePaths: string[] = []) =>
+    invoke<Review>("create_review_for_pr", { owner, name, prNumber, basePaths }),
   publishReview: (reviewId: number) => invoke<Review>("publish_review", { reviewId }),
   publishReviewPending: (reviewId: number) =>
     invoke<Review>("publish_review_pending", { reviewId }),
@@ -105,8 +104,12 @@ export const api = {
   unengageItem: (id: string) => invoke<void>("unengage_item", { id }),
   untrackItem: (id: string) => invoke<void>("untrack_item", { id }),
   retrackItem: (id: string) => invoke<void>("retrack_item", { id }),
-  openPrReview: (itemId: string, owner: string, name: string, number: number) =>
-    invoke<Review>("open_pr_review", { itemId, owner, name, number }),
+  openPrReview: (itemId: string, owner: string, name: string, number: number, basePaths: string[] = []) =>
+    invoke<Review>("open_pr_review", { itemId, owner, name, number, basePaths }),
+  linkLocalPath: (repoId: number, path: string) =>
+    invoke<Repository>("link_local_path", { repoId, path }),
+  autoLinkRepos: (basePaths: string[]) =>
+    invoke<number>("auto_link_repos", { basePaths }),
 
   // Images
   fetchGithubImage: (url: string) =>

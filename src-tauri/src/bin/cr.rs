@@ -336,10 +336,15 @@ fn run(cmd: Cmd, json: bool, db: &Db) -> AppResult<()> {
                         "repository {repo_id} not found"
                     ))
                 })?;
+                let repo_path = repo_row.local_path.as_deref().ok_or_else(|| {
+                    codereview_lib::error::AppError::Other(
+                        "creating a local review requires a local clone".into(),
+                    )
+                })?;
                 let r = review::create_review_impl(
                     &conn,
                     repo_id,
-                    &repo_row.path,
+                    repo_path,
                     &base_ref,
                     &head_ref,
                     three_dot,
@@ -355,7 +360,13 @@ fn run(cmd: Cmd, json: bool, db: &Db) -> AppResult<()> {
                 name,
                 number,
             } => {
-                let r = review::create_review_for_pr_impl(db, &owner, &name, number)?;
+                let base_paths: Vec<String> = std::env::var("CODEREVIEW_BASE_PATHS")
+                    .unwrap_or_default()
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+                let r = review::create_review_for_pr_impl(db, &owner, &name, number, &base_paths)?;
                 if json {
                     println!("{}", serde_json::to_string_pretty(&r)?);
                 } else {
@@ -483,13 +494,14 @@ fn run(cmd: Cmd, json: bool, db: &Db) -> AppResult<()> {
                         println!("No repositories registered.");
                         return Ok(());
                     }
-                    println!("{:<6} {:<20} {:<50}", "ID", "REMOTE", "PATH");
+                    println!("{:<6} {:<20} {:<50}", "ID", "REMOTE", "LOCAL PATH");
                     for r in &repos {
                         let remote = match (&r.remote_owner, &r.remote_name) {
                             (Some(o), Some(n)) => format!("{o}/{n}"),
                             _ => "-".into(),
                         };
-                        println!("{:<6} {:<20} {:<50}", r.id, remote, r.path);
+                        let path = r.local_path.as_deref().unwrap_or("(remote-only)");
+                        println!("{:<6} {:<20} {:<50}", r.id, remote, path);
                     }
                 }
             }
@@ -499,7 +511,7 @@ fn run(cmd: Cmd, json: bool, db: &Db) -> AppResult<()> {
                 if json {
                     println!("{}", serde_json::to_string_pretty(&r)?);
                 } else {
-                    println!("Added repository #{} ({})", r.id, r.path);
+                    println!("Added repository #{} ({})", r.id, r.local_path.as_deref().unwrap_or("remote-only"));
                 }
             }
             RepoAction::Remove { id } => {

@@ -3,6 +3,7 @@ import { useEffect } from "react";
 import { useUIStore, type HomeSection } from "../store";
 import { api } from "./api";
 import { toast } from "./toast";
+import { parseRepoBasePaths, useSettingsStore } from "./settings";
 
 type DeepLinkAction =
   | { kind: "openReview"; review_id: number }
@@ -21,7 +22,8 @@ export async function handleDeepLinkAction(action: DeepLinkAction): Promise<void
       break;
 
     case "openPr": {
-      const review = await api.createReviewForPr(action.owner, action.name, action.number);
+      const basePaths = parseRepoBasePaths(useSettingsStore.getState().repoBasePaths);
+      const review = await api.createReviewForPr(action.owner, action.name, action.number, basePaths);
       openReview(review.id);
       break;
     }
@@ -33,9 +35,12 @@ export async function handleDeepLinkAction(action: DeepLinkAction): Promise<void
         toast.error(`Repository #${action.repo_id} not found`);
         return;
       }
+      if (!repo.local_path) {
+        toast.error(`Repository #${action.repo_id} has no local clone; cannot create a virtual PR diff`);
+        return;
+      }
       const review = await api.createReview({
         repoId: action.repo_id,
-        repoPath: repo.path,
         baseRef: action.base_ref,
         headRef: action.head_ref,
         threeDot: action.three_dot,

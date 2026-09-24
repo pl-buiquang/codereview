@@ -31,12 +31,12 @@ describe("api command wrappers", () => {
     await api.removeRepository(7);
     expect(invoke).toHaveBeenCalledWith("remove_repository", { id: 7 });
 
-    await api.listBranches("/repo");
-    expect(invoke).toHaveBeenCalledWith("list_branches", { repoPath: "/repo" });
+    await api.listBranches(1);
+    expect(invoke).toHaveBeenCalledWith("list_branches", { repoId: 1 });
 
-    await api.diffRefs("/repo", "main", "feature", true);
+    await api.diffRefs(1, "main", "feature", true);
     expect(invoke).toHaveBeenCalledWith("diff_refs", {
-      repoPath: "/repo",
+      repoId: 1,
       base: "main",
       head: "feature",
       threeDot: true,
@@ -46,7 +46,6 @@ describe("api command wrappers", () => {
   it("passes review args objects straight through", async () => {
     const args = {
       repoId: 1,
-      repoPath: "/repo",
       baseRef: "main",
       headRef: "feat",
       threeDot: false,
@@ -75,14 +74,15 @@ describe("api command wrappers", () => {
     await api.checkEnvironment();
     expect(invoke).toHaveBeenCalledWith("check_environment");
 
-    await api.listPrs("/repo");
-    expect(invoke).toHaveBeenCalledWith("list_prs", { repoPath: "/repo" });
+    await api.listPrs(1);
+    expect(invoke).toHaveBeenCalledWith("list_prs", { repoId: 1 });
 
-    await api.createReviewForPr("acme", "widget", 42);
+    await api.createReviewForPr("acme", "widget", 42, []);
     expect(invoke).toHaveBeenCalledWith("create_review_for_pr", {
       owner: "acme",
       name: "widget",
       prNumber: 42,
+      basePaths: [],
     });
 
     await api.publishReview(9);

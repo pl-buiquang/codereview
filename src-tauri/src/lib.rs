@@ -101,6 +101,8 @@ pub fn run() {
             commands::repo::remove_repository,
             commands::repo::list_branches,
             commands::repo::diff_refs,
+            commands::repo::link_local_path,
+            commands::repo::auto_link_repos,
             commands::review::create_review,
             commands::review::list_reviews,
             commands::review::get_review,
