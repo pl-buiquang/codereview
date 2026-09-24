@@ -47,7 +47,7 @@ export function GithubThread({
   });
 
   return (
-    <div className="github-thread">
+    <div className="github-thread" data-thread-id={thread.id}>
       <div className="github-thread-header">
         <span className="github-thread-mark" title="From GitHub (read-only)">
           GitHub

@@ -382,6 +382,7 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
           controlRef={jumpListRef}
           paneCollapsed={sidebarCollapsed}
           onToggle={toggleSidebar}
+          threads={threadsQuery.data ?? []}
         />
         <div className="diff-area" ref={diffAreaRef}>
           {searchOpen && (
@@ -1733,6 +1734,8 @@ export function LineWidget({
   onSaved: () => void;
   onCommentsChanged: () => void;
 }) {
+  if (threads.length === 0 && !composerOpen) return null;
+
   return (
     <div className="line-widget">
       {threads.map((t) => (
@@ -1826,7 +1829,7 @@ export function ThreadItem({
   }
 
   return (
-    <div className="comment-thread">
+    <div className="comment-thread" data-comment-id={root.id}>
       {isResolved && (
         <button
           className="resolved-collapse"

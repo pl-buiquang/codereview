@@ -11,7 +11,10 @@ import { useQuery } from "@tanstack/react-query";
 import { parseDiff } from "react-diff-view";
 import { api } from "../lib/api";
 import { countChanges, fileDisplayPath } from "../lib/diff";
+import { summaryLine } from "../lib/text";
+import { timeAgo } from "../lib/timeAgo";
 import type { JumpListHandle } from "../lib/keyboard";
+import type { PrThread } from "../lib/types";
 import { Icon } from "./icons";
 
 interface Row {
@@ -94,18 +97,46 @@ function Chevron({ open }: { open: boolean }) {
   );
 }
 
+type ResolutionFilter = "all" | "unresolved" | "resolved";
+type SourceFilter = "all" | "draft" | "published" | "github";
+type SortMode = "file" | "time";
+
+interface ReplyEntry {
+  key: string;
+  body: string;
+  createdAt: string;
+  source: "draft" | "published" | "github";
+}
+
+interface DisplayItem {
+  key: string;
+  filePath: string;
+  line: number | null;
+  startLine: number | null;
+  isFileLevel: boolean;
+  body: string;
+  isResolved: boolean;
+  createdAt: string;
+  source: "draft" | "published" | "github";
+  scrollId: string;
+  scrollAttr: "comment-id" | "thread-id";
+  replies: ReplyEntry[];
+}
+
 export function FileJumpList({
   reviewId,
   scrollRootRef,
   controlRef,
   paneCollapsed,
   onToggle,
+  threads = [],
 }: {
   reviewId: number;
   scrollRootRef: RefObject<HTMLElement | null>;
   controlRef?: MutableRefObject<JumpListHandle | null>;
   paneCollapsed?: boolean;
   onToggle?: () => void;
+  threads?: PrThread[];
 }) {
   const detailQuery = useQuery({
     queryKey: ["review", reviewId],
@@ -302,6 +333,205 @@ export function FileJumpList({
       ];
     });
 
+  // ── Comments tab ──────────────────────────────────────────────
+  const [activeTab, setActiveTab] = useState<"files" | "comments">("files");
+  const [resolutionFilter, setResolutionFilter] = useState<ResolutionFilter>("all");
+  const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
+  const [sortMode, setSortMode] = useState<SortMode>("file");
+
+  const allComments = detail?.comments ?? [];
+
+  const displayItems = useMemo((): DisplayItem[] => {
+    const items: DisplayItem[] = [];
+
+    // Build reply map for local comments
+    const repliesByParent = new Map<number, typeof allComments>();
+    for (const c of allComments) {
+      if (c.parent_id != null) {
+        const arr = repliesByParent.get(c.parent_id) ?? [];
+        arr.push(c);
+        repliesByParent.set(c.parent_id, arr);
+      }
+    }
+
+    // Local root comments
+    for (const c of allComments) {
+      if (c.parent_id != null) continue;
+      const rawReplies = repliesByParent.get(c.id) ?? [];
+      rawReplies.sort(
+        (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+      );
+      items.push({
+        key: `local:${c.id}`,
+        filePath: c.file_path,
+        line: c.line,
+        startLine: c.start_line,
+        isFileLevel: c.subject_type === "file",
+        body: c.body,
+        isResolved: c.resolved_at != null,
+        createdAt: c.created_at,
+        source: c.github_comment_id != null ? "published" : "draft",
+        scrollId: String(c.id),
+        scrollAttr: "comment-id",
+        replies: rawReplies.map((r) => ({
+          key: `local-reply:${r.id}`,
+          body: r.body,
+          createdAt: r.created_at,
+          source: r.github_comment_id != null ? ("published" as const) : ("draft" as const),
+        })),
+      });
+    }
+
+    // GitHub PR threads (first comment is the root)
+    for (const t of threads) {
+      if (!t.path || t.comments.length === 0) continue;
+      const [root, ...rest] = t.comments;
+      items.push({
+        key: `github:${t.id}`,
+        filePath: t.path,
+        line: t.line,
+        startLine: t.startLine,
+        isFileLevel: t.subjectType === "FILE",
+        body: root.body,
+        isResolved: t.isResolved,
+        createdAt: root.createdAt,
+        source: "github",
+        scrollId: t.id,
+        scrollAttr: "thread-id",
+        replies: rest.map((r) => ({
+          key: `gh-reply:${r.id}`,
+          body: r.body,
+          createdAt: r.createdAt,
+          source: "github" as const,
+        })),
+      });
+    }
+
+    return items;
+  }, [allComments, threads]);
+
+  const filteredItems = useMemo(() => {
+    return displayItems.filter((item) => {
+      if (resolutionFilter === "unresolved" && item.isResolved) return false;
+      if (resolutionFilter === "resolved" && !item.isResolved) return false;
+      if (sourceFilter !== "all" && item.source !== sourceFilter) return false;
+      return true;
+    });
+  }, [displayItems, resolutionFilter, sourceFilter]);
+
+  const scrollToItem = (item: DisplayItem) => {
+    const root = scrollRootRef.current;
+    if (!root) return;
+    const attr = item.scrollAttr === "comment-id" ? "data-comment-id" : "data-thread-id";
+    const el = root.querySelector<HTMLElement>(`[${attr}="${item.scrollId}"]`);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      el.classList.add("kb-flash");
+      setTimeout(() => el.classList.remove("kb-flash"), 900);
+    } else {
+      // Comment is inside a collapsed (viewed) file — scroll to its file header
+      const fileIdx = rows.findIndex((r) => r.path === item.filePath);
+      if (fileIdx >= 0) jumpTo(fileIdx);
+    }
+  };
+
+  const renderThread = (item: DisplayItem) => {
+    const loc = item.isFileLevel
+      ? "File"
+      : item.line == null
+        ? "—"
+        : item.startLine != null && item.startLine !== item.line
+          ? `L${item.startLine}–${item.line}`
+          : `L${item.line}`;
+    return (
+      <div key={item.key} className={`comment-list-thread${item.isResolved ? " resolved" : ""}`}>
+        <button
+          type="button"
+          className="comment-list-row"
+          onClick={() => scrollToItem(item)}
+          title={`${item.filePath}${item.line != null ? `:${item.line}` : ""}`}
+        >
+          <span className="comment-list-loc">{loc}</span>
+          <span className="comment-list-body">{summaryLine(item.body)}</span>
+          <span className="comment-list-meta">
+            {item.source === "github" && (
+              <span className="comment-list-source-gh">GH</span>
+            )}
+            {item.isResolved && (
+              <Icon name="check" size={11} className="comment-list-resolved-icon" />
+            )}
+            <span className="comment-list-time">{timeAgo(item.createdAt)}</span>
+          </span>
+        </button>
+        {item.replies.map((r) => (
+          <button
+            key={r.key}
+            type="button"
+            className="comment-list-reply"
+            onClick={() => scrollToItem(item)}
+            title={r.body}
+          >
+            <span className="comment-list-reply-body">{summaryLine(r.body)}</span>
+            {r.source === "github" && (
+              <span className="comment-list-source-gh">GH</span>
+            )}
+            <span className="comment-list-time">{timeAgo(r.createdAt)}</span>
+          </button>
+        ))}
+      </div>
+    );
+  };
+
+  const renderCommentList = (): ReactNode => {
+    if (filteredItems.length === 0) {
+      return (
+        <p className="comment-list-empty">
+          {displayItems.length === 0 ? "No comments yet." : "No matching comments."}
+        </p>
+      );
+    }
+
+    if (sortMode === "time") {
+      const sorted = [...filteredItems].sort(
+        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+      );
+      return sorted.map(renderThread);
+    }
+
+    // Group by file, ordered by file index in the diff
+    const pathOrder = new Map(rows.map((r) => [r.path, r.index]));
+    const groups = new Map<string, DisplayItem[]>();
+    for (const item of filteredItems) {
+      const arr = groups.get(item.filePath) ?? [];
+      arr.push(item);
+      groups.set(item.filePath, arr);
+    }
+    const sortedPaths = [...groups.keys()].sort((a, b) => {
+      const ai = pathOrder.get(a) ?? Infinity;
+      const bi = pathOrder.get(b) ?? Infinity;
+      return ai !== bi ? ai - bi : a.localeCompare(b);
+    });
+
+    return sortedPaths.map((path) => {
+      const groupItems = (groups.get(path) ?? []).sort((a, b) => {
+        if (a.isFileLevel && !b.isFileLevel) return -1;
+        if (!a.isFileLevel && b.isFileLevel) return 1;
+        return (a.line ?? 0) - (b.line ?? 0);
+      });
+      const fileName = path.split("/").pop() ?? path;
+      return (
+        <div key={path} className="comment-list-group">
+          <div className="comment-list-file" title={path}>
+            {fileName}
+          </div>
+          {groupItems.map(renderThread)}
+        </div>
+      );
+    });
+  };
+
+  const hasGithubThreads = threads.length > 0;
+
   return (
     <nav className={`jump-list${paneCollapsed ? " jump-list--collapsed" : ""}`}>
       {paneCollapsed ? (
@@ -314,19 +544,83 @@ export function FileJumpList({
         </button>
       ) : (
         <>
-          <div className="jump-list-header">
-            <span>Files ({rows.length})</span>
+          <div className="sidebar-tabs">
+            <button
+              type="button"
+              className={`sidebar-tab${activeTab === "files" ? " active" : ""}`}
+              onClick={() => setActiveTab("files")}
+            >
+              Files ({rows.length})
+            </button>
+            <button
+              type="button"
+              className={`sidebar-tab${activeTab === "comments" ? " active" : ""}`}
+              onClick={() => setActiveTab("comments")}
+            >
+              Comments ({displayItems.length})
+            </button>
             {onToggle && (
               <button
                 className="btn btn-sm btn-ghost sidebar-toggle"
-                title="Hide file list (b)"
+                title="Hide sidebar (b)"
                 onClick={onToggle}
               >
                 <Icon name="x" size={12} />
               </button>
             )}
           </div>
-          {renderNodes(tree, 0)}
+
+          {activeTab === "files" ? (
+            <div className="jump-list-content">
+              {renderNodes(tree, 0)}
+            </div>
+          ) : (
+            <>
+              <div className="comment-filters">
+                <div className="comment-filter-group">
+                  {(["all", "unresolved", "resolved"] as ResolutionFilter[]).map((f) => (
+                    <button
+                      key={f}
+                      type="button"
+                      className={`comment-filter-btn${resolutionFilter === f ? " active" : ""}`}
+                      onClick={() => setResolutionFilter(f)}
+                    >
+                      {f === "all" ? "All" : f === "unresolved" ? "Open" : "Resolved"}
+                    </button>
+                  ))}
+                </div>
+                {hasGithubThreads && (
+                  <div className="comment-filter-group">
+                    {(["all", "draft", "published", "github"] as SourceFilter[]).map((s) => (
+                      <button
+                        key={s}
+                        type="button"
+                        className={`comment-filter-btn${sourceFilter === s ? " active" : ""}`}
+                        onClick={() => setSourceFilter(s)}
+                      >
+                        {s === "all" ? "All" : s === "draft" ? "Draft" : s === "published" ? "Pub" : "GH"}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <div className="comment-filter-group">
+                  {(["file", "time"] as SortMode[]).map((s) => (
+                    <button
+                      key={s}
+                      type="button"
+                      className={`comment-filter-btn${sortMode === s ? " active" : ""}`}
+                      onClick={() => setSortMode(s)}
+                    >
+                      {s === "file" ? "By file" : "By time"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="jump-list-content">
+                {renderCommentList()}
+              </div>
+            </>
+          )}
         </>
       )}
     </nav>

@@ -1480,12 +1480,15 @@ td.diff-code {
 
 /* Read-only GitHub review threads (distinct from local .line-widget/.comment-item) */
 .github-thread {
-  margin: 6px 0;
   padding: 8px 12px;
-  border: 1px solid var(--border);
-  border-left: 2px solid var(--accent-border);
-  border-radius: var(--radius-m);
   background: var(--surface-2);
+  border-left: 2px solid var(--accent-border);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+/* Avoid double border when a local .line-widget sits immediately above */
+.line-widget + .github-thread {
+  border-top: none;
 }
 .github-thread-header {
   display: flex;
@@ -2254,21 +2257,48 @@ tr.search-current {
 .jump-list {
   flex: 0 0 248px;
   min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--border);
+}
+.jump-list-content {
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 1px;
   padding: 4px 8px 12px;
-  border-right: 1px solid var(--border);
 }
-.jump-list-header {
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--text-2);
-  padding-left: 8px;
+.sidebar-tabs {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+  padding: 0 4px 0 8px;
+}
+.sidebar-tab {
+  flex: 1;
+  padding: 6px 4px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-3);
+  cursor: pointer;
+  text-align: center;
+  white-space: nowrap;
+  margin-bottom: -1px;
+}
+.sidebar-tab:hover {
+  color: var(--text-2);
+}
+.sidebar-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
 }
 .jump-list--collapsed {
   flex: 0 0 36px;
@@ -2490,6 +2520,154 @@ tr.search-current {
   border-radius: 999px;
   background: var(--accent-soft);
   color: var(--accent);
+}
+
+/* ── Comment list (sidebar Comments tab) ────────────────────── */
+.comment-filters {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 8px;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+}
+.comment-filter-group {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+.comment-filter-btn {
+  padding: 1px 7px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-s);
+  background: transparent;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-3);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.comment-filter-btn:hover {
+  color: var(--text-2);
+  background: var(--surface-2);
+}
+.comment-filter-btn.active {
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+.comment-list-empty {
+  padding: 16px 0;
+  font-size: 12px;
+  color: var(--text-3);
+  text-align: center;
+}
+.comment-list-group {
+  display: flex;
+  flex-direction: column;
+}
+.comment-list-file {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-3);
+  padding: 8px 0 2px;
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.comment-list-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  min-height: 24px;
+  padding: 3px 0 3px 4px;
+  border: none;
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--text-2);
+  font-size: 11.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.comment-list-row:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.comment-list-thread {
+  display: flex;
+  flex-direction: column;
+}
+.comment-list-thread.resolved {
+  opacity: 0.45;
+}
+.comment-list-reply {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  min-height: 20px;
+  padding: 2px 0 2px 20px;
+  border: none;
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--text-3);
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+.comment-list-reply:hover {
+  background: var(--surface-2);
+  color: var(--text-2);
+}
+.comment-list-reply-body {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.comment-list-loc {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-3);
+  min-width: 30px;
+}
+.comment-list-body {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.comment-list-meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.comment-list-replies {
+  font-size: 10px;
+  color: var(--text-3);
+}
+.comment-list-source-gh {
+  font-size: 9px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  letter-spacing: 0.04em;
+  color: var(--on-accent);
+  background: var(--accent);
+  padding: 0 4px;
+  border-radius: 3px;
+}
+.comment-list-time {
+  font-size: 10px;
+  color: var(--text-3);
+}
+.comment-list-resolved-icon {
+  color: var(--success);
 }
 
 /* ===================== Dashboard (home tab) ===================== */
