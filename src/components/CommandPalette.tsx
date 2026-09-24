@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { useCommandPaletteStore } from "../lib/commandPalette";
 import { searchPalette, type PaletteResult } from "../lib/commandPaletteSearch";
+import { parseRepoBasePaths, useSettingsStore } from "../lib/settings";
 import { timeAgo } from "../lib/timeAgo";
 import { toast } from "../lib/toast";
 import { useUIStore } from "../store";
@@ -18,6 +19,7 @@ function CommandPaletteInner() {
   const hide = useCommandPaletteStore((s) => s.hide);
   const openReview = useUIStore((s) => s.openReview);
   const queryClient = useQueryClient();
+  const repoBasePaths = useSettingsStore((s) => s.repoBasePaths);
 
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
@@ -72,7 +74,7 @@ function CommandPaletteInner() {
     setPending(true);
     hide();
     try {
-      const review = await api.createReviewForPr(result.owner, result.name, result.prNumber);
+      const review = await api.createReviewForPr(result.owner, result.name, result.prNumber, parseRepoBasePaths(repoBasePaths));
       await queryClient.invalidateQueries({ queryKey: ["reviews"] });
       openReview(review.id);
     } catch (e) {
@@ -120,7 +122,7 @@ function CommandPaletteInner() {
             ref={inputRef}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search reviews or type 'repo number'…"
+            placeholder="Search reviews, type 'repo 123', or paste a GitHub PR URL…"
             disabled={pending}
           />
         </div>

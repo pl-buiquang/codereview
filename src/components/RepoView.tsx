@@ -231,13 +231,9 @@ function BranchCompare({ repo }: { repo: Repository }) {
             </button>
           </div>
         </div>
-        <p className="vpr-helper">Pick branches, then “Preview diff” or “Start review”.</p>
       </div>
 
       <div className="diff-area">
-        {!comparison && (
-          <p className="muted">Pick branches, then “Preview diff” or “Start review”.</p>
-        )}
         {comparison && diffQuery.isLoading && <p className="muted">Loading diff…</p>}
         {comparison && diffQuery.isError && (
           <p className="error">Diff failed: {String(diffQuery.error)}</p>

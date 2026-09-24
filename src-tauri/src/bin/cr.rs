@@ -102,11 +102,16 @@ enum CreateTarget {
         #[arg(long)]
         three_dot: bool,
     },
-    /// Create a review for a GitHub PR
+    /// Create a review for a GitHub PR.
+    /// Accepts either a GitHub URL (https://github.com/owner/name/pull/123)
+    /// or three positional args: owner name number.
     Pr {
-        owner: String,
-        name: String,
-        number: i64,
+        /// GitHub PR URL or repo owner
+        owner_or_url: String,
+        /// Repo name (required when not using a URL)
+        name: Option<String>,
+        /// PR number (required when not using a URL)
+        number: Option<i64>,
     },
 }
 
@@ -199,6 +204,23 @@ enum OpenTarget {
     },
     /// Open a raw codereview:// URL
     Url { url: String },
+}
+
+/// Parse a GitHub PR URL into (owner, name, number).
+/// Accepts full URLs: https://github.com/owner/name/pull/123[anything]
+fn parse_github_pr_url(url: &str) -> Option<(String, String, i64)> {
+    let path = url.split("github.com/").nth(1)?;
+    let parts: Vec<&str> = path.splitn(4, '/').collect();
+    if parts.len() >= 4 && parts[2] == "pull" {
+        let number: i64 = parts[3]
+            .split(|c: char| !c.is_ascii_digit())
+            .next()?
+            .parse()
+            .ok()?;
+        Some((parts[0].to_string(), parts[1].to_string(), number))
+    } else {
+        None
+    }
 }
 
 fn main() {
@@ -356,17 +378,37 @@ fn run(cmd: Cmd, json: bool, db: &Db) -> AppResult<()> {
                 }
             }
             CreateTarget::Pr {
-                owner,
+                owner_or_url,
                 name,
                 number,
             } => {
+                let (owner, repo_name, pr_number) =
+                    if owner_or_url.contains("github.com/") {
+                        parse_github_pr_url(&owner_or_url).ok_or_else(|| {
+                            codereview_lib::error::AppError::Other(
+                                format!("could not parse GitHub PR URL: {owner_or_url}"),
+                            )
+                        })?
+                    } else {
+                        let n = name.ok_or_else(|| {
+                            codereview_lib::error::AppError::Other(
+                                "name and number are required when not providing a URL".into(),
+                            )
+                        })?;
+                        let num = number.ok_or_else(|| {
+                            codereview_lib::error::AppError::Other(
+                                "number is required when not providing a URL".into(),
+                            )
+                        })?;
+                        (owner_or_url, n, num)
+                    };
                 let base_paths: Vec<String> = std::env::var("CODEREVIEW_BASE_PATHS")
                     .unwrap_or_default()
                     .split(',')
                     .map(|s| s.trim().to_string())
                     .filter(|s| !s.is_empty())
                     .collect();
-                let r = review::create_review_for_pr_impl(db, &owner, &name, number, &base_paths)?;
+                let r = review::create_review_for_pr_impl(db, &owner, &repo_name, pr_number, &base_paths)?;
                 if json {
                     println!("{}", serde_json::to_string_pretty(&r)?);
                 } else {

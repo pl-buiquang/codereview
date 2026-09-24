@@ -44,6 +44,13 @@ function buildSearchText(s: ReviewSummary): string {
 }
 
 const WORD_NUMBER_RE = /^(\S+)\s+(\d+)$/;
+const GITHUB_PR_RE = /github\.com\/([^/\s]+)\/([^/\s]+)\/pull\/(\d+)/;
+
+function parseGithubPrUrl(q: string): { owner: string; name: string; prNumber: number } | null {
+  const m = GITHUB_PR_RE.exec(q);
+  if (!m) return null;
+  return { owner: m[1], name: m[2], prNumber: parseInt(m[3], 10) };
+}
 
 export function searchPalette(
   query: string,
@@ -114,6 +121,22 @@ export function searchPalette(
         repoLabel: label,
       });
       if (createResults.length >= MAX_CREATES) break;
+    }
+  }
+
+  // GitHub PR URL pasted → always offer to open it (if not already in results)
+  const urlParsed = parseGithubPrUrl(q);
+  if (urlParsed) {
+    const { owner, name, prNumber } = urlParsed;
+    const label = `${owner}/${name}`;
+    const alreadyInReviews = reviewResults.some(
+      (r) => r.repoLabel === label && r.prNumber === prNumber,
+    );
+    const alreadyInCreates = createResults.some(
+      (r) => r.owner === owner && r.name === name && r.prNumber === prNumber,
+    );
+    if (!alreadyInReviews && !alreadyInCreates) {
+      createResults.unshift({ kind: "create-pr", owner, name, prNumber, repoLabel: label });
     }
   }
 
