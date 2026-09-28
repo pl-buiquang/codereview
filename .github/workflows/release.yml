@@ -35,15 +35,19 @@ jobs:
           - platform: macos-latest
             rust-target: aarch64-apple-darwin
             args: --target aarch64-apple-darwin
+            bundle_args: ""
           - platform: macos-latest
             rust-target: x86_64-apple-darwin
             args: --target x86_64-apple-darwin
+            bundle_args: ""
           - platform: windows-latest
             rust-target: ""
             args: ""
+            bundle_args: "--bundles nsis"
           - platform: ubuntu-22.04
             rust-target: ""
             args: ""
+            bundle_args: ""
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
@@ -179,14 +183,8 @@ jobs:
           cp "$SRC" "cr-${TRIPLE}${EXT}"
           echo "CR_ASSET=cr-${TRIPLE}${EXT}" >> "$GITHUB_ENV"
 
-          # Config override that injects externalBin into the Tauri bundle.
-          # On Windows, also restrict targets to nsis — WiX3 (MSI) fails to
-          # bundle external .exe sidecars (light.exe exits non-zero silently).
-          if [[ "$TRIPLE" == *"windows"* ]]; then
-            echo '{"bundle":{"externalBin":["binaries/cr"],"targets":["nsis"]}}' > src-tauri/tauri.sidecar.conf.json
-          else
-            echo '{"bundle":{"externalBin":["binaries/cr"]}}' > src-tauri/tauri.sidecar.conf.json
-          fi
+          # Config override that injects externalBin into the Tauri bundle
+          echo '{"bundle":{"externalBin":["binaries/cr"]}}' > src-tauri/tauri.sidecar.conf.json
 
       - name: Build and upload to draft release
         uses: tauri-apps/tauri-action@v0
@@ -212,7 +210,7 @@ jobs:
             "Run anyway".
           releaseDraft: true
           prerelease: false
-          args: ${{ matrix.args }} --config src-tauri/tauri.sidecar.conf.json
+          args: ${{ matrix.args }} ${{ matrix.bundle_args }} --config src-tauri/tauri.sidecar.conf.json
 
       - name: Upload standalone cr binary to release
         shell: bash
