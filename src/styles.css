@@ -2434,8 +2434,58 @@ tr.search-current {
 .chat-input:disabled {
   opacity: 0.6;
 }
-.chat-input-area .btn {
-  align-self: flex-end;
+.chat-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.chat-toolbar .btn {
+  margin-left: auto;
+}
+.chat-model-select {
+  height: 24px;
+  padding: 0 5px;
+  font-size: 11px;
+  font-family: inherit;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-s);
+  max-width: 84px;
+}
+.chat-mode-toggle {
+  display: inline-flex;
+  padding: 1px;
+  gap: 1px;
+  background: var(--bg-sunken, var(--surface));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-s);
+}
+.chat-mode-toggle button {
+  height: 20px;
+  padding: 0 7px;
+  display: inline-flex;
+  align-items: center;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  border-radius: calc(var(--radius-s) - 1px);
+  color: var(--text-2);
+  font-weight: 600;
+  font-size: 10.5px;
+  cursor: pointer;
+}
+.chat-mode-toggle button:hover:not(:disabled) {
+  color: var(--text);
+}
+.chat-mode-toggle button.active {
+  background: var(--surface-3, var(--surface-2));
+  color: var(--text);
+  box-shadow: var(--shadow-card);
+}
+.chat-mode-toggle button:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 /* Thinking indicator: three pulsing dots */

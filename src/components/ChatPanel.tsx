@@ -2,10 +2,18 @@ import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import type { ChatMessage } from "../lib/types";
+import type { ChatMode } from "../lib/settings";
 import { useSettingsStore } from "../lib/settings";
 import { confirmDialog } from "../lib/confirm";
 import { Icon } from "./icons";
 import { Markdown } from "./Markdown";
+
+const MODEL_OPTIONS: { value: string; label: string }[] = [
+  { value: "", label: "Default" },
+  { value: "sonnet", label: "Sonnet" },
+  { value: "opus", label: "Opus" },
+  { value: "fable", label: "Fable" },
+];
 
 interface ChatPanelProps {
   reviewId: number;
@@ -25,6 +33,9 @@ export function ChatPanel({
 }: ChatPanelProps) {
   const queryClient = useQueryClient();
   const chatModel = useSettingsStore((s) => s.chatModel);
+  const setChatModel = useSettingsStore((s) => s.setChatModel);
+  const chatMode = useSettingsStore((s) => s.chatMode) as ChatMode;
+  const setChatMode = useSettingsStore((s) => s.setChatMode);
   const [input, setInput] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -36,9 +47,11 @@ export function ChatPanel({
   });
 
   const sendMutation = useMutation({
-    mutationFn: (text: string) => api.chatSend(reviewId, text, chatModel || undefined),
+    mutationFn: (text: string) =>
+      api.chatSend(reviewId, text, chatModel || undefined, chatMode === "plan" ? "plan" : undefined),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["chat-messages", reviewId] });
+      queryClient.invalidateQueries({ queryKey: ["review", reviewId] });
     },
   });
 
@@ -213,13 +226,46 @@ export function ChatPanel({
           }}
           rows={3}
         />
-        <button
-          className="btn btn-primary btn-sm"
-          disabled={!input.trim() || busy}
-          onClick={handleSend}
-        >
-          Send
-        </button>
+        <div className="chat-toolbar">
+          <select
+            className="chat-model-select"
+            value={chatModel}
+            onChange={(e) => setChatModel(e.target.value)}
+            disabled={busy}
+            title="Model"
+          >
+            {MODEL_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+          <span className="chat-mode-toggle">
+            <button
+              className={chatMode === "auto" ? "active" : ""}
+              onClick={() => setChatMode("auto")}
+              disabled={busy}
+              title="Auto: Claude can read files and run commands"
+            >
+              Auto
+            </button>
+            <button
+              className={chatMode === "plan" ? "active" : ""}
+              onClick={() => setChatMode("plan")}
+              disabled={busy}
+              title="Plan: read-only analysis, no write actions"
+            >
+              Plan
+            </button>
+          </span>
+          <button
+            className="btn btn-primary btn-sm"
+            disabled={!input.trim() || busy}
+            onClick={handleSend}
+          >
+            Send
+          </button>
+        </div>
       </div>
     </div>
   );

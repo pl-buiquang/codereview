@@ -5,6 +5,7 @@ import type { Direction } from "./themes";
 export type ThemeMode = "dark" | "light" | "system";
 export type ThemeBase = "dark" | "light";
 export type DiffViewType = "split" | "unified";
+export type ChatMode = "auto" | "plan";
 
 export const DEFAULT_DIFF_FONT_SIZE = 12.5;
 
@@ -38,6 +39,7 @@ type PersistedSettings = Pick<
   | "prListPollMs"
   | "inboxPollMs"
   | "chatModel"
+  | "chatMode"
   | "markEdits"
 >;
 
@@ -63,6 +65,8 @@ interface SettingsState {
   markEdits: boolean;
   /** Model passed to `claude -p --model`. Empty = use env default (opus). */
   chatModel: string;
+  /** Permission mode passed to `claude -p --permission-mode`. */
+  chatMode: ChatMode;
   setDirection: (d: Direction) => void;
   setMode: (m: ThemeMode) => void;
   setDiffFontSize: (n: number) => void;
@@ -74,6 +78,7 @@ interface SettingsState {
   setPrListPollMs: (ms: number) => void;
   setInboxPollMs: (ms: number) => void;
   setChatModel: (s: string) => void;
+  setChatMode: (m: ChatMode) => void;
   setMarkEdits: (b: boolean) => void;
 }
 
@@ -91,6 +96,7 @@ export const useSettingsStore = create<SettingsState>()(
       prListPollMs: 0,
       inboxPollMs: 0,
       chatModel: "",
+      chatMode: "auto",
       markEdits: false,
       setDirection: (direction) => set({ direction }),
       setMode: (mode) => set({ mode }),
@@ -103,11 +109,12 @@ export const useSettingsStore = create<SettingsState>()(
       setPrListPollMs: (prListPollMs) => set({ prListPollMs }),
       setInboxPollMs: (inboxPollMs) => set({ inboxPollMs }),
       setChatModel: (chatModel) => set({ chatModel }),
+      setChatMode: (chatMode) => set({ chatMode }),
       setMarkEdits: (markEdits) => set({ markEdits }),
     }),
     {
       name: "codereview-settings",
-      version: 5,
+      version: 6,
       partialize: (s) => ({
         direction: s.direction,
         mode: s.mode,
@@ -120,6 +127,7 @@ export const useSettingsStore = create<SettingsState>()(
         prListPollMs: s.prListPollMs,
         inboxPollMs: s.inboxPollMs,
         chatModel: s.chatModel,
+        chatMode: s.chatMode,
         markEdits: s.markEdits,
       }),
       // v0 (flat: `theme`) and v1 (`themeMode` + theme slots) collapse the same
@@ -140,6 +148,7 @@ export const useSettingsStore = create<SettingsState>()(
           prListPollMs: (p.prListPollMs as number) ?? 0,
           inboxPollMs: (p.inboxPollMs as number) ?? 0,
           chatModel: (p.chatModel as string) ?? "",
+          chatMode: ((p.chatMode as string) === "plan" ? "plan" : "auto") as ChatMode,
           markEdits: (p.markEdits as boolean) ?? false,
         } satisfies PersistedSettings;
       },

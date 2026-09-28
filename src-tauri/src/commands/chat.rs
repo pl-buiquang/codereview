@@ -78,6 +78,7 @@ fn call_claude_turn(
     session_id: &str,
     is_first_turn: bool,
     model: &str,
+    mode: Option<&str>,
     system_prompt: Option<&str>,
     worktree_path: &Path,
     text: &str,
@@ -100,6 +101,10 @@ fn call_claude_turn(
 
     if !model.is_empty() {
         cmd.arg("--model").arg(model);
+    }
+
+    if let Some(m) = mode {
+        cmd.arg("--permission-mode").arg(m);
     }
 
     if is_first_turn {
@@ -200,6 +205,8 @@ fn build_system_prompt(
     head_ref: &str,
     worktree_path: &Path,
     diff_summary: &str,
+    review_id: i64,
+    comments_section: &str,
 ) -> String {
     let repo_label = match (owner, repo_name) {
         (Some(o), Some(n)) => format!("{o}/{n}"),
@@ -237,9 +244,84 @@ Code is checked out at: {worktree_path}
 - When asked about specific lines, read the actual file for full context
 - Use git blame/log to understand the history of changed code when relevant
 - Reference files by their repo-relative path
-- Be concise but thorough",
+- Be concise but thorough
+{comments_section}
+## Review operations (cr CLI)
+You can read and modify this review using the `cr` command-line tool.
+The current review ID is: {review_id}
+
+Reading:
+  cr show {review_id} --json             # full review detail with all comments
+  cr diff {review_id}                    # the diff being reviewed
+
+Adding comments:
+  cr comment add {review_id} --file <path> --line <N> --body \"...\" [--side LEFT|RIGHT]
+  cr comment add-file {review_id} --file <path> --body \"...\"   # file-level comment
+
+Modifying comments:
+  cr comment update <COMMENT_ID> --body \"new text\"
+  cr comment resolve <COMMENT_ID>
+  cr comment unresolve <COMMENT_ID>
+  cr comment delete <COMMENT_ID>",
         worktree_path = worktree_path.display(),
     )
+}
+
+fn format_review_comments(comments: &[crate::db::models::Comment], max_comments: usize) -> String {
+    let roots: Vec<&crate::db::models::Comment> = comments
+        .iter()
+        .filter(|c| c.parent_id.is_none())
+        .take(max_comments)
+        .collect();
+
+    if roots.is_empty() {
+        return String::new();
+    }
+
+    let total_root = comments.iter().filter(|c| c.parent_id.is_none()).count();
+    let mut out = String::from("\n## Existing review comments\n");
+    let mut current_file = "";
+
+    for c in &roots {
+        if c.file_path != current_file {
+            current_file = &c.file_path;
+            out.push_str(&format!("\n### {}\n", current_file));
+        }
+
+        let location = if c.subject_type == "file" {
+            "(file-level)".to_string()
+        } else if let Some(start) = c.start_line {
+            format!("L{}-{} ({})", start, c.line, c.side)
+        } else {
+            format!("L{} ({})", c.line, c.side)
+        };
+
+        let status = if c.resolved_at.is_some() {
+            " [RESOLVED]"
+        } else {
+            ""
+        };
+
+        let body = if c.body.len() > 500 {
+            format!("{}...", &c.body[..500])
+        } else {
+            c.body.clone()
+        };
+
+        out.push_str(&format!(
+            "- {} (id:{}){}:  {}\n",
+            location, c.id, status, body
+        ));
+    }
+
+    if total_root > max_comments {
+        out.push_str(&format!(
+            "\n(Showing {} of {} comments)\n",
+            max_comments, total_root
+        ));
+    }
+
+    out
 }
 
 fn diff_file_summary(diff: &str) -> String {
@@ -274,6 +356,7 @@ pub async fn chat_send(
     review_id: i64,
     text: String,
     model: Option<String>,
+    mode: Option<String>,
     db: State<'_, Db>,
 ) -> AppResult<ChatTurnResult> {
     // --- Phase 1: gather context under DB lock ---
@@ -334,6 +417,7 @@ pub async fn chat_send(
 
     let system_prompt = if is_first_turn {
         let diff_summary = diff_file_summary(&diff);
+        let comments_section = format_review_comments(&detail.comments, 50);
         Some(build_system_prompt(
             &detail.target.title,
             detail.remote_owner.as_deref(),
@@ -343,16 +427,21 @@ pub async fn chat_send(
             &detail.target.head_ref,
             &worktree_path,
             &diff_summary,
+            review_id,
+            &comments_section,
         ))
     } else {
         None
     };
+
+    let mode_str = mode.filter(|m| !m.is_empty());
 
     // --- Phase 3: call claude CLI (no DB lock) ---
     let turn = call_claude_turn(
         &session_id,
         is_first_turn,
         &model,
+        mode_str.as_deref(),
         system_prompt.as_deref(),
         &worktree_path,
         &text,
