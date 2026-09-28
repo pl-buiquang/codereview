@@ -324,6 +324,18 @@ index 0000000..1111111 100644
 +const a = 2;
 `;
 
+// Two deleted lines replaced by two inserted lines (multiline change block).
+const MULTILINE_CHANGE_DIFF = `diff --git a/f.ts b/f.ts
+index 0000000..1111111 100644
+--- a/f.ts
++++ b/f.ts
+@@ -1,2 +1,2 @@
+-const a = 1;
+-const b = 2;
++const a = 10;
++const b = 20;
+`;
+
 // A pure insertion (no paired delete) into a TypeScript file.
 const INSERT_ONLY_TS_DIFF = `diff --git a/f.ts b/f.ts
 index 0000000..1111111 100644
@@ -370,6 +382,14 @@ describe("tokenizeFile", () => {
   it("returns undefined when neither language nor edits apply", () => {
     const [file] = parseDiff(MODIFIED_UNKNOWN_DIFF);
     expect(tokenizeFile(file, { markEditsMaxChanges: 0 })).toBeUndefined();
+  });
+
+  it("skips intra-line marks for multiline change blocks", () => {
+    const [file] = parseDiff(MULTILINE_CHANGE_DIFF);
+    const tokens = tokenizeFile(file);
+    expect(tokens).toBeDefined();
+    expect(tokenTypes(tokens!.new)).not.toContain("edit");
+    expect(tokenTypes(tokens!.old)).not.toContain("edit");
   });
 
   it("adds no edit marks for pure insert/delete blocks", () => {

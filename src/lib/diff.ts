@@ -41,6 +41,39 @@ export function languageForPath(path: string): string | undefined {
 export const MARK_EDITS_MAX_CHANGES = 2000;
 
 /**
+ * Returns a copy of `hunks` where any change block with more than one deleted
+ * line OR more than one inserted line has those changes neutralised to "normal"
+ * type, preventing markEdits from pairing them. Single-line del+ins pairs are
+ * left untouched so they still get intra-line character highlighting.
+ */
+function singleLinePairsHunks(hunks: readonly HunkData[]): HunkData[] {
+  return hunks.map(hunk => {
+    const changes: ChangeData[] = [];
+    let i = 0;
+    while (i < hunk.changes.length) {
+      let j = i;
+      while (j < hunk.changes.length && hunk.changes[j].type === "delete") j++;
+      let k = j;
+      while (k < hunk.changes.length && hunk.changes[k].type === "insert") k++;
+      if (j > i || k > j) {
+        const isMultiLine = j - i > 1 || k - j > 1;
+        for (let x = i; x < k; x++) {
+          changes.push(
+            isMultiLine
+              ? ({ ...hunk.changes[x], type: "normal" } as ChangeData)
+              : hunk.changes[x],
+          );
+        }
+        i = k;
+      } else {
+        changes.push(hunk.changes[i++]);
+      }
+    }
+    return { ...hunk, changes };
+  });
+}
+
+/**
  * Tokens for a file's hunks: syntax highlight (when the language is known)
  * plus word-level intra-line edit marks (when the diff isn't huge), or
  * undefined when neither applies.
@@ -62,7 +95,7 @@ export function tokenizeFile(
     try {
       return tokenize(file.hunks, {
         ...base,
-        enhancers: [markEdits(file.hunks, { type: "block" })],
+        enhancers: [markEdits(singleLinePairsHunks(file.hunks), { type: "block" })],
       });
     } catch {
       // markEdits can throw on odd change blocks; retry highlight-only below.
