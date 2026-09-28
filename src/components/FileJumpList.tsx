@@ -492,9 +492,11 @@ export function FileJumpList({
     }
 
     if (sortMode === "time") {
-      const sorted = [...filteredItems].sort(
-        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-      );
+      const effectiveTime = (item: DisplayItem) => {
+        const last = item.replies[item.replies.length - 1];
+        return new Date(last ? last.createdAt : item.createdAt).getTime();
+      };
+      const sorted = [...filteredItems].sort((a, b) => effectiveTime(b) - effectiveTime(a));
       return sorted.map(renderThread);
     }
 
