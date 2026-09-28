@@ -11,7 +11,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "tauri": "tauri"
+    "tauri": "node scripts/tauri.js"
   },
   "dependencies": {
     "@fontsource/atkinson-hyperlegible": "^5.0.20",

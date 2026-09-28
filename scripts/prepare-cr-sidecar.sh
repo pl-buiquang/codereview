@@ -19,4 +19,3 @@ chmod +x "src-tauri/binaries/cr-${TRIPLE}${EXT}" || true
 echo '{"bundle":{"externalBin":["binaries/cr"]}}' > src-tauri/tauri.sidecar.conf.json
 
 echo "Done → src-tauri/binaries/cr-${TRIPLE}${EXT}"
-echo "Now run: pnpm tauri build -- --config tauri.sidecar.conf.json"
