@@ -50,6 +50,8 @@ export const api = {
     invoke<void>("set_chat_collapsed", { reviewId, collapsed }),
 
   // Chat
+  crInstallNote: () => invoke<string | null>("cr_install_note"),
+
   chatSend: (reviewId: number, text: string, model?: string, mode?: string) =>
     invoke<ChatTurnResult>("chat_send", { reviewId, text, model: model || null, mode: mode || null }),
   chatMessages: (reviewId: number) =>

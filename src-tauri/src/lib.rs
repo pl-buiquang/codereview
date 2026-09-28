@@ -21,6 +21,9 @@ use tauri_plugin_deep_link::DeepLinkExt;
 
 use db::Db;
 
+/// One-time install note for the `cr` CLI sidecar (shown as a frontend toast).
+pub struct CrNote(pub Mutex<Option<String>>);
+
 const CLOSE_TAB_MENU_ID: &str = "close_tab";
 const CLOSE_ACTIVE_TAB_EVENT: &str = "close-active-tab";
 
@@ -40,10 +43,18 @@ fn handle_deep_link_url<R: tauri::Runtime>(app: &tauri::AppHandle<R>, raw_url: &
     }
 }
 
+#[tauri::command]
+fn cr_install_note(note: tauri::State<CrNote>) -> Option<String> {
+    note.0.lock().unwrap().take()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     path_env::ensure_login_path();
-    cr_install::maybe_install();
+    let cr_note = cr_install::maybe_install().map(|r| {
+        let verb = if r.updated { "updated" } else { "installed" };
+        format!("cr CLI {verb} → {}", r.path.display())
+    });
     tools::init();
 
     tauri::Builder::default()
@@ -69,6 +80,7 @@ pub fn run() {
                 let _ = app.emit(CLOSE_ACTIVE_TAB_EVENT, ());
             }
         })
+        .manage(CrNote(Mutex::new(cr_note)))
         .setup(|app| {
             let db_path = match std::env::var_os("CODEREVIEW_DB") {
                 Some(p) => std::path::PathBuf::from(p),
@@ -155,6 +167,7 @@ pub fn run() {
             commands::chat::chat_messages,
             commands::chat::chat_clear,
             commands::chat::set_chat_collapsed,
+            cr_install_note,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

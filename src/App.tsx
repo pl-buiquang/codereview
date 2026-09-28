@@ -11,6 +11,7 @@ import { CommandPalette } from "./components/CommandPalette";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { SettingsView } from "./components/SettingsView";
 import { api } from "./lib/api";
+import { toast } from "./lib/toast";
 import { isCloseTabShortcut, isCommandPaletteShortcut } from "./lib/keyboard";
 import { toggleCommandPalette } from "./lib/commandPalette";
 import { useApplySettings } from "./lib/useApplySettings";
@@ -84,6 +85,14 @@ function App() {
   });
   const repos = reposQuery.data;
   const reposFetching = reposQuery.isFetching;
+
+  // Show a one-time toast when the app installs/updates the bundled cr CLI.
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    api.crInstallNote().then((note) => {
+      if (note) toast.success(note);
+    });
+  }, []);
 
   // Drop repo/review tabs whose repository was removed in a previous session.
   // Only act on a settled list — acting mid-fetch would race a just-added repo
