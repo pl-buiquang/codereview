@@ -43,6 +43,8 @@ export interface Review {
   updated_at: string;
   sidebar_collapsed: boolean;
   chat_collapsed: boolean;
+  left_panel_width: number;
+  right_panel_width: number;
 }
 
 export interface Comment {

@@ -48,6 +48,8 @@ export const api = {
     invoke<void>("set_sidebar_collapsed", { reviewId, collapsed }),
   setChatCollapsed: (reviewId: number, collapsed: boolean) =>
     invoke<void>("set_chat_collapsed", { reviewId, collapsed }),
+  setPanelWidths: (reviewId: number, leftPanelWidth: number, rightPanelWidth: number) =>
+    invoke<void>("set_panel_widths", { reviewId, leftPanelWidth, rightPanelWidth }),
 
   // Chat
   crInstallNote: () => invoke<string | null>("cr_install_note"),

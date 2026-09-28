@@ -884,6 +884,22 @@ pub fn set_file_viewed(
     Ok(())
 }
 
+/// Persist panel widths. UI state — allowed on published reviews.
+#[tauri::command]
+pub fn set_panel_widths(
+    review_id: i64,
+    left_panel_width: i64,
+    right_panel_width: i64,
+    db: State<Db>,
+) -> AppResult<()> {
+    let conn = db.0.lock().unwrap();
+    conn.execute(
+        "UPDATE review SET left_panel_width = ?1, right_panel_width = ?2 WHERE id = ?3",
+        params![left_panel_width, right_panel_width, review_id],
+    )?;
+    Ok(())
+}
+
 /// Persist the sidebar collapsed/expanded state. UI state — allowed on published reviews.
 #[tauri::command]
 pub fn set_sidebar_collapsed(review_id: i64, collapsed: bool, db: State<Db>) -> AppResult<()> {
@@ -2662,6 +2678,8 @@ mod tests {
                 updated_at: "now".into(),
                 sidebar_collapsed: false,
                 chat_collapsed: true,
+                left_panel_width: 248,
+                right_panel_width: 360,
             },
             target: Target {
                 id: 1,

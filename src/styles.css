@@ -2209,11 +2209,33 @@ tr.kb-focus {
 /* --- In-review file jump list --------------------------------------------- */
 .review-body {
   display: flex;
-  gap: 16px;
+  gap: 0;
   align-items: stretch;
   flex: 1;
   min-height: 0;
   overflow: hidden;
+}
+.resize-handle {
+  flex: 0 0 6px;
+  cursor: col-resize;
+  position: relative;
+  z-index: 1;
+  user-select: none;
+}
+.resize-handle::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 1px;
+  height: 100%;
+  background: var(--border);
+  transform: translateX(-50%);
+  transition: background 0.15s;
+}
+.resize-handle:hover::after {
+  background: var(--accent);
+  width: 2px;
 }
 .diff-area {
   flex: 1;
@@ -2261,12 +2283,11 @@ tr.search-current {
   outline-offset: -2px;
 }
 .jump-list {
-  flex: 0 0 248px;
+  flex: 0 0 var(--left-panel-width, 248px);
   min-height: 0;
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  border-right: 1px solid var(--border);
 }
 .jump-list-content {
   flex: 1;
@@ -2325,12 +2346,11 @@ tr.search-current {
 
 /* ── Chat panel ──────────────────────────────────── */
 .chat-panel {
-  flex: 0 0 360px;
+  flex: 0 0 var(--right-panel-width, 360px);
   min-height: 0;
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  border-left: 1px solid var(--border);
 }
 .chat-panel--collapsed {
   flex: 0 0 36px;

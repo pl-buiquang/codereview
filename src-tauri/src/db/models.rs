@@ -75,6 +75,8 @@ pub struct Review {
     pub updated_at: String,
     pub sidebar_collapsed: bool,
     pub chat_collapsed: bool,
+    pub left_panel_width: i64,
+    pub right_panel_width: i64,
 }
 
 impl Review {
@@ -92,6 +94,8 @@ impl Review {
             updated_at: row.get("updated_at")?,
             sidebar_collapsed: row.get::<_, i64>("sidebar_collapsed")? != 0,
             chat_collapsed: row.get::<_, i64>("chat_collapsed")? != 0,
+            left_panel_width: row.get("left_panel_width")?,
+            right_panel_width: row.get("right_panel_width")?,
         })
     }
 }

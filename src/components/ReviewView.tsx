@@ -4,6 +4,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type MutableRefObject,
 } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -84,6 +85,8 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
   const [filePanePath, setFilePanePath] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const [chatCollapsed, setChatCollapsed] = useState(true);
+  const [leftWidth, setLeftWidth] = useState(248);
+  const [rightWidth, setRightWidth] = useState(360);
   const [pendingChatMessage, setPendingChatMessage] = useState<string | null>(null);
   const diffAreaRef = useRef<HTMLDivElement>(null);
 
@@ -127,9 +130,16 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
     if (detailQuery.data) {
       setSidebarCollapsed(detailQuery.data.review.sidebar_collapsed);
       setChatCollapsed(detailQuery.data.review.chat_collapsed);
+      setLeftWidth(detailQuery.data.review.left_panel_width);
+      setRightWidth(detailQuery.data.review.right_panel_width);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [detailQuery.data?.review.sidebar_collapsed, detailQuery.data?.review.chat_collapsed]);
+  }, [
+    detailQuery.data?.review.sidebar_collapsed,
+    detailQuery.data?.review.chat_collapsed,
+    detailQuery.data?.review.left_panel_width,
+    detailQuery.data?.review.right_panel_width,
+  ]);
 
   const toggleSidebar = useCallback(() => {
     setSidebarCollapsed((prev) => {
@@ -146,6 +156,38 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
       return next;
     });
   }, [reviewId]);
+
+  const startResize = useCallback(
+    (side: "left" | "right") => (e: React.MouseEvent) => {
+      e.preventDefault();
+      const startX = e.clientX;
+      const startLeft = leftWidth;
+      const startRight = rightWidth;
+      let finalLeft = startLeft;
+      let finalRight = startRight;
+
+      const onMove = (ev: MouseEvent) => {
+        const delta = ev.clientX - startX;
+        if (side === "left") {
+          finalLeft = Math.max(160, Math.min(500, startLeft + delta));
+          setLeftWidth(finalLeft);
+        } else {
+          finalRight = Math.max(200, Math.min(600, startRight - delta));
+          setRightWidth(finalRight);
+        }
+      };
+
+      const onUp = () => {
+        document.removeEventListener("mousemove", onMove);
+        document.removeEventListener("mouseup", onUp);
+        api.setPanelWidths(reviewId, finalLeft, finalRight);
+      };
+
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", onUp);
+    },
+    [reviewId, leftWidth, rightWidth],
+  );
 
   const sendToChat = useCallback((formattedMsg: string) => {
     setPendingChatMessage(formattedMsg);
@@ -375,7 +417,13 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
         }}
       />
 
-      <div className="review-body">
+      <div
+        className="review-body"
+        style={{
+          "--left-panel-width": `${leftWidth}px`,
+          "--right-panel-width": `${rightWidth}px`,
+        } as CSSProperties}
+      >
         <FileJumpList
           reviewId={reviewId}
           scrollRootRef={diffAreaRef}
@@ -384,6 +432,7 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
           onToggle={toggleSidebar}
           threads={threadsQuery.data ?? []}
         />
+        {!sidebarCollapsed && <div className="resize-handle" onMouseDown={startResize("left")} />}
         <div className="diff-area" ref={diffAreaRef}>
           {searchOpen && (
             <DiffSearchBar
@@ -431,6 +480,7 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
             />
           )}
         </div>
+        {!chatCollapsed && <div className="resize-handle" onMouseDown={startResize("right")} />}
         <ChatPanel
           reviewId={reviewId}
           paneCollapsed={chatCollapsed}

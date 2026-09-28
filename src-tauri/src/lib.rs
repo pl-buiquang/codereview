@@ -126,6 +126,7 @@ pub fn run() {
             commands::review::list_reviews,
             commands::review::get_review,
             commands::review::set_file_viewed,
+            commands::review::set_panel_widths,
             commands::review::set_sidebar_collapsed,
             commands::review::update_review,
             commands::review::delete_review,
