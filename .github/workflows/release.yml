@@ -21,7 +21,7 @@ name: release
 on:
   push:
     tags:
-      - "app-v*"
+      - "[0-9]*.[0-9]*.[0-9]*"
 
 permissions:
   contents: write # create the draft release + upload assets
@@ -48,12 +48,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-tags: true
+          fetch-depth: 0
 
       - name: Check tag matches tauri.conf.json version
         shell: bash
         run: |
-          tag="${GITHUB_REF_NAME#app-v}"   # 0.1.0-rc.1
+          tag="${GITHUB_REF_NAME}"         # 0.1.0-rc.1
           stem="${tag%%-*}"                # 0.1.0
           conf="$(node -p "require('./src-tauri/tauri.conf.json').version")"
           if [ "$stem" != "$conf" ]; then

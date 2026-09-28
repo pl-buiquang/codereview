@@ -21,7 +21,7 @@ fn git_version() -> String {
             "describe",
             "--tags",
             "--match",
-            "app-v*",
+            "[0-9]*",
             "--long",
             "--abbrev=8",
         ])
@@ -33,8 +33,8 @@ fn git_version() -> String {
 
     match describe {
         Some(desc) => {
-            // desc = "app-v0.1.0-3-gabcdef12"
-            let s = desc.trim_start_matches("app-v"); // "0.1.0-3-gabcdef12"
+            // desc = "0.1.0-3-gabcdef12"
+            let s = desc.as_str();
             if let Some(pos) = s.rfind("-g") {
                 let base = &s[..pos]; // "0.1.0-3" or "0.1.0-0"
                 let base = base.strip_suffix("-0").unwrap_or(base); // drop "-0" on exact tag
