@@ -111,7 +111,7 @@ mod tests {
         conn.pragma_update(None, "user_version", (MIGRATIONS.len() - 1) as i64)
             .unwrap();
         conn.execute(
-            "INSERT INTO repository (path, default_branch, added_at) VALUES ('/r', 'main', 'now')",
+            "INSERT INTO repository (local_path, default_branch, added_at) VALUES ('/r', 'main', 'now')",
             [],
         )
         .unwrap();
@@ -155,7 +155,7 @@ mod tests {
         conn.pragma_update(None, "user_version", (MIGRATIONS.len() - 1) as i64)
             .unwrap();
         conn.execute(
-            "INSERT INTO repository (path, default_branch, added_at) VALUES ('/r', 'main', 'now')",
+            "INSERT INTO repository (local_path, default_branch, added_at) VALUES ('/r', 'main', 'now')",
             [],
         )
         .unwrap();
