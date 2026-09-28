@@ -152,6 +152,34 @@ jobs:
             stage "$v"
           done
 
+      - name: Build cr and prepare sidecar
+        shell: bash
+        run: |
+          if [ -n "${{ matrix.rust-target }}" ]; then
+            TRIPLE="${{ matrix.rust-target }}"
+            cargo build --release --bin cr --manifest-path src-tauri/Cargo.toml --target "$TRIPLE"
+            SRC="src-tauri/target/${TRIPLE}/release/cr"
+          else
+            TRIPLE="$(rustc -Vv | grep '^host:' | awk '{print $2}')"
+            cargo build --release --bin cr --manifest-path src-tauri/Cargo.toml
+            SRC="src-tauri/target/release/cr"
+          fi
+
+          EXT=""
+          [[ "$TRIPLE" == *"windows"* ]] && EXT=".exe"
+          SRC="${SRC}${EXT}"
+
+          mkdir -p src-tauri/binaries
+          cp "$SRC" "src-tauri/binaries/cr-${TRIPLE}${EXT}"
+          chmod +x "src-tauri/binaries/cr-${TRIPLE}${EXT}" || true
+
+          # Standalone asset for the GitHub release
+          cp "$SRC" "cr-${TRIPLE}${EXT}"
+          echo "CR_ASSET=cr-${TRIPLE}${EXT}" >> "$GITHUB_ENV"
+
+          # Config override that injects externalBin into the Tauri bundle
+          echo '{"bundle":{"externalBin":["binaries/cr"]}}' > src-tauri/tauri.sidecar.conf.json
+
       - name: Build and upload to draft release
         uses: tauri-apps/tauri-action@v0
         env:
@@ -176,4 +204,10 @@ jobs:
             "Run anyway".
           releaseDraft: true
           prerelease: false
-          args: ${{ matrix.args }}
+          args: ${{ matrix.args }} --config tauri.sidecar.conf.json
+
+      - name: Upload standalone cr binary to release
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${{ github.ref_name }}" "${{ env.CR_ASSET }}" --clobber

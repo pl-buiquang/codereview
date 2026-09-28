@@ -1,5 +1,6 @@
 mod anchor;
 pub mod commands;
+mod cr_install;
 pub mod db;
 pub mod db_path;
 pub mod deep_link;
@@ -42,6 +43,7 @@ fn handle_deep_link_url<R: tauri::Runtime>(app: &tauri::AppHandle<R>, raw_url: &
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     path_env::ensure_login_path();
+    cr_install::maybe_install();
     tools::init();
 
     tauri::Builder::default()
