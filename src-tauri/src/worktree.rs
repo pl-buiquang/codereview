@@ -20,10 +20,10 @@ pub fn ensure_worktree(repo: &Path, head_sha: &str) -> AppResult<PathBuf> {
     // For GitHub PR reviews the head commit is often unfetched — try fetching
     // it from origin. If the fetch fails (no network, server doesn't support
     // SHA fetches, etc.) fall back to the repo as-is so chat still works.
-    if run_git(repo, &["cat-file", "-e", head_sha]).is_err() {
-        if run_git(repo, &["fetch", "origin", head_sha]).is_err() {
-            return Ok(repo.to_path_buf());
-        }
+    if run_git(repo, &["cat-file", "-e", head_sha]).is_err()
+        && run_git(repo, &["fetch", "origin", head_sha]).is_err()
+    {
+        return Ok(repo.to_path_buf());
     }
 
     let sha_short = &head_sha[..head_sha.len().min(8)];

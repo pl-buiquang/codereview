@@ -196,6 +196,7 @@ fn call_claude_turn(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_system_prompt(
     title: &str,
     owner: Option<&str>,

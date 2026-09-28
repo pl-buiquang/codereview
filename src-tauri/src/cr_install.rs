@@ -14,8 +14,8 @@ pub struct CrInstallResult {
 /// Priority:
 ///   1. Replace `cr` in-place wherever it already lives on PATH (keeps the
 ///      user's existing setup intact — e.g. ~/.cargo/bin/cr stays there).
-///   2. ~/.cargo/bin  — if the directory exists (Rust devs always have this
-///                      in PATH, so no shell-profile edits needed).
+///   2. ~/.cargo/bin — if the directory exists (Rust devs always have this
+///      in PATH, so no shell-profile edits needed).
 ///   3. ~/.local/bin  — XDG standard fallback; may need PATH setup.
 ///   4. %LOCALAPPDATA%\CodeReview\bin  — Windows fallback.
 ///
