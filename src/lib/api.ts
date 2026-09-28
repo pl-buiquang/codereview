@@ -51,6 +51,7 @@ export const api = {
 
   // Chat
   crInstallNote: () => invoke<string | null>("cr_install_note"),
+  appVersion: () => invoke<string>("app_version"),
 
   chatSend: (reviewId: number, text: string, model?: string, mode?: string) =>
     invoke<ChatTurnResult>("chat_send", { reviewId, text, model: model || null, mode: mode || null }),

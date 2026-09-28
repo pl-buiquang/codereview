@@ -10,7 +10,11 @@ use codereview_lib::error::AppResult;
 use codereview_lib::tools;
 
 #[derive(Parser)]
-#[command(name = "cr", about = "CodeReview CLI — browse and manage PR reviews")]
+#[command(
+    name = "cr",
+    about = "CodeReview CLI — browse and manage PR reviews",
+    version = env!("CODEREVIEW_VERSION"),
+)]
 struct Cli {
     /// Path to the SQLite database (overrides CODEREVIEW_DB env and platform default)
     #[arg(long, global = true, env = "CODEREVIEW_DB")]

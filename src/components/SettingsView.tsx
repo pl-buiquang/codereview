@@ -119,6 +119,15 @@ function DirectionPicker() {
   );
 }
 
+function AppVersionRow() {
+  const versionQuery = useQuery({ queryKey: ["appVersion"], queryFn: api.appVersion });
+  return (
+    <p className="settings-version muted">
+      CodeReview {versionQuery.data ?? "…"}
+    </p>
+  );
+}
+
 function GeneralSection() {
   const mode = useSettingsStore((s) => s.mode);
   const diffFontSize = useSettingsStore((s) => s.diffFontSize);
@@ -306,6 +315,8 @@ function GeneralSection() {
         <h3>Environment</h3>
         <EnvironmentPanel />
       </section>
+
+      <AppVersionRow />
     </div>
   );
 }

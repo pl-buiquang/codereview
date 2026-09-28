@@ -47,6 +47,8 @@ jobs:
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-tags: true
 
       - name: Check tag matches tauri.conf.json version
         shell: bash

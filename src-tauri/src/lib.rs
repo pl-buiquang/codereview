@@ -44,6 +44,11 @@ fn handle_deep_link_url<R: tauri::Runtime>(app: &tauri::AppHandle<R>, raw_url: &
 }
 
 #[tauri::command]
+fn app_version() -> &'static str {
+    env!("CODEREVIEW_VERSION")
+}
+
+#[tauri::command]
 fn cr_install_note(note: tauri::State<CrNote>) -> Option<String> {
     note.0.lock().unwrap().take()
 }
@@ -168,6 +173,7 @@ pub fn run() {
             commands::chat::chat_clear,
             commands::chat::set_chat_collapsed,
             cr_install_note,
+            app_version,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

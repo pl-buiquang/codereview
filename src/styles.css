@@ -2117,6 +2117,12 @@ tr.kb-focus {
   line-height: 1.4;
 }
 
+.settings-version {
+  font-size: 11px;
+  text-align: center;
+  padding: 12px 0 4px;
+}
+
 /* --- Settings: direction picker (Phase 1; restyled in Phase 8) ----------- */
 .settings-row-stack {
   flex-direction: column;
