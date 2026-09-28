@@ -179,8 +179,14 @@ jobs:
           cp "$SRC" "cr-${TRIPLE}${EXT}"
           echo "CR_ASSET=cr-${TRIPLE}${EXT}" >> "$GITHUB_ENV"
 
-          # Config override that injects externalBin into the Tauri bundle
-          echo '{"bundle":{"externalBin":["binaries/cr"]}}' > src-tauri/tauri.sidecar.conf.json
+          # Config override that injects externalBin into the Tauri bundle.
+          # On Windows, also restrict targets to nsis — WiX3 (MSI) fails to
+          # bundle external .exe sidecars (light.exe exits non-zero silently).
+          if [[ "$TRIPLE" == *"windows"* ]]; then
+            echo '{"bundle":{"externalBin":["binaries/cr"],"targets":["nsis"]}}' > src-tauri/tauri.sidecar.conf.json
+          else
+            echo '{"bundle":{"externalBin":["binaries/cr"]}}' > src-tauri/tauri.sidecar.conf.json
+          fi
 
       - name: Build and upload to draft release
         uses: tauri-apps/tauri-action@v0
