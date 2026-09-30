@@ -20,6 +20,7 @@ import type {
   ReviewSummary,
   Side,
   ToolEnv,
+  WorktreeInfo,
 } from "./types";
 
 export const api = {
@@ -115,6 +116,16 @@ export const api = {
     invoke<Repository>("link_local_path", { repoId, path }),
   autoLinkRepos: (basePaths: string[]) =>
     invoke<number>("auto_link_repos", { basePaths }),
+
+  // Worktrees
+  listWorktrees: (repoId: number) =>
+    invoke<WorktreeInfo[]>("list_worktrees", { repoId }),
+  removeWorktree: (repoId: number, worktreePath: string) =>
+    invoke<void>("remove_worktree", { repoId, worktreePath }),
+  pruneWorktrees: (repoId: number) =>
+    invoke<string>("prune_worktrees", { repoId }),
+  openInVscode: (path: string) =>
+    invoke<void>("open_in_vscode", { path }),
 
   // Images
   fetchGithubImage: (url: string) =>

@@ -266,3 +266,16 @@ export interface InboxMeta {
   lastRefreshAt: string | null;
   viewerLogin: string | null;
 }
+
+export type WorktreeSource = "claude" | "codex" | "codereview" | "manual";
+
+export interface WorktreeInfo {
+  path: string;
+  display_path: string;
+  head_sha: string;
+  branch: string | null;
+  is_main: boolean;
+  is_prunable: boolean;
+  prunable_reason: string | null;
+  source: WorktreeSource;
+}

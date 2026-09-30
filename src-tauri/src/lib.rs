@@ -87,6 +87,11 @@ pub fn run() {
         })
         .manage(CrNote(Mutex::new(cr_note)))
         .setup(|app| {
+            // Ensure ~/.codereview/ exists for worktrees and future per-user data.
+            if let Some(home) = dirs::home_dir() {
+                let _ = std::fs::create_dir_all(home.join(".codereview"));
+            }
+
             let db_path = match std::env::var_os("CODEREVIEW_DB") {
                 Some(p) => std::path::PathBuf::from(p),
                 None => {
@@ -173,6 +178,10 @@ pub fn run() {
             commands::chat::chat_messages,
             commands::chat::chat_clear,
             commands::chat::set_chat_collapsed,
+            commands::worktree::list_worktrees,
+            commands::worktree::remove_worktree,
+            commands::worktree::prune_worktrees,
+            commands::worktree::open_in_vscode,
             cr_install_note,
             app_version,
         ])

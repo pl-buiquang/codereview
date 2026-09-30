@@ -11,7 +11,7 @@ import { OpenPrButton } from "./OpenPrButton";
 import { Icon } from "./icons";
 import { githubPrUrl } from "../lib/githubUrl";
 import { useUIStore } from "../store";
-import type { PrSummary, Repository, ReviewSummary } from "../lib/types";
+import type { PrSummary, Repository, ReviewSummary, WorktreeInfo, WorktreeSource } from "../lib/types";
 import { statusLabel, statusBadgeClass } from "../lib/status";
 
 interface Comparison {
@@ -20,7 +20,7 @@ interface Comparison {
   threeDot: boolean;
 }
 
-type Tab = "branches" | "prs";
+type Tab = "branches" | "prs" | "worktrees";
 
 export function RepoView({ repo }: { repo: Repository }) {
   const openReview = useUIStore((s) => s.openReview);
@@ -65,13 +65,23 @@ export function RepoView({ repo }: { repo: Repository }) {
         >
           GitHub PRs
         </button>
+        <button
+          className={`cr-tab${tab === "worktrees" ? " active" : ""}${!repo.local_path ? " disabled" : ""}`}
+          onClick={() => repo.local_path && setTab("worktrees")}
+          disabled={!repo.local_path}
+          title={!repo.local_path ? "Worktrees require a local clone" : undefined}
+        >
+          Worktrees
+        </button>
       </div>
 
       <div className="repo-body">
         {tab === "branches" ? (
           <BranchCompare repo={repo} />
-        ) : (
+        ) : tab === "prs" ? (
           <PrList repo={repo} onOpen={openReview} />
+        ) : (
+          <WorktreeList repo={repo} />
         )}
 
         <div className="repo-reviews">
@@ -406,6 +416,161 @@ function ReviewRow({
       >
         <Icon name="x" size={12} />
       </button>
+    </div>
+  );
+}
+
+const SOURCE_LABELS: Record<WorktreeSource, string> = {
+  claude: "Claude",
+  codex: "Codex",
+  codereview: "CodeReview",
+  manual: "manual",
+};
+
+function WorktreeList({ repo }: { repo: Repository }) {
+  const queryClient = useQueryClient();
+  const worktreesQuery = useQuery({
+    queryKey: ["worktrees", repo.id],
+    queryFn: () => api.listWorktrees(repo.id),
+    enabled: repo.local_path != null,
+  });
+
+  const removeWorktree = useMutation({
+    mutationFn: (path: string) => api.removeWorktree(repo.id, path),
+    onSuccess: () => worktreesQuery.refetch(),
+    onError: (e) => toast.error(`Remove failed: ${String(e)}`),
+  });
+
+  const pruneWorktrees = useMutation({
+    mutationFn: () => api.pruneWorktrees(repo.id),
+    onSuccess: () => {
+      worktreesQuery.refetch();
+      toast.success("Stale worktrees pruned.");
+    },
+    onError: (e) => toast.error(`Prune failed: ${String(e)}`),
+  });
+
+  const worktrees = worktreesQuery.data ?? [];
+  const hasPrunable = worktrees.some((w) => w.is_prunable);
+  // Use cached PR data if available (populated when GitHub PRs tab has been visited).
+  const cachedPrs = queryClient.getQueryData<PrSummary[]>(["prs", repo.id]) ?? [];
+
+  return (
+    <>
+      <div className="pr-list-toolbar">
+        <span className="muted">Git worktrees</span>
+        <span className="cr-spacer" />
+        {hasPrunable && (
+          <button
+            className="btn btn-sm"
+            disabled={pruneWorktrees.isPending}
+            onClick={() => pruneWorktrees.mutate()}
+          >
+            Prune stale
+          </button>
+        )}
+        <button
+          className="btn btn-sm"
+          disabled={worktreesQuery.isFetching}
+          onClick={() => worktreesQuery.refetch()}
+          title="Refresh worktree list"
+        >
+          {worktreesQuery.isFetching ? (
+            <span className="spinner" />
+          ) : (
+            <Icon name="refresh" size={13} />
+          )}
+        </button>
+      </div>
+      {worktreesQuery.isLoading && <p className="muted">Loading worktrees…</p>}
+      {worktreesQuery.isError && (
+        <p className="error">Could not list worktrees: {String(worktreesQuery.error)}</p>
+      )}
+      {worktrees.length === 0 && !worktreesQuery.isLoading && (
+        <p className="muted">No worktrees found.</p>
+      )}
+      {worktrees.map((wt) => {
+        const linkedPr = wt.branch
+          ? cachedPrs.find((pr) => pr.headRefName === wt.branch)
+          : undefined;
+        return (
+          <WorktreeRow
+            key={wt.path}
+            wt={wt}
+            linkedPr={linkedPr ?? null}
+            onRemove={async () => {
+              if (
+                await confirmDialog({
+                  title: "Remove worktree",
+                  message: `Remove worktree at ${wt.display_path}?\nThis deletes the working directory.`,
+                  confirmLabel: "Remove",
+                  danger: true,
+                })
+              )
+                removeWorktree.mutate(wt.path);
+            }}
+          />
+        );
+      })}
+    </>
+  );
+}
+
+function WorktreeRow({
+  wt,
+  linkedPr,
+  onRemove,
+}: {
+  wt: WorktreeInfo;
+  linkedPr: PrSummary | null;
+  onRemove: () => void;
+}) {
+  return (
+    <div className="card worktree-row">
+      <div className="worktree-main">
+        <span className="worktree-path mono" title={wt.path}>
+          {wt.display_path}
+        </span>
+        <div className="worktree-meta">
+          {wt.branch ? (
+            <span className="mono">{wt.branch}</span>
+          ) : (
+            <span className="mono faint">detached {wt.head_sha.slice(0, 8)}</span>
+          )}
+          {linkedPr && (
+            <span className="badge badge-pr worktree-pr-badge">PR #{linkedPr.number}</span>
+          )}
+          {wt.is_main && <span className="worktree-badge worktree-badge-main">main</span>}
+          {wt.is_prunable && <span className="worktree-badge worktree-badge-stale">stale</span>}
+          <span className={`worktree-source worktree-source-${wt.source}`}>
+            {SOURCE_LABELS[wt.source]}
+          </span>
+        </div>
+      </div>
+      <button
+        className="btn btn-sm"
+        title="Open in VSCode"
+        onClick={(e) => {
+          e.stopPropagation();
+          api.openInVscode(wt.path).catch((err) =>
+            toast.error(`Could not open VSCode: ${String(err)}`)
+          );
+        }}
+      >
+        <Icon name="ext" size={11} /> Code
+      </button>
+      {!wt.is_main && (
+        <button
+          className="btn-icon"
+          title="Remove worktree"
+          onClick={(e) => {
+            e.stopPropagation();
+            onRemove();
+          }}
+        >
+          <Icon name="x" size={12} />
+        </button>
+      )}
     </div>
   );
 }

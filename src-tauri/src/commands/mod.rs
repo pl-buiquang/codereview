@@ -5,3 +5,4 @@ pub mod gh;
 pub mod inbox;
 pub mod repo;
 pub mod review;
+pub mod worktree;

@@ -45,7 +45,6 @@ import { GithubThread } from "./GithubThread";
 import { ShortcutHelp } from "./ShortcutHelp";
 import { Markdown } from "./Markdown";
 import { ChatPanel } from "./ChatPanel";
-import { OpenPrButton } from "./OpenPrButton";
 import { PublishButton } from "./PublishButton";
 import { PrMetaPanel } from "./PrMetaPanel";
 import { Icon } from "./icons";
@@ -568,6 +567,53 @@ function DiffSearchBar({
   );
 }
 
+function PrNumberLink({ prNumber, prUrl }: { prNumber: number; prUrl: string }) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const ref = useRef<HTMLSpanElement>(null);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [menuOpen]);
+
+  return (
+    <span ref={ref} className="pr-number-link-wrap">
+      {" "}
+      <button
+        className="review-repo-link"
+        title="Open PR in browser"
+        onClick={() => api.openUrl(prUrl)}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          setMenuOpen(true);
+        }}
+      >
+        #{prNumber}
+      </button>
+      {menuOpen && (
+        <div className="btn-split-menu card" role="menu">
+          <button
+            role="menuitem"
+            onClick={() => {
+              setMenuOpen(false);
+              navigator.clipboard.writeText(prUrl).then(
+                () => toast.success("PR URL copied to clipboard"),
+                (e) => toast.error(`Could not copy URL: ${String(e)}`),
+              );
+            }}
+          >
+            Copy URL
+          </button>
+        </div>
+      )}
+    </span>
+  );
+}
+
 function ReviewHeader({
   detail,
   saveState,
@@ -587,6 +633,7 @@ function ReviewHeader({
 }) {
   const queryClient = useQueryClient();
   const closeReview = useUIStore((s) => s.closeReview);
+  const openRepoTab = useUIStore((s) => s.openRepoTab);
   const { review, target } = detail;
   const [body, setBody] = useState(review.body);
   const [showExport, setShowExport] = useState(false);
@@ -717,9 +764,19 @@ function ReviewHeader({
         <div className="review-title-wrap">
           <h2 className="review-title">{target.title}</h2>
           {sourceRepo && (
-            <span className="review-repo mono" title="Source repository">
-              {sourceRepo}
-              {prNumber != null ? ` #${prNumber}` : ""}
+            <span className="review-repo mono">
+              <button
+                className="review-repo-link"
+                title={`Open ${sourceRepo} tab`}
+                onClick={() => openRepoTab(detail.target.repo_id)}
+              >
+                {sourceRepo}
+              </button>
+              {prNumber != null && prUrl ? (
+                <PrNumberLink prNumber={prNumber} prUrl={prUrl} />
+              ) : prNumber != null ? (
+                <span> #{prNumber}</span>
+              ) : null}
             </span>
           )}
         </div>
@@ -741,7 +798,6 @@ function ReviewHeader({
             Unified
           </button>
         </div>
-        {prUrl && <OpenPrButton url={prUrl} />}
         {anchorsStale && (
           <span className="head-moved">
             <span

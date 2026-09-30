@@ -3370,6 +3370,98 @@ input[type="range"] {
   min-width: 0;
 }
 
+/* ===== Worktree list ===== */
+.worktree-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+}
+.worktree-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.worktree-path {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.worktree-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-2);
+  flex-wrap: wrap;
+}
+.worktree-badge {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.worktree-badge-main {
+  color: var(--text-2);
+  border-color: var(--border);
+}
+.worktree-badge-stale {
+  color: var(--warning);
+  border-color: var(--warning);
+}
+.worktree-pr-badge {
+  font-size: 10px;
+}
+.worktree-source {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+}
+.worktree-source-claude {
+  color: var(--accent);
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+}
+.worktree-source-codex {
+  color: var(--success);
+  border-color: var(--success);
+  background: var(--success-soft);
+}
+.worktree-source-codereview {
+  color: var(--warning);
+  border-color: var(--warning);
+  background: var(--warning-soft);
+}
+
+/* ===== Review header: clickable repo name + PR number ===== */
+.review-repo-link {
+  all: unset;
+  cursor: pointer;
+  color: inherit;
+}
+.review-repo-link:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+.pr-number-link-wrap {
+  position: relative;
+  display: inline;
+}
+.pr-number-link-wrap .btn-split-menu {
+  top: calc(100% + 4px);
+  left: 0;
+  right: auto;
+  min-width: 120px;
+}
+
 .nav-list {
   list-style: none;
   margin: 0;
