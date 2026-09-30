@@ -584,7 +584,7 @@ function PrNumberLink({ prNumber, prUrl }: { prNumber: number; prUrl: string }) 
     <span ref={ref} className="pr-number-link-wrap">
       {" "}
       <button
-        className="review-repo-link"
+        className="review-repo-link review-pr-link"
         title="Open PR in browser"
         onClick={() => api.openUrl(prUrl)}
         onContextMenu={(e) => {

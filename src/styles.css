@@ -1061,18 +1061,24 @@ td.diff-code {
 }
 .review-title-wrap {
   display: flex;
-  align-items: baseline;
-  gap: 10px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
   min-width: 0;
+  flex: 1;
 }
 .review-title {
   font-family: var(--font-mono);
   font-weight: 600;
   font-size: 15px;
   margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
 }
 .review-repo {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--text-2);
   white-space: nowrap;
 }
@@ -3443,17 +3449,33 @@ input[type="range"] {
 
 /* ===== Review header: clickable repo name + PR number ===== */
 .review-repo-link {
-  all: unset;
-  cursor: pointer;
+  /* Explicit resets instead of all:unset to avoid UA inline-block sizing */
+  appearance: none;
+  -webkit-appearance: none;
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  line-height: inherit;
   color: inherit;
+  cursor: pointer;
+  display: inline;
+  vertical-align: baseline;
+  text-decoration: none;
 }
 .review-repo-link:hover {
   color: var(--accent);
   text-decoration: underline;
 }
+.review-pr-link {
+  font-weight: 700;
+  color: var(--text);
+}
 .pr-number-link-wrap {
   position: relative;
   display: inline;
+  line-height: inherit;
 }
 .pr-number-link-wrap .btn-split-menu {
   top: calc(100% + 4px);
