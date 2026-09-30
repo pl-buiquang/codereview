@@ -27,6 +27,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("migrations/0011_chat.sql"),
     include_str!("migrations/0012_unified_repository.sql"),
     include_str!("migrations/0013_panel_widths.sql"),
+    include_str!("migrations/0014_comment_github_thread_root_id.sql"),
 ];
 
 pub fn open(path: &Path) -> AppResult<Connection> {

@@ -178,6 +178,9 @@ pub struct Comment {
     pub anchored_base_sha: Option<String>,
     pub github_comment_id: Option<i64>,
     pub resolved_at: Option<String>,
+    /// databaseId of the GitHub thread's root comment this draft reply targets.
+    /// NULL for normal local comments.
+    pub github_thread_root_id: Option<i64>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -200,6 +203,7 @@ impl Comment {
             anchored_base_sha: row.get("anchored_base_sha")?,
             github_comment_id: row.get("github_comment_id")?,
             resolved_at: row.get("resolved_at")?,
+            github_thread_root_id: row.get("github_thread_root_id")?,
             created_at: row.get("created_at")?,
             updated_at: row.get("updated_at")?,
         })

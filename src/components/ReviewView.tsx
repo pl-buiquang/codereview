@@ -732,6 +732,28 @@ function ReviewHeader({
     onError: (e) => toast.error(`Re-anchor failed:\n${String(e)}`),
   });
 
+  const draftReplyCount = detail.comments.filter(
+    (c) => c.github_thread_root_id != null,
+  ).length;
+
+  const publishDraftReplies = useMutation({
+    mutationFn: () => api.publishDraftReplies(review.id),
+    onSuccess: (result) => {
+      invalidateReview();
+      queryClient.invalidateQueries({ queryKey: ["pr-threads", owner, name, prNumber] });
+      if (result.failed > 0) {
+        toast.error(
+          `Published ${result.published}, ${result.failed} failed:\n${result.errors.join("\n")}`,
+        );
+      } else {
+        toast.success(
+          `Published ${result.published} draft repl${result.published === 1 ? "y" : "ies"}.`,
+        );
+      }
+    },
+    onError: (e) => toast.error(`Publish draft replies failed:\n${String(e)}`),
+  });
+
   const isPr = target.kind === "github_pr";
   const published = review.status === "published";
   const pending = review.status === "published_pending";
@@ -843,6 +865,18 @@ function ReviewHeader({
         <button className="btn" onClick={() => setShowExport(true)}>
           Export
         </button>
+        {isPr && draftReplyCount > 0 && (
+          <button
+            className="btn btn-primary"
+            disabled={publishDraftReplies.isPending}
+            title="Post all draft replies to their GitHub threads"
+            onClick={() => publishDraftReplies.mutate()}
+          >
+            {publishDraftReplies.isPending
+              ? "Publishing…"
+              : `Publish ${draftReplyCount} draft repl${draftReplyCount === 1 ? "y" : "ies"}`}
+          </button>
+        )}
         {isPr && isDraft && (
           <PublishButton
             published={published}
@@ -1069,6 +1103,20 @@ function FileReview({
           number: detail.target.github_pr_number,
         }
       : null;
+
+  // Local draft replies to GitHub threads, keyed by the target thread's root
+  // databaseId. Rendered alongside the ephemeral GitHub thread they target.
+  const draftRepliesByRoot = useMemo(() => {
+    const map = new Map<number, Comment[]>();
+    for (const c of detail.comments) {
+      if (c.github_thread_root_id == null) continue;
+      const arr = map.get(c.github_thread_root_id) ?? [];
+      arr.push(c);
+      map.set(c.github_thread_root_id, arr);
+    }
+    return map;
+  }, [detail.comments]);
+
   const isDeleted = file.type === "delete";
   const openInDefaultApp = async () => {
     if (isDeleted) return;
@@ -1469,7 +1517,15 @@ function FileReview({
           onCommentsChanged={onCommentsChanged}
         />
         {keyThreads.map((t) => (
-          <GithubThread key={t.id} thread={t} ctx={threadCtx} />
+          <GithubThread
+            key={t.id}
+            thread={t}
+            ctx={threadCtx}
+            reviewId={reviewId}
+            draftReplies={draftRepliesByRoot.get(t.comments[0]?.databaseId ?? -1)}
+            readOnly={readOnly}
+            onCommentsChanged={onCommentsChanged}
+          />
         ))}
       </>
     );
@@ -1582,6 +1638,8 @@ function FileReview({
           orphans={orphans}
           orphanThreads={orphanThreads}
           threadCtx={threadCtx}
+          reviewId={reviewId}
+          draftRepliesByRoot={draftRepliesByRoot}
           headSha={detail.target.head_sha}
           baseSha={detail.target.base_sha}
           readOnly={readOnly}
@@ -1613,6 +1671,8 @@ function FileBody({
   orphans,
   orphanThreads,
   threadCtx,
+  reviewId,
+  draftRepliesByRoot,
   headSha,
   baseSha,
   readOnly,
@@ -1638,6 +1698,8 @@ function FileBody({
   orphans: CommentThread[];
   orphanThreads: PrThread[];
   threadCtx: PrThreadCtx | null;
+  reviewId: number;
+  draftRepliesByRoot: Map<number, Comment[]>;
   headSha: string | null;
   baseSha: string | null;
   readOnly: boolean;
@@ -1688,7 +1750,15 @@ function FileBody({
         <div className="github-orphan-threads">
           <p className="muted">GitHub threads not on the current diff:</p>
           {orphanThreads.map((t) => (
-            <GithubThread key={t.id} thread={t} ctx={threadCtx} />
+            <GithubThread
+              key={t.id}
+              thread={t}
+              ctx={threadCtx}
+              reviewId={reviewId}
+              draftReplies={draftRepliesByRoot.get(t.comments[0]?.databaseId ?? -1)}
+              readOnly={readOnly}
+              onCommentsChanged={onCommentsChanged}
+            />
           ))}
         </div>
       )}

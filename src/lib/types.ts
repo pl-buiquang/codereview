@@ -63,8 +63,16 @@ export interface Comment {
   anchored_base_sha: string | null;
   github_comment_id: number | null;
   resolved_at: string | null;
+  /** databaseId of the GitHub thread's root comment this draft reply targets. */
+  github_thread_root_id: number | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface PublishDraftRepliesResult {
+  published: number;
+  failed: number;
+  errors: string[];
 }
 
 export interface ReviewDetail {

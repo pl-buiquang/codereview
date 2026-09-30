@@ -7,6 +7,7 @@ use codereview_lib::commands::{export, inbox, repo, review};
 use codereview_lib::db::{self, Db};
 use codereview_lib::db_path::resolve_db_path;
 use codereview_lib::error::AppResult;
+use codereview_lib::provider::provider_for;
 use codereview_lib::tools;
 
 #[derive(Parser)]
@@ -93,6 +94,12 @@ enum Cmd {
         #[command(subcommand)]
         target: OpenTarget,
     },
+    /// List GitHub review threads for a PR (for drafting replies with `cr comment draft-reply`)
+    Threads {
+        owner: String,
+        name: String,
+        number: i64,
+    },
 }
 
 #[derive(Subcommand)]
@@ -165,6 +172,40 @@ enum CommentAction {
     /// Mark a comment thread as unresolved
     Unresolve {
         comment_id: i64,
+    },
+    /// Reply to a local comment thread (existing review comments, not GitHub threads)
+    Reply {
+        review_id: i64,
+        /// Root comment ID to reply to
+        #[arg(long)]
+        parent_id: i64,
+        /// Reply body text
+        #[arg(long)]
+        body: String,
+    },
+    /// Draft a local reply to an existing GitHub review thread comment. Not
+    /// posted to GitHub until `cr comment publish-replies` is run.
+    DraftReply {
+        review_id: i64,
+        /// databaseId of the GitHub thread's root comment (see `cr threads --json`)
+        #[arg(long)]
+        thread_comment_id: i64,
+        /// File path the thread is anchored to
+        #[arg(long)]
+        file: String,
+        /// Which side: LEFT (old/deleted) or RIGHT (new/added)
+        #[arg(long, default_value = "RIGHT")]
+        side: String,
+        /// Line number the thread is anchored to
+        #[arg(long)]
+        line: i64,
+        /// Reply body text
+        #[arg(long)]
+        body: String,
+    },
+    /// Publish all draft replies for a review to their GitHub threads
+    PublishReplies {
+        review_id: i64,
     },
 }
 
@@ -314,7 +355,7 @@ fn run(cmd: Cmd, json: bool, db: &Db) -> AppResult<()> {
                 let root_comments: Vec<_> = detail
                     .comments
                     .iter()
-                    .filter(|c| c.parent_id.is_none())
+                    .filter(|c| c.parent_id.is_none() && c.github_thread_root_id.is_none())
                     .collect();
                 if !root_comments.is_empty() {
                     println!("\n## Comments ({} total)\n", root_comments.len());
@@ -335,6 +376,30 @@ fn run(cmd: Cmd, json: bool, db: &Db) -> AppResult<()> {
                             .collect();
                         for r in replies {
                             println!("    ↳ [#{}] {}", r.id, r.body.lines().next().unwrap_or(""));
+                        }
+                        println!();
+                    }
+                }
+                let draft_replies: Vec<_> = detail
+                    .comments
+                    .iter()
+                    .filter(|c| c.github_thread_root_id.is_some())
+                    .collect();
+                if !draft_replies.is_empty() {
+                    println!(
+                        "\n## Draft replies to GitHub threads ({} total, not yet published)\n",
+                        draft_replies.len()
+                    );
+                    for c in draft_replies {
+                        println!(
+                            "  [#{}] -> thread comment {} ({}:{})",
+                            c.id,
+                            c.github_thread_root_id.unwrap_or(0),
+                            c.file_path,
+                            c.line,
+                        );
+                        for line in c.body.lines() {
+                            println!("        {line}");
                         }
                         println!();
                     }
@@ -509,6 +574,71 @@ fn run(cmd: Cmd, json: bool, db: &Db) -> AppResult<()> {
                     println!("Unresolved comment #{comment_id}");
                 }
             }
+            CommentAction::Reply {
+                review_id,
+                parent_id,
+                body,
+            } => {
+                let conn = db.0.lock().unwrap();
+                let c = review::add_comment_impl(
+                    &conn,
+                    review_id,
+                    String::new(),
+                    "RIGHT".to_string(),
+                    0,
+                    None,
+                    None,
+                    body,
+                    None,
+                    Some(parent_id),
+                )?;
+                if json {
+                    println!("{}", serde_json::to_string_pretty(&c)?);
+                } else {
+                    println!("Added reply #{}", c.id);
+                }
+            }
+            CommentAction::DraftReply {
+                review_id,
+                thread_comment_id,
+                file,
+                side,
+                line,
+                body,
+            } => {
+                let conn = db.0.lock().unwrap();
+                let c = review::add_draft_reply_impl(
+                    &conn,
+                    review_id,
+                    thread_comment_id,
+                    body,
+                    file,
+                    side,
+                    line,
+                    None,
+                )?;
+                if json {
+                    println!("{}", serde_json::to_string_pretty(&c)?);
+                } else {
+                    println!("Drafted reply #{} to GitHub thread comment {thread_comment_id}", c.id);
+                }
+            }
+            CommentAction::PublishReplies { review_id } => {
+                let result = review::publish_draft_replies_impl(db, review_id)?;
+                if json {
+                    println!("{}", serde_json::to_string_pretty(&result)?);
+                } else {
+                    println!(
+                        "Published {} draft repl{}, {} failed",
+                        result.published,
+                        if result.published == 1 { "y" } else { "ies" },
+                        result.failed,
+                    );
+                    for err in &result.errors {
+                        eprintln!("  error: {err}");
+                    }
+                }
+            }
         },
 
         Cmd::Export {
@@ -639,6 +769,37 @@ fn run(cmd: Cmd, json: bool, db: &Db) -> AppResult<()> {
                 }
             }
         },
+
+        Cmd::Threads {
+            owner,
+            name,
+            number,
+        } => {
+            let threads = provider_for().pr_review_threads(&owner, &name, number)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&threads)?);
+            } else {
+                if threads.is_empty() {
+                    println!("No review threads found.");
+                    return Ok(());
+                }
+                for t in &threads {
+                    let loc = match (&t.path, t.line) {
+                        (Some(p), Some(l)) => format!("{p}:{l}"),
+                        (Some(p), None) => p.clone(),
+                        _ => "(file-level)".to_string(),
+                    };
+                    let status = if t.is_resolved { "resolved" } else { "open" };
+                    println!("Thread {} — {loc} [{status}]", t.id);
+                    for c in &t.comments {
+                        let login = c.author.as_ref().and_then(|a| a.login.as_deref()).unwrap_or("unknown");
+                        let db_id = c.database_id.map(|n| n.to_string()).unwrap_or_else(|| "-".to_string());
+                        println!("  [{db_id}] {login}: {}", c.body.lines().next().unwrap_or(""));
+                    }
+                    println!();
+                }
+            }
+        }
     }
     Ok(())
 }

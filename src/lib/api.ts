@@ -11,6 +11,7 @@ import type {
   PrMeta,
   PrSummary,
   PrThread,
+  PublishDraftRepliesResult,
   ReanchorResult,
   RefreshResult,
   Repository,
@@ -89,6 +90,21 @@ export const api = {
     invoke<number>("reply_to_thread", { owner, name, number, commentId, body }),
   setPrThreadResolved: (threadId: string, resolved: boolean) =>
     invoke<boolean>("set_pr_thread_resolved", { threadId, resolved }),
+  addDraftReply: (args: {
+    reviewId: number;
+    githubThreadRootId: number;
+    body: string;
+    filePath: string;
+    side: Side;
+    line: number;
+    startLine?: number | null;
+  }) => invoke<Comment>("add_draft_reply", args),
+  updateDraftReply: (commentId: number, body: string) =>
+    invoke<void>("update_draft_reply", { commentId, body }),
+  deleteDraftReply: (commentId: number) =>
+    invoke<void>("delete_draft_reply", { commentId }),
+  publishDraftReplies: (reviewId: number) =>
+    invoke<PublishDraftRepliesResult>("publish_draft_replies", { reviewId }),
   createReviewForPr: (owner: string, name: string, prNumber: number, basePaths: string[] = []) =>
     invoke<Review>("create_review_for_pr", { owner, name, prNumber, basePaths }),
   publishReview: (reviewId: number) => invoke<Review>("publish_review", { reviewId }),

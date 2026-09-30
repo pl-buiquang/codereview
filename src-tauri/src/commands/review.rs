@@ -988,6 +988,7 @@ fn inline_publish_comments(detail: &ReviewDetail) -> Vec<(&Comment, String)> {
             c.subject_type != "file"
                 && c.origin != "file_view"
                 && c.parent_id.is_none()
+                && c.github_thread_root_id.is_none()
                 && is_anchored_to(c, &detail.target)
         })
         .map(|c| {
@@ -1099,6 +1100,7 @@ fn body_with_file_comments(detail: &ReviewDetail) -> String {
             c.subject_type != "file"
                 && c.origin != "file_view"
                 && c.parent_id.is_none()
+                && c.github_thread_root_id.is_none()
                 && !is_anchored_to(c, &detail.target)
         })
         .collect();
@@ -1747,6 +1749,178 @@ pub fn set_resolved(conn: &Connection, comment_id: i64, resolved: bool) -> AppRe
 pub fn set_comment_resolved(comment_id: i64, resolved: bool, db: State<Db>) -> AppResult<()> {
     let conn = db.0.lock().unwrap();
     set_resolved(&conn, comment_id, resolved)
+}
+
+/// Insert a draft reply targeting an existing GitHub PR review thread. Unlike
+/// regular `add_comment`, this bypasses `ensure_draft` so it works even when the
+/// review is already published — draft replies are about GitHub interactions, not
+/// the review's own content. The caller supplies the thread's anchor (file/side/line)
+/// so the reply can be positioned correctly in the diff UI.
+#[allow(clippy::too_many_arguments)]
+pub fn add_draft_reply_impl(
+    conn: &Connection,
+    review_id: i64,
+    github_thread_root_id: i64,
+    body: String,
+    file_path: String,
+    side: String,
+    line: i64,
+    start_line: Option<i64>,
+) -> AppResult<Comment> {
+    let review_exists: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM review WHERE id = ?1",
+            params![review_id],
+            |r| r.get::<_, i64>(0),
+        )
+        .map(|n| n > 0)
+        .map_err(AppError::from)?;
+    if !review_exists {
+        return Err(AppError::Other(format!("review {review_id} not found")));
+    }
+    let ts = now();
+    conn.execute(
+        "INSERT INTO comment
+            (review_id, file_path, subject_type, origin, side, line, start_line,
+             body, github_thread_root_id, created_at, updated_at)
+         VALUES (?1, ?2, 'line', 'diff', ?3, ?4, ?5, ?6, ?7, ?8, ?8)",
+        params![review_id, file_path, side, line, start_line, body, github_thread_root_id, ts],
+    )?;
+    conn.execute(
+        "UPDATE review SET updated_at = ?1 WHERE id = ?2",
+        params![ts, review_id],
+    )?;
+    get_comment(conn, conn.last_insert_rowid())
+}
+
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+pub fn add_draft_reply(
+    review_id: i64,
+    github_thread_root_id: i64,
+    body: String,
+    file_path: String,
+    side: String,
+    line: i64,
+    start_line: Option<i64>,
+    db: State<Db>,
+) -> AppResult<Comment> {
+    let conn = db.0.lock().unwrap();
+    add_draft_reply_impl(&conn, review_id, github_thread_root_id, body, file_path, side, line, start_line)
+}
+
+/// Result of publishing all draft replies for a review.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublishDraftRepliesResult {
+    pub published: usize,
+    pub failed: usize,
+    pub errors: Vec<String>,
+}
+
+/// Publish all pending draft replies (github_thread_root_id IS NOT NULL) for a
+/// review to GitHub, then delete each local row on success. Continues on
+/// per-reply failures and reports them in the result rather than aborting.
+pub fn publish_draft_replies_impl(db: &Db, review_id: i64) -> AppResult<PublishDraftRepliesResult> {
+    let (owner, name, number) = {
+        let conn = db.0.lock().unwrap();
+        let detail = load_detail(&conn, review_id)?;
+        if detail.target.kind != "github_pr" {
+            return Err(AppError::Other(
+                "draft replies can only be published for GitHub PR reviews".into(),
+            ));
+        }
+        let n = detail
+            .target
+            .github_pr_number
+            .ok_or_else(|| AppError::Other("PR target missing number".into()))?;
+        let (o, nm) = pr_remote(&conn, detail.target.repo_id)?;
+        (o, nm, n)
+    };
+
+    // Collect pending draft replies outside the lock.
+    let draft_replies: Vec<(i64, i64, String)> = {
+        let conn = db.0.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, github_thread_root_id, body FROM comment
+             WHERE review_id = ?1 AND github_thread_root_id IS NOT NULL",
+        )?;
+        let rows = stmt
+            .query_map(params![review_id], |r| {
+                Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, String>(2)?))
+            })?
+            .collect::<rusqlite::Result<_>>()?;
+        rows
+    };
+
+    let mut published = 0usize;
+    let mut failed = 0usize;
+    let mut errors: Vec<String> = Vec::new();
+
+    for (comment_id, thread_root_id, body) in draft_replies {
+        match provider_for().reply_to_thread(&owner, &name, number, thread_root_id, &body) {
+            Ok(_gh_comment_id) => {
+                let conn = db.0.lock().unwrap();
+                let _ = conn.execute("DELETE FROM comment WHERE id = ?1", params![comment_id]);
+                published += 1;
+            }
+            Err(e) => {
+                failed += 1;
+                errors.push(format!("comment #{comment_id}: {e}"));
+            }
+        }
+    }
+
+    Ok(PublishDraftRepliesResult { published, failed, errors })
+}
+
+#[tauri::command]
+pub async fn publish_draft_replies(
+    review_id: i64,
+    db: State<'_, Db>,
+) -> AppResult<PublishDraftRepliesResult> {
+    publish_draft_replies_impl(&db, review_id)
+}
+
+/// Update the body of a draft reply. Bypasses `ensure_draft` so it works even
+/// on published reviews (draft replies live independently of review lifecycle).
+pub fn update_draft_reply_impl(conn: &Connection, comment_id: i64, body: String) -> AppResult<()> {
+    let affected = conn.execute(
+        "UPDATE comment SET body = ?1, updated_at = ?2 WHERE id = ?3 AND github_thread_root_id IS NOT NULL",
+        params![body, now(), comment_id],
+    )?;
+    if affected == 0 {
+        return Err(AppError::Other(format!(
+            "draft reply #{comment_id} not found"
+        )));
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn update_draft_reply(comment_id: i64, body: String, db: State<Db>) -> AppResult<()> {
+    let conn = db.0.lock().unwrap();
+    update_draft_reply_impl(&conn, comment_id, body)
+}
+
+/// Delete a draft reply. Bypasses `ensure_draft` — same rationale as update.
+pub fn delete_draft_reply_impl(conn: &Connection, comment_id: i64) -> AppResult<()> {
+    let affected = conn.execute(
+        "DELETE FROM comment WHERE id = ?1 AND github_thread_root_id IS NOT NULL",
+        params![comment_id],
+    )?;
+    if affected == 0 {
+        return Err(AppError::Other(format!(
+            "draft reply #{comment_id} not found"
+        )));
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn delete_draft_reply(comment_id: i64, db: State<Db>) -> AppResult<()> {
+    let conn = db.0.lock().unwrap();
+    delete_draft_reply_impl(&conn, comment_id)
 }
 
 #[cfg(test)]
@@ -2719,6 +2893,7 @@ mod tests {
             anchored_base_sha: None,
             github_comment_id: None,
             resolved_at: None,
+            github_thread_root_id: None,
             created_at: "now".into(),
             updated_at: "now".into(),
         }

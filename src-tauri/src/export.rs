@@ -75,6 +75,9 @@ pub fn render_markdown(detail: &ReviewDetail, repo_label: &str) -> String {
             if c.parent_id.is_some() {
                 continue; // replies nest under their root, never top-level
             }
+            if c.github_thread_root_id.is_some() {
+                continue; // draft reply to a GitHub thread, not review content
+            }
             let folded = fold_replies(&c.body, replies.get(&c.id).map_or(&[][..], Vec::as_slice));
             let resolved = if c.resolved_at.is_some() { " (resolved)" } else { "" };
             if c.subject_type == "file" {
@@ -125,7 +128,7 @@ pub fn render_json(detail: &ReviewDetail, repo_label: &str) -> String {
     let comments: Vec<_> = detail
         .comments
         .iter()
-        .filter(|c| c.parent_id.is_none())
+        .filter(|c| c.parent_id.is_none() && c.github_thread_root_id.is_none())
         .map(|c| {
             let nested: Vec<_> = replies
                 .get(&c.id)
@@ -182,7 +185,7 @@ pub fn render_vscode(detail: &ReviewDetail, repo_path: &Path) -> serde_json::Val
     let comments_json: Vec<serde_json::Value> = detail
         .comments
         .iter()
-        .filter(|c| c.parent_id.is_none())
+        .filter(|c| c.parent_id.is_none() && c.github_thread_root_id.is_none())
         .map(|c| {
             let comment_id = format!("c{}", c.id);
             let body = fold_replies(&c.body, replies.get(&c.id).map_or(&[][..], Vec::as_slice));
@@ -306,6 +309,7 @@ mod tests {
             anchored_base_sha: None,
             github_comment_id: None,
             resolved_at: None,
+            github_thread_root_id: None,
             created_at: "2026-01-01T00:00:00Z".into(),
             updated_at: "2026-01-01T00:00:00Z".into(),
         }

@@ -1,22 +1,35 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
+import { confirmDialog } from "../lib/confirm";
 import { toast } from "../lib/toast";
 import { timeAgo } from "../lib/timeAgo";
+import { useDebouncedCallback } from "../lib/useDebouncedCallback";
+import { Icon } from "./icons";
 import { Markdown } from "./Markdown";
 import { Composer } from "./ReviewView";
-import type { PrThread, PrThreadComment, PrThreadCtx } from "../lib/types";
+import type { Comment, PrThread, PrThreadComment, PrThreadCtx, Side } from "../lib/types";
 
 /** Display of an existing GitHub PR review thread. Never persisted or exported —
  *  it's fetched ephemerally and shown "from GitHub" so it can't be confused with
  *  a local draft. When `ctx` is supplied the thread can be replied to and
- *  resolved/unresolved, acting on GitHub state directly (no local storage). */
+ *  resolved/unresolved, acting on GitHub state directly (no local storage).
+ *  When `reviewId` is also supplied, "Reply…" drafts a local reply (via
+ *  `draftReplies`) instead of posting to GitHub immediately. */
 export function GithubThread({
   thread,
   ctx,
+  reviewId,
+  draftReplies,
+  readOnly,
+  onCommentsChanged,
 }: {
   thread: PrThread;
   ctx?: PrThreadCtx | null;
+  reviewId?: number;
+  draftReplies?: Comment[];
+  readOnly?: boolean;
+  onCommentsChanged?: () => void;
 }) {
   const collapsible = thread.isResolved && thread.isCollapsed;
   const [expanded, setExpanded] = useState(!collapsible);
@@ -35,6 +48,8 @@ export function GithubThread({
   });
 
   const rootId = thread.comments[0]?.databaseId ?? null;
+  const canDraft =
+    reviewId != null && thread.path != null && thread.line != null && thread.diffSide != null;
 
   const reply = useMutation({
     mutationFn: (body: string) =>
@@ -44,6 +59,24 @@ export function GithubThread({
       invalidate();
     },
     onError: (e) => toast.error(`Reply failed:\n${String(e)}`),
+  });
+
+  const draftReply = useMutation({
+    mutationFn: (body: string) =>
+      api.addDraftReply({
+        reviewId: reviewId!,
+        githubThreadRootId: rootId!,
+        body,
+        filePath: thread.path!,
+        side: thread.diffSide as Side,
+        line: thread.line!,
+        startLine: thread.startLine,
+      }),
+    onSuccess: () => {
+      setReplying(false);
+      onCommentsChanged?.();
+    },
+    onError: (e) => toast.error(`Draft reply failed:\n${String(e)}`),
   });
 
   return (
@@ -82,7 +115,19 @@ export function GithubThread({
       </div>
       {expanded &&
         thread.comments.map((c) => <ThreadComment key={c.id} comment={c} />)}
-      {expanded && ctx && rootId != null && (
+      {expanded && draftReplies && draftReplies.length > 0 && (
+        <div className="github-thread-drafts">
+          {draftReplies.map((d) => (
+            <DraftReplyItem
+              key={d.id}
+              comment={d}
+              readOnly={readOnly}
+              onCommentsChanged={onCommentsChanged}
+            />
+          ))}
+        </div>
+      )}
+      {expanded && ctx && rootId != null && !readOnly && (
         <div className="github-thread-reply">
           {!replying ? (
             <button
@@ -95,12 +140,74 @@ export function GithubThread({
             <Composer
               submitLabel="Reply"
               onSubmit={async (text) => {
-                await reply.mutateAsync(text);
+                if (canDraft) {
+                  await draftReply.mutateAsync(text);
+                } else {
+                  await reply.mutateAsync(text);
+                }
               }}
               onCancel={() => setReplying(false)}
             />
           )}
         </div>
+      )}
+    </div>
+  );
+}
+
+function DraftReplyItem({
+  comment,
+  readOnly,
+  onCommentsChanged,
+}: {
+  comment: Comment;
+  readOnly?: boolean;
+  onCommentsChanged?: () => void;
+}) {
+  const [body, setBody] = useState(comment.body);
+  const save = useDebouncedCallback((text: string) => {
+    api.updateDraftReply(comment.id, text).catch((e) => toast.error(String(e)));
+  }, 400);
+
+  return (
+    <div className="github-thread-comment github-draft-reply">
+      <div className="github-thread-comment-head">
+        <span className="draft-badge" title="Not posted to GitHub yet">
+          Draft
+        </span>
+        {!readOnly && (
+          <button
+            className="btn-icon github-draft-delete"
+            title="Delete draft reply"
+            onClick={async () => {
+              if (
+                await confirmDialog({
+                  title: "Delete draft reply",
+                  message: "Delete this draft reply?",
+                  confirmLabel: "Delete",
+                  danger: true,
+                })
+              ) {
+                await api.deleteDraftReply(comment.id);
+                onCommentsChanged?.();
+              }
+            }}
+          >
+            <Icon name="x" size={12} />
+          </button>
+        )}
+      </div>
+      {readOnly ? (
+        <Markdown source={comment.body} />
+      ) : (
+        <textarea
+          className="github-draft-textarea"
+          value={body}
+          onChange={(e) => {
+            setBody(e.target.value);
+            save(e.target.value);
+          }}
+        />
       )}
     </div>
   );
