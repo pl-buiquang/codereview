@@ -9,7 +9,6 @@
 //!
 //! No-op on a terminal launch (PATH already good) and on non-unix targets.
 
-#[cfg(unix)]
 pub fn ensure_login_path() {
     // Kept for compatibility; the real work is in ensure_login_env.
     ensure_login_env();
@@ -68,7 +67,5 @@ pub fn ensure_login_env() {
     }
 }
 
-#[cfg(not(unix))]
-pub fn ensure_login_path() {}
 #[cfg(not(unix))]
 pub fn ensure_login_env() {}
