@@ -3,10 +3,23 @@ use serde::Serialize;
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum DeepLinkAction {
-    OpenReview { review_id: i64 },
-    OpenPr { owner: String, name: String, number: i64 },
-    OpenDiff { repo_id: i64, base_ref: String, head_ref: String, three_dot: bool },
-    NavigateHome { section: Option<String> },
+    OpenReview {
+        review_id: i64,
+    },
+    OpenPr {
+        owner: String,
+        name: String,
+        number: i64,
+    },
+    OpenDiff {
+        repo_id: i64,
+        base_ref: String,
+        head_ref: String,
+        three_dot: bool,
+    },
+    NavigateHome {
+        section: Option<String>,
+    },
 }
 
 /// Parse a `codereview://` URL into a navigation action.
@@ -68,6 +81,8 @@ fn parse_diff_params(url: &url::Url) -> Result<DeepLinkAction, String> {
         .get("head")
         .ok_or("missing 'head' query param")?
         .to_string();
+    crate::git::validate_commit_ref(&base_ref).map_err(|e| e.to_string())?;
+    crate::git::validate_commit_ref(&head_ref).map_err(|e| e.to_string())?;
     let three_dot = pairs
         .get("three_dot")
         .is_none_or(|v| v != "false" && v != "0");
@@ -84,6 +99,21 @@ mod tests {
     use super::*;
 
     #[test]
+    fn rejects_unsafe_diff_refs() {
+        for field in ["base", "head"] {
+            for value in ["--output=/", "--all", "", "main\nfeature", "main\0"] {
+                let mut url = url::Url::parse("codereview://diff").unwrap();
+                url.query_pairs_mut()
+                    .append_pair("repo", "1")
+                    .append_pair("base", if field == "base" { value } else { "main" })
+                    .append_pair("head", if field == "head" { value } else { "feature" })
+                    .append_pair("three_dot", "false");
+                assert!(parse_deep_link(url.as_str()).is_err());
+            }
+        }
+    }
+
+    #[test]
     fn parse_review() {
         let a = parse_deep_link("codereview://review/42").unwrap();
         let DeepLinkAction::OpenReview { review_id } = a else {
@@ -95,7 +125,12 @@ mod tests {
     #[test]
     fn parse_pr() {
         let a = parse_deep_link("codereview://pr/acme/widget/99").unwrap();
-        let DeepLinkAction::OpenPr { owner, name, number } = a else {
+        let DeepLinkAction::OpenPr {
+            owner,
+            name,
+            number,
+        } = a
+        else {
             panic!("expected OpenPr, got {a:?}");
         };
         assert_eq!(owner, "acme");
@@ -105,10 +140,15 @@ mod tests {
 
     #[test]
     fn parse_diff() {
-        let a =
-            parse_deep_link("codereview://diff?repo=5&base=main&head=feature&three_dot=true")
-                .unwrap();
-        let DeepLinkAction::OpenDiff { repo_id, base_ref, head_ref, three_dot } = a else {
+        let a = parse_deep_link("codereview://diff?repo=5&base=main&head=feature&three_dot=true")
+            .unwrap();
+        let DeepLinkAction::OpenDiff {
+            repo_id,
+            base_ref,
+            head_ref,
+            three_dot,
+        } = a
+        else {
             panic!("expected OpenDiff, got {a:?}");
         };
         assert_eq!(repo_id, 5);

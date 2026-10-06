@@ -67,6 +67,27 @@ export function ReviewsView() {
     onError: (e) => toast.error(`Could not delete review:\n${String(e)}`),
   });
 
+  const cleanUp = useMutation({
+    mutationFn: async (): Promise<number | null> => {
+      const ids = await api.findClosedPrReviews();
+      if (ids.length === 0) return 0;
+      const ok = await confirmDialog({
+        title: "Clean up reviews",
+        message: `Delete ${ids.length} review${ids.length === 1 ? "" : "s"} of merged or closed PRs, including drafts?`,
+        confirmLabel: "Delete",
+        danger: true,
+      });
+      if (!ok) return null;
+      return api.deleteReviews(ids);
+    },
+    onSuccess: (deleted) => {
+      if (deleted == null) return;
+      if (deleted > 0) queryClient.invalidateQueries({ queryKey: ["reviews"] });
+      toast.success(deleted === 0 ? "No reviews of merged or closed PRs" : `Deleted ${deleted} review${deleted === 1 ? "" : "s"}`);
+    },
+    onError: (e) => toast.error(`Clean up failed:\n${String(e)}`),
+  });
+
   const importReview = useMutation({
     mutationFn: async () => {
       const path = await pickJsonFile();
@@ -148,6 +169,15 @@ export function ReviewsView() {
           </p>
         </div>
         <div className="cr-spacer" />
+        <button
+          className="btn btn-sm"
+          title="Delete reviews of merged or closed PRs"
+          disabled={cleanUp.isPending}
+          onClick={() => cleanUp.mutate()}
+        >
+          <Icon name="archive" size={14} />
+          {cleanUp.isPending ? "Checking…" : "Clean up"}
+        </button>
         <button
           className="btn btn-sm"
           title="Import a review from a JSON file"

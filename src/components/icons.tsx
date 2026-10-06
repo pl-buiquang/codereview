@@ -36,6 +36,7 @@ export type IconName =
   | "upload"
   | "link"
   | "search"
+  | "copy"
   | "dot";
 
 const STROKE: Record<Exclude<IconName, "dot">, ReactNode> = {
@@ -152,6 +153,12 @@ const STROKE: Record<Exclude<IconName, "dot">, ReactNode> = {
     <>
       <circle cx="7" cy="7" r="4" />
       <path d="m10 10 3.5 3.5" />
+    </>
+  ),
+  copy: (
+    <>
+      <rect x="5.5" y="5.5" width="8" height="8" rx="1" />
+      <path d="M10.5 5.5V3.5a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2" />
     </>
   ),
 };

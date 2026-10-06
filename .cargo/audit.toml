@@ -1,0 +1,6 @@
+[advisories]
+# Tauri's Linux GTK3 stack; review by 2026-11-06. See specs/security.md.
+ignore = [
+    "RUSTSEC-2024-0429", # glib 0.18.5: VariantStrIter unsoundness
+    "RUSTSEC-2024-0370", # proc-macro-error 1.0.4: unmaintained
+]

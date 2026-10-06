@@ -1,6 +1,6 @@
 [package]
 name = "codereview"
-version = "0.1.1"
+version = "0.1.2"
 description = "Local desktop app for reviewing GitHub PRs and local branch diffs"
 authors = ["Paul Bui-Quang"]
 edition = "2021"
@@ -42,8 +42,8 @@ clap = { version = "4", features = ["derive", "env"] }
 url = "2"
 open = "5"
 dirs = "5"
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls"] }
 
 [[bin]]
 name = "cr"
 path = "src/bin/cr.rs"
-

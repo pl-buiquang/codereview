@@ -17,7 +17,7 @@ import {
   tokenizeFile,
 } from "../lib/diff";
 import { LineWidget, ThreadItem } from "./ReviewView";
-import { groupThreads, type CommentThread } from "../lib/threads";
+import { groupThreads, isDraftReply, type CommentThread } from "../lib/threads";
 import type { ReviewDetail } from "../lib/types";
 
 interface Selection {
@@ -98,7 +98,11 @@ export function FileViewPane({
     const byKey = new Map<string, CommentThread[]>();
     const orphan: CommentThread[] = [];
     const rightComments = detail.comments.filter(
-      (c) => c.file_path === filePath && c.subject_type !== "file" && c.side === "RIGHT",
+      (c) =>
+        c.file_path === filePath &&
+        c.subject_type !== "file" &&
+        c.side === "RIGHT" &&
+        !isDraftReply(c),
     );
     for (const thread of groupThreads(rightComments)) {
       const key = keyByAnchor.get(`RIGHT:${thread.root.line}`);

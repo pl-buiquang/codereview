@@ -11,6 +11,7 @@ import { useQuery } from "@tanstack/react-query";
 import { parseDiff } from "react-diff-view";
 import { api } from "../lib/api";
 import { countChanges, fileDisplayPath } from "../lib/diff";
+import { isDraftReply } from "../lib/threads";
 import { summaryLine } from "../lib/text";
 import { timeAgo } from "../lib/timeAgo";
 import type { JumpListHandle } from "../lib/keyboard";
@@ -356,7 +357,7 @@ export function FileJumpList({
 
     // Local root comments
     for (const c of allComments) {
-      if (c.parent_id != null) continue;
+      if (c.parent_id != null || isDraftReply(c)) continue;
       const rawReplies = repliesByParent.get(c.id) ?? [];
       rawReplies.sort(
         (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),

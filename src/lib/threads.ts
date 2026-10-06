@@ -5,6 +5,12 @@ export interface CommentThread {
   replies: Comment[]; // created_at asc, id as tiebreak
 }
 
+/** True for local drafts targeting an existing GitHub thread — rendered as a
+ *  "Draft" card inside that thread, never as its own local comment thread. */
+export function isDraftReply(c: Comment): boolean {
+  return c.github_thread_root_id != null;
+}
+
 /**
  * Group flat comment rows into root threads. A reply whose parent is not in the
  * input is promoted to a root (defensive — never drop data). Root order follows

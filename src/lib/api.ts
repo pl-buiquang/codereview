@@ -57,12 +57,14 @@ export const api = {
   crInstallNote: () => invoke<string | null>("cr_install_note"),
   appVersion: () => invoke<string>("app_version"),
 
-  chatSend: (reviewId: number, text: string, model?: string, mode?: string) =>
-    invoke<ChatTurnResult>("chat_send", { reviewId, text, model: model || null, mode: mode || null }),
+  chatSend: (reviewId: number, text: string, model?: string) =>
+    invoke<ChatTurnResult>("chat_send", { reviewId, text, model: model || null }),
   chatMessages: (reviewId: number) =>
     invoke<ChatMessage[]>("chat_messages", { reviewId }),
   chatClear: (reviewId: number) =>
     invoke<void>("chat_clear", { reviewId }),
+  chatBranch: (reviewId: number) =>
+    invoke<string | null>("chat_branch", { reviewId }),
   reviewDiff: (reviewId: number) => invoke<string>("review_diff", { reviewId }),
   fileSource: (reviewId: number, filePath: string, side: Side) =>
     invoke<string>("file_source", { reviewId, filePath, side }),
@@ -73,6 +75,9 @@ export const api = {
     invoke<void>("update_review", { reviewId, body, event }),
   deleteReview: (reviewId: number) =>
     invoke<void>("delete_review", { reviewId }),
+  findClosedPrReviews: () => invoke<number[]>("find_closed_pr_reviews"),
+  deleteReviews: (reviewIds: number[]) =>
+    invoke<number>("delete_reviews", { reviewIds }),
   refreshReview: (reviewId: number) =>
     invoke<FreshnessResult>("refresh_review", { reviewId }),
   reanchorComments: (reviewId: number) =>
@@ -103,6 +108,8 @@ export const api = {
     invoke<void>("update_draft_reply", { commentId, body }),
   deleteDraftReply: (commentId: number) =>
     invoke<void>("delete_draft_reply", { commentId }),
+  publishDraftReply: (commentId: number) =>
+    invoke<void>("publish_draft_reply", { commentId }),
   publishDraftReplies: (reviewId: number) =>
     invoke<PublishDraftRepliesResult>("publish_draft_replies", { reviewId }),
   createReviewForPr: (owner: string, name: string, prNumber: number, basePaths: string[] = []) =>

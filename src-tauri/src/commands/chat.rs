@@ -78,7 +78,6 @@ fn call_claude_turn(
     session_id: &str,
     is_first_turn: bool,
     model: &str,
-    mode: Option<&str>,
     system_prompt: Option<&str>,
     worktree_path: &Path,
     text: &str,
@@ -95,16 +94,16 @@ fn call_claude_turn(
         // own auth and Bedrock configuration from ~/.claude/.
         .arg("--strict-mcp-config")
         .arg("--allowedTools")
-        .arg("Bash Read Glob Grep")
+        .arg("Bash Read Glob Grep Edit Write")
+        // Explicit, so the user's own `~/.claude/settings.json` (e.g. a
+        // `defaultMode: plan`) never leaks into this non-interactive session.
+        .arg("--permission-mode")
+        .arg("acceptEdits")
         .arg("--add-dir")
         .arg(worktree_path);
 
     if !model.is_empty() {
         cmd.arg("--model").arg(model);
-    }
-
-    if let Some(m) = mode {
-        cmd.arg("--permission-mode").arg(m);
     }
 
     if is_first_turn {
@@ -233,12 +232,13 @@ fn build_system_prompt(
 {diff_summary}
 
 ## Capabilities
-You have full access to the repository at the reviewed revision.
+You have full read/write access to the repository, checked out on branch `{head_ref}`.
 Code is checked out at: {worktree_path}
-- Use Bash to run git commands (git log, git show, git blame, git diff, etc.)
-- Use Read to view specific files
-- Use Grep to search across the codebase
-- Use Glob to discover file structure
+- Use Bash to run git commands (git log, git show, git blame, git diff, git commit, etc.)
+- Use Read/Grep/Glob to explore the codebase
+- Use Edit/Write to make code changes
+- Commits you make land on `{head_ref}` directly (this worktree is a real branch checkout,
+  not detached). Only run `git push` when the user explicitly asks you to.
 
 ## Guidelines
 - Focus on understanding the code changes and their implications
@@ -246,6 +246,7 @@ Code is checked out at: {worktree_path}
 - Use git blame/log to understand the history of changed code when relevant
 - Reference files by their repo-relative path
 - Be concise but thorough
+- Don't commit or push unless the user asks you to
 {comments_section}
 ## Review operations (cr CLI)
 You can read and modify this review using the `cr` command-line tool.
@@ -357,7 +358,6 @@ pub async fn chat_send(
     review_id: i64,
     text: String,
     model: Option<String>,
-    mode: Option<String>,
     db: State<'_, Db>,
 ) -> AppResult<ChatTurnResult> {
     // --- Phase 1: gather context under DB lock ---
@@ -387,13 +387,20 @@ pub async fn chat_send(
         )
     })?;
     let repo_path = Path::new(local_path_str);
-    let head_sha = detail
-        .target
-        .head_sha
-        .as_deref()
-        .unwrap_or(&detail.target.head_ref);
 
-    let worktree_path = worktree::ensure_worktree(repo_path, head_sha)?;
+    // Reuse the chat's existing worktree if it's still there — keeps the
+    // working directory stable so `claude --resume` can find the session,
+    // and keeps using the same branch checkout across turns even if the
+    // PR's head ref moves on.
+    let worktree_path = match existing_chat
+        .as_ref()
+        .and_then(|c| c.worktree_path.as_deref())
+        .map(Path::new)
+        .filter(|p| p.exists())
+    {
+        Some(p) => p.to_path_buf(),
+        None => worktree::ensure_branch_worktree(repo_path, &detail.target)?,
+    };
 
     let is_first_turn = existing_chat
         .as_ref()
@@ -435,14 +442,11 @@ pub async fn chat_send(
         None
     };
 
-    let mode_str = mode.filter(|m| !m.is_empty());
-
     // --- Phase 3: call claude CLI (no DB lock) ---
     let turn = call_claude_turn(
         &session_id,
         is_first_turn,
         &model,
-        mode_str.as_deref(),
         system_prompt.as_deref(),
         &worktree_path,
         &text,
@@ -547,13 +551,13 @@ pub fn chat_messages(review_id: i64, db: State<Db>) -> AppResult<Vec<ChatMessage
     Ok(messages)
 }
 
-/// Delete the chat (and all its messages) for a review.
-#[tauri::command]
-pub fn chat_clear(review_id: i64, db: State<Db>) -> AppResult<()> {
-    let conn = db.0.lock().unwrap();
-
-    // Grab worktree + repo paths before deleting so we can clean up.
-    let paths: Option<(Option<String>, Option<String>)> = conn
+/// Looks up the chat's worktree path and the review's repo clone path, for
+/// cleanup callers (`chat_clear`, `delete_review`).
+pub fn chat_worktree_and_repo_paths(
+    conn: &rusqlite::Connection,
+    review_id: i64,
+) -> AppResult<Option<(Option<String>, Option<String>)>> {
+    Ok(conn
         .query_row(
             "SELECT c.worktree_path, r.local_path
              FROM chat c
@@ -564,21 +568,66 @@ pub fn chat_clear(review_id: i64, db: State<Db>) -> AppResult<()> {
             params![review_id],
             |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, Option<String>>(1)?)),
         )
-        .optional()?;
+        .optional()?)
+}
+
+/// Best-effort removal of a chat's edit worktree. Errors are silently
+/// ignored — cleanup is advisory, never blocking.
+pub fn cleanup_chat_worktree_paths(worktree_path: Option<String>, repo_path: Option<String>) {
+    if let (Some(worktree_path), Some(repo_path)) = (worktree_path, repo_path) {
+        let repo = Path::new(&repo_path);
+        let wt = Path::new(&worktree_path);
+        if wt != repo {
+            let _ = worktree::cleanup_chat_worktree(repo, wt);
+        }
+    }
+}
+
+/// Delete the chat (and all its messages) for a review.
+#[tauri::command]
+pub fn chat_clear(review_id: i64, db: State<Db>) -> AppResult<()> {
+    let conn = db.0.lock().unwrap();
+
+    // Grab worktree + repo paths before deleting so we can clean up.
+    let paths = chat_worktree_and_repo_paths(&conn, review_id)?;
 
     conn.execute("DELETE FROM chat WHERE review_id = ?1", params![review_id])?;
     drop(conn);
 
-    // Best-effort worktree cleanup — errors are silently ignored.
-    if let Some((Some(worktree_path), Some(repo_path))) = paths {
-        let repo = std::path::Path::new(&repo_path);
-        let wt = std::path::Path::new(&worktree_path);
-        if wt != repo {
-            let _ = worktree::cleanup_worktree(repo, wt);
-        }
+    if let Some((worktree_path, repo_path)) = paths {
+        cleanup_chat_worktree_paths(worktree_path, repo_path);
     }
 
     Ok(())
+}
+
+/// Returns the branch currently checked out in the chat's worktree, if any.
+#[tauri::command]
+pub fn chat_branch(review_id: i64, db: State<Db>) -> AppResult<Option<String>> {
+    let conn = db.0.lock().unwrap();
+    let worktree_path: Option<String> = conn
+        .query_row(
+            "SELECT worktree_path FROM chat WHERE review_id = ?1",
+            params![review_id],
+            |row| row.get(0),
+        )
+        .optional()?
+        .flatten();
+    drop(conn);
+
+    let Some(worktree_path) = worktree_path else {
+        return Ok(None);
+    };
+    let path = Path::new(&worktree_path);
+    if !path.exists() {
+        return Ok(None);
+    }
+
+    let branch = crate::git::run_git(path, &["rev-parse", "--abbrev-ref", "HEAD"])
+        .map(|s| s.trim().to_string())
+        .ok()
+        .filter(|b| b != "HEAD");
+    Ok(branch)
 }
 
 /// Persist the chat panel collapsed/expanded state. UI state — allowed on all reviews.

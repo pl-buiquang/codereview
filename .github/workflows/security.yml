@@ -1,0 +1,68 @@
+name: Security
+
+on:
+  workflow_call:
+  workflow_dispatch:
+  schedule:
+    - cron: "23 7 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  javascript:
+    name: JavaScript dependency audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm audit --registry=https://registry.npmjs.org
+
+  rust:
+    name: Rust dependency audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Enforce audit exception review deadline
+        run: |
+          if [[ "$(date -u +%F)" > "2026-11-06" ]]; then
+            echo '::error::Review the GTK3 exceptions in .cargo/audit.toml and specs/security.md before extending this deadline.'
+            exit 1
+          fi
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          workspaces: src-tauri -> target
+          shared-key: security-audit
+      - run: cargo install cargo-audit --version 0.22.2 --locked --no-default-features
+      - run: cargo audit --file src-tauri/Cargo.lock --deny warnings
+
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - name: Install verified Gitleaks
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download v8.30.1 --repo gitleaks/gitleaks \
+            --pattern gitleaks_8.30.1_linux_x64.tar.gz --dir "$RUNNER_TEMP"
+          cd "$RUNNER_TEMP"
+          echo '551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  gitleaks_8.30.1_linux_x64.tar.gz' | sha256sum --check
+          tar -xzf gitleaks_8.30.1_linux_x64.tar.gz gitleaks
+      - name: Scan full fetched history
+        run: >-
+          "$RUNNER_TEMP/gitleaks" git . --log-opts='--all --full-history'
+          --redact=100 --ignore-gitleaks-allow --max-archive-depth=3
+          --max-decode-depth=5 --no-banner

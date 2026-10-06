@@ -33,6 +33,13 @@ function reviewLabel(decision: string): string {
   return decision.toLowerCase().replace(/_/g, " ");
 }
 
+// Draft is tracked separately from state on GitHub, but the rail treats it as
+// one "Status" facet since a draft PR is never also "open" to a reviewer.
+function statusKey(item: InboxItem): string {
+  if (item.is_draft) return "draft";
+  return item.state ?? "open";
+}
+
 function isVisited(item: InboxItem): boolean {
   return !!item.engaged_at && item.engaged_at >= item.updated_at;
 }
@@ -63,6 +70,7 @@ export function InboxView() {
   const [authorFilter, setAuthorFilter] = useState<string | null>(null);
   const [typeFilter, setTypeFilter] = useState<string | null>(null);
   const [reviewFilter, setReviewFilter] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] = useState<string | null>(null);
 
   const inboxQuery = useQuery({ queryKey: ["inbox"], queryFn: api.listInbox });
   const closedQuery = useQuery({ queryKey: ["closed"], queryFn: api.listClosed });
@@ -158,16 +166,19 @@ export function InboxView() {
   const tabItems = buckets[active];
 
   // Build sidebar filter counts from the active bucket.
-  const { repoEntries, authorEntries, typeEntries, reviewEntries } = useMemo(() => {
+  const { repoEntries, authorEntries, typeEntries, reviewEntries, statusEntries } = useMemo(() => {
     const repo = new Map<string, number>();
     const author = new Map<string, number>();
     const type = new Map<string, number>();
     const review = new Map<string, number>();
+    const status = new Map<string, number>();
     for (const it of tabItems) {
       repo.set(it.repo, (repo.get(it.repo) ?? 0) + 1);
       if (it.author_login) author.set(it.author_login, (author.get(it.author_login) ?? 0) + 1);
       type.set(it.type, (type.get(it.type) ?? 0) + 1);
       if (it.review_decision) review.set(it.review_decision, (review.get(it.review_decision) ?? 0) + 1);
+      const sk = statusKey(it);
+      status.set(sk, (status.get(sk) ?? 0) + 1);
     }
     const byCount = (a: [string, number], b: [string, number]) => b[1] - a[1] || a[0].localeCompare(b[0]);
     const byReviewOrder = (a: [string, number], b: [string, number]) =>
@@ -177,6 +188,7 @@ export function InboxView() {
       authorEntries: [...author.entries()].sort(byCount),
       typeEntries: [...type.entries()].sort((a, b) => a[0].localeCompare(b[0])),
       reviewEntries: [...review.entries()].sort(byReviewOrder),
+      statusEntries: [...status.entries()].sort(byCount),
     };
   }, [tabItems]);
 
@@ -184,12 +196,14 @@ export function InboxView() {
   const effAuthor = authorFilter && tabItems.some((i) => i.author_login === authorFilter) ? authorFilter : null;
   const effType = typeFilter && tabItems.some((i) => i.type === typeFilter) ? typeFilter : null;
   const effReview = reviewFilter && tabItems.some((i) => i.review_decision === reviewFilter) ? reviewFilter : null;
+  const effStatus = statusFilter && tabItems.some((i) => statusKey(i) === statusFilter) ? statusFilter : null;
 
   const items = tabItems.filter((i) => {
     if (effRepo && i.repo !== effRepo) return false;
     if (effAuthor && i.author_login !== effAuthor) return false;
     if (effType && i.type !== effType) return false;
     if (effReview && i.review_decision !== effReview) return false;
+    if (effStatus && statusKey(i) !== effStatus) return false;
     return true;
   });
 
@@ -258,6 +272,7 @@ export function InboxView() {
 
       <div className="inbox-layout">
         <aside className="cr-rail">
+          <FilterList title="Status" entries={statusEntries} selected={effStatus} onSelect={setStatusFilter} />
           <FilterList title="Type" entries={typeEntries} selected={effType} onSelect={setTypeFilter} />
           <FilterList
             title="Review"

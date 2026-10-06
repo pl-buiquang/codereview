@@ -207,6 +207,10 @@ enum CommentAction {
     PublishReplies {
         review_id: i64,
     },
+    /// Publish a single draft reply to its GitHub thread
+    PublishReply {
+        comment_id: i64,
+    },
 }
 
 #[derive(Subcommand)]
@@ -637,6 +641,14 @@ fn run(cmd: Cmd, json: bool, db: &Db) -> AppResult<()> {
                     for err in &result.errors {
                         eprintln!("  error: {err}");
                     }
+                }
+            }
+            CommentAction::PublishReply { comment_id } => {
+                review::publish_draft_reply_impl(db, comment_id)?;
+                if json {
+                    println!("{}", serde_json::json!({ "published": true }));
+                } else {
+                    println!("Published draft reply #{comment_id}");
                 }
             }
         },

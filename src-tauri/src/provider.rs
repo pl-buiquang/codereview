@@ -2,6 +2,8 @@
 //! surface the command layer uses; `GithubProvider` delegates 1:1 to `gh.rs`.
 //! See the "Adding a provider" recipe at the bottom of this file.
 
+use std::collections::HashMap;
+
 use crate::error::AppResult;
 use crate::gh::{self, ComparedFile, GhRepo, PrInfo, PrMeta, PrSummary, PrThread, ReviewComment};
 
@@ -27,6 +29,9 @@ pub trait ReviewProvider: Send + Sync {
     fn pr_view(&self, ctx: &GhRepo, number: i64) -> AppResult<PrInfo>;
     fn pr_diff(&self, ctx: &GhRepo, number: i64) -> AppResult<String>;
     fn pr_meta(&self, owner: &str, name: &str, number: i64) -> AppResult<PrMeta>;
+    /// Batch state (`OPEN`/`CLOSED`/`MERGED`) lookup, keyed by `(owner, name, number)`.
+    /// Used by the "clean up merged PRs" review-list action.
+    fn pr_states(&self, prs: &[(String, String, i64)]) -> AppResult<HashMap<(String, String, i64), String>>;
     fn pr_review_threads(
         &self,
         owner: &str,
@@ -124,6 +129,10 @@ impl ReviewProvider for GithubProvider {
 
     fn pr_meta(&self, owner: &str, name: &str, number: i64) -> AppResult<PrMeta> {
         gh::pr_meta(owner, name, number)
+    }
+
+    fn pr_states(&self, prs: &[(String, String, i64)]) -> AppResult<HashMap<(String, String, i64), String>> {
+        gh::pr_states(prs)
     }
 
     fn pr_review_threads(

@@ -59,7 +59,7 @@ import {
   type FileKbHandle,
   type JumpListHandle,
 } from "../lib/keyboard";
-import { groupThreads, type CommentThread } from "../lib/threads";
+import { groupThreads, isDraftReply, type CommentThread } from "../lib/threads";
 import { anchorPin, isCommentOutdated } from "../lib/staleness";
 import { summaryLine } from "../lib/text";
 import { statusLabel, statusBadgeClass } from "../lib/status";
@@ -764,8 +764,8 @@ function ReviewHeader({
       : review.event === "request_changes"
         ? "Request changes"
         : "Comment";
-  const anchorsStale = detail.comments.some((c) =>
-    isCommentOutdated(c, target.base_sha, target.head_sha),
+  const anchorsStale = detail.comments.some(
+    (c) => !isDraftReply(c) && isCommentOutdated(c, target.base_sha, target.head_sha),
   );
   const prUrl =
     isPr && detail.remote_owner && detail.remote_name && target.github_pr_number != null
@@ -1344,7 +1344,8 @@ function FileReview({
       (c) =>
         c.file_path === path &&
         c.subject_type !== "file" &&
-        c.origin !== "file_view", // shown in the full-file pane, not the diff
+        c.origin !== "file_view" && // shown in the full-file pane, not the diff
+        !isDraftReply(c), // rendered inside its GitHub thread instead
     );
     for (const thread of groupThreads(lineComments)) {
       const key = keyByAnchor.get(`${thread.root.side}:${thread.root.line}`);
@@ -1537,7 +1538,7 @@ function FileReview({
   // file even though they render in the pane) and how many are resolved.
   const { rootCount, resolvedCount } = useMemo(() => {
     const roots = detail.comments.filter(
-      (c) => c.file_path === path && c.parent_id == null,
+      (c) => c.file_path === path && c.parent_id == null && !isDraftReply(c),
     );
     return {
       rootCount: roots.length,
@@ -1548,7 +1549,20 @@ function FileReview({
   return (
     <div className="diff-file" id={`file-${index}`} ref={rootRef}>
       <div className="diff-file-header">
-        <span className="file-path mono" title={path}>{path}</span>
+        <span className="file-path-group">
+          <span className="file-path mono" title={path}>{path}</span>
+          <button
+            className="btn-icon copy-path-btn"
+            title="Copy relative file path"
+            onClick={(e) => {
+              e.stopPropagation();
+              navigator.clipboard.writeText(path);
+              toast.success("Path copied to clipboard");
+            }}
+          >
+            <Icon name="copy" size={12} />
+          </button>
+        </span>
         <span className="diff-stats">
           <span className="delta-add">+{add}</span>
           <span className="delta-del">−{del}</span>
@@ -2220,6 +2234,8 @@ export function Composer({
   onCancel,
   rangeLabel,
   submitLabel = "Add comment",
+  secondaryLabel,
+  onSecondarySubmit,
   suggestionSeed,
   onSendToChat,
 }: {
@@ -2227,16 +2243,18 @@ export function Composer({
   onCancel: () => void;
   rangeLabel?: string;
   submitLabel?: string;
+  secondaryLabel?: string;
+  onSecondarySubmit?: (text: string) => Promise<void>;
   suggestionSeed?: string | null;
   onSendToChat?: (text: string) => void;
 }) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
-  const handleSubmit = async () => {
+  const run = async (fn: (text: string) => Promise<void>) => {
     if (busy || text.trim() === "") return;
     setBusy(true);
     try {
-      await onSubmit(text.trim());
+      await fn(text.trim());
     } finally {
       setBusy(false);
     }
@@ -2255,7 +2273,7 @@ export function Composer({
             onCancel();
           } else if (e.key === "Enter" && (e.metaKey || e.altKey)) {
             e.preventDefault();
-            handleSubmit();
+            run(onSubmit);
           }
         }}
       />
@@ -2291,10 +2309,19 @@ export function Composer({
         <button className="btn btn-ghost" onClick={onCancel}>
           Cancel
         </button>
+        {onSecondarySubmit && (
+          <button
+            className="btn"
+            disabled={busy || text.trim() === ""}
+            onClick={() => run(onSecondarySubmit)}
+          >
+            {secondaryLabel}
+          </button>
+        )}
         <button
           className="btn btn-primary"
           disabled={busy || text.trim() === ""}
-          onClick={handleSubmit}
+          onClick={() => run(onSubmit)}
         >
           {submitLabel}
         </button>

@@ -1485,7 +1485,99 @@ pub fn delete_review_impl(conn: &Connection, review_id: i64) -> AppResult<()> {
 #[tauri::command]
 pub fn delete_review(review_id: i64, db: State<Db>) -> AppResult<()> {
     let conn = db.0.lock().unwrap();
-    delete_review_impl(&conn, review_id)
+    let paths = crate::commands::chat::chat_worktree_and_repo_paths(&conn, review_id)?;
+    delete_review_impl(&conn, review_id)?;
+    drop(conn);
+
+    if let Some((worktree_path, repo_path)) = paths {
+        crate::commands::chat::cleanup_chat_worktree_paths(worktree_path, repo_path);
+    }
+    Ok(())
+}
+
+/// GitHub-PR review candidates for the "clean up merged PRs" action: reviews
+/// backed by a known remote, excluding ones pending on GitHub (`delete_review_impl`
+/// refuses those anyway).
+pub fn closed_pr_candidates_impl(conn: &Connection) -> AppResult<Vec<(i64, String, String, i64)>> {
+    let mut stmt = conn.prepare(
+        "SELECT rv.id, r.remote_owner, r.remote_name, t.github_pr_number
+         FROM review rv
+         JOIN target t ON t.id = rv.target_id
+         JOIN repository r ON r.id = t.repo_id
+         WHERE t.kind = 'github_pr'
+           AND t.github_pr_number IS NOT NULL
+           AND r.remote_owner IS NOT NULL
+           AND r.remote_name IS NOT NULL
+           AND rv.status != 'published_pending'",
+    )?;
+    let rows = stmt
+        .query_map([], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, i64>(3)?,
+            ))
+        })?
+        .collect::<rusqlite::Result<_>>()?;
+    Ok(rows)
+}
+
+/// Find reviews whose PR is MERGED or CLOSED on GitHub, for the Reviews list
+/// "clean up" button. `async` so the batched GitHub lookup doesn't block the UI
+/// thread (same rationale as `pr_meta`); the DB lock is dropped before it runs.
+#[tauri::command]
+pub async fn find_closed_pr_reviews(db: State<'_, Db>) -> AppResult<Vec<i64>> {
+    let candidates = {
+        let conn = db.0.lock().unwrap();
+        closed_pr_candidates_impl(&conn)?
+    };
+    if candidates.is_empty() {
+        return Ok(Vec::new());
+    }
+    let keys: Vec<(String, String, i64)> = candidates
+        .iter()
+        .map(|(_, owner, name, number)| (owner.clone(), name.clone(), *number))
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+    let states = provider_for().pr_states(&keys)?;
+    Ok(candidates
+        .into_iter()
+        .filter(|(_, owner, name, number)| {
+            matches!(
+                states.get(&(owner.clone(), name.clone(), *number)).map(String::as_str),
+                Some("MERGED") | Some("CLOSED")
+            )
+        })
+        .map(|(id, ..)| id)
+        .collect())
+}
+
+/// Delete a batch of reviews (the "clean up" button). Skips any id that fails
+/// to delete — e.g. one that turned `published_pending` since the caller
+/// fetched its candidate list — instead of aborting the whole batch; returns
+/// how many were actually removed.
+#[tauri::command]
+pub fn delete_reviews(review_ids: Vec<i64>, db: State<Db>) -> AppResult<usize> {
+    let mut cleanup_paths = Vec::new();
+    let mut deleted = 0usize;
+    {
+        let conn = db.0.lock().unwrap();
+        for id in review_ids {
+            let paths = crate::commands::chat::chat_worktree_and_repo_paths(&conn, id)?;
+            if delete_review_impl(&conn, id).is_ok() {
+                deleted += 1;
+                if let Some(p) = paths {
+                    cleanup_paths.push(p);
+                }
+            }
+        }
+    }
+    for (worktree_path, repo_path) in cleanup_paths {
+        crate::commands::chat::cleanup_chat_worktree_paths(worktree_path, repo_path);
+    }
+    Ok(deleted)
 }
 
 /// Validate a reply target: the parent must exist, belong to `review_id`, and be
@@ -1818,24 +1910,29 @@ pub struct PublishDraftRepliesResult {
     pub errors: Vec<String>,
 }
 
+/// Resolve the `(owner, name, pr_number)` a review's draft replies post to.
+fn pr_coords(conn: &Connection, review_id: i64) -> AppResult<(String, String, i64)> {
+    let detail = load_detail(conn, review_id)?;
+    if detail.target.kind != "github_pr" {
+        return Err(AppError::Other(
+            "draft replies can only be published for GitHub PR reviews".into(),
+        ));
+    }
+    let number = detail
+        .target
+        .github_pr_number
+        .ok_or_else(|| AppError::Other("PR target missing number".into()))?;
+    let (owner, name) = pr_remote(conn, detail.target.repo_id)?;
+    Ok((owner, name, number))
+}
+
 /// Publish all pending draft replies (github_thread_root_id IS NOT NULL) for a
 /// review to GitHub, then delete each local row on success. Continues on
 /// per-reply failures and reports them in the result rather than aborting.
 pub fn publish_draft_replies_impl(db: &Db, review_id: i64) -> AppResult<PublishDraftRepliesResult> {
     let (owner, name, number) = {
         let conn = db.0.lock().unwrap();
-        let detail = load_detail(&conn, review_id)?;
-        if detail.target.kind != "github_pr" {
-            return Err(AppError::Other(
-                "draft replies can only be published for GitHub PR reviews".into(),
-            ));
-        }
-        let n = detail
-            .target
-            .github_pr_number
-            .ok_or_else(|| AppError::Other("PR target missing number".into()))?;
-        let (o, nm) = pr_remote(&conn, detail.target.repo_id)?;
-        (o, nm, n)
+        pr_coords(&conn, review_id)?
     };
 
     // Collect pending draft replies outside the lock.
@@ -1880,6 +1977,34 @@ pub async fn publish_draft_replies(
     db: State<'_, Db>,
 ) -> AppResult<PublishDraftRepliesResult> {
     publish_draft_replies_impl(&db, review_id)
+}
+
+/// Publish a single draft reply to GitHub, then delete its local row on success.
+pub fn publish_draft_reply_impl(db: &Db, comment_id: i64) -> AppResult<()> {
+    let (owner, name, number, thread_root_id, body) = {
+        let conn = db.0.lock().unwrap();
+        let (review_id, thread_root_id, body) = conn
+            .query_row(
+                "SELECT review_id, github_thread_root_id, body FROM comment
+                 WHERE id = ?1 AND github_thread_root_id IS NOT NULL",
+                params![comment_id],
+                |r| {
+                    Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, String>(2)?))
+                },
+            )
+            .map_err(|_| AppError::Other(format!("draft reply #{comment_id} not found")))?;
+        let (owner, name, number) = pr_coords(&conn, review_id)?;
+        (owner, name, number, thread_root_id, body)
+    };
+    provider_for().reply_to_thread(&owner, &name, number, thread_root_id, &body)?;
+    let conn = db.0.lock().unwrap();
+    conn.execute("DELETE FROM comment WHERE id = ?1", params![comment_id])?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn publish_draft_reply(comment_id: i64, db: State<'_, Db>) -> AppResult<()> {
+    publish_draft_reply_impl(&db, comment_id)
 }
 
 /// Update the body of a draft reply. Bypasses `ensure_draft` so it works even
@@ -3997,5 +4122,58 @@ mod tests {
         assert_eq!(reply.line, 3);
         assert_eq!(root.anchored_base_sha.as_deref(), Some(b2.as_str()));
         assert_eq!(reply.anchored_base_sha.as_deref(), Some(b2.as_str()));
+    }
+
+    #[test]
+    fn closed_pr_candidates_includes_only_eligible_github_reviews() {
+        let conn = open_memory();
+        let repo_remote = seed_repo(&conn, Some("o"), Some("n"));
+        let repo_local = seed_repo_at(&conn, "/repo-local");
+
+        conn.execute(
+            "INSERT INTO target (repo_id, kind, github_pr_number, title, base_ref, head_ref, created_at)
+             VALUES (?1, 'github_pr', 1, 'pr target', 'main', 'feat', 'now')",
+            params![repo_remote],
+        )
+        .unwrap();
+        let pr_target_id = conn.last_insert_rowid();
+
+        conn.execute(
+            "INSERT INTO target (repo_id, kind, github_pr_number, title, base_ref, head_ref, created_at)
+             VALUES (?1, 'local', NULL, 'local target', 'main', 'feat', 'now')",
+            params![repo_remote],
+        )
+        .unwrap();
+        let local_target_id = conn.last_insert_rowid();
+
+        conn.execute(
+            "INSERT INTO target (repo_id, kind, github_pr_number, title, base_ref, head_ref, created_at)
+             VALUES (?1, 'github_pr', 2, 'no remote', 'main', 'feat', 'now')",
+            params![repo_local],
+        )
+        .unwrap();
+        let no_remote_target_id = conn.last_insert_rowid();
+
+        // Eligible: draft review on a github_pr target with a known remote.
+        let draft = new_review_for_target(&conn, pr_target_id).unwrap();
+        // Excluded: pending-on-GitHub review (delete_review_impl refuses these).
+        let pending = new_review_for_target(&conn, pr_target_id).unwrap();
+        conn.execute(
+            "UPDATE review SET status = 'published_pending' WHERE id = ?1",
+            params![pending.id],
+        )
+        .unwrap();
+        // Excluded: local virtual-PR target.
+        new_review_for_target(&conn, local_target_id).unwrap();
+        // Excluded: github_pr target whose repo has no resolved remote.
+        new_review_for_target(&conn, no_remote_target_id).unwrap();
+
+        let candidates = closed_pr_candidates_impl(&conn).unwrap();
+        assert_eq!(candidates.len(), 1);
+        let (review_id, owner, name, number) = &candidates[0];
+        assert_eq!(*review_id, draft.id);
+        assert_eq!(owner, "o");
+        assert_eq!(name, "n");
+        assert_eq!(*number, 1);
     }
 }

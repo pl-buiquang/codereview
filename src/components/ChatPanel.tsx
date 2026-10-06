@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import type { ChatMessage } from "../lib/types";
-import type { ChatMode } from "../lib/settings";
 import { useSettingsStore } from "../lib/settings";
 import { confirmDialog } from "../lib/confirm";
 import { Icon } from "./icons";
@@ -34,8 +33,6 @@ export function ChatPanel({
   const queryClient = useQueryClient();
   const chatModel = useSettingsStore((s) => s.chatModel);
   const setChatModel = useSettingsStore((s) => s.setChatModel);
-  const chatMode = useSettingsStore((s) => s.chatMode) as ChatMode;
-  const setChatMode = useSettingsStore((s) => s.setChatMode);
   const [input, setInput] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -46,11 +43,17 @@ export function ChatPanel({
     refetchOnWindowFocus: false,
   });
 
+  const branchQuery = useQuery({
+    queryKey: ["chat-branch", reviewId],
+    queryFn: () => api.chatBranch(reviewId),
+    refetchOnWindowFocus: false,
+  });
+
   const sendMutation = useMutation({
-    mutationFn: (text: string) =>
-      api.chatSend(reviewId, text, chatModel || undefined, chatMode === "plan" ? "plan" : undefined),
+    mutationFn: (text: string) => api.chatSend(reviewId, text, chatModel || undefined),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["chat-messages", reviewId] });
+      queryClient.invalidateQueries({ queryKey: ["chat-branch", reviewId] });
       queryClient.invalidateQueries({ queryKey: ["review", reviewId] });
     },
   });
@@ -59,6 +62,7 @@ export function ChatPanel({
     mutationFn: () => api.chatClear(reviewId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["chat-messages", reviewId] });
+      queryClient.invalidateQueries({ queryKey: ["chat-branch", reviewId] });
       sendMutation.reset();
     },
   });
@@ -141,6 +145,7 @@ export function ChatPanel({
         <span className="chat-title">
           <Icon name="bot" size={13} />
           Chat
+          {branchQuery.data && <span className="chat-branch">{branchQuery.data}</span>}
         </span>
         <div className="chat-header-actions">
           {messages.length > 0 && (
@@ -174,8 +179,8 @@ export function ChatPanel({
       <div className="chat-messages">
         {messages.length === 0 && !busy && (
           <p className="chat-empty muted">
-            Ask anything about this review — the assistant can read files and
-            run git commands at the reviewed revision.
+            Ask anything about this review — the assistant can read, edit, and
+            commit code on the review's branch.
           </p>
         )}
         {messages.map((msg) => (
@@ -240,24 +245,6 @@ export function ChatPanel({
               </option>
             ))}
           </select>
-          <span className="chat-mode-toggle">
-            <button
-              className={chatMode === "auto" ? "active" : ""}
-              onClick={() => setChatMode("auto")}
-              disabled={busy}
-              title="Auto: Claude can read files and run commands"
-            >
-              Auto
-            </button>
-            <button
-              className={chatMode === "plan" ? "active" : ""}
-              onClick={() => setChatMode("plan")}
-              disabled={busy}
-              title="Plan: read-only analysis, no write actions"
-            >
-              Plan
-            </button>
-          </span>
           <button
             className="btn btn-primary btn-sm"
             disabled={!input.trim() || busy}

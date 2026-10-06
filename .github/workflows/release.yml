@@ -1,21 +1,3 @@
-# Release pipeline (Spec 06).
-#
-# Trigger: push a tag matching app-v* (e.g. app-v0.1.0, app-v0.1.0-rc.1).
-# Output:  a DRAFT GitHub Release for the tag with unsigned bundles for
-#          macOS (arm64 + x64 .dmg/.app), Windows (.msi + NSIS -setup.exe),
-#          Linux (.deb/.rpm/.AppImage). Publish the draft by hand.
-#
-# Version policy: the tag's X.Y.Z stem (app-v stripped, pre-release suffix
-# stripped) MUST equal `version` in src-tauri/tauri.conf.json — the guard
-# step below fails the run otherwise. Artifact filenames use the conf
-# version; the release name uses the tag.
-#
-# Extension points (do not restructure when adding these):
-#   Spec 07 — updater: add TAURI_SIGNING_PRIVATE_KEY{,_PASSWORD} to the
-#             tauri-action `env:` block and `includeUpdaterJson: true` to
-#             its `with:` block.
-#   Spec 08 — signing: add the conditional Apple/Windows signing env vars
-#             to the same `env:` block.
 name: release
 
 on:
@@ -24,10 +6,21 @@ on:
       - "[0-9]*.[0-9]*.[0-9]*"
 
 permissions:
-  contents: write # create the draft release + upload assets
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
+  validate:
+    uses: ./.github/workflows/ci.yml
+
   build:
+    needs: validate
+    permissions:
+      contents: write
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -50,7 +43,7 @@ jobs:
             bundle_args: ""
     runs-on: ${{ matrix.platform }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
 
@@ -81,9 +74,9 @@ jobs:
             libayatana-appindicator3-dev \
             librsvg2-dev
 
-      - uses: pnpm/action-setup@v4 # version comes from package.json "packageManager" (Spec 04)
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4 # version comes from package.json "packageManager" (Spec 04)
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version-file: .nvmrc # pinned by Spec 04
           cache: pnpm
@@ -96,7 +89,7 @@ jobs:
         if: matrix.rust-target != ''
         run: rustup target add ${{ matrix.rust-target }}
 
-      - uses: swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: src-tauri
           key: ${{ matrix.rust-target }} # arm64/x64 mac builds must not share a cache
@@ -163,11 +156,11 @@ jobs:
         run: |
           if [ -n "${{ matrix.rust-target }}" ]; then
             TRIPLE="${{ matrix.rust-target }}"
-            cargo build --release --bin cr --manifest-path src-tauri/Cargo.toml --target "$TRIPLE"
+            cargo build --locked --release --bin cr --manifest-path src-tauri/Cargo.toml --target "$TRIPLE"
             SRC="src-tauri/target/${TRIPLE}/release/cr"
           else
             TRIPLE="$(rustc -Vv | grep '^host:' | awk '{print $2}')"
-            cargo build --release --bin cr --manifest-path src-tauri/Cargo.toml
+            cargo build --locked --release --bin cr --manifest-path src-tauri/Cargo.toml
             SRC="src-tauri/target/release/cr"
           fi
 
@@ -187,7 +180,7 @@ jobs:
           echo '{"bundle":{"externalBin":["binaries/cr"]}}' > src-tauri/tauri.sidecar.conf.json
 
       - name: Build and upload to draft release
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Spec 07: minisign updater signing keys (set via `gh secret set`).
@@ -199,6 +192,7 @@ jobs:
           # See docs/signing.md.
         with:
           tagName: ${{ github.ref_name }}
+          tauriScript: pnpm exec tauri
           releaseName: "CodeReview ${{ github.ref_name }}"
           includeUpdaterJson: true
           releaseBody: |
@@ -210,7 +204,7 @@ jobs:
             "Run anyway".
           releaseDraft: true
           prerelease: false
-          args: ${{ matrix.args }} ${{ matrix.bundle_args }} --config src-tauri/tauri.sidecar.conf.json
+          args: ${{ matrix.args }} ${{ matrix.bundle_args }} --config src-tauri/tauri.sidecar.conf.json -- --locked
 
       - name: Upload standalone cr binary to release
         shell: bash

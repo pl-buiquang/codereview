@@ -14,8 +14,10 @@ import type { Comment, PrThread, PrThreadComment, PrThreadCtx, Side } from "../l
  *  it's fetched ephemerally and shown "from GitHub" so it can't be confused with
  *  a local draft. When `ctx` is supplied the thread can be replied to and
  *  resolved/unresolved, acting on GitHub state directly (no local storage).
- *  When `reviewId` is also supplied, "Reply…" drafts a local reply (via
- *  `draftReplies`) instead of posting to GitHub immediately. */
+ *  When `reviewId` is also supplied and the thread is anchored to the current
+ *  diff, replying offers a choice: "Reply now" posts to GitHub immediately,
+ *  "Add draft reply" saves a local draft (shown via `draftReplies`) that can be
+ *  edited, deleted, or published (individually or all at once) later. */
 export function GithubThread({
   thread,
   ctx,
@@ -121,6 +123,7 @@ export function GithubThread({
             <DraftReplyItem
               key={d.id}
               comment={d}
+              ctx={ctx}
               readOnly={readOnly}
               onCommentsChanged={onCommentsChanged}
             />
@@ -136,15 +139,23 @@ export function GithubThread({
             >
               Reply…
             </button>
+          ) : canDraft ? (
+            <Composer
+              submitLabel="Add draft reply"
+              onSubmit={async (text) => {
+                await draftReply.mutateAsync(text);
+              }}
+              secondaryLabel="Reply now"
+              onSecondarySubmit={async (text) => {
+                await reply.mutateAsync(text);
+              }}
+              onCancel={() => setReplying(false)}
+            />
           ) : (
             <Composer
-              submitLabel="Reply"
+              submitLabel="Reply now"
               onSubmit={async (text) => {
-                if (canDraft) {
-                  await draftReply.mutateAsync(text);
-                } else {
-                  await reply.mutateAsync(text);
-                }
+                await reply.mutateAsync(text);
               }}
               onCancel={() => setReplying(false)}
             />
@@ -157,44 +168,73 @@ export function GithubThread({
 
 function DraftReplyItem({
   comment,
+  ctx,
   readOnly,
   onCommentsChanged,
 }: {
   comment: Comment;
+  ctx?: PrThreadCtx | null;
   readOnly?: boolean;
   onCommentsChanged?: () => void;
 }) {
   const [body, setBody] = useState(comment.body);
+  const queryClient = useQueryClient();
   const save = useDebouncedCallback((text: string) => {
     api.updateDraftReply(comment.id, text).catch((e) => toast.error(String(e)));
   }, 400);
 
+  const publish = useMutation({
+    mutationFn: async () => {
+      if (body !== comment.body) await api.updateDraftReply(comment.id, body);
+      await api.publishDraftReply(comment.id);
+    },
+    onSuccess: () => {
+      onCommentsChanged?.();
+      if (ctx) {
+        queryClient.invalidateQueries({
+          queryKey: ["pr-threads", ctx.owner, ctx.name, ctx.number],
+        });
+      }
+    },
+    onError: (e) => toast.error(`Publish draft reply failed:\n${String(e)}`),
+  });
+
   return (
-    <div className="github-thread-comment github-draft-reply">
+    <div className="github-thread-comment">
       <div className="github-thread-comment-head">
         <span className="draft-badge" title="Not posted to GitHub yet">
           Draft
         </span>
         {!readOnly && (
-          <button
-            className="btn-icon github-draft-delete"
-            title="Delete draft reply"
-            onClick={async () => {
-              if (
-                await confirmDialog({
-                  title: "Delete draft reply",
-                  message: "Delete this draft reply?",
-                  confirmLabel: "Delete",
-                  danger: true,
-                })
-              ) {
-                await api.deleteDraftReply(comment.id);
-                onCommentsChanged?.();
-              }
-            }}
-          >
-            <Icon name="x" size={12} />
-          </button>
+          <>
+            <button
+              className="btn btn-primary github-draft-publish"
+              disabled={publish.isPending || body.trim() === ""}
+              title="Post this reply to GitHub"
+              onClick={() => publish.mutate()}
+            >
+              {publish.isPending ? "Publishing…" : "Publish"}
+            </button>
+            <button
+              className="btn-icon github-draft-delete"
+              title="Delete draft reply"
+              onClick={async () => {
+                if (
+                  await confirmDialog({
+                    title: "Delete draft reply",
+                    message: "Delete this draft reply?",
+                    confirmLabel: "Delete",
+                    danger: true,
+                  })
+                ) {
+                  await api.deleteDraftReply(comment.id);
+                  onCommentsChanged?.();
+                }
+              }}
+            >
+              <Icon name="x" size={12} />
+            </button>
+          </>
         )}
       </div>
       {readOnly ? (

@@ -88,7 +88,7 @@ describe("GithubThread", () => {
     await userEvent.click(screen.getByRole("button", { name: "Reply…" }));
     const textarea = screen.getByPlaceholderText("Leave a comment…");
     await userEvent.type(textarea, "from the app");
-    await userEvent.click(screen.getByRole("button", { name: "Reply" }));
+    await userEvent.click(screen.getByRole("button", { name: "Reply now" }));
 
     expect(replyToThread).toHaveBeenCalledWith("acme", "widget", 42, 1001, "from the app");
     // Composer closes -> the collapsed affordance returns.

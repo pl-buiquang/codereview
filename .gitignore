@@ -28,3 +28,13 @@ CLAUDE.md
 
 # Minisign updater keys must never be committed (Spec 07)
 *.key
+.env
+.env.*
+!.env.example
+*.p12
+*.pfx
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3

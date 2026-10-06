@@ -165,15 +165,11 @@ function ChecksList({ checks }: { checks: PrCheck[] }) {
 }
 
 function Description({ body }: { body: string }) {
-  const [expanded, setExpanded] = useState(false);
   return (
     <div className="pr-meta-description">
-      <div className={`pr-meta-desc-body ${expanded ? "scroll" : "clamped"}`}>
+      <div className="pr-meta-desc-body scroll">
         <Markdown source={body} />
       </div>
-      <button className="pr-meta-toggle" onClick={() => setExpanded((v) => !v)}>
-        {expanded ? "Show less" : "Show more"}
-      </button>
     </div>
   );
 }

@@ -63,15 +63,18 @@ pub fn parse_owner_repo(url: &str) -> RemoteInfo {
 /// Resolve the repository's default branch (origin/HEAD, falling back to the
 /// current branch).
 pub fn default_branch(path: &Path) -> Option<String> {
-    run_git(path, &["symbolic-ref", "--short", "refs/remotes/origin/HEAD"])
-        .ok()
-        .map(|s| s.trim().trim_start_matches("origin/").to_string())
-        .filter(|s| !s.is_empty())
-        .or_else(|| {
-            run_git(path, &["rev-parse", "--abbrev-ref", "HEAD"])
-                .ok()
-                .map(|s| s.trim().to_string())
-        })
+    run_git(
+        path,
+        &["symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
+    )
+    .ok()
+    .map(|s| s.trim().trim_start_matches("origin/").to_string())
+    .filter(|s| !s.is_empty())
+    .or_else(|| {
+        run_git(path, &["rev-parse", "--abbrev-ref", "HEAD"])
+            .ok()
+            .map(|s| s.trim().to_string())
+    })
 }
 
 #[derive(Debug, Serialize)]
@@ -111,30 +114,72 @@ pub fn list_branches(path: &Path) -> AppResult<Vec<Branch>> {
     Ok(branches)
 }
 
+pub fn validate_commit_ref(rev: &str) -> AppResult<()> {
+    if rev.is_empty() || rev.starts_with('-') || rev.chars().any(char::is_control) {
+        return Err(AppError::Git("invalid commit reference".into()));
+    }
+    Ok(())
+}
+
 pub fn rev_parse(path: &Path, rev: &str) -> AppResult<String> {
-    Ok(run_git(path, &["rev-parse", rev])?.trim().to_string())
+    validate_commit_ref(rev)?;
+    Ok(run_git(
+        path,
+        &[
+            "rev-parse",
+            "--verify",
+            "--end-of-options",
+            &format!("{rev}^{{commit}}"),
+        ],
+    )?
+    .trim()
+    .to_string())
 }
 
 /// First merge-base of two revs (`git merge-base a b`).
 pub fn merge_base(repo: &Path, a: &str, b: &str) -> AppResult<String> {
-    Ok(run_git(repo, &["merge-base", a, b])?.trim().to_string())
+    let a = rev_parse(repo, a)?;
+    let b = rev_parse(repo, b)?;
+    Ok(run_git(repo, &["merge-base", &a, &b])?.trim().to_string())
 }
 
 /// Full contents of `file_path` as of `sha` (`git show <sha>:<file_path>`),
 /// used to reveal collapsed context lines around a diff.
 pub fn show_file(path: &Path, sha: &str, file_path: &str) -> AppResult<String> {
-    run_git(path, &["show", &format!("{sha}:{file_path}")])
+    let sha = rev_parse(path, sha)?;
+    run_git(
+        path,
+        &[
+            "show",
+            "--no-ext-diff",
+            "--no-textconv",
+            &format!("{sha}:{file_path}"),
+            "--",
+        ],
+    )
 }
 
 /// Unified diff between two refs. `three_dot` uses the merge-base (GitHub PR
 /// semantics); otherwise a plain two-dot diff.
 pub fn diff(path: &Path, base: &str, head: &str, three_dot: bool) -> AppResult<String> {
+    let base = rev_parse(path, base)?;
+    let head = rev_parse(path, head)?;
     let range = if three_dot {
         format!("{base}...{head}")
     } else {
         format!("{base}..{head}")
     };
-    run_git(path, &["diff", "--no-color", &range])
+    run_git(
+        path,
+        &[
+            "diff",
+            "--no-color",
+            "--no-ext-diff",
+            "--no-textconv",
+            &range,
+            "--",
+        ],
+    )
 }
 
 /// Plain two-dot diff between two commits (literal line evolution old→new).
@@ -142,7 +187,7 @@ pub fn diff(path: &Path, base: &str, head: &str, three_dot: bool) -> AppResult<S
 /// alongside the path-scoped variant the re-anchor helper uses (Spec 01 §2).
 #[allow(dead_code)]
 pub fn diff_shas(repo: &Path, old_sha: &str, new_sha: &str) -> AppResult<String> {
-    run_git(repo, &["diff", "--no-color", &format!("{old_sha}..{new_sha}")])
+    diff(repo, old_sha, new_sha, false)
 }
 
 /// Two-dot diff scoped to a single file, so the diff parser only sees one file.
@@ -152,11 +197,15 @@ pub fn diff_shas_path(
     new_sha: &str,
     file_path: &str,
 ) -> AppResult<String> {
+    let old_sha = rev_parse(repo, old_sha)?;
+    let new_sha = rev_parse(repo, new_sha)?;
     run_git(
         repo,
         &[
             "diff",
             "--no-color",
+            "--no-ext-diff",
+            "--no-textconv",
             &format!("{old_sha}..{new_sha}"),
             "--",
             file_path,
@@ -285,6 +334,49 @@ mod tests {
         let sha = rev_parse(repo.path(), "main").unwrap();
         assert_eq!(sha.len(), 40, "expected full sha, got {sha:?}");
         assert!(sha.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn commit_refs_reject_options_ranges_and_non_commits() {
+        let repo = fixture_repo();
+        for rev in [
+            "",
+            "--all",
+            "--output=/tmp/unused",
+            "main\nfeature",
+            "main..feature",
+            "main:file.txt",
+        ] {
+            assert!(rev_parse(repo.path(), rev).is_err(), "accepted {rev:?}");
+        }
+        git(
+            repo.path(),
+            &["tag", "-a", "v1", "-m", "release", "feature"],
+        );
+        assert_eq!(
+            rev_parse(repo.path(), "v1").unwrap(),
+            rev_parse(repo.path(), "feature").unwrap()
+        );
+        assert_eq!(
+            rev_parse(repo.path(), "feature~1").unwrap(),
+            rev_parse(repo.path(), "main").unwrap()
+        );
+    }
+
+    #[test]
+    fn crafted_diff_refs_cannot_overwrite_files() {
+        let repo = fixture_repo();
+        let sentinel = repo.path().join("sentinel.txt");
+        fs::write(&sentinel, "preserve me").unwrap();
+        fs::write(repo.path().join("file.txt"), "modified\n").unwrap();
+        let destination = sentinel.to_str().unwrap();
+        for three_dot in [false, true] {
+            assert!(diff(repo.path(), "--output=/", destination, three_dot).is_err());
+            assert!(diff(repo.path(), "main", "--output=/", three_dot).is_err());
+        }
+        assert!(diff_shas(repo.path(), "--output=/", destination).is_err());
+        assert!(diff_shas_path(repo.path(), "--output=/", destination, "file.txt").is_err());
+        assert_eq!(fs::read_to_string(sentinel).unwrap(), "preserve me");
     }
 
     #[test]

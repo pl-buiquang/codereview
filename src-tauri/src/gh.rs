@@ -1,6 +1,8 @@
+use std::collections::HashMap;
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
+use std::time::Duration;
 
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -253,7 +255,7 @@ pub fn auth_status() -> bool {
 
 pub fn auth_token() -> AppResult<String> {
     let output = Command::new(crate::tools::gh_bin())
-        .args(["auth", "token"])
+        .args(["auth", "token", "--hostname", "github.com"])
         .output()
         .map_err(|e| AppError::Gh(format!("failed to spawn gh: {e}")))?;
     if !output.status.success() {
@@ -263,28 +265,126 @@ pub fn auth_token() -> AppResult<String> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
-/// Fetch a URL using curl with GitHub auth. Returns raw bytes.
-/// Used for downloading private-repo image attachments.
-pub fn fetch_authenticated_url(url: &str) -> AppResult<Vec<u8>> {
-    let token = auth_token()?;
-    let output = Command::new(crate::tools::curl_bin())
-        .args([
-            "-fsSL",
-            "--max-time",
-            "30",
-            "--max-filesize",
-            "10485760", // 10 MB
-            "-H",
-            &format!("Authorization: token {token}"),
-            url,
-        ])
-        .output()
-        .map_err(|e| AppError::Gh(format!("failed to spawn curl: {e}")))?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(AppError::Gh(format!("curl failed for {url}: {}", stderr.trim())));
+const MAX_IMAGE_BYTES: usize = 10 * 1024 * 1024;
+const MAX_IMAGE_REDIRECTS: usize = 5;
+
+fn validate_image_url(url: &url::Url) -> AppResult<()> {
+    let allowed_host = match url.host_str() {
+        Some("github.com") => {
+            let parts: Vec<_> = url.path().trim_start_matches('/').split('/').collect();
+            url.path().starts_with("/user-attachments/")
+                || (parts.len() >= 4 && parts[2] == "assets")
+        }
+        Some(
+            "user-images.githubusercontent.com"
+            | "private-user-images.githubusercontent.com"
+            | "github-production-user-asset-6210df.s3.amazonaws.com"
+            | "github-production-repository-image-32fea6.s3.amazonaws.com",
+        ) => true,
+        _ => false,
+    };
+    if url.scheme() != "https"
+        || url.port_or_known_default() != Some(443)
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || !allowed_host
+    {
+        return Err(AppError::Gh(
+            "image URL is not an allowed GitHub HTTPS attachment".into(),
+        ));
     }
-    Ok(output.stdout)
+    Ok(())
+}
+
+fn image_redirect(
+    current: &url::Url,
+    location: &str,
+    token: &mut Option<String>,
+) -> AppResult<url::Url> {
+    let next = current
+        .join(location)
+        .map_err(|_| AppError::Gh("invalid image redirect".into()))?;
+    validate_image_url(&next)?;
+    if next.origin() != current.origin() {
+        *token = None;
+    }
+    Ok(next)
+}
+
+fn image_request(
+    client: &reqwest::Client,
+    url: &url::Url,
+    token: Option<&str>,
+) -> AppResult<reqwest::Request> {
+    validate_image_url(url)?;
+    let mut request = client.get(url.clone());
+    if url.host_str() == Some("github.com") {
+        if let Some(token) = token {
+            let mut value = reqwest::header::HeaderValue::from_str(&format!("token {token}"))
+                .map_err(|_| AppError::Gh("invalid GitHub authorization header".into()))?;
+            value.set_sensitive(true);
+            request = request.header(reqwest::header::AUTHORIZATION, value);
+        }
+    }
+    request.build().map_err(image_http_error)
+}
+
+fn image_http_error(error: reqwest::Error) -> AppError {
+    AppError::Gh(format!("image request failed: {}", error.without_url()))
+}
+
+fn append_image_chunk(bytes: &mut Vec<u8>, chunk: &[u8]) -> AppResult<()> {
+    if chunk.len() > MAX_IMAGE_BYTES.saturating_sub(bytes.len()) {
+        return Err(AppError::Gh("image exceeds the 10 MiB limit".into()));
+    }
+    bytes.extend_from_slice(chunk);
+    Ok(())
+}
+
+pub async fn fetch_authenticated_url(raw_url: &str) -> AppResult<Vec<u8>> {
+    let mut url = url::Url::parse(raw_url).map_err(|_| AppError::Gh("invalid image URL".into()))?;
+    validate_image_url(&url)?;
+    let mut token = if url.host_str() == Some("github.com") {
+        Some(auth_token()?)
+    } else {
+        None
+    };
+    let client = reqwest::Client::builder()
+        .https_only(true)
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(Duration::from_secs(30))
+        .user_agent("CodeReview")
+        .build()
+        .map_err(image_http_error)?;
+    for redirects in 0..=MAX_IMAGE_REDIRECTS {
+        let request = image_request(&client, &url, token.as_deref())?;
+        let mut response = client.execute(request).await.map_err(image_http_error)?;
+        if response.status().is_redirection() {
+            if redirects == MAX_IMAGE_REDIRECTS {
+                return Err(AppError::Gh("too many image redirects".into()));
+            }
+            let location = response
+                .headers()
+                .get(reqwest::header::LOCATION)
+                .and_then(|v| v.to_str().ok())
+                .ok_or_else(|| AppError::Gh("invalid image redirect".into()))?;
+            url = image_redirect(&url, location, &mut token)?;
+            continue;
+        }
+        response.error_for_status_ref().map_err(image_http_error)?;
+        if response
+            .content_length()
+            .is_some_and(|len| len > MAX_IMAGE_BYTES as u64)
+        {
+            return Err(AppError::Gh("image exceeds the 10 MiB limit".into()));
+        }
+        let mut bytes = Vec::new();
+        while let Some(chunk) = response.chunk().await.map_err(image_http_error)? {
+            append_image_chunk(&mut bytes, &chunk)?;
+        }
+        return Ok(bytes);
+    }
+    unreachable!()
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -748,6 +848,46 @@ pub fn pr_meta(owner: &str, name: &str, number: i64) -> AppResult<PrMeta> {
 }
 
 // ---------------------------------------------------------------------------
+// Batch PR state lookup (clone-less, read-only, ephemeral)
+// ---------------------------------------------------------------------------
+
+/// Look up the current state (`OPEN` | `CLOSED` | `MERGED`) of a batch of PRs in
+/// as few GraphQL round-trips as possible, via aliased sub-queries. Keyed by
+/// `(owner, name, number)`; PRs that fail to resolve (deleted repo, bad
+/// number, ...) are simply absent from the map, since `graphql()` tolerates
+/// partial errors.
+pub fn pr_states(prs: &[(String, String, i64)]) -> AppResult<HashMap<(String, String, i64), String>> {
+    let mut out = HashMap::new();
+    for chunk in prs.chunks(50) {
+        let mut fields = String::new();
+        let mut var_decls = Vec::new();
+        let mut variables = serde_json::Map::new();
+        for (i, (owner, name, number)) in chunk.iter().enumerate() {
+            fields.push_str(&format!(
+                "  r{i}: repository(owner: $o{i}, name: $n{i}) {{ pullRequest(number: $p{i}) {{ state }} }}\n"
+            ));
+            var_decls.push(format!("$o{i}: String!, $n{i}: String!, $p{i}: Int!"));
+            variables.insert(format!("o{i}"), serde_json::json!(owner));
+            variables.insert(format!("n{i}"), serde_json::json!(name));
+            variables.insert(format!("p{i}"), serde_json::json!(number));
+        }
+        let query = format!("query PrStates({}) {{\n{fields}}}", var_decls.join(", "));
+        let data: serde_json::Value = graphql(&query, serde_json::Value::Object(variables))?;
+        for (i, (owner, name, number)) in chunk.iter().enumerate() {
+            let state = data
+                .get(format!("r{i}"))
+                .and_then(|r| r.get("pullRequest"))
+                .and_then(|p| p.get("state"))
+                .and_then(|s| s.as_str());
+            if let Some(state) = state {
+                out.insert((owner.clone(), name.clone(), *number), state.to_string());
+            }
+        }
+    }
+    Ok(out)
+}
+
+// ---------------------------------------------------------------------------
 // PR review threads (clone-less, read-only, ephemeral)
 // ---------------------------------------------------------------------------
 
@@ -1045,6 +1185,93 @@ pub fn set_thread_resolved(thread_id: &str, resolved: bool) -> AppResult<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn attachment_urls_require_trusted_https_origins() {
+        for raw in [
+            "https://github.com/user-attachments/assets/image-id",
+            "https://github.com/owner/repo/assets/123/image-id",
+            "https://user-images.githubusercontent.com/123/image.png",
+            "https://private-user-images.githubusercontent.com/123/image.png?signature=value",
+            "https://github-production-user-asset-6210df.s3.amazonaws.com/image.png",
+        ] {
+            assert!(
+                validate_image_url(&url::Url::parse(raw).unwrap()).is_ok(),
+                "{raw}"
+            );
+        }
+        for raw in [
+            "http://github.com/user-attachments/assets/image-id",
+            "file:///etc/passwd",
+            "https://127.0.0.1/image.png",
+            "https://github.com.evil.example/user-attachments/assets/image-id",
+            "https://github.com@evil.example/image.png",
+            "https://attacker:password@github.com/user-attachments/assets/image-id",
+            "https://github.com:444/user-attachments/assets/image-id",
+            "https://github.com/login?return_to=https://evil.example",
+            "https://github.com/user-attachments/../../login",
+            "https://attacker.githubusercontent.com/image.png",
+            "https://attacker.s3.amazonaws.com/image.png",
+        ] {
+            assert!(
+                validate_image_url(&url::Url::parse(raw).unwrap()).is_err(),
+                "{raw}"
+            );
+        }
+    }
+
+    #[test]
+    fn redirects_validate_destination_and_drop_auth_permanently() {
+        let github = url::Url::parse("https://github.com/user-attachments/assets/id").unwrap();
+        let mut token = Some("dummy-test-credential".to_string());
+        let same = image_redirect(&github, "next", &mut token).unwrap();
+        assert!(token.is_some());
+        for destination in [
+            "https://evil.example/image.png",
+            "http://github.com/user-attachments/assets/id",
+            "file:///etc/passwd",
+        ] {
+            assert!(image_redirect(&same, destination, &mut token).is_err());
+        }
+        let cdn = image_redirect(
+            &same,
+            "https://private-user-images.githubusercontent.com/image.png",
+            &mut token,
+        )
+        .unwrap();
+        assert!(token.is_none());
+        let back = image_redirect(&cdn, github.as_str(), &mut token).unwrap();
+        assert!(token.is_none());
+        let client = reqwest::Client::new();
+        assert!(!image_request(&client, &back, token.as_deref())
+            .unwrap()
+            .headers()
+            .contains_key(reqwest::header::AUTHORIZATION));
+    }
+
+    #[test]
+    fn only_github_attachment_requests_receive_sensitive_auth() {
+        let client = reqwest::Client::new();
+        let github = url::Url::parse("https://github.com/user-attachments/assets/id").unwrap();
+        let request = image_request(&client, &github, Some("dummy-test-credential")).unwrap();
+        assert!(request.headers()[reqwest::header::AUTHORIZATION].is_sensitive());
+        let cdn = url::Url::parse("https://user-images.githubusercontent.com/image.png").unwrap();
+        assert!(!image_request(&client, &cdn, Some("dummy-test-credential"))
+            .unwrap()
+            .headers()
+            .contains_key(reqwest::header::AUTHORIZATION));
+        let untrusted = url::Url::parse("https://evil.example/image.png").unwrap();
+        assert!(image_request(&client, &untrusted, Some("dummy-test-credential")).is_err());
+    }
+
+    #[test]
+    fn image_size_limit_applies_to_streamed_chunks() {
+        let mut bytes = vec![0; MAX_IMAGE_BYTES - 2];
+        append_image_chunk(&mut bytes, &[1, 2]).unwrap();
+        assert_eq!(bytes.len(), MAX_IMAGE_BYTES);
+        assert!(append_image_chunk(&mut bytes, &[3]).is_err());
+        assert_eq!(bytes.len(), MAX_IMAGE_BYTES);
+    }
 
     const FIXTURE: &str = r#"{
       "repository": {

@@ -70,7 +70,7 @@ pub struct ToolEnv {
 /// Fetch a GitHub image URL (e.g. user-attachments) with auth, return as data URL.
 #[tauri::command]
 pub async fn fetch_github_image(url: String) -> AppResult<String> {
-    let bytes = gh::fetch_authenticated_url(&url)?;
+    let bytes = gh::fetch_authenticated_url(&url).await?;
     let mime = match () {
         _ if bytes.starts_with(&[0x89, b'P', b'N', b'G']) => "image/png",
         _ if bytes.starts_with(&[0xFF, 0xD8]) => "image/jpeg",

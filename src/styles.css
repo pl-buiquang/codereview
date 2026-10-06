@@ -131,6 +131,14 @@ button:hover {
   background: transparent;
   color: var(--danger);
 }
+.copy-path-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.copy-path-btn:hover {
+  color: var(--accent);
+}
 .btn-split {
   display: inline-flex;
 }
@@ -865,6 +873,12 @@ button:disabled,
   top: 0;
   z-index: 3;
 }
+.file-path-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
 .file-path {
   font-family: var(--font-mono);
   font-size: 11.5px;
@@ -1289,12 +1303,6 @@ td.diff-code {
   border-top: 1px solid var(--border);
   padding-top: 8px;
 }
-.pr-meta-desc-body.clamped {
-  max-height: 120px;
-  overflow: hidden;
-  position: relative;
-  mask-image: linear-gradient(to bottom, #000 70%, transparent);
-}
 .pr-meta-desc-body.scroll {
   max-height: 42vh;
   overflow-y: auto;
@@ -1603,12 +1611,6 @@ td.diff-code {
 .github-thread-drafts {
   margin-top: 8px;
 }
-.github-draft-reply {
-  background: color-mix(in srgb, var(--warning) 6%, transparent);
-  border: 1px dashed var(--warning);
-  border-radius: var(--radius-s);
-  padding: 6px 8px;
-}
 .draft-badge {
   padding: 1px 6px;
   border-radius: 9px;
@@ -1618,8 +1620,10 @@ td.diff-code {
   background: var(--warning-soft);
   border: 1px solid var(--warning);
 }
-.github-draft-delete {
+.github-draft-publish {
   margin-left: auto;
+  padding: 1px 8px;
+  font-size: 11px;
 }
 .github-draft-textarea {
   width: 100%;
@@ -2514,39 +2518,15 @@ tr.search-current {
   border-radius: var(--radius-s);
   max-width: 84px;
 }
-.chat-mode-toggle {
-  display: inline-flex;
-  padding: 1px;
-  gap: 1px;
+.chat-branch {
+  padding: 1px 6px;
   background: var(--bg-sunken, var(--surface));
   border: 1px solid var(--border);
   border-radius: var(--radius-s);
-}
-.chat-mode-toggle button {
-  height: 20px;
-  padding: 0 7px;
-  display: inline-flex;
-  align-items: center;
-  border: none;
-  background: transparent;
-  box-shadow: none;
-  border-radius: calc(var(--radius-s) - 1px);
   color: var(--text-2);
-  font-weight: 600;
+  font-weight: 500;
   font-size: 10.5px;
-  cursor: pointer;
-}
-.chat-mode-toggle button:hover:not(:disabled) {
-  color: var(--text);
-}
-.chat-mode-toggle button.active {
-  background: var(--surface-3, var(--surface-2));
-  color: var(--text);
-  box-shadow: var(--shadow-card);
-}
-.chat-mode-toggle button:disabled {
-  opacity: 0.5;
-  cursor: default;
+  font-family: var(--font-mono);
 }
 
 /* Thinking indicator: three pulsing dots */

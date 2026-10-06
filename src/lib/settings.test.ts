@@ -64,7 +64,6 @@ describe("useSettingsStore", () => {
     expect(Object.keys(snapshot).sort()).toEqual(
       [
         "botLogins",
-        "chatMode",
         "chatModel",
         "defaultThreeDot",
         "defaultViewType",
