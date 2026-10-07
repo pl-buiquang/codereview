@@ -8,9 +8,8 @@ import {
   type CommitGraphHandle,
   type CommitGraphProps,
 } from "./CommitGraph";
+import type { GraphRow as FixtureRow } from "../../lib/graphLayout";
 import type { GraphCommit, RefInfo, WorktreeInfo } from "../../lib/types";
-
-type FixtureRow = CommitGraphProps["rows"][number];
 
 function linearFixture(n: number): { commits: GraphCommit[]; rows: FixtureRow[] } {
   const sha = (i: number) => `c${String(i).padStart(39, "0")}`;

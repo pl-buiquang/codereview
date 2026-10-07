@@ -10,22 +10,8 @@ import {
   type MouseEvent as ReactMouseEvent,
 } from "react";
 import type { GraphCommit, RefInfo, WorktreeInfo } from "../../lib/types";
+import { PALETTE_SIZE, type Edge, type GraphRow } from "../../lib/graphLayout";
 import "./CommitGraph.css";
-
-// Mirrors the frozen spec-22 contract of src/lib/graphLayout.ts (T4). Swap for
-// `import type { GraphRow, Edge } from "../../lib/graphLayout"` once that module lands.
-interface Edge {
-  fromLane: number;
-  toLane: number;
-  color: number;
-}
-interface GraphRow {
-  sha: string;
-  lane: number;
-  color: number;
-  edgesUp: Edge[];
-  edgesDown: Edge[];
-}
 
 export const WIP_SELECTION = "WIP";
 export const ROW_HEIGHT = 28;
@@ -33,7 +19,6 @@ export const LANE_WIDTH = 14;
 const FALLBACK_VIEWPORT_HEIGHT = 600;
 const OVERSCAN_ROWS = 8;
 const END_REACHED_THRESHOLD_ROWS = 20;
-const PALETTE_SIZE = 8;
 const DOT_RADIUS = 4;
 const MAX_VISIBLE_PILLS = 2;
 
