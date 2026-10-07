@@ -1,8 +1,8 @@
 # codereview
 
 A cross-platform **desktop app for reviewing code locally**, GitHub-PR style. Point it at a
-local git repository and review **open GitHub PRs** (via the `gh` CLI) *or* a **"virtual PR"**
-between any two local branches. Leave inline comments and a verdict like on GitHub, stored in
+local git repository, browse its history in a **commit graph**, and review **open GitHub PRs**
+(via the `gh` CLI) *or* a **"virtual PR"** between any two local branches. Leave inline comments and a verdict like on GitHub, stored in
 a local database, then either **publish the review to GitHub** or **export it as Markdown/JSON**
 for an AI agent to read.
 
@@ -13,8 +13,14 @@ Built with **Tauri v2** (Rust) + **React/TypeScript**.
 ## Features
 
 - **Local-first** — works against any local git repo; no server.
+- **Git graph** — a GitKraken-style, read-only view of the repo's history: a sidebar of local /
+  remote branches, worktrees and tags (filterable; click to jump to the tip), a lane-drawn commit
+  graph paged as you scroll (scope **All / Local / Current**), a `// WIP` row for uncommitted
+  changes, and a commit panel with author/committer, parents and the changed files. Click a file
+  to preview its diff in place.
 - **Two diff sources, both first-class**
-  - *Virtual PR*: pick any `base` and `compare` branch; diff uses the merge-base (`base...head`,
+  - *Virtual PR*: start a review of any branch against the default branch (or any `base` via
+    **Review vs…**) from the graph's branch menu; diff uses the merge-base (`base...head`,
     GitHub semantics) with a two-dot toggle.
   - *GitHub PR*: list open PRs and fetch their diff through `gh`.
 - **GitHub-style diff viewer** — split/unified, syntax highlighting, +/− counts, per-file
@@ -135,15 +141,23 @@ of this.
 
 1. **Add a repository** — click **+ Add repo** and choose a local git repo.
 2. Pick it in the sidebar, then choose a tab:
-   - **Virtual PR** — select `base` and `compare` branches → **Preview diff** to look, or
-     **Start review** to begin one.
+   - **Graph** (default when the repo has a local clone) — browse the commit graph. Pick a scope
+     (**All** = all branches/remotes/tags, **Local** = local branches, **Current** = the checkout's
+     `HEAD` only), click a sidebar branch/tag to jump to its tip, select a commit (or the `// WIP`
+     row) to see its files in the right panel, and click a file to preview its diff (`Esc` or ✕
+     closes the preview; ‹/› cycle files). Clicking a worktree in the sidebar makes it the graph's
+     context checkout (HEAD marker, WIP row, Current scope); the toolbar chip resets it to the main
+     checkout. Worktree rows can also be opened in VS Code, removed, or pruned. Right-click a
+     branch (sidebar row or graph pill), or use its `⋯` button, for **Review vs `<default>`** or
+     **Review vs…** to start a virtual-PR review.
    - **GitHub PRs** — lists open PRs (requires `gh auth`); click **Review** to start one.
 3. In a review: **click a line** to comment (shift-click to select a range), fill in the
    **summary** and **verdict**. Everything autosaves.
 4. Finish with **Export** (Markdown/JSON, any review, repeatable) or **Publish** (GitHub PR
    reviews only; locks the review).
 
-The Reviews list shows every saved review for the repo — open to resume, or ✕ to delete.
+The Reviews list (on the GitHub PRs tab) shows every saved review for the repo — open to resume,
+or ✕ to delete.
 
 ---
 

@@ -4,7 +4,8 @@ Ideas for evolving **codereview** beyond the current baseline. Grouped by theme;
 ordered by value-to-effort, both across sections and within each one. Nothing here is committed
 scope — it's a backlog to pull from.
 
-Current baseline (for reference): virtual-PR + GitHub-PR diff review, autosaved review model
+Current baseline (for reference): a read-only git graph tab (spec 22), virtual-PR + GitHub-PR
+diff review, autosaved review model
 with inline & multi-line comments, Markdown/JSON export, and GitHub publish via `gh`. The UI runs
 on a 3-direction (Continuity / Modern / Terminal) × dark/light token-based design system — see
 `THEMING.md`.
