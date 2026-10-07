@@ -156,7 +156,7 @@ of this.
 4. Finish with **Export** (Markdown/JSON, any review, repeatable) or **Publish** (GitHub PR
    reviews only; locks the review).
 
-The Reviews list (on the GitHub PRs tab) shows every saved review for the repo — open to resume,
+The **Reviews** tab shows every saved review for the repo — open to resume,
 or ✕ to delete.
 
 ---

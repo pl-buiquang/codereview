@@ -72,20 +72,22 @@ beforeEach(() => {
 });
 
 describe("RepoView tabs", () => {
-  it("shows only the Graph and GitHub PRs tabs, defaulting to Graph", async () => {
+  it("shows the Graph, GitHub PRs and Reviews tabs, defaulting to Graph", async () => {
     renderRepo();
-    const tabs = screen.getAllByRole("button", { name: /^(Graph|GitHub PRs|Virtual PR|Worktrees)$/ });
-    expect(tabs.map((t) => t.textContent)).toEqual(["Graph", "GitHub PRs"]);
+    const tabs = screen.getAllByRole("button", { name: /^(Graph|GitHub PRs|Reviews|Virtual PR|Worktrees)$/ });
+    expect(tabs.map((t) => t.textContent)).toEqual(["Graph", "GitHub PRs", "Reviews"]);
     expect(screen.getByRole("button", { name: "Graph" })).toHaveClass("active");
     await waitFor(() => expect(graphLog).toHaveBeenCalled());
-    expect(screen.queryByText("Reviews")).not.toBeInTheDocument();
+    expect(screen.queryByText("No reviews yet.")).not.toBeInTheDocument();
   });
 
-  it("shows the reviews list on the GitHub PRs tab", async () => {
+  it("shows the reviews list only on the Reviews tab", async () => {
     const user = userEvent.setup();
     renderRepo();
     await openPrTab(user);
-    expect(screen.getByText("Reviews")).toBeInTheDocument();
+    expect(screen.queryByText("No reviews yet.")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Reviews" }));
+    await waitFor(() => expect(screen.getByText("No reviews yet.")).toBeInTheDocument());
   });
 
   it("disables the Graph tab without a local clone and defaults to GitHub PRs", async () => {

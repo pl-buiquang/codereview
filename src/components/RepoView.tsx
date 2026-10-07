@@ -13,7 +13,7 @@ import { useUIStore } from "../store";
 import type { PrSummary, Repository, ReviewSummary } from "../lib/types";
 import { statusLabel, statusBadgeClass } from "../lib/status";
 
-type Tab = "graph" | "prs";
+type Tab = "graph" | "prs" | "reviews";
 
 export function RepoView({ repo }: { repo: Repository }) {
   const openReview = useUIStore((s) => s.openReview);
@@ -58,16 +58,26 @@ export function RepoView({ repo }: { repo: Repository }) {
         >
           GitHub PRs
         </button>
+        <button
+          className={`cr-tab${tab === "reviews" ? " active" : ""}`}
+          onClick={() => setTab("reviews")}
+        >
+          Reviews
+        </button>
       </div>
 
-      {tab === "graph" ? (
+      {tab === "graph" && (
         <div className="repo-body repo-body-graph">
           <GraphView repo={repo} />
         </div>
-      ) : (
+      )}
+      {tab === "prs" && (
         <div className="repo-body">
           <PrList repo={repo} onOpen={openReview} />
-
+        </div>
+      )}
+      {tab === "reviews" && (
+        <div className="repo-body">
           <div className="repo-reviews">
             <div className="repo-section-row">
               <h3 className="repo-section-h">Reviews</h3>
