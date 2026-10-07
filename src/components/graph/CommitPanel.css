@@ -1,0 +1,264 @@
+.commit-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  min-width: 0;
+  overflow-y: auto;
+}
+
+.cp-subject {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  word-break: break-word;
+}
+
+.cp-body {
+  margin: var(--sp-2) 0 0;
+  font-family: var(--font-ui);
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-2);
+}
+
+.cp-muted {
+  color: var(--text-3);
+}
+
+.cp-meta {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding: var(--sp-2) 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.cp-shas,
+.cp-person {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.cp-label,
+.cp-person-role {
+  width: 64px;
+  flex: none;
+  color: var(--text-3);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.cp-person-name {
+  color: var(--text);
+}
+
+.cp-person-email,
+.cp-person-date {
+  color: var(--text-2);
+}
+
+.cp-sha {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: 0 var(--sp-1);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--accent);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-s);
+  cursor: pointer;
+}
+
+.cp-sha:hover {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+}
+
+.cp-files-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.cp-counts {
+  display: inline-flex;
+  gap: var(--sp-2);
+  font-family: var(--font-mono);
+  font-weight: 400;
+}
+
+.cp-group-count {
+  font-family: var(--font-mono);
+  color: var(--text-3);
+}
+
+.cp-file-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.cp-file {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  padding: 2px var(--sp-1);
+  text-align: left;
+  color: var(--text);
+  background: none;
+  border: none;
+  border-radius: var(--radius-s);
+  cursor: pointer;
+}
+
+.cp-file:hover {
+  background: var(--surface-2);
+}
+
+.cp-file.active {
+  background: var(--accent-soft);
+}
+
+.cp-file-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.cp-numstat {
+  display: inline-flex;
+  gap: var(--sp-1);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.cp-numstat .add {
+  color: var(--success);
+}
+
+.cp-numstat .del {
+  color: var(--danger);
+}
+
+.cp-status {
+  flex: none;
+  width: 16px;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: var(--radius-s);
+}
+
+.cp-status-A {
+  color: var(--success);
+}
+
+.cp-status-M,
+.cp-status-T {
+  color: var(--warning);
+}
+
+.cp-status-D {
+  color: var(--danger);
+}
+
+.cp-status-R,
+.cp-status-C {
+  color: var(--accent);
+}
+
+.cp-wip-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.cp-empty {
+  margin: 0;
+  font-size: 12px;
+}
+
+.diff-preview {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+}
+
+.dp-header {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.dp-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.dp-kind {
+  color: var(--text-3);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.dp-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+
+.dp-pos {
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.dp-close {
+  display: inline-flex;
+  padding: var(--sp-1);
+  color: var(--text-2);
+  background: none;
+  border: none;
+  border-radius: var(--radius-s);
+  cursor: pointer;
+}
+
+.dp-close:hover {
+  color: var(--text);
+  background: var(--surface-2);
+}
+
+.dp-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--sp-3);
+}
