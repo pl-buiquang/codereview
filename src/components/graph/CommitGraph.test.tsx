@@ -19,6 +19,7 @@ function linearFixture(n: number): { commits: GraphCommit[]; rows: FixtureRow[] 
     subject: `subject ${i}`,
     body_preview: i % 2 === 0 ? `body ${i}` : "",
     author_name: "dev",
+    author_email: "dev@example.com",
     author_time: 1_700_000_000 - i,
     committer_time: 1_700_000_000 - i,
   }));
@@ -56,6 +57,16 @@ function setup(overrides: Partial<CommitGraphProps> = {}, n = 5) {
 const commitRows = (container: HTMLElement) => container.querySelectorAll(".cg-row[data-sha]");
 
 describe("CommitGraph", () => {
+  it("uses the author's avatar when known and an identicon otherwise", () => {
+    const { container, rerender, props, handle } = setup();
+    const href = () => container.querySelector(".cg-row[data-sha] .cg-avatar")?.getAttribute("href") ?? "";
+    expect(href()).toMatch(/^data:image\/svg\+xml/);
+    rerender(
+      <CommitGraph ref={handle} {...props} avatars={new Map([["dev@example.com", "data:image/png;base64,AAAA"]])} />,
+    );
+    expect(href()).toBe("data:image/png;base64,AAAA");
+  });
+
   it("renders only a window of rows for a long list", () => {
     const { container } = setup({}, 2000);
     const rendered = commitRows(container).length;
@@ -122,8 +133,8 @@ describe("CommitGraph", () => {
 
   it("renders ref, HEAD and worktree pills and forwards right-click on ref pills", () => {
     const { commits } = linearFixture(5);
-    const main: RefInfo = { name: "main", kind: "local", sha: commits[0].sha, is_head: true };
-    const tag: RefInfo = { name: "v1.0.0", kind: "tag", sha: commits[3].sha, is_head: false };
+    const main: RefInfo = { name: "main", kind: "local", sha: commits[0].sha, is_head: true, updated_at: 0 };
+    const tag: RefInfo = { name: "v1.0.0", kind: "tag", sha: commits[3].sha, is_head: false, updated_at: 0 };
     const wt: WorktreeInfo = {
       path: "/tmp/repo-feature",
       display_path: "~/repo-feature",

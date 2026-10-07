@@ -86,6 +86,24 @@ describe("CommitPanel (commit mode)", () => {
     expect(success).toHaveBeenCalled();
   });
 
+  it("links open PRs for the branch tip", async () => {
+    const onOpenPr = vi.fn();
+    const pr = {
+      number: 42,
+      title: "Add graph",
+      author: null,
+      headRefName: "feat",
+      baseRefName: "main",
+      createdAt: "",
+      url: "https://github.com/acme/w/pull/42",
+    };
+    render(
+      <CommitPanel detail={detail()} onOpenFile={vi.fn()} onJumpToSha={vi.fn()} pullRequests={[pr]} onOpenPr={onOpenPr} />,
+    );
+    await userEvent.setup().click(screen.getByRole("button", { name: /PR #42/ }));
+    expect(onOpenPr).toHaveBeenCalledWith(pr);
+  });
+
   it("labels a root commit", () => {
     render(
       <CommitPanel detail={detail({ parents: [] })} onOpenFile={vi.fn()} onJumpToSha={vi.fn()} />,

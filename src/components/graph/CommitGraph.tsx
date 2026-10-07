@@ -11,15 +11,18 @@ import {
 } from "react";
 import type { GraphCommit, RefInfo, WorktreeInfo } from "../../lib/types";
 import { PALETTE_SIZE, type Edge, type GraphRow } from "../../lib/graphLayout";
+import { identicon } from "../../lib/avatar";
 import "./CommitGraph.css";
 
 export const WIP_SELECTION = "WIP";
-export const ROW_HEIGHT = 28;
-export const LANE_WIDTH = 14;
+export const ROW_HEIGHT = 34;
+export const LANE_WIDTH = 26;
 const FALLBACK_VIEWPORT_HEIGHT = 600;
 const OVERSCAN_ROWS = 8;
 const END_REACHED_THRESHOLD_ROWS = 20;
-const DOT_RADIUS = 4;
+const AVATAR_RADIUS = 11;
+const MERGE_RADIUS = 5;
+const WIP_RADIUS = 9;
 const MAX_VISIBLE_PILLS = 2;
 
 export interface CommitGraphHandle {
@@ -32,6 +35,8 @@ export interface CommitGraphProps {
   /** Output of `layoutGraph(commits)`; `rows[i]` describes `commits[i]`. */
   rows: GraphRow[];
   maxLanes: number;
+  /** Lowercased author email → avatar image URL; authors without one get a generated identicon. */
+  avatars?: ReadonlyMap<string, string>;
   refs: RefInfo[];
   worktrees?: WorktreeInfo[];
   /** HEAD of the context checkout; gets a HEAD pill and anchors the WIP row. */
@@ -74,6 +79,7 @@ export const CommitGraph = forwardRef<CommitGraphHandle, CommitGraphProps>(funct
     commits,
     rows,
     maxLanes,
+    avatars,
     refs,
     worktrees = [],
     headSha,
@@ -230,7 +236,7 @@ export const CommitGraph = forwardRef<CommitGraphHandle, CommitGraphProps>(funct
             <path key={`p${i}`} className={`cg-edge ${colorClass(e.color)}`} d={edgePath({ ...e, toLane: e.fromLane }, 0, ROW_HEIGHT)} />
           ))}
           <path className="cg-edge cg-edge-wip" d={`M${laneX(wipLane)} ${mid} L${laneX(wipLane)} ${ROW_HEIGHT}`} />
-          <circle className="cg-dot cg-dot-wip" cx={laneX(wipLane)} cy={mid} r={DOT_RADIUS} />
+          <circle className="cg-dot cg-dot-wip" cx={laneX(wipLane)} cy={mid} r={WIP_RADIUS} />
         </svg>
         <div className="cg-message">
           <span className="cg-subject cg-subject-wip">// WIP +{wip?.count ?? 0}</span>
@@ -267,12 +273,38 @@ export const CommitGraph = forwardRef<CommitGraphHandle, CommitGraphProps>(funct
           {isHead && showWip && (
             <path className="cg-edge cg-edge-wip" d={`M${laneX(lane)} 0 L${laneX(lane)} ${mid}`} />
           )}
-          <circle
-            className={`cg-dot ${colorClass(row?.color ?? 0)}${isMerge ? " cg-dot-merge" : ""}${isHead ? " cg-dot-head" : ""}`}
-            cx={laneX(lane)}
-            cy={mid}
-            r={isMerge ? DOT_RADIUS - 1 : DOT_RADIUS}
-          />
+          {isMerge ? (
+            <circle
+              className={`cg-dot ${colorClass(row?.color ?? 0)} cg-dot-merge${isHead ? " cg-dot-head" : ""}`}
+              cx={laneX(lane)}
+              cy={mid}
+              r={MERGE_RADIUS}
+            />
+          ) : (
+            <>
+              <clipPath id={`cg-av-${commit.sha}`}>
+                <circle cx={laneX(lane)} cy={mid} r={AVATAR_RADIUS} />
+              </clipPath>
+              <circle
+                className={`cg-dot ${colorClass(row?.color ?? 0)}${isHead ? " cg-dot-head" : ""}`}
+                cx={laneX(lane)}
+                cy={mid}
+                r={AVATAR_RADIUS + 2}
+              />
+              <image
+                className="cg-avatar"
+                href={avatars?.get(commit.author_email.toLowerCase()) ?? identicon(commit.author_name || commit.author_email)}
+                x={laneX(lane) - AVATAR_RADIUS}
+                y={mid - AVATAR_RADIUS}
+                width={AVATAR_RADIUS * 2}
+                height={AVATAR_RADIUS * 2}
+                preserveAspectRatio="xMidYMid slice"
+                clipPath={`url(#cg-av-${commit.sha})`}
+              >
+                <title>{`${commit.author_name} <${commit.author_email}>`}</title>
+              </image>
+            </>
+          )}
         </svg>
         <div className="cg-message">
           <span className="cg-subject">{commit.subject}</span>

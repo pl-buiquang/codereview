@@ -91,7 +91,7 @@ pub(crate) fn gh_ctx_for_repo(conn: &Connection, repo_id: i64) -> AppResult<GhRe
 
 /// The GitHub owner/name of a repository, if it has one.
 /// None for purely local repos (callers skip GitHub-API work gracefully).
-fn repo_owner_name(conn: &Connection, repo_id: i64) -> AppResult<Option<(String, String)>> {
+pub(crate) fn repo_owner_name(conn: &Connection, repo_id: i64) -> AppResult<Option<(String, String)>> {
     let (owner, name): (Option<String>, Option<String>) = conn.query_row(
         "SELECT remote_owner, remote_name FROM repository WHERE id = ?1",
         params![repo_id],

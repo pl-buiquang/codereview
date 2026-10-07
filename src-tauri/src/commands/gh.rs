@@ -1,4 +1,3 @@
-use base64::{engine::general_purpose::STANDARD, Engine};
 use serde::Serialize;
 use tauri::State;
 
@@ -71,18 +70,7 @@ pub struct ToolEnv {
 #[tauri::command]
 pub async fn fetch_github_image(url: String) -> AppResult<String> {
     let bytes = gh::fetch_authenticated_url(&url).await?;
-    let mime = match () {
-        _ if bytes.starts_with(&[0x89, b'P', b'N', b'G']) => "image/png",
-        _ if bytes.starts_with(&[0xFF, 0xD8]) => "image/jpeg",
-        _ if bytes.starts_with(b"GIF") => "image/gif",
-        _ if bytes.starts_with(b"RIFF") && bytes.len() > 12 && &bytes[8..12] == b"WEBP" => {
-            "image/webp"
-        }
-        _ if bytes.starts_with(b"<svg") || bytes.starts_with(b"<?xml") => "image/svg+xml",
-        _ => "application/octet-stream",
-    };
-    let b64 = STANDARD.encode(&bytes);
-    Ok(format!("data:{mime};base64,{b64}"))
+    Ok(gh::image_data_url(&bytes))
 }
 
 #[tauri::command]

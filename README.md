@@ -15,7 +15,7 @@ Built with **Tauri v2** (Rust) + **React/TypeScript**.
 - **Local-first** — works against any local git repo; no server.
 - **Git graph** — a GitKraken-style, read-only view of the repo's history: a sidebar of local /
   remote branches, worktrees and tags (filterable; click to jump to the tip), a lane-drawn commit
-  graph paged as you scroll (scope **All / Local / Current**), a `// WIP` row for uncommitted
+  graph paged as you scroll (scope **Local** (default) / **All**), a `// WIP` row for uncommitted
   changes, and a commit panel with author/committer, parents and the changed files. Click a file
   to preview its diff in place.
 - **Two diff sources, both first-class**
@@ -146,7 +146,7 @@ of this.
      `HEAD` only), click a sidebar branch/tag to jump to its tip, select a commit (or the `// WIP`
      row) to see its files in the right panel, and click a file to preview its diff (`Esc` or ✕
      closes the preview; ‹/› cycle files). Clicking a worktree in the sidebar makes it the graph's
-     context checkout (HEAD marker, WIP row, Current scope); the toolbar chip resets it to the main
+     context checkout (HEAD marker, WIP row); the toolbar chip resets it to the main
      checkout. Worktree rows can also be opened in VS Code, removed, or pruned. Right-click a
      branch (sidebar row or graph pill), or use its `⋯` button, for **Review vs `<default>`** or
      **Review vs…** to start a virtual-PR review.

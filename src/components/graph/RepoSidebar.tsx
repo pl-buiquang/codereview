@@ -11,6 +11,7 @@ import type {
   WorktreeInfo,
   WorktreeSource,
 } from "../../lib/types";
+import { ancestorPaths, buildRefTree, type RefSort, type RefTreeNode } from "../../lib/refTree";
 import { BranchActionsMenu, type MenuAnchor } from "./BranchActionsMenu";
 import "./RepoSidebar.css";
 
@@ -57,9 +58,9 @@ export function RepoSidebar({
   const queryClient = useQueryClient();
   const [collapsed, setCollapsed] = useState<Record<SectionId, boolean>>({
     local: false,
-    remote: false,
-    worktrees: false,
-    tags: false,
+    remote: true,
+    worktrees: true,
+    tags: true,
   });
   const [filters, setFilters] = useState<Record<SectionId, string>>({
     local: "",
@@ -68,6 +69,8 @@ export function RepoSidebar({
     tags: "",
   });
   const [menu, setMenu] = useState<{ branch: string; anchor: MenuAnchor } | null>(null);
+  const [sort, setSort] = useState<RefSort>("updated");
+  const [toggledFolders, setToggledFolders] = useState<ReadonlySet<string>>(() => new Set());
 
   const { local, remote, tags } = useMemo(() => {
     const local: RefInfo[] = [];
@@ -104,6 +107,32 @@ export function RepoSidebar({
     onError: (e) => toast.error(`Prune failed: ${String(e)}`),
   });
 
+  const pruneGone = useMutation({
+    mutationFn: async () => {
+      const gone = await api.listGoneBranches(repo.id);
+      if (gone.length === 0) return null;
+      const ok = await confirmDialog({
+        title: "Delete gone branches",
+        message: `Force-delete ${gone.length} local branch${gone.length === 1 ? "" : "es"} whose upstream is gone?\n\n${gone.join("\n")}`,
+        confirmLabel: "Delete",
+        danger: true,
+      });
+      return ok ? api.deleteGoneBranches(repo.id, gone) : undefined;
+    },
+    onSuccess: (outcome) => {
+      if (outcome === null) {
+        toast.success("No gone branches.");
+        return;
+      }
+      if (!outcome) return;
+      queryClient.invalidateQueries({ queryKey: ["refs", repo.id] });
+      queryClient.invalidateQueries({ queryKey: ["graph", repo.id] });
+      if (outcome.deleted.length) toast.success(`Deleted ${outcome.deleted.length} gone branch(es).`);
+      for (const f of outcome.failed) toast.error(`Could not delete ${f.name}: ${f.error}`);
+    },
+    onError: (e) => toast.error(`Prune failed: ${String(e)}`),
+  });
+
   const hasPrunable = worktrees.some((w) => w.is_prunable);
   // Use cached PR data if available (populated when GitHub PRs tab has been visited).
   const cachedPrs = queryClient.getQueryData<PrSummary[]>(["prs", repo.id]) ?? [];
@@ -113,18 +142,60 @@ export function RepoSidebar({
 
   const openMenu = (branch: string, anchor: MenuAnchor) => setMenu({ branch, anchor });
 
+  const activeNames = useMemo(
+    () => new Set([...refs.filter((r) => r.is_head).map((r) => r.name), ...(selectedRefName ? [selectedRefName] : [])]),
+    [refs, selectedRefName],
+  );
+  const openByDefault = (id: SectionId, path: string, depth: number) =>
+    (id === "remote" && depth === 0) ||
+    [...activeNames].some((n) => ancestorPaths(n).includes(path));
+  const toggleFolder = (key: string) =>
+    setToggledFolders((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(key)) next.add(key);
+      return next;
+    });
+
+  const renderTree = (nodes: RefTreeNode[], id: SectionId, withActions: boolean, depth: number): ReactNode =>
+    nodes.map((node) => {
+      if (node.type === "leaf") {
+        const r = node.ref;
+        return (
+          <RefRow
+            key={`${r.kind}:${r.name}`}
+            refInfo={r}
+            label={node.label}
+            depth={depth}
+            selected={selectedRefName === r.name}
+            onJump={() => onJumpToRef(r)}
+            onOpenMenu={withActions ? (anchor) => openMenu(r.name, anchor) : undefined}
+          />
+        );
+      }
+      const key = `${id}:${node.path}`;
+      const open = filters[id] !== "" || openByDefault(id, node.path, depth) !== toggledFolders.has(key);
+      return (
+        <div key={key} className="rs-folder">
+          <button
+            className="rs-folder-row"
+            style={{ paddingLeft: 6 + depth * 12 }}
+            aria-expanded={open}
+            title={node.path}
+            onClick={() => toggleFolder(key)}
+          >
+            <span className={`rs-chev${open ? "" : " collapsed"}`}>
+              <Icon name="chev" size={10} />
+            </span>
+            <span className="rs-row-name">{node.label}</span>
+            <span className="rs-folder-count">{node.count}</span>
+          </button>
+          {open && renderTree(node.children, id, withActions, depth + 1)}
+        </div>
+      );
+    });
+
   const renderRefs = (list: RefInfo[], id: SectionId, withActions: boolean) =>
-    list
-      .filter((r) => matches(r.name, filters[id]))
-      .map((r) => (
-        <RefRow
-          key={`${r.kind}:${r.name}`}
-          refInfo={r}
-          selected={selectedRefName === r.name}
-          onJump={() => onJumpToRef(r)}
-          onOpenMenu={withActions ? (anchor) => openMenu(r.name, anchor) : undefined}
-        />
-      ));
+    renderTree(buildRefTree(list.filter((r) => matches(r.name, filters[id])), sort), id, withActions, 0);
 
   const visibleWorktrees = worktrees.filter(
     (w) => matches(w.display_path, filters.worktrees) || matches(w.branch ?? "", filters.worktrees),
@@ -132,6 +203,16 @@ export function RepoSidebar({
 
   return (
     <aside className="rs-sidebar" aria-label="Repository refs">
+      <div className="rs-toolbar">
+        <button
+          className="btn btn-sm"
+          onClick={() => setSort((v) => (v === "updated" ? "name" : "updated"))}
+          title="Toggle branch/tag sort order"
+          aria-label={`Sort by ${sort === "updated" ? "last updated" : "name"}`}
+        >
+          Sort: {sort === "updated" ? "Last updated" : "Name"}
+        </button>
+      </div>
       <Section
         id="local"
         title="Local"
@@ -141,6 +222,16 @@ export function RepoSidebar({
         filter={filters.local}
         onToggle={toggle}
         onFilter={setFilter}
+        actions={
+          <button
+            className="btn btn-sm"
+            disabled={pruneGone.isPending}
+            onClick={() => pruneGone.mutate()}
+            title="git fetch --prune, then delete local branches whose upstream is gone"
+          >
+            {pruneGone.isPending ? <span className="spinner" /> : "Prune gone"}
+          </button>
+        }
       >
         {renderRefs(local, "local", true)}
       </Section>
@@ -287,7 +378,7 @@ function Section({
             value={filter}
             onChange={(e) => onFilter(id, e.target.value)}
           />
-          {children}
+          <div className="rs-list">{children}</div>
           {shown === 0 && <p className="rs-empty faint">{total === 0 ? "None" : "No matches"}</p>}
         </div>
       )}
@@ -297,11 +388,15 @@ function Section({
 
 function RefRow({
   refInfo,
+  label,
+  depth,
   selected,
   onJump,
   onOpenMenu,
 }: {
   refInfo: RefInfo;
+  label: string;
+  depth: number;
   selected: boolean;
   onJump: () => void;
   onOpenMenu?: (anchor: MenuAnchor) => void;
@@ -320,12 +415,13 @@ function RefRow({
     >
       <button
         className="rs-row-main"
+        style={{ paddingLeft: 6 + depth * 12 }}
         onClick={onJump}
         title={`Jump to ${refInfo.name}`}
         aria-label={`Jump to ${refInfo.name}`}
       >
         <Icon name={refInfo.kind === "tag" ? "link" : "branch"} size={12} />
-        <span className="rs-row-name mono">{refInfo.name}</span>
+        <span className="rs-row-name mono">{label}</span>
         {refInfo.is_head && <span className="rs-head-badge">HEAD</span>}
       </button>
       {onOpenMenu && (

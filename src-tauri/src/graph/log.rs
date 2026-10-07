@@ -5,8 +5,8 @@ use crate::git::run_git;
 
 use super::{GraphCommit, RefInfo, RefKind, Scope};
 
-const LOG_FORMAT: &str = "--format=%H%x1f%P%x1f%an%x1f%at%x1f%ct%x1f%s%x1f%b%x1e";
-const REF_FORMAT: &str = "--format=%(refname)%09%(objectname)%09%(*objectname)%09%(HEAD)%09%(symref)";
+const LOG_FORMAT: &str = "--format=%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%ct%x1f%s%x1f%b%x1e";
+const REF_FORMAT: &str = "--format=%(refname)%09%(objectname)%09%(*objectname)%09%(HEAD)%09%(symref)%09%(creatordate:unix)";
 
 pub fn graph_log(
     checkout: &Path,
@@ -18,12 +18,9 @@ pub fn graph_log(
     let mut revs: Vec<&str> = match scope {
         Scope::All => vec!["--branches", "--remotes", "--tags"],
         Scope::Local => vec!["--branches"],
-        Scope::Current => vec![],
     };
     if has_head {
         revs.push("HEAD");
-    } else if scope == Scope::Current {
-        return Ok(Vec::new());
     }
 
     let skip_arg = format!("--skip={skip}");
@@ -48,8 +45,8 @@ pub fn graph_log(
 }
 
 fn parse_commit(rec: &str) -> AppResult<GraphCommit> {
-    let fields: Vec<&str> = rec.splitn(7, '\x1f').collect();
-    if fields.len() != 7 {
+    let fields: Vec<&str> = rec.splitn(8, '\x1f').collect();
+    if fields.len() != 8 {
         return Err(AppError::Git(format!("malformed git log record: {rec:?}")));
     }
     let parse_time = |s: &str| {
@@ -61,10 +58,11 @@ fn parse_commit(rec: &str) -> AppResult<GraphCommit> {
         sha: fields[0].to_string(),
         parents: fields[1].split_whitespace().map(str::to_string).collect(),
         author_name: fields[2].to_string(),
-        author_time: parse_time(fields[3])?,
-        committer_time: parse_time(fields[4])?,
-        subject: fields[5].to_string(),
-        body_preview: fields[6]
+        author_email: fields[3].to_string(),
+        author_time: parse_time(fields[4])?,
+        committer_time: parse_time(fields[5])?,
+        subject: fields[6].to_string(),
+        body_preview: fields[7]
             .lines()
             .map(str::trim)
             .find(|l| !l.is_empty())
@@ -94,6 +92,7 @@ fn parse_ref(line: &str) -> Option<RefInfo> {
     let peeled = parts.next().unwrap_or("");
     let head = parts.next().unwrap_or("");
     let symref = parts.next().unwrap_or("");
+    let updated_at = parts.next().and_then(|t| t.trim().parse().ok()).unwrap_or(0);
     if !symref.is_empty() {
         return None;
     }
@@ -112,6 +111,7 @@ fn parse_ref(line: &str) -> Option<RefInfo> {
         kind,
         sha: sha.to_string(),
         is_head: head.trim() == "*",
+        updated_at,
     })
 }
 
@@ -185,7 +185,7 @@ mod tests {
         let c2 = f.commit("a.txt", "second\n\n\nbody line one\nbody line two");
         let c3 = f.commit("a.txt", "third");
 
-        let log = graph_log(f.path(), Scope::Current, 0, 100).unwrap();
+        let log = graph_log(f.path(), Scope::Local, 0, 100).unwrap();
         assert_eq!(shas(&log), vec![c3.clone(), c2.clone(), c1.clone()]);
 
         assert_eq!(log[0].subject, "third");
@@ -210,7 +210,7 @@ mod tests {
         f.git(&["merge", "-q", "--no-ff", "-m", "merge feature", "feature"]);
         let merge = f.git(&["rev-parse", "HEAD"]);
 
-        let log = graph_log(f.path(), Scope::Current, 0, 100).unwrap();
+        let log = graph_log(f.path(), Scope::Local, 0, 100).unwrap();
         assert_eq!(log.len(), 4);
         assert_eq!(log[0].sha, merge);
         assert_eq!(log[0].parents, vec![main_tip, feat]);
@@ -259,6 +259,7 @@ mod tests {
         assert_eq!(main.sha, c1);
         let other = refs.iter().find(|r| r.name == "other").unwrap();
         assert!(!other.is_head);
+        assert!(other.updated_at >= 1_700_000_000);
         let remote = refs.iter().find(|r| r.name == "origin/main").unwrap();
         assert_eq!(remote.kind, RefKind::Remote);
         assert_eq!(remote.sha, c1);
@@ -271,13 +272,13 @@ mod tests {
         for i in 0..7 {
             f.commit("a.txt", &format!("c{i}"));
         }
-        let all = graph_log(f.path(), Scope::Current, 0, 100).unwrap();
+        let all = graph_log(f.path(), Scope::Local, 0, 100).unwrap();
         assert_eq!(all.len(), 7);
 
-        let p1 = graph_log(f.path(), Scope::Current, 0, 3).unwrap();
-        let p2 = graph_log(f.path(), Scope::Current, 3, 3).unwrap();
-        let p3 = graph_log(f.path(), Scope::Current, 6, 3).unwrap();
-        let p4 = graph_log(f.path(), Scope::Current, 9, 3).unwrap();
+        let p1 = graph_log(f.path(), Scope::Local, 0, 3).unwrap();
+        let p2 = graph_log(f.path(), Scope::Local, 3, 3).unwrap();
+        let p3 = graph_log(f.path(), Scope::Local, 6, 3).unwrap();
+        let p4 = graph_log(f.path(), Scope::Local, 9, 3).unwrap();
         assert_eq!(p1.len(), 3);
         assert_eq!(p2.len(), 3);
         assert_eq!(p3.len(), 1);
@@ -308,9 +309,6 @@ mod tests {
         f.git(&["checkout", "-q", "-f", "main"]);
         f.git(&["branch", "-q", "-D", "tagged"]);
 
-        let current = shas(&graph_log(f.path(), Scope::Current, 0, 100).unwrap());
-        assert_eq!(current, vec![base.clone()]);
-
         let local = shas(&graph_log(f.path(), Scope::Local, 0, 100).unwrap());
         assert!(local.contains(&base) && local.contains(&side));
         assert!(!local.contains(&remote_only));
@@ -337,7 +335,7 @@ mod tests {
     #[test]
     fn unborn_head_yields_empty_log() {
         let f = Fixture::new();
-        assert!(graph_log(f.path(), Scope::Current, 0, 10).unwrap().is_empty());
+        assert!(graph_log(f.path(), Scope::Local, 0, 10).unwrap().is_empty());
         assert!(graph_log(f.path(), Scope::All, 0, 10).unwrap().is_empty());
         assert!(list_refs(f.path()).unwrap().is_empty());
     }

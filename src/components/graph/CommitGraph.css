@@ -127,6 +127,11 @@
 
 .cg-dot-head {
   stroke: var(--text);
+  stroke-width: 2;
+}
+
+.cg-avatar {
+  pointer-events: auto;
 }
 
 .cg-dot-wip {

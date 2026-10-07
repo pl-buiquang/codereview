@@ -9,6 +9,8 @@ const listBranches = vi.fn();
 const removeWorktree = vi.fn();
 const pruneWorktrees = vi.fn();
 const openInVscode = vi.fn();
+const listGoneBranches = vi.fn();
+const deleteGoneBranches = vi.fn();
 vi.mock("../../lib/api", () => ({
   api: {
     createReview: (args: unknown) => createReview(args),
@@ -16,6 +18,8 @@ vi.mock("../../lib/api", () => ({
     removeWorktree: (id: number, path: string) => removeWorktree(id, path),
     pruneWorktrees: (id: number) => pruneWorktrees(id),
     openInVscode: (path: string) => openInVscode(path),
+    listGoneBranches: (id: number) => listGoneBranches(id),
+    deleteGoneBranches: (id: number, names: string[]) => deleteGoneBranches(id, names),
   },
 }));
 
@@ -39,13 +43,13 @@ const repo: Repository = {
 };
 
 const refs: RefInfo[] = [
-  { name: "main", kind: "local", sha: "a".repeat(40), is_head: true },
-  { name: "feature/login", kind: "local", sha: "b".repeat(40), is_head: false },
-  { name: "fix/crash", kind: "local", sha: "c".repeat(40), is_head: false },
-  { name: "origin/HEAD", kind: "remote", sha: "a".repeat(40), is_head: false },
-  { name: "origin/main", kind: "remote", sha: "a".repeat(40), is_head: false },
-  { name: "origin/feature/login", kind: "remote", sha: "b".repeat(40), is_head: false },
-  { name: "v1.0.0", kind: "tag", sha: "d".repeat(40), is_head: false },
+  { name: "main", kind: "local", sha: "a".repeat(40), is_head: true, updated_at: 0 },
+  { name: "feature/login", kind: "local", sha: "b".repeat(40), is_head: false, updated_at: 0 },
+  { name: "fix/crash", kind: "local", sha: "c".repeat(40), is_head: false, updated_at: 0 },
+  { name: "origin/HEAD", kind: "remote", sha: "a".repeat(40), is_head: false, updated_at: 0 },
+  { name: "origin/main", kind: "remote", sha: "a".repeat(40), is_head: false, updated_at: 0 },
+  { name: "origin/feature/login", kind: "remote", sha: "b".repeat(40), is_head: false, updated_at: 0 },
+  { name: "v1.0.0", kind: "tag", sha: "d".repeat(40), is_head: false, updated_at: 0 },
 ];
 
 const worktrees: WorktreeInfo[] = [
@@ -95,6 +99,12 @@ function section(id: string): HTMLElement {
   return document.querySelector(`[data-section="${id}"]`) as HTMLElement;
 }
 
+const expand = (user: ReturnType<typeof userEvent.setup>, id: string) =>
+  user.click(within(section(id)).getByRole("button", { name: new RegExp(id, "i"), expanded: false }));
+
+const openFolder = (user: ReturnType<typeof userEvent.setup>, id: string, path: string) =>
+  user.click(within(section(id)).getByTitle(path));
+
 beforeEach(() => {
   vi.clearAllMocks();
   useSettingsStore.setState({ defaultThreeDot: true });
@@ -124,33 +134,58 @@ describe("RepoSidebar sections", () => {
     const { user } = setup();
     await user.type(screen.getByLabelText("Filter local"), "LOGIN");
     const local = section("local");
-    expect(within(local).getByText("feature/login")).toBeInTheDocument();
-    expect(within(local).queryByText("fix/crash")).not.toBeInTheDocument();
+    expect(within(local).getByRole("button", { name: "Jump to feature/login" })).toBeInTheDocument();
+    expect(within(local).queryByRole("button", { name: "Jump to fix/crash" })).not.toBeInTheDocument();
     expect(screen.getByTestId("count-local")).toHaveTextContent("1/3");
-    expect(within(section("remote")).getByText("origin/feature/login")).toBeInTheDocument();
 
     await user.clear(screen.getByLabelText("Filter local"));
     await user.type(screen.getByLabelText("Filter local"), "zzz");
     expect(within(local).getByText("No matches")).toBeInTheDocument();
   });
 
-  it("collapses and expands a section", async () => {
+  it("opens only the local section by default and toggles others", async () => {
     const { user } = setup();
     const toggle = within(section("tags")).getByRole("button", { name: /tags/i });
-    expect(toggle).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByText("v1.0.0")).toBeInTheDocument();
-
-    await user.click(toggle);
     expect(toggle).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByText("v1.0.0")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Filter tags")).not.toBeInTheDocument();
+    expect(within(section("local")).getByRole("button", { name: /local/i })).toHaveAttribute("aria-expanded", "true");
 
     await user.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByText("v1.0.0")).toBeInTheDocument();
+  });
+
+  it("groups refs into collapsed folders by slash, opening remotes and active branches", async () => {
+    const { user } = setup({ selectedRefName: "fix/crash" });
+    await expand(user, "remote");
+    const local = section("local");
+    expect(within(local).queryByRole("button", { name: "Jump to feature/login" })).toBeNull();
+    expect(within(local).getByRole("button", { name: "Jump to fix/crash" })).toBeInTheDocument();
+    expect(within(section("remote")).getByRole("button", { name: "Jump to origin/main" })).toBeInTheDocument();
+    await openFolder(user, "local", "feature");
+    expect(within(local).getByRole("button", { name: "Jump to feature/login" })).toHaveTextContent("login");
+  });
+
+  it("sorts by last updated by default and toggles to name", async () => {
+    const dated: RefInfo[] = [
+      { name: "alpha", kind: "local", sha: "a".repeat(40), is_head: false, updated_at: 1 },
+      { name: "zeta", kind: "local", sha: "b".repeat(40), is_head: false, updated_at: 9 },
+    ];
+    const { user } = setup({ refs: dated });
+    const order = () =>
+      within(section("local"))
+        .getAllByRole("button", { name: /^Jump to/ })
+        .map((b) => b.getAttribute("aria-label"));
+    expect(order()).toEqual(["Jump to zeta", "Jump to alpha"]);
+    await user.click(screen.getByRole("button", { name: "Sort by last updated" }));
+    expect(order()).toEqual(["Jump to alpha", "Jump to zeta"]);
   });
 
   it("clicking a ref row jumps to it", async () => {
     const { user, props } = setup();
+    await expand(user, "remote");
+    await expand(user, "tags");
     await user.click(screen.getByRole("button", { name: /Jump to origin\/main/ }));
     expect(props.onJumpToRef).toHaveBeenCalledWith(refs[4]);
     await user.click(screen.getByRole("button", { name: /Jump to v1.0.0/ }));
@@ -161,12 +196,14 @@ describe("RepoSidebar sections", () => {
 describe("RepoSidebar worktrees", () => {
   it("clicking a worktree row selects it as the context", async () => {
     const { user, props } = setup();
+    await expand(user, "worktrees");
     await user.click(screen.getByText("~/.claude/worktrees/widget/wt1"));
     expect(props.onSelectWorktree).toHaveBeenCalledWith("/home/me/.claude/worktrees/widget/wt1");
   });
 
-  it("highlights the main worktree when context is null, else the matching one", () => {
-    setup({ contextPath: "/home/me/.claude/worktrees/widget/wt1" });
+  it("highlights the main worktree when context is null, else the matching one", async () => {
+    const { user } = setup({ contextPath: "/home/me/.claude/worktrees/widget/wt1" });
+    await expand(user, "worktrees");
     const rows = within(section("worktrees")).getAllByRole("button", { pressed: true });
     expect(rows).toHaveLength(1);
     expect(rows[0]).toHaveTextContent("~/.claude/worktrees/widget/wt1");
@@ -175,6 +212,7 @@ describe("RepoSidebar worktrees", () => {
   it("removes a worktree after confirming and invalidates the worktree list", async () => {
     const onWorktreeRemoved = vi.fn();
     const { user, invalidate, props } = setup({ onWorktreeRemoved });
+    await expand(user, "worktrees");
     await user.click(screen.getByRole("button", { name: /Remove worktree ~\/.claude/ }));
     await waitFor(() =>
       expect(removeWorktree).toHaveBeenCalledWith(7, "/home/me/.claude/worktrees/widget/wt1"),
@@ -190,6 +228,7 @@ describe("RepoSidebar worktrees", () => {
   it("does not remove when the confirm is cancelled", async () => {
     confirmDialog.mockResolvedValue(false);
     const { user } = setup();
+    await expand(user, "worktrees");
     await user.click(screen.getByRole("button", { name: /Remove worktree ~\/.claude/ }));
     await waitFor(() => expect(confirmDialog).toHaveBeenCalled());
     expect(removeWorktree).not.toHaveBeenCalled();
@@ -197,6 +236,7 @@ describe("RepoSidebar worktrees", () => {
 
   it("prunes stale worktrees and opens in VS Code without selecting", async () => {
     const { user, invalidate, props } = setup();
+    await expand(user, "worktrees");
     await user.click(screen.getByRole("button", { name: "Prune stale" }));
     await waitFor(() => expect(pruneWorktrees).toHaveBeenCalledWith(7));
     await waitFor(() =>
@@ -212,6 +252,7 @@ describe("RepoSidebar worktrees", () => {
 describe("Branch actions", () => {
   it("'Review vs default' creates a three-dot review and opens it", async () => {
     const { user, props, invalidate } = setup();
+    await openFolder(user, "local", "feature");
     await user.click(screen.getByRole("button", { name: "Actions for feature/login" }));
     const menu = screen.getByRole("menu", { name: "Actions for feature/login" });
     await user.click(within(menu).getByRole("menuitem", { name: /Review vs main/ }));
@@ -245,6 +286,7 @@ describe("Branch actions", () => {
   it("'Review vs…' opens the dialog and creates a review with the chosen base", async () => {
     useSettingsStore.setState({ defaultThreeDot: false });
     const { user, props } = setup();
+    await openFolder(user, "local", "feature");
     await user.click(screen.getByRole("button", { name: "Actions for feature/login" }));
     await user.click(screen.getByRole("menuitem", { name: "Review vs…" }));
 
@@ -283,5 +325,30 @@ describe("ReviewVsDialog", () => {
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     expect(onClose).toHaveBeenCalled();
     expect(createReview).not.toHaveBeenCalled();
+  });
+});
+
+describe("Prune gone branches", () => {
+  it("lists gone branches, confirms, deletes them and refreshes refs", async () => {
+    listGoneBranches.mockResolvedValue(["feature/login"]);
+    deleteGoneBranches.mockResolvedValue({ deleted: ["feature/login"], failed: [] });
+    const { user, invalidate } = setup();
+    await user.click(screen.getByRole("button", { name: "Prune gone" }));
+    await waitFor(() => expect(deleteGoneBranches).toHaveBeenCalledWith(7, ["feature/login"]));
+    expect(confirmDialog).toHaveBeenCalledWith(expect.objectContaining({ danger: true }));
+    await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ["refs", 7] }));
+  });
+
+  it("deletes nothing when the confirm is cancelled or nothing is gone", async () => {
+    listGoneBranches.mockResolvedValue(["fix/crash"]);
+    confirmDialog.mockResolvedValue(false);
+    const { user } = setup();
+    await user.click(screen.getByRole("button", { name: "Prune gone" }));
+    await waitFor(() => expect(confirmDialog).toHaveBeenCalled());
+    listGoneBranches.mockResolvedValue([]);
+    await user.click(screen.getByRole("button", { name: "Prune gone" }));
+    await waitFor(() => expect(listGoneBranches).toHaveBeenCalledTimes(2));
+    expect(confirmDialog).toHaveBeenCalledTimes(1);
+    expect(deleteGoneBranches).not.toHaveBeenCalled();
   });
 });

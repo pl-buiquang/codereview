@@ -50,6 +50,7 @@ function chain(from: number, count: number): GraphCommit[] {
       subject: `subject ${i}`,
       body_preview: "",
       author_name: "dev",
+      author_email: "dev@example.com",
       author_time: 1_700_000_000 - i,
       committer_time: 1_700_000_000 - i,
     };
@@ -118,26 +119,26 @@ describe("GraphView", () => {
     renderView();
     await waitFor(() =>
       expect(graphLog).toHaveBeenCalledWith(
-        expect.objectContaining({ scope: "all", skip: 0, limit: GRAPH_PAGE_SIZE, worktreePath: null }),
+        expect.objectContaining({ scope: "local", skip: 0, limit: GRAPH_PAGE_SIZE, worktreePath: null }),
       ),
     );
-    await user.selectOptions(screen.getByRole("combobox", { name: "Graph scope" }), "local");
+    await user.selectOptions(screen.getByRole("combobox", { name: "Graph scope" }), "all");
     await waitFor(() =>
-      expect(graphLog).toHaveBeenCalledWith(expect.objectContaining({ scope: "local", skip: 0 })),
+      expect(graphLog).toHaveBeenCalledWith(expect.objectContaining({ scope: "all", skip: 0 })),
     );
   });
 
   it("toasts immediately for a remote branch outside the All scope", async () => {
     const user = userEvent.setup();
-    const remote: RefInfo = { name: "origin/feature", kind: "remote", sha: sha(99), is_head: false };
+    const remote: RefInfo = { name: "origin/feature", kind: "remote", sha: sha(99), is_head: false, updated_at: 0 };
     listRefs.mockResolvedValue([remote]);
     renderView();
 
-    await user.selectOptions(screen.getByRole("combobox", { name: "Graph scope" }), "local");
     await waitFor(() => expect(screen.getByText("subject 0")).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: /^Remote/, expanded: false }));
     await user.click(await screen.findByRole("button", { name: "Jump to origin/feature" }));
     expect(toastError).toHaveBeenCalledWith("Switch to All to see this branch");
-    expect(graphLog).toHaveBeenCalledTimes(2);
+    expect(graphLog).toHaveBeenCalledTimes(1);
   });
 
   it("pages forward to find a ref tip beyond the first page", async () => {
@@ -146,7 +147,7 @@ describe("GraphView", () => {
     graphLog.mockImplementation(({ skip }: { skip: number }) =>
       Promise.resolve(skip === 0 ? chain(0, GRAPH_PAGE_SIZE) : chain(GRAPH_PAGE_SIZE, 10)),
     );
-    listRefs.mockResolvedValue([{ name: "old", kind: "local", sha: target, is_head: false }]);
+    listRefs.mockResolvedValue([{ name: "old", kind: "local", sha: target, is_head: false, updated_at: 0 }]);
     renderView();
 
     await waitFor(() => expect(screen.getByText("subject 0")).toBeInTheDocument());
@@ -159,16 +160,16 @@ describe("GraphView", () => {
 
   it("toasts when a ref tip is not in the exhausted graph", async () => {
     const user = userEvent.setup();
-    listRefs.mockResolvedValue([{ name: "v9", kind: "tag", sha: sha(500), is_head: false }]);
+    listRefs.mockResolvedValue([{ name: "v9", kind: "tag", sha: sha(500), is_head: false, updated_at: 0 }]);
     renderView();
-    await user.selectOptions(screen.getByRole("combobox", { name: "Graph scope" }), "current");
     await waitFor(() => expect(screen.getByText("subject 0")).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: /^Tags/, expanded: false }));
     await user.click(await screen.findByRole("button", { name: "Jump to v9" }));
     await waitFor(() => expect(toastError).toHaveBeenCalledWith("Switch to All to see this branch"));
   });
 
   it("opens branch actions from a graph ref pill right-click", async () => {
-    listRefs.mockResolvedValue([{ name: "topic", kind: "local", sha: sha(1), is_head: false }]);
+    listRefs.mockResolvedValue([{ name: "topic", kind: "local", sha: sha(1), is_head: false, updated_at: 0 }]);
     renderView();
     await waitFor(() => expect(screen.getByText("subject 1")).toBeInTheDocument());
     const pill = await waitFor(() => {

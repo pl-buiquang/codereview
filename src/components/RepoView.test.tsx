@@ -108,10 +108,10 @@ describe("RepoView PR list", () => {
     await openPrTab(user);
 
     await waitFor(() => expect(screen.getByText(/#42 Fix anchor drift/)).toBeInTheDocument());
-    expect(listPrs).toHaveBeenCalledTimes(1);
+    const before = listPrs.mock.calls.length;
 
     await user.click(screen.getByRole("button", { name: "Refresh" }));
-    await waitFor(() => expect(listPrs).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(listPrs).toHaveBeenCalledTimes(before + 1));
   });
 
   it("staleness label appears after first load", async () => {

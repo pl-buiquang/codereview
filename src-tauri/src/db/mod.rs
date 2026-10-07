@@ -28,6 +28,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("migrations/0012_unified_repository.sql"),
     include_str!("migrations/0013_panel_widths.sql"),
     include_str!("migrations/0014_comment_github_thread_root_id.sql"),
+    include_str!("migrations/0015_avatar_cache.sql"),
 ];
 
 pub fn open(path: &Path) -> AppResult<Connection> {
@@ -38,7 +39,7 @@ pub fn open(path: &Path) -> AppResult<Connection> {
     Ok(conn)
 }
 
-fn migrate(conn: &Connection) -> AppResult<()> {
+pub(crate) fn migrate(conn: &Connection) -> AppResult<()> {
     let current: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
     let mut version = current as usize;
     while version < MIGRATIONS.len() {

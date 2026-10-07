@@ -1,4 +1,5 @@
 mod anchor;
+mod avatar;
 pub mod commands;
 mod cr_install;
 pub mod db;
@@ -193,7 +194,10 @@ pub fn run() {
             commands::worktree::open_in_vscode,
             commands::graph::graph_log,
             commands::graph::list_refs,
+            commands::graph::commit_avatar,
             commands::graph::commit_detail,
+            commands::graph::delete_gone_branches,
+            commands::graph::list_gone_branches,
             commands::graph::commit_file_diff,
             commands::graph::worktree_status,
             commands::graph::worktree_file_diff,

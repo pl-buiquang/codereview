@@ -1,3 +1,4 @@
+use base64::{engine::general_purpose::STANDARD, Engine};
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::PathBuf;
@@ -277,6 +278,7 @@ fn validate_image_url(url: &url::Url) -> AppResult<()> {
         }
         Some(
             "user-images.githubusercontent.com"
+            | "avatars.githubusercontent.com"
             | "private-user-images.githubusercontent.com"
             | "github-production-user-asset-6210df.s3.amazonaws.com"
             | "github-production-repository-image-32fea6.s3.amazonaws.com",
@@ -385,6 +387,20 @@ pub async fn fetch_authenticated_url(raw_url: &str) -> AppResult<Vec<u8>> {
         return Ok(bytes);
     }
     unreachable!()
+}
+
+pub fn image_data_url(bytes: &[u8]) -> String {
+    let mime = match () {
+        _ if bytes.starts_with(&[0x89, b'P', b'N', b'G']) => "image/png",
+        _ if bytes.starts_with(&[0xFF, 0xD8]) => "image/jpeg",
+        _ if bytes.starts_with(b"GIF") => "image/gif",
+        _ if bytes.starts_with(b"RIFF") && bytes.len() > 12 && &bytes[8..12] == b"WEBP" => {
+            "image/webp"
+        }
+        _ if bytes.starts_with(b"<svg") || bytes.starts_with(b"<?xml") => "image/svg+xml",
+        _ => "application/octet-stream",
+    };
+    format!("data:{mime};base64,{}", STANDARD.encode(bytes))
 }
 
 #[derive(Debug, Serialize, Deserialize)]

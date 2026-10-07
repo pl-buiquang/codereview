@@ -9,6 +9,7 @@ function c(sha: string, ...parents: string[]): GraphCommit {
     subject: sha,
     body_preview: "",
     author_name: "a",
+    author_email: "dev@example.com",
     author_time: 0,
     committer_time: 0,
   };

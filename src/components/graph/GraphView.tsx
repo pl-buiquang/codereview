@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
-import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import { toast } from "../../lib/toast";
 import { layoutGraph } from "../../lib/graphLayout";
@@ -7,6 +7,7 @@ import type { ChangedFile, GraphScope, RefInfo, Repository, WipKind } from "../.
 import { Icon } from "../icons";
 import { CommitGraph, WIP_SELECTION, type CommitGraphHandle } from "./CommitGraph";
 import { CommitPanel } from "./CommitPanel";
+import { CommitReviewMenu } from "./CommitReviewMenu";
 import { DiffPreview, type DiffPreviewTarget } from "./DiffPreview";
 import { RepoSidebar } from "./RepoSidebar";
 import { BranchActionsMenu, type MenuAnchor } from "./BranchActionsMenu";
@@ -17,9 +18,8 @@ export const MAX_JUMP_PAGES = 20;
 const OUT_OF_SCOPE_MESSAGE = "Switch to All to see this branch";
 
 const SCOPE_OPTIONS: { value: GraphScope; label: string }[] = [
-  { value: "all", label: "All" },
   { value: "local", label: "Local" },
-  { value: "current", label: "Current" },
+  { value: "all", label: "All" },
 ];
 
 type WipEntry = { path: string; kind: WipKind };
@@ -33,7 +33,7 @@ export function GraphView({ repo }: { repo: Repository }) {
   const queryClient = useQueryClient();
   const graphRef = useRef<CommitGraphHandle>(null);
 
-  const [scope, setScope] = useState<GraphScope>("all");
+  const [scope, setScope] = useState<GraphScope>("local");
   const [ctx, setCtx] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
@@ -86,7 +86,37 @@ export function GraphView({ repo }: { repo: Repository }) {
   const commits = useMemo(() => (pages ?? []).flat(), [pages]);
   const layout = useMemo(() => layoutGraph(commits), [commits]);
 
+  // Oldest loaded commit per author: the likeliest to be pushed, so GitHub can map it to a user.
+  const authorShas = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const c of commits) if (c.author_email) m.set(c.author_email.toLowerCase(), c.sha);
+    return [...m];
+  }, [commits]);
+  const avatars = useQueries({
+    queries: authorShas.map(([email, sha]) => ({
+      queryKey: ["avatar", email],
+      queryFn: () => api.commitAvatar(repo.id, email, sha),
+      staleTime: Infinity,
+      gcTime: Infinity,
+      retry: false,
+    })),
+    combine: (results) => {
+      const m = new Map<string, string>();
+      results.forEach((r, i) => {
+        if (r.data) m.set(authorShas[i][0], r.data);
+      });
+      return m;
+    },
+  });
+
   const refs = useMemo(() => refsQuery.data ?? [], [refsQuery.data]);
+
+  const ghAuthQuery = useQuery({ queryKey: ["gh-auth"], queryFn: api.ghAuthStatus });
+  const prsQuery = useQuery({
+    queryKey: ["prs", repo.id],
+    queryFn: () => api.listPrs(repo.id),
+    enabled: ghAuthQuery.data === true && !!repo.remote_owner,
+  });
   const worktrees = useMemo(() => worktreesQuery.data ?? [], [worktreesQuery.data]);
   const wip = wipQuery.data ?? null;
   const headSha = wip?.head_sha ?? refs.find((r) => r.is_head)?.sha ?? null;
@@ -262,6 +292,7 @@ export function GraphView({ repo }: { repo: Repository }) {
         commits={commits}
         rows={layout.rows}
         maxLanes={layout.maxLanes}
+        avatars={avatars}
         refs={refs}
         worktrees={worktrees}
         headSha={headSha}
@@ -287,6 +318,11 @@ export function GraphView({ repo }: { repo: Repository }) {
       />
     );
   } else if (detail) {
+    const tipRefs = refs.filter((r) => r.sha === detail.sha && r.kind !== "tag" && !r.name.endsWith("/HEAD"));
+    const tipBranches = new Set(
+      tipRefs.map((r) => (r.kind === "remote" ? r.name.slice(r.name.indexOf("/") + 1) : r.name)),
+    );
+    const pullRequests = (prsQuery.data ?? []).filter((pr) => tipBranches.has(pr.headRefName));
     rightBody = (
       <CommitPanel
         detail={detail}
@@ -296,6 +332,13 @@ export function GraphView({ repo }: { repo: Repository }) {
           if (idx >= 0) setPreviewIndex(idx);
         }}
         onJumpToSha={onJumpToParent}
+        pullRequests={pullRequests}
+        actions={
+          repo.local_path || pullRequests.length > 0 ? (
+            <CommitReviewMenu repo={repo} detail={detail} tipRefs={tipRefs} pullRequests={pullRequests} />
+          ) : null
+        }
+        onOpenPr={(pr) => api.openUrl(pr.url).catch((e) => toast.error(`Could not open PR: ${String(e)}`))}
       />
     );
   } else if (isCommitSelected && detailQuery.isError) {

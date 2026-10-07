@@ -1,4 +1,5 @@
-import type { ChangeStatus, ChangedFile, CommitDetail, WipKind, WipStatus } from "../../lib/types";
+import type { ReactNode } from "react";
+import type { ChangeStatus, ChangedFile, CommitDetail, PrSummary, WipKind, WipStatus } from "../../lib/types";
 import { timeAgo } from "../../lib/timeAgo";
 import { toast } from "../../lib/toast";
 import { Icon } from "../icons";
@@ -97,11 +98,17 @@ function CommitMode({
   detail,
   onOpenFile,
   onJumpToSha,
+  onOpenPr,
+  pullRequests = [],
+  actions,
   activePath,
 }: {
   detail: CommitDetail;
   onOpenFile: (file: ChangedFile) => void;
   onJumpToSha: (sha: string) => void;
+  onOpenPr?: (pr: PrSummary) => void;
+  pullRequests?: PrSummary[];
+  actions?: ReactNode;
   activePath?: string | null;
 }) {
   const counts = countStatuses(detail.files);
@@ -119,9 +126,27 @@ function CommitMode({
       <div className="cp-header">
         <h3 className="cp-subject">{detail.subject}</h3>
         {detail.body.trim() && <pre className="cp-body">{detail.body.trim()}</pre>}
+        {actions}
       </div>
 
       <div className="cp-meta">
+        {pullRequests.length > 0 && (
+          <div className="cp-prs">
+            {pullRequests.map((pr) => (
+              <button
+                key={pr.number}
+                type="button"
+                className="cp-pr"
+                onClick={() => onOpenPr?.(pr)}
+                title={`Open ${pr.url}`}
+              >
+                <span className="badge badge-pr">PR #{pr.number}</span>
+                <span className="cp-pr-title">{pr.title}</span>
+                <Icon name="ext" size={11} />
+              </button>
+            ))}
+          </div>
+        )}
         <div className="cp-shas">
           <span className="cp-label">commit</span>
           <button
@@ -293,6 +318,11 @@ export type CommitPanelProps =
       detail: CommitDetail;
       onOpenFile: (file: ChangedFile) => void;
       onJumpToSha: (sha: string) => void;
+      onOpenPr?: (pr: PrSummary) => void;
+      /** Open PRs whose head branch tip is this commit. */
+      pullRequests?: PrSummary[];
+      /** Extra controls rendered under the commit message (e.g. review actions). */
+      actions?: ReactNode;
       activePath?: string | null;
     }
   | {
@@ -308,6 +338,9 @@ export function CommitPanel(props: CommitPanelProps) {
         detail={props.detail}
         onOpenFile={props.onOpenFile}
         onJumpToSha={props.onJumpToSha}
+        onOpenPr={props.onOpenPr}
+        pullRequests={props.pullRequests}
+        actions={props.actions}
         activePath={props.activePath}
       />
     );

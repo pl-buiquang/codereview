@@ -262,3 +262,42 @@
   overflow: auto;
   padding: var(--sp-3);
 }
+
+.cp-prs {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.cp-pr {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.cp-pr:hover {
+  background: var(--surface-2);
+}
+
+.cp-pr-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cp-review {
+  display: flex;
+  gap: 4px;
+  margin-top: 8px;
+}

@@ -289,7 +289,7 @@ export interface WorktreeInfo {
 }
 
 // Git graph (spec 22)
-export type GraphScope = "all" | "local" | "current";
+export type GraphScope = "all" | "local";
 
 export type WipKind = "staged" | "unstaged" | "untracked";
 
@@ -303,6 +303,7 @@ export interface GraphCommit {
   subject: string;
   body_preview: string;
   author_name: string;
+  author_email: string;
   author_time: number;
   committer_time: number;
 }
@@ -312,6 +313,13 @@ export interface RefInfo {
   kind: RefKind;
   sha: string;
   is_head: boolean;
+  /** Unix seconds: tip commit date, or tagger date for annotated tags. */
+  updated_at: number;
+}
+
+export interface DeleteGoneOutcome {
+  deleted: string[];
+  failed: { name: string; error: string }[];
 }
 
 export interface ChangedFile {

@@ -6,6 +6,7 @@ import type {
   ChatTurnResult,
   Comment,
   CommitDetail,
+  DeleteGoneOutcome,
   FreshnessResult,
   GraphCommit,
   GraphScope,
@@ -170,6 +171,11 @@ export const api = {
     }),
   listRefs: (repoId: number, worktreePath?: string | null) =>
     invoke<RefInfo[]>("list_refs", { repoId, worktreePath: worktreePath ?? null }),
+  listGoneBranches: (repoId: number) => invoke<string[]>("list_gone_branches", { repoId }),
+  deleteGoneBranches: (repoId: number, names: string[]) =>
+    invoke<DeleteGoneOutcome>("delete_gone_branches", { repoId, names }),
+  commitAvatar: (repoId: number, email: string, sha: string) =>
+    invoke<string | null>("commit_avatar", { repoId, email, sha }),
   commitDetail: (repoId: number, sha: string) =>
     invoke<CommitDetail>("commit_detail", { repoId, sha }),
   commitFileDiff: (args: {

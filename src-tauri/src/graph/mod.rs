@@ -1,11 +1,13 @@
 //! Read-only git history for the Graph tab (spec 22). Types here are mirrored in `src/lib/types.ts`.
 
+pub mod branches;
 pub mod commit;
 pub mod log;
 pub mod wip;
 
 use serde::{Deserialize, Serialize};
 
+pub use branches::{delete_gone_branches, gone_branches};
 pub use commit::{commit_detail, commit_file_diff};
 pub use log::{graph_log, list_refs};
 pub use wip::{worktree_file_diff, worktree_status};
@@ -15,7 +17,6 @@ pub use wip::{worktree_file_diff, worktree_status};
 pub enum Scope {
     All,
     Local,
-    Current,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -58,6 +59,7 @@ pub struct GraphCommit {
     /// First line of the body after the subject, `""` if none.
     pub body_preview: String,
     pub author_name: String,
+    pub author_email: String,
     /// Unix seconds.
     pub author_time: i64,
     pub committer_time: i64,
@@ -71,6 +73,8 @@ pub struct RefInfo {
     /// Peeled commit sha for annotated tags.
     pub sha: String,
     pub is_head: bool,
+    /// Unix seconds: tip commit date, or tagger date for annotated tags.
+    pub updated_at: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -115,8 +119,8 @@ mod tests {
         assert_eq!(serde_json::to_string(&RefKind::Remote).unwrap(), "\"remote\"");
         assert_eq!(serde_json::to_string(&ChangeStatus::Renamed).unwrap(), "\"R\"");
         assert_eq!(serde_json::to_string(&ChangeStatus::TypeChanged).unwrap(), "\"T\"");
-        let s: Scope = serde_json::from_str("\"current\"").unwrap();
-        assert_eq!(s, Scope::Current);
+        let s: Scope = serde_json::from_str("\"local\"").unwrap();
+        assert_eq!(s, Scope::Local);
         let k: WipKind = serde_json::from_str("\"untracked\"").unwrap();
         assert_eq!(k, WipKind::Untracked);
     }
