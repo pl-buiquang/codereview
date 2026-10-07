@@ -4,16 +4,22 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 
-// Mock the API layer used by RepoView (PR list + the surrounding queries).
+// Mock the API layer used by RepoView (PR list, graph tab + the surrounding queries).
 const listReviews = vi.fn();
 const listBranches = vi.fn();
 const ghAuthStatus = vi.fn();
 const listPrs = vi.fn();
 const createReviewForPr = vi.fn();
+const graphLog = vi.fn();
 vi.mock("../lib/api", () => ({
   api: {
     listReviews: (id: number | null) => listReviews(id),
     listBranches: (id: number) => listBranches(id),
+    graphLog: (args: unknown) => graphLog(args),
+    listRefs: () => Promise.resolve([]),
+    worktreeStatus: () =>
+      Promise.resolve({ head_sha: "a".repeat(40), staged: [], unstaged: [], untracked: [] }),
+    listWorktrees: () => Promise.resolve([]),
     ghAuthStatus: () => ghAuthStatus(),
     listPrs: (id: number) => listPrs(id),
     createReviewForPr: (o: string, n: string, num: number, paths: string[]) => createReviewForPr(o, n, num, paths),
@@ -43,12 +49,12 @@ const pr: PrSummary = {
   url: "https://github.com/acme/widget/pull/42",
 };
 
-function renderRepo() {
+function renderRepo(r: Repository = repo) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}>{children}</QueryClientProvider>
   );
-  return render(<RepoView repo={repo} />, { wrapper });
+  return render(<RepoView repo={r} />, { wrapper });
 }
 
 async function openPrTab(user: ReturnType<typeof userEvent.setup>) {
@@ -62,6 +68,35 @@ beforeEach(() => {
   listBranches.mockResolvedValue([]);
   ghAuthStatus.mockResolvedValue(true);
   listPrs.mockResolvedValue([pr]);
+  graphLog.mockResolvedValue([]);
+});
+
+describe("RepoView tabs", () => {
+  it("shows only the Graph and GitHub PRs tabs, defaulting to Graph", async () => {
+    renderRepo();
+    const tabs = screen.getAllByRole("button", { name: /^(Graph|GitHub PRs|Virtual PR|Worktrees)$/ });
+    expect(tabs.map((t) => t.textContent)).toEqual(["Graph", "GitHub PRs"]);
+    expect(screen.getByRole("button", { name: "Graph" })).toHaveClass("active");
+    await waitFor(() => expect(graphLog).toHaveBeenCalled());
+    expect(screen.queryByText("Reviews")).not.toBeInTheDocument();
+  });
+
+  it("shows the reviews list on the GitHub PRs tab", async () => {
+    const user = userEvent.setup();
+    renderRepo();
+    await openPrTab(user);
+    expect(screen.getByText("Reviews")).toBeInTheDocument();
+  });
+
+  it("disables the Graph tab without a local clone and defaults to GitHub PRs", async () => {
+    renderRepo({ ...repo, local_path: null });
+    const graphTab = screen.getByRole("button", { name: "Graph" });
+    expect(graphTab).toBeDisabled();
+    expect(graphTab).toHaveAttribute("title", "Graph requires a local clone");
+    expect(screen.getByRole("button", { name: "GitHub PRs" })).toHaveClass("active");
+    await waitFor(() => expect(screen.getByText(/#42 Fix anchor drift/)).toBeInTheDocument());
+    expect(graphLog).not.toHaveBeenCalled();
+  });
 });
 
 describe("RepoView PR list", () => {

@@ -3292,7 +3292,7 @@ tr.search-current {
   color: var(--text-2);
 }
 
-/* ===== Repo view / Virtual PR (Phase 5) ===== */
+/* ===== Repo view (Phase 5) ===== */
 input[type="checkbox"],
 input[type="radio"],
 input[type="range"] {
@@ -3312,6 +3312,11 @@ input[type="range"] {
   flex-direction: column;
   gap: 16px;
 }
+.repo-body-graph {
+  padding: 0;
+  overflow: hidden;
+  gap: 0;
+}
 .repo-section-h {
   margin: 0;
   font-size: 12px;
@@ -3329,36 +3334,6 @@ input[type="range"] {
   display: flex;
   align-items: center;
   gap: 8px;
-}
-.vpr-card {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 14px 16px;
-}
-.vpr-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-.vpr-field {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 12px;
-  color: var(--text-2);
-}
-.vpr-field .select {
-  min-width: 160px;
-}
-.vpr-row .view-toggle {
-  margin-left: auto;
-}
-.vpr-helper {
-  margin: 0;
-  font-size: 11.5px;
-  color: var(--text-3);
 }
 .pr-list-toolbar {
   display: flex;
@@ -3383,77 +3358,6 @@ input[type="range"] {
   gap: 2px;
   flex: 1;
   min-width: 0;
-}
-
-/* ===== Worktree list ===== */
-.worktree-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
-}
-.worktree-main {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-.worktree-path {
-  font-size: 12px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.worktree-meta {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 11px;
-  color: var(--text-2);
-  flex-wrap: wrap;
-}
-.worktree-badge {
-  font-size: 10px;
-  padding: 1px 6px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-}
-.worktree-badge-main {
-  color: var(--text-2);
-  border-color: var(--border);
-}
-.worktree-badge-stale {
-  color: var(--warning);
-  border-color: var(--warning);
-}
-.worktree-pr-badge {
-  font-size: 10px;
-}
-.worktree-source {
-  font-size: 10px;
-  padding: 1px 6px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  background: var(--surface-2);
-}
-.worktree-source-claude {
-  color: var(--accent);
-  border-color: var(--accent-border);
-  background: var(--accent-soft);
-}
-.worktree-source-codex {
-  color: var(--success);
-  border-color: var(--success);
-  background: var(--success-soft);
-}
-.worktree-source-codereview {
-  color: var(--warning);
-  border-color: var(--warning);
-  background: var(--warning-soft);
 }
 
 /* ===== Review header: clickable repo name + PR number ===== */

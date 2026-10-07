@@ -1,31 +1,24 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { ViewType } from "react-diff-view";
 import { api } from "../lib/api";
 import { toast } from "../lib/toast";
 import { confirmDialog } from "../lib/confirm";
 import { PR_LIST_POLL_OPTIONS, useSettingsStore, parseRepoBasePaths } from "../lib/settings";
 import { timeAgo } from "../lib/timeAgo";
-import { DiffViewer } from "./DiffViewer";
+import { GraphView } from "./graph/GraphView";
 import { OpenPrButton } from "./OpenPrButton";
 import { Icon } from "./icons";
 import { githubPrUrl } from "../lib/githubUrl";
 import { useUIStore } from "../store";
-import type { PrSummary, Repository, ReviewSummary, WorktreeInfo, WorktreeSource } from "../lib/types";
+import type { PrSummary, Repository, ReviewSummary } from "../lib/types";
 import { statusLabel, statusBadgeClass } from "../lib/status";
 
-interface Comparison {
-  base: string;
-  head: string;
-  threeDot: boolean;
-}
-
-type Tab = "branches" | "prs" | "worktrees";
+type Tab = "graph" | "prs";
 
 export function RepoView({ repo }: { repo: Repository }) {
   const openReview = useUIStore((s) => s.openReview);
   const queryClient = useQueryClient();
-  const [tab, setTab] = useState<Tab>(repo.local_path ? "branches" : "prs");
+  const [tab, setTab] = useState<Tab>(repo.local_path ? "graph" : "prs");
 
   const reviewsQuery = useQuery({
     queryKey: ["reviews", repo.id],
@@ -52,12 +45,12 @@ export function RepoView({ repo }: { repo: Repository }) {
 
       <div className="cr-tabs">
         <button
-          className={`cr-tab${tab === "branches" ? " active" : ""}${!repo.local_path ? " disabled" : ""}`}
-          onClick={() => repo.local_path && setTab("branches")}
+          className={`cr-tab${tab === "graph" ? " active" : ""}${!repo.local_path ? " disabled" : ""}`}
+          onClick={() => repo.local_path && setTab("graph")}
           disabled={!repo.local_path}
-          title={!repo.local_path ? "Virtual PR requires a local clone" : undefined}
+          title={!repo.local_path ? "Graph requires a local clone" : undefined}
         >
-          Virtual PR
+          Graph
         </button>
         <button
           className={`cr-tab${tab === "prs" ? " active" : ""}`}
@@ -65,194 +58,66 @@ export function RepoView({ repo }: { repo: Repository }) {
         >
           GitHub PRs
         </button>
-        <button
-          className={`cr-tab${tab === "worktrees" ? " active" : ""}${!repo.local_path ? " disabled" : ""}`}
-          onClick={() => repo.local_path && setTab("worktrees")}
-          disabled={!repo.local_path}
-          title={!repo.local_path ? "Worktrees require a local clone" : undefined}
-        >
-          Worktrees
-        </button>
       </div>
 
-      <div className="repo-body">
-        {tab === "branches" ? (
-          <BranchCompare repo={repo} />
-        ) : tab === "prs" ? (
+      {tab === "graph" ? (
+        <div className="repo-body repo-body-graph">
+          <GraphView repo={repo} />
+        </div>
+      ) : (
+        <div className="repo-body">
           <PrList repo={repo} onOpen={openReview} />
-        ) : (
-          <WorktreeList repo={repo} />
-        )}
 
-        <div className="repo-reviews">
-          <div className="repo-section-row">
-            <h3 className="repo-section-h">Reviews</h3>
-            <button
-              className="btn btn-sm"
-              disabled={reviewsQuery.isFetching}
-              onClick={() => reviewsQuery.refetch()}
-              title="Refresh reviews"
-            >
-              {reviewsQuery.isFetching ? (
-                <span className="spinner" />
-              ) : (
-                <Icon name="refresh" size={13} />
-              )}
-            </button>
+          <div className="repo-reviews">
+            <div className="repo-section-row">
+              <h3 className="repo-section-h">Reviews</h3>
+              <button
+                className="btn btn-sm"
+                disabled={reviewsQuery.isFetching}
+                onClick={() => reviewsQuery.refetch()}
+                title="Refresh reviews"
+              >
+                {reviewsQuery.isFetching ? (
+                  <span className="spinner" />
+                ) : (
+                  <Icon name="refresh" size={13} />
+                )}
+              </button>
+            </div>
+            {reviewsQuery.isLoading && <p className="muted">Loading…</p>}
+            {reviews.length === 0 && !reviewsQuery.isLoading && (
+              <p className="muted">No reviews yet.</p>
+            )}
+            {reviews.map((r) => (
+                <ReviewRow
+                  key={r.review.id}
+                  summary={r}
+                  prUrl={
+                    r.target.kind === "github_pr" &&
+                    repo.remote_owner &&
+                    repo.remote_name &&
+                    r.target.github_pr_number != null
+                      ? githubPrUrl(repo.remote_owner, repo.remote_name, r.target.github_pr_number)
+                      : null
+                  }
+                  onOpen={() => openReview(r.review.id)}
+                  onDelete={async () => {
+                    if (
+                      await confirmDialog({
+                        title: "Delete review",
+                        message: "Delete this review and all its comments?",
+                        confirmLabel: "Delete",
+                        danger: true,
+                      })
+                    )
+                      deleteReview.mutate(r.review.id);
+                  }}
+                />
+              ))}
           </div>
-          {reviewsQuery.isLoading && <p className="muted">Loading…</p>}
-          {reviews.length === 0 && !reviewsQuery.isLoading && (
-            <p className="muted">No reviews yet.</p>
-          )}
-          {reviews.map((r) => (
-              <ReviewRow
-                key={r.review.id}
-                summary={r}
-                prUrl={
-                  r.target.kind === "github_pr" &&
-                  repo.remote_owner &&
-                  repo.remote_name &&
-                  r.target.github_pr_number != null
-                    ? githubPrUrl(repo.remote_owner, repo.remote_name, r.target.github_pr_number)
-                    : null
-                }
-                onOpen={() => openReview(r.review.id)}
-                onDelete={async () => {
-                  if (
-                    await confirmDialog({
-                      title: "Delete review",
-                      message: "Delete this review and all its comments?",
-                      confirmLabel: "Delete",
-                      danger: true,
-                    })
-                  )
-                    deleteReview.mutate(r.review.id);
-                }}
-              />
-            ))}
         </div>
-      </div>
+      )}
     </section>
-  );
-}
-
-function BranchCompare({ repo }: { repo: Repository }) {
-  const openReview = useUIStore((s) => s.openReview);
-  const queryClient = useQueryClient();
-
-  const branchesQuery = useQuery({
-    queryKey: ["branches", repo.id],
-    queryFn: () => api.listBranches(repo.id),
-    enabled: repo.local_path != null,
-  });
-  const branchNames = useMemo(
-    () => (branchesQuery.data ?? []).map((b) => b.name),
-    [branchesQuery.data],
-  );
-
-  const defaultThreeDot = useSettingsStore((s) => s.defaultThreeDot);
-  const defaultViewType = useSettingsStore((s) => s.defaultViewType);
-  const [base, setBase] = useState("");
-  const [head, setHead] = useState("");
-  const [threeDot, setThreeDot] = useState(defaultThreeDot);
-  const [viewType, setViewType] = useState<ViewType>(defaultViewType);
-  const [comparison, setComparison] = useState<Comparison | null>(null);
-
-  useEffect(() => {
-    if (branchNames.length === 0) return;
-    const fallbackBase = repo.default_branch ?? branchNames[0];
-    setBase((prev) => (prev && branchNames.includes(prev) ? prev : fallbackBase));
-    setHead((prev) => {
-      if (prev && branchNames.includes(prev)) return prev;
-      return branchNames.find((n) => n !== fallbackBase) ?? branchNames[0];
-    });
-  }, [branchNames, repo.default_branch]);
-
-  const diffQuery = useQuery({
-    queryKey: ["diff", repo.id, comparison?.base, comparison?.head, comparison?.threeDot],
-    queryFn: () =>
-      api.diffRefs(repo.id, comparison!.base, comparison!.head, comparison!.threeDot),
-    enabled: comparison != null,
-  });
-
-  const startReview = useMutation({
-    mutationFn: () =>
-      api.createReview({ repoId: repo.id, baseRef: base, headRef: head, threeDot }),
-    onSuccess: (review) => {
-      queryClient.invalidateQueries({ queryKey: ["reviews", repo.id] });
-      openReview(review.id);
-    },
-    onError: (e) => toast.error(String(e)),
-  });
-
-  const canCompare = base !== "" && head !== "" && base !== head;
-
-  return (
-    <>
-      <div className="card vpr-card">
-        <h3 className="repo-section-h">New virtual PR</h3>
-        <div className="vpr-row">
-          <label className="vpr-field">
-            base
-            <select className="select mono" value={base} onChange={(e) => setBase(e.target.value)}>
-              {branchNames.map((n) => (
-                <option key={n} value={n}>
-                  {n}
-                </option>
-              ))}
-            </select>
-          </label>
-          <Icon name="back" size={14} />
-          <label className="vpr-field">
-            compare
-            <select className="select mono" value={head} onChange={(e) => setHead(e.target.value)}>
-              {branchNames.map((n) => (
-                <option key={n} value={n}>
-                  {n}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="check" title="Diff against merge-base (GitHub PR semantics)">
-            <input type="checkbox" checked={threeDot} onChange={(e) => setThreeDot(e.target.checked)} />
-            merge-base
-          </label>
-        </div>
-        <div className="vpr-row">
-          <button className="btn" disabled={!canCompare} onClick={() => setComparison({ base, head, threeDot })}>
-            Preview diff
-          </button>
-          <button
-            className="btn btn-primary"
-            disabled={!canCompare || startReview.isPending}
-            onClick={() => startReview.mutate()}
-          >
-            {startReview.isPending ? "Starting…" : "Start review"}
-          </button>
-          <div className="view-toggle">
-            <button className={viewType === "split" ? "active" : ""} onClick={() => setViewType("split")}>
-              Split
-            </button>
-            <button
-              className={viewType === "unified" ? "active" : ""}
-              onClick={() => setViewType("unified")}
-            >
-              Unified
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <div className="diff-area">
-        {comparison && diffQuery.isLoading && <p className="muted">Loading diff…</p>}
-        {comparison && diffQuery.isError && (
-          <p className="error">Diff failed: {String(diffQuery.error)}</p>
-        )}
-        {comparison && diffQuery.data != null && (
-          <DiffViewer diffText={diffQuery.data} viewType={viewType} />
-        )}
-      </div>
-    </>
   );
 }
 
@@ -416,161 +281,6 @@ function ReviewRow({
       >
         <Icon name="x" size={12} />
       </button>
-    </div>
-  );
-}
-
-const SOURCE_LABELS: Record<WorktreeSource, string> = {
-  claude: "Claude",
-  codex: "Codex",
-  codereview: "CodeReview",
-  manual: "manual",
-};
-
-function WorktreeList({ repo }: { repo: Repository }) {
-  const queryClient = useQueryClient();
-  const worktreesQuery = useQuery({
-    queryKey: ["worktrees", repo.id],
-    queryFn: () => api.listWorktrees(repo.id),
-    enabled: repo.local_path != null,
-  });
-
-  const removeWorktree = useMutation({
-    mutationFn: (path: string) => api.removeWorktree(repo.id, path),
-    onSuccess: () => worktreesQuery.refetch(),
-    onError: (e) => toast.error(`Remove failed: ${String(e)}`),
-  });
-
-  const pruneWorktrees = useMutation({
-    mutationFn: () => api.pruneWorktrees(repo.id),
-    onSuccess: () => {
-      worktreesQuery.refetch();
-      toast.success("Stale worktrees pruned.");
-    },
-    onError: (e) => toast.error(`Prune failed: ${String(e)}`),
-  });
-
-  const worktrees = worktreesQuery.data ?? [];
-  const hasPrunable = worktrees.some((w) => w.is_prunable);
-  // Use cached PR data if available (populated when GitHub PRs tab has been visited).
-  const cachedPrs = queryClient.getQueryData<PrSummary[]>(["prs", repo.id]) ?? [];
-
-  return (
-    <>
-      <div className="pr-list-toolbar">
-        <span className="muted">Git worktrees</span>
-        <span className="cr-spacer" />
-        {hasPrunable && (
-          <button
-            className="btn btn-sm"
-            disabled={pruneWorktrees.isPending}
-            onClick={() => pruneWorktrees.mutate()}
-          >
-            Prune stale
-          </button>
-        )}
-        <button
-          className="btn btn-sm"
-          disabled={worktreesQuery.isFetching}
-          onClick={() => worktreesQuery.refetch()}
-          title="Refresh worktree list"
-        >
-          {worktreesQuery.isFetching ? (
-            <span className="spinner" />
-          ) : (
-            <Icon name="refresh" size={13} />
-          )}
-        </button>
-      </div>
-      {worktreesQuery.isLoading && <p className="muted">Loading worktrees…</p>}
-      {worktreesQuery.isError && (
-        <p className="error">Could not list worktrees: {String(worktreesQuery.error)}</p>
-      )}
-      {worktrees.length === 0 && !worktreesQuery.isLoading && (
-        <p className="muted">No worktrees found.</p>
-      )}
-      {worktrees.map((wt) => {
-        const linkedPr = wt.branch
-          ? cachedPrs.find((pr) => pr.headRefName === wt.branch)
-          : undefined;
-        return (
-          <WorktreeRow
-            key={wt.path}
-            wt={wt}
-            linkedPr={linkedPr ?? null}
-            onRemove={async () => {
-              if (
-                await confirmDialog({
-                  title: "Remove worktree",
-                  message: `Remove worktree at ${wt.display_path}?\nThis deletes the working directory.`,
-                  confirmLabel: "Remove",
-                  danger: true,
-                })
-              )
-                removeWorktree.mutate(wt.path);
-            }}
-          />
-        );
-      })}
-    </>
-  );
-}
-
-function WorktreeRow({
-  wt,
-  linkedPr,
-  onRemove,
-}: {
-  wt: WorktreeInfo;
-  linkedPr: PrSummary | null;
-  onRemove: () => void;
-}) {
-  return (
-    <div className="card worktree-row">
-      <div className="worktree-main">
-        <span className="worktree-path mono" title={wt.path}>
-          {wt.display_path}
-        </span>
-        <div className="worktree-meta">
-          {wt.branch ? (
-            <span className="mono">{wt.branch}</span>
-          ) : (
-            <span className="mono faint">detached {wt.head_sha.slice(0, 8)}</span>
-          )}
-          {linkedPr && (
-            <span className="badge badge-pr worktree-pr-badge">PR #{linkedPr.number}</span>
-          )}
-          {wt.is_main && <span className="worktree-badge worktree-badge-main">main</span>}
-          {wt.is_prunable && <span className="worktree-badge worktree-badge-stale">stale</span>}
-          <span className={`worktree-source worktree-source-${wt.source}`}>
-            {SOURCE_LABELS[wt.source]}
-          </span>
-        </div>
-      </div>
-      <button
-        className="btn btn-sm"
-        title="Open in VSCode"
-        onClick={(e) => {
-          e.stopPropagation();
-          api.openInVscode(wt.path).catch((err) =>
-            toast.error(`Could not open VSCode: ${String(err)}`)
-          );
-        }}
-      >
-        <Icon name="ext" size={11} /> Code
-      </button>
-      {!wt.is_main && (
-        <button
-          className="btn-icon"
-          title="Remove worktree"
-          onClick={(e) => {
-            e.stopPropagation();
-            onRemove();
-          }}
-        >
-          <Icon name="x" size={12} />
-        </button>
-      )}
     </div>
   );
 }
