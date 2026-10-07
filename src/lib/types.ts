@@ -287,3 +287,58 @@ export interface WorktreeInfo {
   prunable_reason: string | null;
   source: WorktreeSource;
 }
+
+// Git graph (spec 22)
+export type GraphScope = "all" | "local" | "current";
+
+export type WipKind = "staged" | "unstaged" | "untracked";
+
+export type RefKind = "local" | "remote" | "tag";
+
+export type ChangeStatus = "A" | "M" | "D" | "R" | "C" | "T";
+
+export interface GraphCommit {
+  sha: string;
+  parents: string[];
+  subject: string;
+  body_preview: string;
+  author_name: string;
+  author_time: number;
+  committer_time: number;
+}
+
+export interface RefInfo {
+  name: string;
+  kind: RefKind;
+  sha: string;
+  is_head: boolean;
+}
+
+export interface ChangedFile {
+  path: string;
+  old_path: string | null;
+  status: ChangeStatus;
+  additions: number | null;
+  deletions: number | null;
+}
+
+export interface CommitDetail {
+  sha: string;
+  parents: string[];
+  subject: string;
+  body: string;
+  author_name: string;
+  author_email: string;
+  author_time: number;
+  committer_name: string;
+  committer_email: string;
+  committer_time: number;
+  files: ChangedFile[];
+}
+
+export interface WipStatus {
+  head_sha: string;
+  staged: ChangedFile[];
+  unstaged: ChangedFile[];
+  untracked: string[];
+}

@@ -5,13 +5,17 @@ import type {
   ChatMessage,
   ChatTurnResult,
   Comment,
+  CommitDetail,
   FreshnessResult,
+  GraphCommit,
+  GraphScope,
   InboxItem,
   InboxMeta,
   PrMeta,
   PrSummary,
   PrThread,
   PublishDraftRepliesResult,
+  RefInfo,
   ReanchorResult,
   RefreshResult,
   Repository,
@@ -21,6 +25,8 @@ import type {
   ReviewSummary,
   Side,
   ToolEnv,
+  WipKind,
+  WipStatus,
   WorktreeInfo,
 } from "./types";
 
@@ -149,6 +155,42 @@ export const api = {
     invoke<string>("prune_worktrees", { repoId }),
   openInVscode: (path: string) =>
     invoke<void>("open_in_vscode", { path }),
+
+  // Git graph
+  graphLog: (args: {
+    repoId: number;
+    scope: GraphScope;
+    worktreePath?: string | null;
+    skip: number;
+    limit: number;
+  }) =>
+    invoke<GraphCommit[]>("graph_log", {
+      ...args,
+      worktreePath: args.worktreePath ?? null,
+    }),
+  listRefs: (repoId: number, worktreePath?: string | null) =>
+    invoke<RefInfo[]>("list_refs", { repoId, worktreePath: worktreePath ?? null }),
+  commitDetail: (repoId: number, sha: string) =>
+    invoke<CommitDetail>("commit_detail", { repoId, sha }),
+  commitFileDiff: (args: {
+    repoId: number;
+    sha: string;
+    path: string;
+    oldPath?: string | null;
+  }) =>
+    invoke<string>("commit_file_diff", { ...args, oldPath: args.oldPath ?? null }),
+  worktreeStatus: (repoId: number, worktreePath?: string | null) =>
+    invoke<WipStatus>("worktree_status", { repoId, worktreePath: worktreePath ?? null }),
+  worktreeFileDiff: (args: {
+    repoId: number;
+    worktreePath?: string | null;
+    path: string;
+    kind: WipKind;
+  }) =>
+    invoke<string>("worktree_file_diff", {
+      ...args,
+      worktreePath: args.worktreePath ?? null,
+    }),
 
   // Images
   fetchGithubImage: (url: string) =>

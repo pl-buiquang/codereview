@@ -8,6 +8,7 @@ pub mod error;
 pub mod export;
 pub mod gh;
 pub mod git;
+pub mod graph;
 pub mod inbox;
 mod path_env;
 pub mod provider;
@@ -190,6 +191,12 @@ pub fn run() {
             commands::worktree::remove_worktree,
             commands::worktree::prune_worktrees,
             commands::worktree::open_in_vscode,
+            commands::graph::graph_log,
+            commands::graph::list_refs,
+            commands::graph::commit_detail,
+            commands::graph::commit_file_diff,
+            commands::graph::worktree_status,
+            commands::graph::worktree_file_diff,
             cr_install_note,
             app_version,
         ])

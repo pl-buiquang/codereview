@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use tauri::State;
@@ -7,7 +7,7 @@ use crate::db::Db;
 use crate::error::{AppError, AppResult};
 use crate::worktree::{self, WorktreeInfo};
 
-fn repo_local_path(db: &Db, repo_id: i64) -> AppResult<String> {
+pub(crate) fn repo_local_path(db: &Db, repo_id: i64) -> AppResult<String> {
     let conn = db.0.lock().unwrap();
     let local_path: Option<String> = conn
         .query_row(
@@ -17,6 +17,31 @@ fn repo_local_path(db: &Db, repo_id: i64) -> AppResult<String> {
         )
         .map_err(AppError::from)?;
     local_path.ok_or_else(|| AppError::Other("operation requires a local clone".into()))
+}
+
+/// Resolves the checkout a graph command operates on: the repo's main clone, or a
+/// `worktree_path` that must be one of the repo's registered worktrees.
+pub(crate) fn resolve_checkout(
+    db: &Db,
+    repo_id: i64,
+    worktree_path: Option<String>,
+) -> AppResult<PathBuf> {
+    let repo_path = repo_local_path(db, repo_id)?;
+    match worktree_path {
+        None => Ok(PathBuf::from(repo_path)),
+        Some(p) => {
+            let worktrees = worktree::list_worktrees(Path::new(&repo_path))?;
+            match_worktree(&worktrees, &p)
+        }
+    }
+}
+
+fn match_worktree(worktrees: &[WorktreeInfo], path: &str) -> AppResult<PathBuf> {
+    worktrees
+        .iter()
+        .find(|w| w.path == path)
+        .map(|w| PathBuf::from(&w.path))
+        .ok_or_else(|| AppError::Other("unknown worktree path".into()))
 }
 
 #[tauri::command]
@@ -44,4 +69,35 @@ pub fn open_in_vscode(path: String) -> AppResult<()> {
         .spawn()
         .map_err(|e| AppError::Other(format!("failed to open VSCode: {e}")))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::worktree::WorktreeSource;
+
+    fn wt(path: &str) -> WorktreeInfo {
+        WorktreeInfo {
+            path: path.into(),
+            display_path: path.into(),
+            head_sha: "abc".into(),
+            branch: None,
+            is_main: false,
+            is_prunable: false,
+            prunable_reason: None,
+            source: WorktreeSource::Manual,
+        }
+    }
+
+    #[test]
+    fn match_worktree_accepts_registered_path() {
+        let list = [wt("/repo"), wt("/repo-wt")];
+        assert_eq!(match_worktree(&list, "/repo-wt").unwrap(), PathBuf::from("/repo-wt"));
+    }
+
+    #[test]
+    fn match_worktree_rejects_unknown_path() {
+        let err = match_worktree(&[wt("/repo")], "/etc").unwrap_err();
+        assert_eq!(err.to_string(), "unknown worktree path");
+    }
 }
