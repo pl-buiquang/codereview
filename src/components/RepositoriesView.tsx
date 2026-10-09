@@ -12,8 +12,6 @@ export function RepositoriesView() {
   const queryClient = useQueryClient();
   const openRepo = useUIStore((s) => s.openRepo);
   const forgetRepo = useUIStore((s) => s.forgetRepo);
-  const pinnedRepoIds = useUIStore((s) => s.pinnedRepoIds);
-  const togglePinRepo = useUIStore((s) => s.togglePinRepo);
   const repoBasePaths = useSettingsStore((s) => s.repoBasePaths);
 
   const reposQuery = useQuery({
@@ -125,16 +123,6 @@ export function RepositoriesView() {
                 Link
               </button>
             )}
-            <button
-              className={`btn-icon repo-pin-btn${pinnedRepoIds.includes(repo.id) ? " pinned" : ""}`}
-              title={pinnedRepoIds.includes(repo.id) ? "Unpin from sidebar" : "Pin to sidebar"}
-              onClick={(e) => {
-                e.stopPropagation();
-                togglePinRepo(repo.id);
-              }}
-            >
-              <Icon name="pin" size={13} />
-            </button>
             <button
               className="btn-icon"
               title="Remove repository"

@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { useUIStore } from "../store";
@@ -12,14 +13,18 @@ export function DashboardPanel() {
   const section = useUIStore((s) => s.homeSection);
   const homeRepoId = useUIStore((s) => s.homeRepoId);
   const collapsed = useUIStore((s) => s.sidebarCollapsed);
+  const openRepoIds = useUIStore((s) => s.openRepoIds);
+  // Stable order so closing/opening repos never moves the mounted subtrees.
+  const panes = [...openRepoIds].sort((a, b) => a - b);
 
   return (
     <div className="dashboard">
       <HomeNav collapsed={collapsed} />
       <div className="dashboard-main">
-        {homeRepoId != null ? (
-          <RepoPane key={homeRepoId} repoId={homeRepoId} />
-        ) : (
+        {panes.map((id) => (
+          <RepoSlot key={id} repoId={id} active={id === homeRepoId} />
+        ))}
+        {homeRepoId == null && (
           <>
             {section === "inbox" && <InboxView />}
             {section === "reviews" && <ReviewsView />}
@@ -32,7 +37,17 @@ export function DashboardPanel() {
   );
 }
 
-function RepoPane({ repoId }: { repoId: number }) {
+// Open repos stay mounted (hidden when not shown) so switching keeps their
+// state and is instant, as when they were separate tabs.
+const RepoSlot = memo(function RepoSlot({ repoId, active }: { repoId: number; active: boolean }) {
+  return (
+    <div className="tab-pane" style={active ? undefined : { display: "none" }}>
+      <RepoPane repoId={repoId} />
+    </div>
+  );
+});
+
+const RepoPane = memo(function RepoPane({ repoId }: { repoId: number }) {
   const { data: repos, isLoading } = useQuery({
     queryKey: ["repositories"],
     queryFn: api.listRepositories,
@@ -46,4 +61,4 @@ function RepoPane({ repoId }: { repoId: number }) {
     );
   }
   return <RepoView repo={repo} />;
-}
+});

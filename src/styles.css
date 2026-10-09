@@ -2902,12 +2902,12 @@ tr.search-current {
   justify-content: center;
   padding: 0;
 }
-.cr-pinned {
+.cr-open-repos {
   margin-top: 14px;
   min-height: 0;
   overflow-y: auto;
 }
-.cr-pinned-head {
+.cr-open-repos-head {
   padding: 0 10px 4px;
   font-size: 11px;
   font-weight: 600;
@@ -2915,28 +2915,28 @@ tr.search-current {
   letter-spacing: 0.04em;
   color: var(--text-3);
 }
-.cr-pinned-sep {
+.cr-open-repos-sep {
   height: 1px;
   margin: 0 6px 6px;
   background: var(--border);
 }
-.cr-pinned-item {
+.cr-open-repo {
   cursor: pointer;
 }
-.cr-pinned-avatar {
+.cr-open-repo-avatar {
   width: 15px;
   height: 15px;
   border-radius: 3px;
   flex: none;
 }
-.cr-pinned-label {
+.cr-open-repo-label {
   flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.cr-pinned-unpin {
+.cr-open-repo-close {
   visibility: hidden;
   height: auto;
   padding: 2px;
@@ -2945,10 +2945,10 @@ tr.search-current {
   box-shadow: none;
   color: var(--text-3);
 }
-.cr-pinned-item:hover .cr-pinned-unpin {
+.cr-open-repo:hover .cr-open-repo-close {
   visibility: visible;
 }
-.cr-pinned-unpin:hover {
+.cr-open-repo-close:hover {
   color: var(--danger);
 }
 
@@ -2971,9 +2971,7 @@ tr.search-current {
 .home-flyout .cr-side {
   height: 100%;
 }
-.repo-pin-btn.pinned {
-  color: var(--accent);
-}
+
 
 /* Page scaffolding */
 .cr-main {

@@ -13,8 +13,9 @@ Built with **Tauri v2** (Rust) + **React/TypeScript**.
 ## Features
 
 - **Local-first** — works against any local git repo; no server.
-- **Home sidebar** — Inbox / Reviews / Archive / Repositories plus your **pinned repositories**;
-  repos open inside the Home tab. Fold it to icons only, and hover the Home tab icon or the
+- **Home sidebar** — Inbox / Reviews / Archive / Repositories plus your **open repositories**
+  (they open inside the Home tab and stay loaded, so switching is instant; ✕ closes one). Fold it
+  to icons only, and hover the Home tab icon or the
   window's left edge to pop the menu from anywhere.
 - **Git graph** — a GitKraken-style, read-only view of the repo's history: a sidebar of local /
   remote branches, worktrees and tags (filterable; click to jump to the tip), a lane-drawn commit
@@ -143,7 +144,7 @@ of this.
 ## Usage
 
 1. **Add a repository** — click **+ Add repo** and choose a local git repo.
-2. Open it from **Repositories** (pin it with the pin button to keep it in the Home sidebar), then
+2. Open it from **Repositories** (it's then listed in the Home sidebar until you close it), then
    choose a tab:
    - **Graph** (default when the repo has a local clone) — browse the commit graph. Pick a scope
      (**All** = all branches/remotes/tags, **Local** = local branches, **Current** = the checkout's

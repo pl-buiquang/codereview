@@ -54,7 +54,7 @@ beforeEach(() => {
     tabs: [{ id: "home", kind: "home" }],
     activeTabId: "home",
     homeRepoId: null,
-    pinnedRepoIds: [],
+    openRepoIds: [],
   });
   listRepositories.mockResolvedValue([]);
 });
@@ -85,19 +85,7 @@ describe("RepositoriesView", () => {
     const s = useUIStore.getState();
     expect(s.activeTabId).toBe("home");
     expect(s.homeRepoId).toBe(7);
-  });
-
-  it("pins and unpins a repo without opening it", async () => {
-    const user = userEvent.setup();
-    listRepositories.mockResolvedValue([repo({ id: 7, remote_owner: "a", remote_name: "b" })]);
-    renderHome();
-
-    await screen.findByText("a/b");
-    await user.click(screen.getByTitle("Pin to sidebar"));
-    expect(useUIStore.getState().pinnedRepoIds).toEqual([7]);
-    expect(useUIStore.getState().homeRepoId).toBeNull();
-    await user.click(screen.getByTitle("Unpin from sidebar"));
-    expect(useUIStore.getState().pinnedRepoIds).toEqual([]);
+    expect(s.openRepoIds).toEqual([7]);
   });
 
   it("adds a repo via the folder picker and opens it", async () => {

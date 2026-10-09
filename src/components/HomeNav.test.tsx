@@ -25,7 +25,7 @@ beforeEach(() => {
     activeTabId: "home",
     homeSection: "inbox",
     homeRepoId: null,
-    pinnedRepoIds: [2],
+    openRepoIds: [2],
     sidebarCollapsed: false,
   });
   listRepositories.mockResolvedValue([
@@ -35,7 +35,7 @@ beforeEach(() => {
 });
 
 describe("HomeNav", () => {
-  it("lists only pinned repos and opens one on click", async () => {
+  it("lists only open repos and shows one on click", async () => {
     const onNavigate = vi.fn();
     const user = userEvent.setup();
     renderNav(false, onNavigate);
@@ -46,12 +46,13 @@ describe("HomeNav", () => {
     expect(onNavigate).toHaveBeenCalled();
   });
 
-  it("unpins without navigating", async () => {
+  it("closes an open repo", async () => {
     const user = userEvent.setup();
+    useUIStore.setState({ homeRepoId: 2 });
     renderNav(false);
 
-    await user.click(await screen.findByLabelText("Unpin acme/two"));
-    expect(useUIStore.getState().pinnedRepoIds).toEqual([]);
+    await user.click(await screen.findByLabelText("Close acme/two"));
+    expect(useUIStore.getState().openRepoIds).toEqual([]);
     expect(useUIStore.getState().homeRepoId).toBeNull();
   });
 

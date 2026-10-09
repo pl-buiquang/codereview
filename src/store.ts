@@ -22,7 +22,8 @@ interface UIState {
   homeSection: HomeSection;
   /** When set, the home tab shows this repository instead of `homeSection`. */
   homeRepoId: number | null;
-  pinnedRepoIds: number[];
+  /** Repos opened in the home tab, listed in the sidebar and kept mounted. */
+  openRepoIds: number[];
   sidebarCollapsed: boolean;
   openRepo: (repoId: number) => void;
   openSettingsTab: () => void;
@@ -32,7 +33,7 @@ interface UIState {
   closeTab: (id: string) => void;
   setActiveTab: (id: string) => void;
   setHomeSection: (section: HomeSection) => void;
-  togglePinRepo: (repoId: number) => void;
+  closeRepo: (repoId: number) => void;
   forgetRepo: (repoId: number) => void;
   toggleSidebar: () => void;
   moveTab: (fromId: string, toId: string) => void;
@@ -40,7 +41,7 @@ interface UIState {
 
 type Persisted = Pick<
   UIState,
-  "tabs" | "activeTabId" | "homeSection" | "homeRepoId" | "pinnedRepoIds" | "sidebarCollapsed"
+  "tabs" | "activeTabId" | "homeSection" | "homeRepoId" | "openRepoIds" | "sidebarCollapsed"
 >;
 
 function upsertTab(tabs: Tab[], tab: Tab): Tab[] {
@@ -54,10 +55,15 @@ export const useUIStore = create<UIState>()(
       activeTabId: HOME_TAB.id,
       homeSection: "inbox",
       homeRepoId: null,
-      pinnedRepoIds: [],
+      openRepoIds: [],
       sidebarCollapsed: false,
 
-      openRepo: (repoId) => set({ activeTabId: HOME_TAB.id, homeRepoId: repoId }),
+      openRepo: (repoId) =>
+        set((s) => ({
+          activeTabId: HOME_TAB.id,
+          homeRepoId: repoId,
+          openRepoIds: s.openRepoIds.includes(repoId) ? s.openRepoIds : [...s.openRepoIds, repoId],
+        })),
 
       openSettingsTab: () =>
         set((s) => ({
@@ -90,7 +96,13 @@ export const useUIStore = create<UIState>()(
           if (active?.kind !== "review") return {};
           const result = closeTabReducer(s, active.id);
           if (active.repoId != null) {
-            return { ...result, activeTabId: HOME_TAB.id, homeRepoId: active.repoId };
+            const repoId = active.repoId;
+            return {
+              ...result,
+              activeTabId: HOME_TAB.id,
+              homeRepoId: repoId,
+              openRepoIds: s.openRepoIds.includes(repoId) ? s.openRepoIds : [...s.openRepoIds, repoId],
+            };
           }
           return result;
         }),
@@ -104,18 +116,9 @@ export const useUIStore = create<UIState>()(
       setHomeSection: (homeSection) =>
         set({ homeSection, homeRepoId: null, activeTabId: HOME_TAB.id }),
 
-      togglePinRepo: (repoId) =>
-        set((s) => ({
-          pinnedRepoIds: s.pinnedRepoIds.includes(repoId)
-            ? s.pinnedRepoIds.filter((id) => id !== repoId)
-            : [...s.pinnedRepoIds, repoId],
-        })),
+      closeRepo: (repoId) => set((s) => closeRepoReducer(s, repoId)),
 
-      forgetRepo: (repoId) =>
-        set((s) => ({
-          pinnedRepoIds: s.pinnedRepoIds.filter((id) => id !== repoId),
-          homeRepoId: s.homeRepoId === repoId ? null : s.homeRepoId,
-        })),
+      forgetRepo: (repoId) => set((s) => closeRepoReducer(s, repoId)),
 
       toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
 
@@ -145,13 +148,17 @@ export const useUIStore = create<UIState>()(
         activeTabId: s.activeTabId,
         homeSection: s.homeSection,
         homeRepoId: s.homeRepoId,
-        pinnedRepoIds: s.pinnedRepoIds,
+        openRepoIds: s.openRepoIds,
         sidebarCollapsed: s.sidebarCollapsed,
       }),
       migrate: (persisted, version) => migratePersisted(persisted, version),
       merge: (persisted, current) => {
         const next = { ...current, ...(persisted as Partial<UIState>) };
-        return { ...next, ...repairTabs(next.tabs, next.activeTabId) };
+        const openRepoIds = next.openRepoIds ?? [];
+        if (next.homeRepoId != null && !openRepoIds.includes(next.homeRepoId)) {
+          openRepoIds.push(next.homeRepoId);
+        }
+        return { ...next, openRepoIds, ...repairTabs(next.tabs, next.activeTabId) };
       },
     },
   ),
@@ -213,16 +220,16 @@ export function migratePersisted(persisted: unknown, version: number): Partial<P
     state = { ...old, tabs: old.tabs ?? [HOME_TAB], activeTabId: old.activeTabId ?? HOME_TAB.id };
   }
 
-  // v3 folds repo tabs into the home tab: open repo tabs become pins, and an
-  // active repo tab becomes the repo shown in home.
-  const pinnedRepoIds: number[] = [];
+  // v3 folds repo tabs into the home tab's open-repo list; an active repo tab
+  // becomes the repo shown in home.
+  const openRepoIds: number[] = [];
   let homeRepoId: number | null = null;
   let activeTabId = state.activeTabId;
   const tabs: Tab[] = [];
   for (const tab of state.tabs) {
     if (tab.kind === "repo") {
       if (tab.repoId == null) continue;
-      if (!pinnedRepoIds.includes(tab.repoId)) pinnedRepoIds.push(tab.repoId);
+      if (!openRepoIds.includes(tab.repoId)) openRepoIds.push(tab.repoId);
       if (tab.id === activeTabId) {
         homeRepoId = tab.repoId;
         activeTabId = HOME_TAB.id;
@@ -231,7 +238,17 @@ export function migratePersisted(persisted: unknown, version: number): Partial<P
       tabs.push(tab as Tab);
     }
   }
-  return { ...state, tabs, activeTabId, homeRepoId, pinnedRepoIds };
+  return { ...state, tabs, activeTabId, homeRepoId, openRepoIds };
+}
+
+// Closing the shown repo falls back to its left neighbor (like closing a tab),
+// or to the home section when none is left.
+function closeRepoReducer(s: UIState, repoId: number): Partial<UIState> {
+  const idx = s.openRepoIds.indexOf(repoId);
+  const openRepoIds = s.openRepoIds.filter((id) => id !== repoId);
+  if (s.homeRepoId !== repoId) return { openRepoIds };
+  const neighbor = openRepoIds[idx - 1] ?? openRepoIds[idx] ?? null;
+  return { openRepoIds, homeRepoId: neighbor };
 }
 
 function closeTabReducer(s: UIState, id: string): Partial<UIState> {

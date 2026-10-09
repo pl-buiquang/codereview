@@ -7,7 +7,7 @@ const reset = () =>
     activeTabId: "home",
     homeSection: "inbox",
     homeRepoId: null,
-    pinnedRepoIds: [],
+    openRepoIds: [],
     sidebarCollapsed: false,
   });
 
@@ -79,22 +79,43 @@ describe("useUIStore", () => {
     expect(s.homeRepoId).toBe(5);
   });
 
-  it("togglePinRepo pins and unpins in order", () => {
-    const { togglePinRepo } = useUIStore.getState();
-    togglePinRepo(2);
-    togglePinRepo(1);
-    expect(useUIStore.getState().pinnedRepoIds).toEqual([2, 1]);
-    togglePinRepo(2);
-    expect(useUIStore.getState().pinnedRepoIds).toEqual([1]);
+  it("openRepo adds to the open list once, in open order", () => {
+    const { openRepo } = useUIStore.getState();
+    openRepo(2);
+    openRepo(1);
+    openRepo(2);
+    expect(useUIStore.getState().openRepoIds).toEqual([2, 1]);
+    expect(useUIStore.getState().homeRepoId).toBe(2);
   });
 
-  it("forgetRepo drops the pin and the shown repo", () => {
-    useUIStore.getState().togglePinRepo(4);
-    useUIStore.getState().openRepo(4);
-    useUIStore.getState().forgetRepo(4);
-    const s = useUIStore.getState();
-    expect(s.pinnedRepoIds).toEqual([]);
-    expect(s.homeRepoId).toBeNull();
+  it("closing the shown repo falls back to its left neighbor, then the section", () => {
+    const { openRepo, closeRepo } = useUIStore.getState();
+    openRepo(1);
+    openRepo(2);
+    closeRepo(2);
+    expect(useUIStore.getState().openRepoIds).toEqual([1]);
+    expect(useUIStore.getState().homeRepoId).toBe(1);
+    closeRepo(1);
+    expect(useUIStore.getState().openRepoIds).toEqual([]);
+    expect(useUIStore.getState().homeRepoId).toBeNull();
+  });
+
+  it("closing a hidden repo keeps the shown one", () => {
+    const { openRepo, closeRepo } = useUIStore.getState();
+    openRepo(1);
+    openRepo(2);
+    closeRepo(1);
+    expect(useUIStore.getState().openRepoIds).toEqual([2]);
+    expect(useUIStore.getState().homeRepoId).toBe(2);
+  });
+
+  it("closeReview reopens its repo if it was closed meanwhile", () => {
+    useUIStore.getState().openRepo(5);
+    useUIStore.getState().openReview(42);
+    useUIStore.getState().closeRepo(5);
+    useUIStore.getState().closeReview();
+    expect(useUIStore.getState().openRepoIds).toEqual([5]);
+    expect(useUIStore.getState().homeRepoId).toBe(5);
   });
 
   it("toggleSidebar flips the collapsed flag", () => {
@@ -186,7 +207,7 @@ describe("useUIStore", () => {
   });
 
   describe("migratePersisted", () => {
-    it("v2 → v3 turns repo tabs into pins and shows the active one in home", () => {
+    it("v2 → v3 turns repo tabs into open repos and shows the active one in home", () => {
       const out = migratePersisted(
         {
           tabs: [
@@ -201,7 +222,7 @@ describe("useUIStore", () => {
         2,
       );
       expect(out.tabs?.map((t) => t.id)).toEqual(["home", "review-9"]);
-      expect(out.pinnedRepoIds).toEqual([1, 2]);
+      expect(out.openRepoIds).toEqual([1, 2]);
       expect(out.homeRepoId).toBe(2);
       expect(out.activeTabId).toBe("home");
       expect(out.homeSection).toBe("reviews");
@@ -210,7 +231,7 @@ describe("useUIStore", () => {
     it("v0 chains through to v3", () => {
       const out = migratePersisted({ activeRepoId: 4, activeReviewId: 7 }, 0);
       expect(out.tabs?.map((t) => t.id)).toEqual(["home", "review-7"]);
-      expect(out.pinnedRepoIds).toEqual([4]);
+      expect(out.openRepoIds).toEqual([4]);
       expect(out.activeTabId).toBe("review-7");
       expect(out.homeRepoId).toBeNull();
     });

@@ -25,10 +25,10 @@ export function HomeNav({
 }) {
   const section = useUIStore((s) => s.homeSection);
   const homeRepoId = useUIStore((s) => s.homeRepoId);
-  const pinnedRepoIds = useUIStore((s) => s.pinnedRepoIds);
+  const openRepoIds = useUIStore((s) => s.openRepoIds);
   const setSection = useUIStore((s) => s.setHomeSection);
   const openRepo = useUIStore((s) => s.openRepo);
-  const togglePinRepo = useUIStore((s) => s.togglePinRepo);
+  const closeRepo = useUIStore((s) => s.closeRepo);
   const toggleSidebar = useUIStore((s) => s.toggleSidebar);
   const openSettingsTab = useUIStore((s) => s.openSettingsTab);
 
@@ -36,7 +36,7 @@ export function HomeNav({
     queryKey: ["repositories"],
     queryFn: api.listRepositories,
   });
-  const pinned = pinnedRepoIds.flatMap((id) => repos?.find((r) => r.id === id) ?? []);
+  const openRepos = openRepoIds.flatMap((id) => repos?.find((r) => r.id === id) ?? []);
 
   const go = (fn: () => void) => () => {
     fn();
@@ -72,22 +72,28 @@ export function HomeNav({
           </button>
         ))}
       </div>
-      {pinned.length > 0 && (
-        <div className="cr-nav cr-pinned">
+      {openRepos.length > 0 && (
+        <div className="cr-nav cr-open-repos">
           {collapsed ? (
-            <div className="cr-pinned-sep" />
+            <div className="cr-open-repos-sep" />
           ) : (
-            <div className="cr-pinned-head">Pinned</div>
+            <div className="cr-open-repos-head">Open</div>
           )}
-          {pinned.map((repo) => {
+          {openRepos.map((repo) => {
             const label = repoLabel(repo);
             return (
               <div
                 key={repo.id}
                 role="button"
                 tabIndex={0}
-                className={`cr-nav-item cr-pinned-item${homeRepoId === repo.id ? " active" : ""}`}
+                className={`cr-nav-item cr-open-repo${homeRepoId === repo.id ? " active" : ""}`}
                 onClick={go(() => openRepo(repo.id))}
+                onMouseDown={(e) => {
+                  if (e.button === 1) e.preventDefault();
+                }}
+                onAuxClick={(e) => {
+                  if (e.button === 1) closeRepo(repo.id);
+                }}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" || e.key === " ") {
                     e.preventDefault();
@@ -97,17 +103,17 @@ export function HomeNav({
                 }}
                 title={label}
               >
-                <img className="cr-pinned-avatar" src={identicon(label)} alt="" />
+                <img className="cr-open-repo-avatar" src={identicon(label)} alt="" />
                 {!collapsed && (
                   <>
-                    <span className="cr-pinned-label">{label}</span>
+                    <span className="cr-open-repo-label">{label}</span>
                     <button
-                      className="cr-pinned-unpin"
-                      title="Unpin"
-                      aria-label={`Unpin ${label}`}
+                      className="cr-open-repo-close"
+                      title="Close repository"
+                      aria-label={`Close ${label}`}
                       onClick={(e) => {
                         e.stopPropagation();
-                        togglePinRepo(repo.id);
+                        closeRepo(repo.id);
                       }}
                     >
                       <Icon name="x" size={10} />

@@ -44,7 +44,7 @@ function App() {
   useDeepLinkListener();
   const tabs = useUIStore((s) => s.tabs);
   const closeTab = useUIStore((s) => s.closeTab);
-  const pinnedRepoIds = useUIStore((s) => s.pinnedRepoIds);
+  const openRepoIds = useUIStore((s) => s.openRepoIds);
   const homeRepoId = useUIStore((s) => s.homeRepoId);
   const forgetRepo = useUIStore((s) => s.forgetRepo);
 
@@ -97,7 +97,7 @@ function App() {
     });
   }, []);
 
-  // Drop review tabs, pins, and the shown repo whose repository was removed in a previous session.
+  // Drop review tabs and open repos whose repository was removed in a previous session.
   // Only act on a settled list — acting mid-fetch would race a just-added repo
   // (whose tab is opened optimistically before the refetch lands).
   useEffect(() => {
@@ -108,10 +108,10 @@ function App() {
         closeTab(tab.id);
       }
     }
-    for (const id of [...pinnedRepoIds, homeRepoId]) {
+    for (const id of [...openRepoIds, homeRepoId]) {
       if (id != null && !ids.has(id)) forgetRepo(id);
     }
-  }, [repos, reposFetching, tabs, closeTab, pinnedRepoIds, homeRepoId, forgetRepo]);
+  }, [repos, reposFetching, tabs, closeTab, openRepoIds, homeRepoId, forgetRepo]);
 
   return (
     <div className="app-shell">

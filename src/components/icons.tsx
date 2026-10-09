@@ -37,13 +37,11 @@ export type IconName =
   | "link"
   | "search"
   | "copy"
-  | "pin"
   | "sidebar"
   | "dot";
 
 const STROKE: Record<Exclude<IconName, "dot">, ReactNode> = {
   menu: <path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11" />,
-  pin: <path d="M6 2.5h4M6.8 2.5v3.8L4.5 9h7l-2.3-2.7V2.5M8 9v4.5" />,
   sidebar: (
     <>
       <rect x="2" y="3" width="12" height="10" rx="1.5" />
