@@ -10,8 +10,10 @@ import { useSettingsStore, parseRepoBasePaths } from "../lib/settings";
 
 export function RepositoriesView() {
   const queryClient = useQueryClient();
-  const openRepoTab = useUIStore((s) => s.openRepoTab);
-  const closeTab = useUIStore((s) => s.closeTab);
+  const openRepo = useUIStore((s) => s.openRepo);
+  const forgetRepo = useUIStore((s) => s.forgetRepo);
+  const pinnedRepoIds = useUIStore((s) => s.pinnedRepoIds);
+  const togglePinRepo = useUIStore((s) => s.togglePinRepo);
   const repoBasePaths = useSettingsStore((s) => s.repoBasePaths);
 
   const reposQuery = useQuery({
@@ -27,14 +29,13 @@ export function RepositoriesView() {
     },
     onSuccess: (repo) => {
       if (repo) {
-        // Seed the cache before opening the tab: App's cleanup effect closes
-        // repo/review tabs whose repoId isn't in ["repositories"], so the new
-        // tab would be killed if we opened it against the stale (pre-refetch)
-        // list — landing the user back on the previously active tab.
+        // Seed the cache before opening the repo: App's cleanup effect forgets
+        // repos whose id isn't in ["repositories"], so the new repo would be
+        // dropped if we opened it against the stale (pre-refetch) list.
         queryClient.setQueryData<Repository[]>(["repositories"], (old) =>
           old ? (old.some((r) => r.id === repo.id) ? old : [...old, repo]) : [repo],
         );
-        openRepoTab(repo.id);
+        openRepo(repo.id);
       }
       queryClient.invalidateQueries({ queryKey: ["repositories"] });
     },
@@ -45,7 +46,7 @@ export function RepositoriesView() {
     mutationFn: (id: number) => api.removeRepository(id),
     onSuccess: (_data, id) => {
       queryClient.invalidateQueries({ queryKey: ["repositories"] });
-      closeTab(`repo-${id}`);
+      forgetRepo(id);
     },
   });
 
@@ -102,7 +103,7 @@ export function RepositoriesView() {
           <p className="muted">No repositories yet. Add a local git repo to start.</p>
         )}
         {repos.map((repo) => (
-          <div key={repo.id} className="card repo-row" onClick={() => openRepoTab(repo.id)}>
+          <div key={repo.id} className="card repo-row" onClick={() => openRepo(repo.id)}>
             <span className="repo-row-icon">
               <Icon name="repo" size={16} />
             </span>
@@ -124,6 +125,16 @@ export function RepositoriesView() {
                 Link
               </button>
             )}
+            <button
+              className={`btn-icon repo-pin-btn${pinnedRepoIds.includes(repo.id) ? " pinned" : ""}`}
+              title={pinnedRepoIds.includes(repo.id) ? "Unpin from sidebar" : "Pin to sidebar"}
+              onClick={(e) => {
+                e.stopPropagation();
+                togglePinRepo(repo.id);
+              }}
+            >
+              <Icon name="pin" size={13} />
+            </button>
             <button
               className="btn-icon"
               title="Remove repository"

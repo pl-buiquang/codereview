@@ -3,10 +3,9 @@ import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { useUIStore, type Tab } from "../store";
-import { repoLabel } from "../lib/repoLabel";
 import { toast } from "../lib/toast";
-import type { Repository } from "../lib/types";
 import { Icon, type IconName } from "./icons";
+import { flyoutHover } from "./HomeFlyout";
 
 function tabMagicLink(tab: Tab): string | null {
   if (tab.kind === "review" && tab.reviewId != null) {
@@ -17,7 +16,6 @@ function tabMagicLink(tab: Tab): string | null {
 
 /** The type glyph shown on an inactive document tab (active tabs show the dot). */
 function tabIcon(kind: Tab["kind"]): IconName {
-  if (kind === "repo") return "repo";
   if (kind === "review") return "review";
   if (kind === "settings") return "gear";
   return "file";
@@ -25,7 +23,7 @@ function tabIcon(kind: Tab["kind"]): IconName {
 
 /** The display label for a tab. Review titles come from the (cached) review
  *  query, so this is a hook shared by the tab strip and the overflow menu. */
-function useTabLabel(tab: Tab, repos: Repository[]): string {
+function useTabLabel(tab: Tab): string {
   const reviewQuery = useQuery({
     queryKey: ["review", tab.reviewId],
     queryFn: () => api.getReview(tab.reviewId!),
@@ -34,9 +32,7 @@ function useTabLabel(tab: Tab, repos: Repository[]): string {
 
   if (tab.kind === "home") return "Home";
   if (tab.kind === "settings") return "Settings";
-  if (tab.kind === "review") return reviewQuery.data?.target.title ?? `Review #${tab.reviewId}`;
-  const repo = repos.find((r) => r.id === tab.repoId);
-  return repo ? repoLabel(repo) : `repo #${tab.repoId}`;
+  return reviewQuery.data?.target.title ?? `Review #${tab.reviewId}`;
 }
 
 function TabContextMenu({
@@ -114,7 +110,7 @@ function TabContextMenu({
   );
 }
 
-function TabItem({ tab, repos }: { tab: Tab; repos: Repository[] }) {
+function TabItem({ tab }: { tab: Tab }) {
   const activeTabId = useUIStore((s) => s.activeTabId);
   const setActiveTab = useUIStore((s) => s.setActiveTab);
   const closeTab = useUIStore((s) => s.closeTab);
@@ -126,7 +122,7 @@ function TabItem({ tab, repos }: { tab: Tab; repos: Repository[] }) {
   // The home tab is pinned: it can't be dragged or accept a drop before it.
   const draggable = tab.kind !== "home";
   const isActive = tab.id === activeTabId;
-  const label = useTabLabel(tab, repos);
+  const label = useTabLabel(tab);
 
   // Only show a context menu if there's something to offer.
   const hasContextMenu = tabMagicLink(tab) !== null || tab.kind !== "home";
@@ -138,6 +134,8 @@ function TabItem({ tab, repos }: { tab: Tab; repos: Repository[] }) {
         dragOver ? "drag-over" : ""
       }`}
       onClick={() => setActiveTab(tab.id)}
+      onMouseEnter={tab.kind === "home" ? flyoutHover.enter : undefined}
+      onMouseLeave={tab.kind === "home" ? flyoutHover.leave : undefined}
       onContextMenu={(e) => {
         if (!hasContextMenu) return;
         e.preventDefault();
@@ -204,17 +202,15 @@ function TabItem({ tab, repos }: { tab: Tab; repos: Repository[] }) {
 
 function OverflowRow({
   tab,
-  repos,
   onPick,
 }: {
   tab: Tab;
-  repos: Repository[];
   onPick: () => void;
 }) {
   const activeTabId = useUIStore((s) => s.activeTabId);
   const setActiveTab = useUIStore((s) => s.setActiveTab);
   const closeTab = useUIStore((s) => s.closeTab);
-  const label = useTabLabel(tab, repos);
+  const label = useTabLabel(tab);
 
   return (
     <div
@@ -242,7 +238,7 @@ function OverflowRow({
   );
 }
 
-function TabOverflowMenu({ tabs, repos }: { tabs: Tab[]; repos: Repository[] }) {
+function TabOverflowMenu({ tabs }: { tabs: Tab[] }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -267,7 +263,7 @@ function TabOverflowMenu({ tabs, repos }: { tabs: Tab[]; repos: Repository[] }) 
       {open && (
         <div className="tab-overflow-menu">
           {tabs.map((tab) => (
-            <OverflowRow key={tab.id} tab={tab} repos={repos} onPick={() => setOpen(false)} />
+            <OverflowRow key={tab.id} tab={tab} onPick={() => setOpen(false)} />
           ))}
         </div>
       )}
@@ -278,20 +274,14 @@ function TabOverflowMenu({ tabs, repos }: { tabs: Tab[]; repos: Repository[] }) 
 export function TabBar() {
   const tabs = useUIStore((s) => s.tabs);
 
-  const reposQuery = useQuery({
-    queryKey: ["repositories"],
-    queryFn: api.listRepositories,
-  });
-  const repos = reposQuery.data ?? [];
-
   return (
     <nav className="tab-bar">
       <div className="tab-bar-tabs">
         {tabs.map((tab) => (
-          <TabItem key={tab.id} tab={tab} repos={repos} />
+          <TabItem key={tab.id} tab={tab} />
         ))}
       </div>
-      {tabs.length > 1 && <TabOverflowMenu tabs={tabs} repos={repos} />}
+      {tabs.length > 1 && <TabOverflowMenu tabs={tabs} />}
     </nav>
   );
 }

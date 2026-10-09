@@ -50,9 +50,10 @@ export async function handleDeepLinkAction(action: DeepLinkAction): Promise<void
     }
 
     case "navigateHome":
-      setActiveTab("home");
       if (action.section && VALID_SECTIONS.has(action.section as HomeSection)) {
         setHomeSection(action.section as HomeSection);
+      } else {
+        setActiveTab("home");
       }
       break;
   }

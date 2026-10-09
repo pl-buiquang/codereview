@@ -17,6 +17,8 @@ type Tab = "graph" | "prs" | "reviews";
 
 export function RepoView({ repo }: { repo: Repository }) {
   const openReview = useUIStore((s) => s.openReview);
+  const pinned = useUIStore((s) => s.pinnedRepoIds.includes(repo.id));
+  const togglePinRepo = useUIStore((s) => s.togglePinRepo);
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<Tab>(repo.local_path ? "graph" : "prs");
 
@@ -41,6 +43,13 @@ export function RepoView({ repo }: { repo: Repository }) {
             ? `${repo.remote_owner}/${repo.remote_name}`
             : repo.local_path ?? "Repository"}
         </h1>
+        <button
+          className={`btn btn-sm repo-pin-btn${pinned ? " pinned" : ""}`}
+          onClick={() => togglePinRepo(repo.id)}
+          title={pinned ? "Unpin from sidebar" : "Pin to sidebar"}
+        >
+          <Icon name="pin" size={12} /> {pinned ? "Pinned" : "Pin"}
+        </button>
       </header>
 
       <div className="cr-tabs">

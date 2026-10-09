@@ -50,7 +50,12 @@ function renderHome() {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  useUIStore.setState({ tabs: [{ id: "home", kind: "home" }], activeTabId: "home" });
+  useUIStore.setState({
+    tabs: [{ id: "home", kind: "home" }],
+    activeTabId: "home",
+    homeRepoId: null,
+    pinnedRepoIds: [],
+  });
   listRepositories.mockResolvedValue([]);
 });
 
@@ -71,18 +76,31 @@ describe("RepositoriesView", () => {
     expect(screen.getByText("localonly")).toBeInTheDocument();
   });
 
-  it("opens a repo tab on click", async () => {
+  it("opens the repo inside the home tab on click", async () => {
     const user = userEvent.setup();
     listRepositories.mockResolvedValue([repo({ id: 7, remote_owner: "a", remote_name: "b" })]);
     renderHome();
 
     await user.click(await screen.findByText("a/b"));
     const s = useUIStore.getState();
-    expect(s.activeTabId).toBe("repo-7");
-    expect(s.tabs.some((t) => t.id === "repo-7")).toBe(true);
+    expect(s.activeTabId).toBe("home");
+    expect(s.homeRepoId).toBe(7);
   });
 
-  it("adds a repo via the folder picker and opens its tab", async () => {
+  it("pins and unpins a repo without opening it", async () => {
+    const user = userEvent.setup();
+    listRepositories.mockResolvedValue([repo({ id: 7, remote_owner: "a", remote_name: "b" })]);
+    renderHome();
+
+    await screen.findByText("a/b");
+    await user.click(screen.getByTitle("Pin to sidebar"));
+    expect(useUIStore.getState().pinnedRepoIds).toEqual([7]);
+    expect(useUIStore.getState().homeRepoId).toBeNull();
+    await user.click(screen.getByTitle("Unpin from sidebar"));
+    expect(useUIStore.getState().pinnedRepoIds).toEqual([]);
+  });
+
+  it("adds a repo via the folder picker and opens it", async () => {
     const user = userEvent.setup();
     pickFolder.mockResolvedValue("/new/repo/path");
     addRepository.mockResolvedValue(repo({ id: 99 }));
@@ -91,7 +109,7 @@ describe("RepositoriesView", () => {
     await user.click(await screen.findByRole("button", { name: /Add repo/i }));
 
     await waitFor(() => expect(addRepository).toHaveBeenCalledWith("/new/repo/path"));
-    await waitFor(() => expect(useUIStore.getState().activeTabId).toBe("repo-99"));
+    await waitFor(() => expect(useUIStore.getState().homeRepoId).toBe(99));
   });
 
   it("does not call addRepository when the folder picker is cancelled", async () => {

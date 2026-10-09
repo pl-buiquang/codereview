@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
-export type TabKind = "home" | "repo" | "settings" | "review";
+export type TabKind = "home" | "settings" | "review";
 
 /** Which section the home tab's sidebar shows. */
 export type HomeSection = "inbox" | "reviews" | "archive" | "repositories";
@@ -14,14 +14,17 @@ export interface Tab {
 }
 
 const HOME_TAB: Tab = { id: "home", kind: "home" };
-const repoTabId = (repoId: number) => `repo-${repoId}`;
 const reviewTabId = (reviewId: number) => `review-${reviewId}`;
 
 interface UIState {
   tabs: Tab[];
   activeTabId: string;
   homeSection: HomeSection;
-  openRepoTab: (repoId: number) => void;
+  /** When set, the home tab shows this repository instead of `homeSection`. */
+  homeRepoId: number | null;
+  pinnedRepoIds: number[];
+  sidebarCollapsed: boolean;
+  openRepo: (repoId: number) => void;
   openSettingsTab: () => void;
   openReview: (reviewId: number, repoId?: number) => void;
   closeReview: () => void;
@@ -29,8 +32,16 @@ interface UIState {
   closeTab: (id: string) => void;
   setActiveTab: (id: string) => void;
   setHomeSection: (section: HomeSection) => void;
+  togglePinRepo: (repoId: number) => void;
+  forgetRepo: (repoId: number) => void;
+  toggleSidebar: () => void;
   moveTab: (fromId: string, toId: string) => void;
 }
+
+type Persisted = Pick<
+  UIState,
+  "tabs" | "activeTabId" | "homeSection" | "homeRepoId" | "pinnedRepoIds" | "sidebarCollapsed"
+>;
 
 function upsertTab(tabs: Tab[], tab: Tab): Tab[] {
   return tabs.some((t) => t.id === tab.id) ? tabs : [...tabs, tab];
@@ -42,16 +53,11 @@ export const useUIStore = create<UIState>()(
       tabs: [HOME_TAB],
       activeTabId: HOME_TAB.id,
       homeSection: "inbox",
+      homeRepoId: null,
+      pinnedRepoIds: [],
+      sidebarCollapsed: false,
 
-      openRepoTab: (repoId) =>
-        set((s) => ({
-          tabs: upsertTab(s.tabs, {
-            id: repoTabId(repoId),
-            kind: "repo",
-            repoId,
-          }),
-          activeTabId: repoTabId(repoId),
-        })),
+      openRepo: (repoId) => set({ activeTabId: HOME_TAB.id, homeRepoId: repoId }),
 
       openSettingsTab: () =>
         set((s) => ({
@@ -59,14 +65,14 @@ export const useUIStore = create<UIState>()(
           activeTabId: "settings",
         })),
 
-      // Opened from within a repo tab; the review becomes its own tab parented
-      // to that repo so closing it returns there. An explicit repoId overrides
-      // the inferred parent (used when opening via deep link with no active repo tab).
+      // A review opened while a repo is shown in the home tab is parented to
+      // that repo so closing it returns there. An explicit repoId overrides
+      // the inferred parent (used when opening via deep link).
       openReview: (reviewId, explicitRepoId?) =>
         set((s) => {
-          const parent = s.tabs.find((t) => t.id === s.activeTabId);
           const repoId =
-            explicitRepoId ?? (parent?.kind === "repo" ? parent.repoId : undefined);
+            explicitRepoId ??
+            (s.activeTabId === HOME_TAB.id ? (s.homeRepoId ?? undefined) : undefined);
           return {
             tabs: upsertTab(s.tabs, {
               id: reviewTabId(reviewId),
@@ -84,10 +90,7 @@ export const useUIStore = create<UIState>()(
           if (active?.kind !== "review") return {};
           const result = closeTabReducer(s, active.id);
           if (active.repoId != null) {
-            const parentId = repoTabId(active.repoId);
-            if (result.tabs?.some((t) => t.id === parentId)) {
-              return { ...result, activeTabId: parentId };
-            }
+            return { ...result, activeTabId: HOME_TAB.id, homeRepoId: active.repoId };
           }
           return result;
         }),
@@ -98,7 +101,23 @@ export const useUIStore = create<UIState>()(
 
       setActiveTab: (id) => set({ activeTabId: id }),
 
-      setHomeSection: (homeSection) => set({ homeSection }),
+      setHomeSection: (homeSection) =>
+        set({ homeSection, homeRepoId: null, activeTabId: HOME_TAB.id }),
+
+      togglePinRepo: (repoId) =>
+        set((s) => ({
+          pinnedRepoIds: s.pinnedRepoIds.includes(repoId)
+            ? s.pinnedRepoIds.filter((id) => id !== repoId)
+            : [...s.pinnedRepoIds, repoId],
+        })),
+
+      forgetRepo: (repoId) =>
+        set((s) => ({
+          pinnedRepoIds: s.pinnedRepoIds.filter((id) => id !== repoId),
+          homeRepoId: s.homeRepoId === repoId ? null : s.homeRepoId,
+        })),
+
+      toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
 
       // Reorder by dropping `fromId` onto `toId`. The home tab is pinned first:
       // it never moves and nothing can be dropped onto or before it.
@@ -120,55 +139,16 @@ export const useUIStore = create<UIState>()(
     }),
     {
       name: "codereview-ui",
-      version: 2,
-      partialize: (s) => ({
+      version: 3,
+      partialize: (s): Persisted => ({
         tabs: s.tabs,
         activeTabId: s.activeTabId,
         homeSection: s.homeSection,
+        homeRepoId: s.homeRepoId,
+        pinnedRepoIds: s.pinnedRepoIds,
+        sidebarCollapsed: s.sidebarCollapsed,
       }),
-      migrate: (persisted, version) => {
-        if (version >= 2) return persisted as { tabs: Tab[]; activeTabId: string };
-
-        // v0 stored { activeRepoId, activeReviewId } as flat flags.
-        if (version === 0) {
-          const old = (persisted ?? {}) as {
-            activeRepoId?: number | null;
-            activeReviewId?: number | null;
-          };
-          const tabs: Tab[] = [HOME_TAB];
-          let activeTabId = HOME_TAB.id;
-          if (old.activeRepoId != null) {
-            tabs.push({ id: repoTabId(old.activeRepoId), kind: "repo", repoId: old.activeRepoId });
-            activeTabId = repoTabId(old.activeRepoId);
-            if (old.activeReviewId != null) {
-              tabs.push({
-                id: reviewTabId(old.activeReviewId),
-                kind: "review",
-                repoId: old.activeRepoId,
-                reviewId: old.activeReviewId,
-              });
-              activeTabId = reviewTabId(old.activeReviewId);
-            }
-          }
-          return { tabs, activeTabId };
-        }
-
-        // v1 kept the open review inline on its repo tab; split those out.
-        const old = (persisted ?? {}) as { tabs?: Tab[]; activeTabId?: string };
-        const tabs: Tab[] = [];
-        let activeTabId = old.activeTabId ?? HOME_TAB.id;
-        for (const tab of old.tabs ?? [HOME_TAB]) {
-          if (tab.kind === "repo" && tab.reviewId != null) {
-            tabs.push({ id: tab.id, kind: "repo", repoId: tab.repoId });
-            const rid = reviewTabId(tab.reviewId);
-            tabs.push({ id: rid, kind: "review", repoId: tab.repoId, reviewId: tab.reviewId });
-            if (activeTabId === tab.id) activeTabId = rid;
-          } else {
-            tabs.push(tab);
-          }
-        }
-        return { tabs, activeTabId };
-      },
+      migrate: (persisted, version) => migratePersisted(persisted, version),
       merge: (persisted, current) => {
         const next = { ...current, ...(persisted as Partial<UIState>) };
         return { ...next, ...repairTabs(next.tabs, next.activeTabId) };
@@ -176,6 +156,83 @@ export const useUIStore = create<UIState>()(
     },
   ),
 );
+
+// Legacy tab shape: before v3 repositories had their own tabs.
+interface LegacyTab {
+  id: string;
+  kind: TabKind | "repo";
+  repoId?: number;
+  reviewId?: number | null;
+}
+
+export function migratePersisted(persisted: unknown, version: number): Partial<Persisted> {
+  if (version >= 3) return persisted as Partial<Persisted>;
+
+  let state: { tabs: LegacyTab[]; activeTabId: string } & Record<string, unknown>;
+
+  if (version === 0) {
+    // v0 stored { activeRepoId, activeReviewId } as flat flags.
+    const old = (persisted ?? {}) as {
+      activeRepoId?: number | null;
+      activeReviewId?: number | null;
+    };
+    const tabs: LegacyTab[] = [HOME_TAB];
+    let activeTabId = HOME_TAB.id;
+    if (old.activeRepoId != null) {
+      tabs.push({ id: `repo-${old.activeRepoId}`, kind: "repo", repoId: old.activeRepoId });
+      activeTabId = `repo-${old.activeRepoId}`;
+      if (old.activeReviewId != null) {
+        tabs.push({
+          id: reviewTabId(old.activeReviewId),
+          kind: "review",
+          repoId: old.activeRepoId,
+          reviewId: old.activeReviewId,
+        });
+        activeTabId = reviewTabId(old.activeReviewId);
+      }
+    }
+    state = { tabs, activeTabId };
+  } else if (version === 1) {
+    // v1 kept the open review inline on its repo tab; split those out.
+    const old = (persisted ?? {}) as { tabs?: LegacyTab[]; activeTabId?: string };
+    const tabs: LegacyTab[] = [];
+    let activeTabId = old.activeTabId ?? HOME_TAB.id;
+    for (const tab of old.tabs ?? [HOME_TAB]) {
+      if (tab.kind === "repo" && tab.reviewId != null) {
+        tabs.push({ id: tab.id, kind: "repo", repoId: tab.repoId });
+        const rid = reviewTabId(tab.reviewId);
+        tabs.push({ id: rid, kind: "review", repoId: tab.repoId, reviewId: tab.reviewId });
+        if (activeTabId === tab.id) activeTabId = rid;
+      } else {
+        tabs.push(tab);
+      }
+    }
+    state = { tabs, activeTabId };
+  } else {
+    const old = (persisted ?? {}) as { tabs?: LegacyTab[]; activeTabId?: string };
+    state = { ...old, tabs: old.tabs ?? [HOME_TAB], activeTabId: old.activeTabId ?? HOME_TAB.id };
+  }
+
+  // v3 folds repo tabs into the home tab: open repo tabs become pins, and an
+  // active repo tab becomes the repo shown in home.
+  const pinnedRepoIds: number[] = [];
+  let homeRepoId: number | null = null;
+  let activeTabId = state.activeTabId;
+  const tabs: Tab[] = [];
+  for (const tab of state.tabs) {
+    if (tab.kind === "repo") {
+      if (tab.repoId == null) continue;
+      if (!pinnedRepoIds.includes(tab.repoId)) pinnedRepoIds.push(tab.repoId);
+      if (tab.id === activeTabId) {
+        homeRepoId = tab.repoId;
+        activeTabId = HOME_TAB.id;
+      }
+    } else {
+      tabs.push(tab as Tab);
+    }
+  }
+  return { ...state, tabs, activeTabId, homeRepoId, pinnedRepoIds };
+}
 
 function closeTabReducer(s: UIState, id: string): Partial<UIState> {
   if (id === HOME_TAB.id) return {};

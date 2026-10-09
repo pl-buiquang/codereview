@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { listen } from "@tauri-apps/api/event";
 import { TabBar } from "./components/TabBar";
 import { DashboardPanel } from "./components/DashboardPanel";
-import { RepoView } from "./components/RepoView";
+import { HomeFlyout } from "./components/HomeFlyout";
 import { ReviewView } from "./components/ReviewView";
 import { Toaster } from "./components/Toaster";
 import { ConfirmDialog } from "./components/ConfirmDialog";
@@ -44,6 +44,9 @@ function App() {
   useDeepLinkListener();
   const tabs = useUIStore((s) => s.tabs);
   const closeTab = useUIStore((s) => s.closeTab);
+  const pinnedRepoIds = useUIStore((s) => s.pinnedRepoIds);
+  const homeRepoId = useUIStore((s) => s.homeRepoId);
+  const forgetRepo = useUIStore((s) => s.forgetRepo);
 
   useEffect(() => {
     if (isTauriRuntime()) {
@@ -94,28 +97,28 @@ function App() {
     });
   }, []);
 
-  // Drop repo/review tabs whose repository was removed in a previous session.
+  // Drop review tabs, pins, and the shown repo whose repository was removed in a previous session.
   // Only act on a settled list — acting mid-fetch would race a just-added repo
   // (whose tab is opened optimistically before the refetch lands).
   useEffect(() => {
     if (!repos || reposFetching) return;
     const ids = new Set(repos.map((r) => r.id));
     for (const tab of tabs) {
-      if (
-        (tab.kind === "repo" || tab.kind === "review") &&
-        tab.repoId != null &&
-        !ids.has(tab.repoId)
-      ) {
+      if (tab.kind === "review" && tab.repoId != null && !ids.has(tab.repoId)) {
         closeTab(tab.id);
       }
     }
-  }, [repos, reposFetching, tabs, closeTab]);
+    for (const id of [...pinnedRepoIds, homeRepoId]) {
+      if (id != null && !ids.has(id)) forgetRepo(id);
+    }
+  }, [repos, reposFetching, tabs, closeTab, pinnedRepoIds, homeRepoId, forgetRepo]);
 
   return (
     <div className="app-shell">
       <UpdateBanner />
       <TabBar />
       <TabPanes />
+      <HomeFlyout />
       <Toaster />
       <ConfirmDialog />
       <CommandPalette />
@@ -157,31 +160,11 @@ const TabPane = memo(function TabPane({ tab, active }: { tab: Tab; active: boole
 });
 
 const TabContent = memo(function TabContent({ tab }: { tab: Tab }) {
-  if (tab.kind === "home") return <DashboardPanel />;
   if (tab.kind === "settings") return <SettingsView />;
   if (tab.kind === "review" && tab.reviewId != null) {
     return <ReviewView key={tab.reviewId} reviewId={tab.reviewId} />;
   }
-  return <RepoPane repoId={tab.repoId} />;
+  return <DashboardPanel />;
 });
-
-// Looks up its own repo rather than taking it from App, so the pane doesn't
-// depend on App's repos query (whose identity changes on every refetch would
-// otherwise defeat TabContent's memo).
-function RepoPane({ repoId }: { repoId?: number }) {
-  const { data: repos } = useQuery({
-    queryKey: ["repositories"],
-    queryFn: api.listRepositories,
-  });
-  const repo = repos?.find((r) => r.id === repoId);
-  if (!repo) {
-    return (
-      <section className="main-panel empty">
-        <p className="muted">This repository is no longer available.</p>
-      </section>
-    );
-  }
-  return <RepoView repo={repo} />;
-}
 
 export default App;

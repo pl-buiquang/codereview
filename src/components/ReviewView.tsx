@@ -633,7 +633,7 @@ function ReviewHeader({
 }) {
   const queryClient = useQueryClient();
   const closeReview = useUIStore((s) => s.closeReview);
-  const openRepoTab = useUIStore((s) => s.openRepoTab);
+  const openRepo = useUIStore((s) => s.openRepo);
   const { review, target } = detail;
   const [body, setBody] = useState(review.body);
   const [showExport, setShowExport] = useState(false);
@@ -789,8 +789,8 @@ function ReviewHeader({
             <span className="review-repo mono">
               <button
                 className="review-repo-link"
-                title={`Open ${sourceRepo} tab`}
-                onClick={() => openRepoTab(detail.target.repo_id)}
+                title={`Open ${sourceRepo}`}
+                onClick={() => openRepo(detail.target.repo_id)}
               >
                 {sourceRepo}
               </button>
