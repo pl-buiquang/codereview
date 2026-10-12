@@ -40,8 +40,8 @@ describe("HomeNav", () => {
     const user = userEvent.setup();
     renderNav(false, onNavigate);
 
-    await user.click(await screen.findByText("acme/two"));
-    expect(screen.queryByText("acme/one")).not.toBeInTheDocument();
+    await user.click(await screen.findByText("two"));
+    expect(screen.queryByText("one")).not.toBeInTheDocument();
     expect(useUIStore.getState().homeRepoId).toBe(2);
     expect(onNavigate).toHaveBeenCalled();
   });
@@ -59,10 +59,20 @@ describe("HomeNav", () => {
   it("hides labels when collapsed but keeps tooltips", async () => {
     renderNav(true);
 
-    expect(await screen.findByTitle("acme/two")).toBeInTheDocument();
-    expect(screen.queryByText("acme/two")).not.toBeInTheDocument();
+    expect(await screen.findByLabelText("acme/two")).toBeInTheDocument();
+    expect(screen.queryByText("two")).not.toBeInTheDocument();
     expect(screen.queryByText("Inbox")).not.toBeInTheDocument();
     expect(screen.getByTitle("Inbox")).toBeInTheDocument();
+  });
+
+  it("shows the full repo name in a hover tooltip", async () => {
+    const user = userEvent.setup();
+    renderNav(false);
+
+    await user.hover(await screen.findByText("two"));
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("acme/two");
+    await user.unhover(screen.getByText("two"));
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
   });
 
   it("toggles the collapsed flag", async () => {

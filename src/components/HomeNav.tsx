@@ -1,9 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { identicon } from "../lib/avatar";
-import { repoLabel } from "../lib/repoLabel";
+import { repoLabel, repoShortName } from "../lib/repoLabel";
 import { useUIStore, type HomeSection } from "../store";
 import { Icon, type IconName } from "./icons";
+import { Tooltip } from "./Tooltip";
 
 const NAV: { key: HomeSection; label: string; icon: IconName }[] = [
   { key: "inbox", label: "Inbox", icon: "inbox" },
@@ -82,8 +83,8 @@ export function HomeNav({
           {openRepos.map((repo) => {
             const label = repoLabel(repo);
             return (
+              <Tooltip key={repo.id} text={label}>
               <div
-                key={repo.id}
                 role="button"
                 tabIndex={0}
                 className={`cr-nav-item cr-open-repo${homeRepoId === repo.id ? " active" : ""}`}
@@ -101,12 +102,12 @@ export function HomeNav({
                     onNavigate?.();
                   }
                 }}
-                title={label}
+                aria-label={label}
               >
                 <img className="cr-open-repo-avatar" src={identicon(label)} alt="" />
                 {!collapsed && (
                   <>
-                    <span className="cr-open-repo-label">{label}</span>
+                    <span className="cr-open-repo-label">{repoShortName(repo)}</span>
                     <button
                       className="cr-open-repo-close"
                       title="Close repository"
@@ -121,6 +122,7 @@ export function HomeNav({
                   </>
                 )}
               </div>
+              </Tooltip>
             );
           })}
         </div>

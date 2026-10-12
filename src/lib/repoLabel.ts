@@ -11,3 +11,8 @@ export function repoLabel(repo: Repository): string {
   }
   return "unknown";
 }
+
+/** `repoLabel` without the `owner/` prefix. */
+export function repoShortName(repo: Repository): string {
+  return repo.remote_name ?? repoLabel(repo);
+}

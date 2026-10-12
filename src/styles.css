@@ -2952,6 +2952,23 @@ tr.search-current {
   color: var(--danger);
 }
 
+.cr-tooltip-anchor {
+  display: block;
+}
+.cr-tooltip {
+  position: fixed;
+  z-index: 1000;
+  transform: translateY(-50%);
+  padding: 4px 8px;
+  border-radius: var(--radius-s);
+  background: var(--text);
+  color: var(--bg-sunken);
+  font-size: 12px;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
 /* Home menu flyout, revealed by hovering the home tab or the app's left edge */
 .home-edge-trigger {
   position: fixed;
