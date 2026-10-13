@@ -352,6 +352,8 @@ pub struct BoardCardRow {
     pub discarded_at: Option<String>,
     pub archived_at: Option<String>,
     pub last_refreshed: Option<String>,
+    pub ci_status: Option<String>,
+    pub mergeable: Option<String>,
 }
 
 impl BoardCardRow {
@@ -377,6 +379,8 @@ impl BoardCardRow {
             discarded_at: row.get("discarded_at")?,
             archived_at: row.get("archived_at")?,
             last_refreshed: row.get("last_refreshed")?,
+            ci_status: row.get("ci_status")?,
+            mergeable: row.get("mergeable")?,
         })
     }
 }

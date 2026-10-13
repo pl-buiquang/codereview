@@ -35,13 +35,14 @@ fn upsert_card(conn: &Connection, node: &BoardNode, viewer_login: &str, ts: &str
     let author_login = node.author.as_ref().and_then(|a| a.login.clone());
     let is_mine = author_login.as_deref() == Some(viewer_login);
     let has_reviews = node.reviews.as_ref().map(|r| r.total_count > 0).unwrap_or(false);
+    let ci_status = node.ci_status();
     let extra = if clear_discard { ", discarded_at = NULL" } else { "" };
     let sql = format!(
         "INSERT INTO board_card (
             id, type, repo, number, url, title, author_login, state, is_draft,
             review_decision, has_reviews, head_ref, is_mine, updated_at, closed_at,
-            tracked_at, last_refreshed
-         ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?16)
+            tracked_at, last_refreshed, ci_status, mergeable
+         ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?16,?17,?18)
          ON CONFLICT(id) DO UPDATE SET
             type = excluded.type, repo = excluded.repo, number = excluded.number,
             url = excluded.url, title = excluded.title, author_login = excluded.author_login,
@@ -49,7 +50,8 @@ fn upsert_card(conn: &Connection, node: &BoardNode, viewer_login: &str, ts: &str
             review_decision = excluded.review_decision, has_reviews = excluded.has_reviews,
             head_ref = excluded.head_ref, is_mine = excluded.is_mine,
             updated_at = excluded.updated_at, closed_at = excluded.closed_at,
-            last_refreshed = excluded.last_refreshed{extra}"
+            last_refreshed = excluded.last_refreshed,
+            ci_status = excluded.ci_status, mergeable = excluded.mergeable{extra}"
     );
     conn.execute(
         &sql,
@@ -70,6 +72,8 @@ fn upsert_card(conn: &Connection, node: &BoardNode, viewer_login: &str, ts: &str
             node.updated_at,
             node.closed_at,
             ts,
+            ci_status,
+            node.mergeable,
         ],
     )?;
     Ok(())

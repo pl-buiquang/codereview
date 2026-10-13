@@ -439,6 +439,8 @@ export interface BoardCard {
   discarded_at: string | null;
   archived_at: string | null;
   last_refreshed: string | null;
+  ci_status: string | null; // SUCCESS | FAILURE | PENDING | ERROR | EXPECTED, from the head commit's statusCheckRollup
+  mergeable: string | null; // MERGEABLE | CONFLICTING | UNKNOWN
   // Computed/enriched by board_list, flattened alongside the row above.
   lane: BoardLane | null;
   meta: BoardMeta[];

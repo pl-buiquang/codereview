@@ -1060,6 +1060,10 @@ fn run_board(action: BoardAction, json: bool, db: &Db) -> AppResult<()> {
                 println!("{} {}#{} — {}", card.card.typ, card.card.repo, card.card.number, card.card.title);
                 println!("Lane:  {}", card.lane.as_deref().unwrap_or("(hidden)"));
                 println!("State: {}", card.card.state.as_deref().unwrap_or("-"));
+                if card.card.typ == "pr" {
+                    println!("CI:    {}", card.card.ci_status.as_deref().unwrap_or("-"));
+                    println!("Merge: {}", card.card.mergeable.as_deref().unwrap_or("-"));
+                }
                 println!("URL:   {}", card.card.url);
                 if !card.meta.is_empty() {
                     println!("\nMetadata:");

@@ -6,6 +6,7 @@ import { confirmDialog } from "../lib/confirm";
 import { timeAgo } from "../lib/timeAgo";
 import { useSettingsStore, type BoardBorderSide } from "../lib/settings";
 import { RepoName } from "./RepoName";
+import { CiBadge, MergeableBadge } from "./InboxBadges";
 import { Icon } from "./icons";
 
 const BORDER_STYLE_KEY: Record<BoardBorderSide, "borderTopColor" | "borderRightColor" | "borderBottomColor" | "borderLeftColor"> = {
@@ -274,6 +275,12 @@ export function BoardCard({
         <button className="board-card-link board-card-repo" onClick={onOpenRepo} title="Open repository">
           <RepoName name={card.repo} />
         </button>
+        {card.type === "pr" && (
+          <>
+            <CiBadge state={card.ci_status ? card.ci_status.toLowerCase() : null} />
+            <MergeableBadge mergeable={card.mergeable} />
+          </>
+        )}
       </div>
 
       <div className="board-card-actions">

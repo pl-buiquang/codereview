@@ -213,6 +213,8 @@ const BOARD_FRAGMENT: &str = r#"
       reviewDecision
       reviews(first: 1) { totalCount }
       repository { nameWithOwner }
+      mergeable
+      commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
       closingIssuesReferences(first: 20) {
         nodes { id number url title state repository { nameWithOwner } }
       }
@@ -274,6 +276,31 @@ pub struct ClosingIssuesConn {
     pub nodes: Vec<ClosingIssueNode>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StatusCheckRollup {
+    #[serde(default)]
+    pub state: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitObj {
+    #[serde(default)]
+    pub status_check_rollup: Option<StatusCheckRollup>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct CommitNode {
+    pub commit: CommitObj,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct CommitsConn {
+    #[serde(default)]
+    pub nodes: Vec<CommitNode>,
+}
+
 /// One node from the shared `BOARD_FRAGMENT`: an Issue or a PullRequest.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -305,11 +332,25 @@ pub struct BoardNode {
     pub head_ref_name: Option<String>,
     #[serde(default)]
     pub closing_issues_references: Option<ClosingIssuesConn>,
+    #[serde(default)]
+    pub mergeable: Option<String>,
+    #[serde(default)]
+    pub commits: Option<CommitsConn>,
 }
 
 impl BoardNode {
     pub fn is_pr(&self) -> bool {
         self.typename == "PullRequest"
+    }
+
+    /// The head commit's combined CI status (`SUCCESS`/`FAILURE`/`PENDING`/...),
+    /// or `None` when there's no commit/no checks reported for it.
+    pub fn ci_status(&self) -> Option<String> {
+        self.commits
+            .as_ref()
+            .and_then(|c| c.nodes.first())
+            .and_then(|n| n.commit.status_check_rollup.as_ref())
+            .and_then(|r| r.state.clone())
     }
 
     /// `state` normalized the way `board_card.state` stores it: `merged` takes
@@ -417,6 +458,8 @@ mod tests {
       "reviewDecision": "REVIEW_REQUIRED",
       "reviews": { "totalCount": 2 },
       "repository": { "nameWithOwner": "acme/widget" },
+      "mergeable": "MERGEABLE",
+      "commits": { "nodes": [ { "commit": { "statusCheckRollup": { "state": "SUCCESS" } } } ] },
       "closingIssuesReferences": { "nodes": [] }
     }"#;
 
@@ -425,8 +468,10 @@ mod tests {
         let node: BoardNode = serde_json::from_str(PR_NODE_FIXTURE).expect("fixture parses");
         assert!(node.is_pr());
         assert_eq!(node.repo(), Some("acme/widget".to_string()));
-        assert_eq!(node.reviews.map(|r| r.total_count), Some(2));
         assert_eq!(node.head_ref_name.as_deref(), Some("pbq/issue-7"));
+        assert_eq!(node.mergeable.as_deref(), Some("MERGEABLE"));
+        assert_eq!(node.ci_status().as_deref(), Some("SUCCESS"));
+        assert_eq!(node.reviews.map(|r| r.total_count), Some(2));
     }
 
     fn card(typ: &str, state: Option<&str>, is_draft: bool, is_mine: bool) -> BoardCardRow {
@@ -451,6 +496,8 @@ mod tests {
             discarded_at: None,
             archived_at: None,
             last_refreshed: None,
+            ci_status: None,
+            mergeable: None,
         }
     }
 

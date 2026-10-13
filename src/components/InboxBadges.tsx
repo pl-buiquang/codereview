@@ -44,3 +44,16 @@ export function CiBadge({ state }: { state: string | null }) {
     </span>
   );
 }
+
+/** Mergeability (conflicts), distinct from CI: a PR can pass every check and
+ *  still conflict with its base, or vice versa. `null`/`UNKNOWN` hides the
+ *  badge rather than showing a stale "checking…" state. */
+export function MergeableBadge({ mergeable }: { mergeable: string | null }) {
+  if (!mergeable || mergeable === "UNKNOWN") return null;
+  const ok = mergeable === "MERGEABLE";
+  return (
+    <span className={`chip ${ok ? "ok" : "bad"}`} title={ok ? "No merge conflicts" : "Merge conflicts"}>
+      <Icon name={ok ? "check" : "x"} size={11} /> merge
+    </span>
+  );
+}
