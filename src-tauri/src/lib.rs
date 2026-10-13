@@ -1,5 +1,6 @@
 mod anchor;
 mod avatar;
+pub mod board;
 pub mod commands;
 mod cr_install;
 pub mod db;
@@ -99,7 +100,7 @@ pub fn run() {
                 None => {
                     let dir = app.path().app_data_dir()?;
                     std::fs::create_dir_all(&dir)?;
-                    dir.join("codereview.db")
+                    dir.join(db_path::db_filename())
                 }
             };
             if let Some(parent) = db_path.parent() {
@@ -196,6 +197,20 @@ pub fn run() {
             commands::inbox::retrack_item,
             commands::inbox::open_pr_review,
             commands::inbox::inbox_meta,
+            commands::board::board_refresh,
+            commands::board::board_list,
+            commands::board::board_tracked_ids,
+            commands::board::board_track,
+            commands::board::board_discard,
+            commands::board::board_link_pr,
+            commands::board::board_unlink,
+            commands::board::board_archive_done,
+            commands::board::board_open_review,
+            commands::board::board_open_vscode,
+            commands::board::board_meta_add,
+            commands::board::board_meta_update,
+            commands::board::board_meta_delete,
+            commands::board::board_meta_tags,
             commands::chat::chat_send,
             commands::chat::chat_messages,
             commands::chat::chat_clear,

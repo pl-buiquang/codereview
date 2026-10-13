@@ -121,3 +121,18 @@ Repo/filesystem:
 - Image/asset diffs.
 - More syntax grammars (e.g. Dockerfile isn't in refractor-common today, so `Dockerfile` shows
   unhighlighted — register extra languages).
+
+## 10. Board (kanban)
+
+- **Restore archived cards** — `board_archive_done` is permanent in v1 (no restore UI); the row
+  and its metadata survive in SQLite, so a restore command/button is a schema-compatible addition.
+- **Metadata editing in the UI** — `board_meta_update` exists on the backend/CLI but the app only
+  exposes add/delete today; editing a tag/label/value in place is a small follow-up.
+- **`claude_session` title** — the schema has no `title` column for a session row (just id/cwd);
+  add one if sessions need a human label beyond the raw id.
+- **Reviews-lane comment badge edge cases** — `pending_threads` for the "Reviewing" mode counts
+  only threads whose *first* comment is the viewer's; a thread the viewer joined partway through
+  (replied but didn't start) never counts. Revisit if that undercounts in practice.
+- **Board refresh cost** — `board_refresh` fetches review threads for every open PR card
+  sequentially-ish (8-way concurrency, like the inbox); on a board with many open PRs this is the
+  slowest step. Consider skipping unchanged PRs (compare `updated_at`) the way inbox enrichment does.

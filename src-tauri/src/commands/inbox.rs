@@ -24,14 +24,14 @@ fn now() -> String {
 // meta key/value helpers
 // ---------------------------------------------------------------------------
 
-fn get_meta(conn: &Connection, key: &str) -> Option<String> {
+pub(crate) fn get_meta(conn: &Connection, key: &str) -> Option<String> {
     conn.query_row("SELECT value FROM meta WHERE key = ?1", params![key], |r| r.get(0))
         .optional()
         .ok()
         .flatten()
 }
 
-fn set_meta(conn: &Connection, key: &str, value: &str) -> AppResult<()> {
+pub(crate) fn set_meta(conn: &Connection, key: &str, value: &str) -> AppResult<()> {
     conn.execute(
         "INSERT INTO meta (key, value) VALUES (?1, ?2)
          ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -220,7 +220,7 @@ fn query_items(conn: &Connection, sql: &str, params: &[&dyn rusqlite::ToSql]) ->
 // viewer cache
 // ---------------------------------------------------------------------------
 
-fn cached_viewer(conn: &Connection) -> Option<ViewerInfo> {
+pub(crate) fn cached_viewer(conn: &Connection) -> Option<ViewerInfo> {
     let cached_at = get_meta(conn, "viewer_cached_at")?;
     let login = get_meta(conn, "viewer_login")?;
     let teams_json = get_meta(conn, "viewer_team_slugs_json")?;
@@ -253,25 +253,30 @@ pub struct RefreshResult {
 /// Declared `async` so Tauri runs it off the main (UI) thread — the body is
 /// synchronous and contains no `.await`, but the `gh` fan-out is slow and would
 /// otherwise freeze the webview.
-pub fn refresh_inbox_impl(db: &Db) -> AppResult<RefreshResult> {
-    let start = Instant::now();
-
+/// Cached viewer (24h TTL), fetching and persisting it on a cache miss. Shared
+/// with the board refresh, which only needs the login (not the team slugs).
+pub(crate) fn cached_or_fetch_viewer(db: &Db) -> AppResult<ViewerInfo> {
     let cached = {
         let conn = db.0.lock().unwrap();
         cached_viewer(&conn)
     };
-
-    let viewer = match cached {
-        Some(v) => v,
+    match cached {
+        Some(v) => Ok(v),
         None => {
             let v = inbox::fetch_viewer()?;
             let conn = db.0.lock().unwrap();
             set_meta(&conn, "viewer_login", &v.login)?;
             set_meta(&conn, "viewer_team_slugs_json", &serde_json::to_string(&v.team_slugs)?)?;
             set_meta(&conn, "viewer_cached_at", &now())?;
-            v
+            Ok(v)
         }
-    };
+    }
+}
+
+pub fn refresh_inbox_impl(db: &Db) -> AppResult<RefreshResult> {
+    let start = Instant::now();
+
+    let viewer = cached_or_fetch_viewer(db)?;
     let scope = std::env::var("CODEREVIEW_SEARCH_SCOPE").ok();
     let merged = inbox::run_all_searches(&viewer, scope.as_deref());
     let merged_ids: Vec<String> = merged.iter().map(|r| r.node.id.clone()).collect();

@@ -319,3 +319,118 @@ pub struct ItemWithReasons {
     pub item: ItemRow,
     pub reasons: Vec<ItemReason>,
 }
+
+// ---------------------------------------------------------------------------
+// Board (kanban work tracker)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BoardCardRow {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub typ: String,
+    pub repo: String,
+    pub number: i64,
+    pub url: String,
+    pub title: String,
+    pub author_login: Option<String>,
+    pub state: Option<String>,
+    pub is_draft: bool,
+    pub review_decision: Option<String>,
+    pub has_reviews: bool,
+    pub head_ref: Option<String>,
+    pub is_mine: bool,
+    pub pending_threads: Option<i64>,
+    pub updated_at: String,
+    pub closed_at: Option<String>,
+    pub tracked_at: String,
+    pub discarded_at: Option<String>,
+    pub archived_at: Option<String>,
+    pub last_refreshed: Option<String>,
+}
+
+impl BoardCardRow {
+    pub fn from_row(row: &Row) -> rusqlite::Result<Self> {
+        Ok(Self {
+            id: row.get("id")?,
+            typ: row.get("type")?,
+            repo: row.get("repo")?,
+            number: row.get("number")?,
+            url: row.get("url")?,
+            title: row.get("title")?,
+            author_login: row.get("author_login")?,
+            state: row.get("state")?,
+            is_draft: row.get::<_, i64>("is_draft")? != 0,
+            review_decision: row.get("review_decision")?,
+            has_reviews: row.get::<_, i64>("has_reviews")? != 0,
+            head_ref: row.get("head_ref")?,
+            is_mine: row.get::<_, i64>("is_mine")? != 0,
+            pending_threads: row.get("pending_threads")?,
+            updated_at: row.get("updated_at")?,
+            closed_at: row.get("closed_at")?,
+            tracked_at: row.get("tracked_at")?,
+            discarded_at: row.get("discarded_at")?,
+            archived_at: row.get("archived_at")?,
+            last_refreshed: row.get("last_refreshed")?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BoardLinkRow {
+    pub issue_id: String,
+    pub pr_id: String,
+    pub source: String,
+}
+
+impl BoardLinkRow {
+    pub fn from_row(row: &Row) -> rusqlite::Result<Self> {
+        Ok(Self {
+            issue_id: row.get("issue_id")?,
+            pr_id: row.get("pr_id")?,
+            source: row.get("source")?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BoardMetaRow {
+    pub id: i64,
+    pub card_id: String,
+    pub kind: String,
+    pub value: String,
+    pub tag: Option<String>,
+    pub label: Option<String>,
+    pub cwd: Option<String>,
+    pub created_at: String,
+}
+
+impl BoardMetaRow {
+    pub fn from_row(row: &Row) -> rusqlite::Result<Self> {
+        Ok(Self {
+            id: row.get("id")?,
+            card_id: row.get("card_id")?,
+            kind: row.get("kind")?,
+            value: row.get("value")?,
+            tag: row.get("tag")?,
+            label: row.get("label")?,
+            cwd: row.get("cwd")?,
+            created_at: row.get("created_at")?,
+        })
+    }
+}
+
+/// A board card plus everything the frontend needs to render it: its computed
+/// lane, its own metadata, metadata inherited from a linked issue (labelled by
+/// that issue's id), and the raw links for the Unlink UI.
+#[derive(Debug, Clone, Serialize)]
+pub struct BoardCardWithExtras {
+    #[serde(flatten)]
+    pub card: BoardCardRow,
+    pub lane: Option<String>,
+    pub meta: Vec<BoardMetaRow>,
+    pub inherited_meta: Vec<BoardMetaRow>,
+    pub linked_issue_ids: Vec<String>,
+    pub linked_pr_ids: Vec<String>,
+    pub existing_review_id: Option<i64>,
+}

@@ -4,7 +4,7 @@ import { persist } from "zustand/middleware";
 export type TabKind = "home" | "settings" | "review";
 
 /** Which section the home tab's sidebar shows. */
-export type HomeSection = "inbox" | "reviews" | "archive" | "repositories";
+export type HomeSection = "board" | "inbox" | "reviews" | "archive" | "repositories";
 
 export interface Tab {
   id: string;
@@ -53,7 +53,7 @@ export const useUIStore = create<UIState>()(
     (set) => ({
       tabs: [HOME_TAB],
       activeTabId: HOME_TAB.id,
-      homeSection: "inbox",
+      homeSection: "board",
       homeRepoId: null,
       openRepoIds: [],
       sidebarCollapsed: false,

@@ -44,6 +44,12 @@ function isVisited(item: InboxItem): boolean {
   return !!item.engaged_at && item.engaged_at >= item.updated_at;
 }
 
+/** Mine == authored by the viewer; my own PRs are tracked on the board by
+ *  default, so they never show a manual Track button. */
+function isMine(item: InboxItem): boolean {
+  return item.reasons.some((r) => r.reason === "author");
+}
+
 function bucketFor(item: InboxItem, bots: Set<string>): BucketKey {
   if (isVisited(item)) return "visited";
   if (item.author_login && bots.has(item.author_login.toLowerCase())) return "bots";
@@ -71,11 +77,14 @@ export function InboxView() {
   const [typeFilter, setTypeFilter] = useState<string | null>(null);
   const [reviewFilter, setReviewFilter] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
+  const [trackingFilter, setTrackingFilter] = useState<string | null>(null);
 
   const inboxQuery = useQuery({ queryKey: ["inbox"], queryFn: api.listInbox });
   const closedQuery = useQuery({ queryKey: ["closed"], queryFn: api.listClosed });
   const metaQuery = useQuery({ queryKey: ["inbox-meta"], queryFn: api.inboxMeta });
   const reviewsQuery = useQuery({ queryKey: ["reviews", null], queryFn: () => api.listReviews(null) });
+  const trackedQuery = useQuery({ queryKey: ["board-tracked"], queryFn: api.boardTrackedIds });
+  const trackedIds = useMemo(() => new Set(trackedQuery.data ?? []), [trackedQuery.data]);
 
   // Latest existing review per GitHub PR, keyed "owner/name#number" (repo_label
   // is owner/name for remote targets, matching InboxItem.repo). list_reviews is
@@ -132,6 +141,15 @@ export function InboxView() {
   const engage = useMutation({ mutationFn: api.engageItem, onSuccess: invalidate, onError: onErr });
   const unengage = useMutation({ mutationFn: api.unengageItem, onSuccess: invalidate, onError: onErr });
   const untrack = useMutation({ mutationFn: api.untrackItem, onSuccess: invalidate, onError: onErr });
+  const track = useMutation({
+    mutationFn: (item: InboxItem) => api.boardTrack(item.url),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["board-tracked"] });
+      queryClient.invalidateQueries({ queryKey: ["board"] });
+      toast.success("Tracked on the board");
+    },
+    onError: (e) => toast.error(`Could not track:\n${String(e)}`),
+  });
 
   const openPr = useMutation({
     mutationFn: (item: InboxItem) => {
@@ -166,12 +184,14 @@ export function InboxView() {
   const tabItems = buckets[active];
 
   // Build sidebar filter counts from the active bucket.
-  const { repoEntries, authorEntries, typeEntries, reviewEntries, statusEntries } = useMemo(() => {
+  const { repoEntries, authorEntries, typeEntries, reviewEntries, statusEntries, trackingEntries } = useMemo(() => {
     const repo = new Map<string, number>();
     const author = new Map<string, number>();
     const type = new Map<string, number>();
     const review = new Map<string, number>();
     const status = new Map<string, number>();
+    let trackedCount = 0;
+    let untrackedCount = 0;
     for (const it of tabItems) {
       repo.set(it.repo, (repo.get(it.repo) ?? 0) + 1);
       if (it.author_login) author.set(it.author_login, (author.get(it.author_login) ?? 0) + 1);
@@ -179,6 +199,8 @@ export function InboxView() {
       if (it.review_decision) review.set(it.review_decision, (review.get(it.review_decision) ?? 0) + 1);
       const sk = statusKey(it);
       status.set(sk, (status.get(sk) ?? 0) + 1);
+      if (trackedIds.has(it.id)) trackedCount++;
+      else untrackedCount++;
     }
     const byCount = (a: [string, number], b: [string, number]) => b[1] - a[1] || a[0].localeCompare(b[0]);
     const byReviewOrder = (a: [string, number], b: [string, number]) =>
@@ -189,8 +211,9 @@ export function InboxView() {
       typeEntries: [...type.entries()].sort((a, b) => a[0].localeCompare(b[0])),
       reviewEntries: [...review.entries()].sort(byReviewOrder),
       statusEntries: [...status.entries()].sort(byCount),
+      trackingEntries: [["tracked", trackedCount], ["untracked", untrackedCount]] as [string, number][],
     };
-  }, [tabItems]);
+  }, [tabItems, trackedIds]);
 
   const effRepo = repoFilter && tabItems.some((i) => i.repo === repoFilter) ? repoFilter : null;
   const effAuthor = authorFilter && tabItems.some((i) => i.author_login === authorFilter) ? authorFilter : null;
@@ -204,10 +227,12 @@ export function InboxView() {
     if (effType && i.type !== effType) return false;
     if (effReview && i.review_decision !== effReview) return false;
     if (effStatus && statusKey(i) !== effStatus) return false;
+    if (trackingFilter === "tracked" && !trackedIds.has(i.id)) return false;
+    if (trackingFilter === "untracked" && trackedIds.has(i.id)) return false;
     return true;
   });
 
-  const busy = engage.isPending || unengage.isPending || untrack.isPending || openPr.isPending;
+  const busy = engage.isPending || unengage.isPending || untrack.isPending || openPr.isPending || track.isPending;
   const lastRefresh = metaQuery.data?.lastRefreshAt;
 
   return (
@@ -272,6 +297,7 @@ export function InboxView() {
 
       <div className="inbox-layout">
         <aside className="cr-rail">
+          <FilterList title="Tracking" entries={trackingEntries} selected={trackingFilter} onSelect={setTrackingFilter} />
           <FilterList title="Status" entries={statusEntries} selected={effStatus} onSelect={setStatusFilter} />
           <FilterList title="Type" entries={typeEntries} selected={effType} onSelect={setTypeFilter} />
           <FilterList
@@ -308,6 +334,7 @@ export function InboxView() {
           {items.map((item) => {
             const tab = TABS.find((t) => t.key === active)!;
             const existingReviewId = reviewByPr.get(`${item.repo}#${item.number}`);
+            const canBoardTrack = item.type === "issue" || !isMine(item);
             return (
               <InboxItemRow
                 key={item.id}
@@ -321,6 +348,8 @@ export function InboxView() {
                 onRetrack={() => {}}
                 onOpenReview={() => openPr.mutate(item)}
                 onOpenExisting={() => existingReviewId != null && openReview(existingReviewId)}
+                boardTracked={trackedIds.has(item.id)}
+                onBoardTrack={canBoardTrack ? () => track.mutate(item) : undefined}
               />
             );
           })}

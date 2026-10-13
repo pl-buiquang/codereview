@@ -1,6 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import type {
+  BoardCard,
+  BoardMeta,
+  BoardMetaKind,
+  BoardRefreshResult,
   Branch,
   ChatMessage,
   ChatTurnResult,
@@ -164,6 +168,39 @@ export const api = {
   autoLinkRepos: (basePaths: string[]) =>
     invoke<number>("auto_link_repos", { basePaths }),
 
+  // Kanban board
+  boardRefresh: () => invoke<BoardRefreshResult>("board_refresh"),
+  boardList: () => invoke<BoardCard[]>("board_list"),
+  boardTrackedIds: () => invoke<string[]>("board_tracked_ids"),
+  boardTrack: (reference: string) => invoke<string>("board_track", { reference }),
+  boardDiscard: (cardId: string) => invoke<void>("board_discard", { cardId }),
+  boardLinkPr: (issueId: string, prReference: string) =>
+    invoke<void>("board_link_pr", { issueId, prReference }),
+  boardUnlink: (issueId: string, prId: string) => invoke<void>("board_unlink", { issueId, prId }),
+  boardArchiveDone: (olderThanDays: number) =>
+    invoke<number>("board_archive_done", { olderThanDays }),
+  boardOpenReview: (cardId: string, basePaths: string[] = []) =>
+    invoke<Review>("board_open_review", { cardId, basePaths }),
+  boardOpenVscode: (cardId: string, basePaths: string[] = []) =>
+    invoke<void>("board_open_vscode", { cardId, basePaths }),
+  boardMetaAdd: (args: {
+    cardId: string;
+    kind: BoardMetaKind;
+    value: string;
+    tag?: string | null;
+    label?: string | null;
+    cwd?: string | null;
+  }) => invoke<BoardMeta>("board_meta_add", { ...args, tag: args.tag ?? null, label: args.label ?? null, cwd: args.cwd ?? null }),
+  boardMetaUpdate: (id: number, args: { value?: string | null; tag?: string | null; label?: string | null }) =>
+    invoke<void>("board_meta_update", {
+      id,
+      value: args.value ?? null,
+      tag: args.tag ?? null,
+      label: args.label ?? null,
+    }),
+  boardMetaDelete: (id: number) => invoke<void>("board_meta_delete", { id }),
+  boardMetaTags: () => invoke<string[]>("board_meta_tags"),
+
   // Worktrees
   listWorktrees: (repoId: number) =>
     invoke<WorktreeInfo[]>("list_worktrees", { repoId }),
@@ -305,5 +342,11 @@ export async function pickJsonFile(): Promise<string | null> {
     multiple: false,
     filters: [{ name: "JSON", extensions: ["json"] }],
   });
+  return typeof selected === "string" ? selected : null;
+}
+
+/** Open a native file picker (any file); returns the chosen path or null. */
+export async function pickFile(): Promise<string | null> {
+  const selected = await open({ multiple: false });
   return typeof selected === "string" ? selected : null;
 }

@@ -108,4 +108,9 @@ The CLI shares the desktop app's database. By default:
 | Linux | `$XDG_DATA_HOME/com.codereview.app/codereview.db` |
 | Windows | `%APPDATA%/com.codereview.app/codereview.db` |
 
+A **debug build** (a `cr` built by `cargo build`/`cargo run`, or installed from `pnpm tauri dev`)
+uses `codereview-dev.db` in the same directory instead, so a local dev session never touches your
+real data. Only a release build (`pnpm tauri build`, or the bundled installers) uses
+`codereview.db`.
+
 Override with `--db <path>` or the `CODEREVIEW_DB` environment variable.

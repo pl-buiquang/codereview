@@ -34,6 +34,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("migrations/0015_avatar_cache.sql"),
     include_str!("migrations/0016_focus.sql"),
     include_str!("migrations/0017_comment_tag.sql"),
+    include_str!("migrations/0018_board.sql"),
 ];
 
 pub fn open(path: &Path) -> AppResult<Connection> {
@@ -100,7 +101,7 @@ mod tests {
             .unwrap()
             .collect::<rusqlite::Result<_>>()
             .unwrap();
-        for expected in ["comment", "repository", "review", "target"] {
+        for expected in ["comment", "repository", "review", "target", "board_card", "board_link", "board_meta"] {
             assert!(tables.contains(&expected.to_string()), "missing {expected}");
         }
     }

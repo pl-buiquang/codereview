@@ -26,6 +26,10 @@ export const INBOX_POLL_OPTIONS: { label: string; value: number }[] = [
   { label: "30m", value: 1_800_000 },
 ];
 
+/** Board auto-refresh choices — same cadence as the inbox (also a live
+ *  GitHub fan-out: tracked cards + review threads). */
+export const BOARD_POLL_OPTIONS = INBOX_POLL_OPTIONS;
+
 type PersistedSettings = Pick<
   SettingsState,
   | "direction"
@@ -38,6 +42,7 @@ type PersistedSettings = Pick<
   | "repoBasePaths"
   | "prListPollMs"
   | "inboxPollMs"
+  | "boardPollMs"
   | "chatModel"
   | "markEdits"
   | "fileTestPatterns"
@@ -55,6 +60,7 @@ const DEFAULTS: PersistedSettings = {
   repoBasePaths: "~/projects",
   prListPollMs: 0,
   inboxPollMs: 0,
+  boardPollMs: 0,
   chatModel: "",
   markEdits: false,
   fileTestPatterns: DEFAULT_TEST_PATTERNS,
@@ -81,6 +87,8 @@ interface SettingsState {
   prListPollMs: number;
   /** Inbox auto-refresh interval in ms; 0 = off. */
   inboxPollMs: number;
+  /** Board auto-refresh interval in ms; 0 = off. */
+  boardPollMs: number;
   /** Highlight intra-line character-level changes (markEdits). */
   markEdits: boolean;
   /** Model passed to `claude -p --model`. Empty = use env default (opus). */
@@ -99,6 +107,7 @@ interface SettingsState {
   setRepoBasePaths: (s: string) => void;
   setPrListPollMs: (ms: number) => void;
   setInboxPollMs: (ms: number) => void;
+  setBoardPollMs: (ms: number) => void;
   setChatModel: (s: string) => void;
   setMarkEdits: (b: boolean) => void;
   setFileTestPatterns: (s: string) => void;
@@ -119,6 +128,7 @@ export const useSettingsStore = create<SettingsState>()(
       setRepoBasePaths: (repoBasePaths) => set({ repoBasePaths }),
       setPrListPollMs: (prListPollMs) => set({ prListPollMs }),
       setInboxPollMs: (inboxPollMs) => set({ inboxPollMs }),
+      setBoardPollMs: (boardPollMs) => set({ boardPollMs }),
       setChatModel: (chatModel) => set({ chatModel }),
       setMarkEdits: (markEdits) => set({ markEdits }),
       setFileTestPatterns: (fileTestPatterns) => set({ fileTestPatterns }),
@@ -126,7 +136,7 @@ export const useSettingsStore = create<SettingsState>()(
     }),
     {
       name: "codereview-settings",
-      version: 6,
+      version: 7,
       partialize: (s) => pickPersisted(s),
       // v0 (flat: `theme`) and v1 (`themeMode` + theme slots) collapse the same
       // way: direction resets to "a", the old mode maps over (custom themes,
@@ -145,6 +155,7 @@ export const useSettingsStore = create<SettingsState>()(
           repoBasePaths: (p.repoBasePaths as string) ?? "~/projects",
           prListPollMs: (p.prListPollMs as number) ?? 0,
           inboxPollMs: (p.inboxPollMs as number) ?? 0,
+          boardPollMs: (p.boardPollMs as number) ?? 0,
           chatModel: (p.chatModel as string) ?? "",
           markEdits: (p.markEdits as boolean) ?? false,
           fileTestPatterns: (p.fileTestPatterns as string) ?? DEFAULT_TEST_PATTERNS,

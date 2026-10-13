@@ -33,6 +33,8 @@ export function InboxItemRow({
   onRetrack,
   onOpenReview,
   onOpenExisting,
+  boardTracked,
+  onBoardTrack,
 }: {
   item: InboxItem;
   variant: RowVariant;
@@ -44,6 +46,11 @@ export function InboxItemRow({
   onRetrack: () => void;
   onOpenReview: () => void;
   onOpenExisting?: () => void;
+  /** Whether this item already has a card on the kanban board. */
+  boardTracked?: boolean;
+  /** Shown as a "Track" button when the item isn't on the board yet.
+   *  Omitted entirely for the viewer's own PRs, which are tracked automatically. */
+  onBoardTrack?: () => void;
 }) {
   const topFiles = parseTopFiles(item.top_files_json);
 
@@ -171,6 +178,16 @@ export function InboxItemRow({
           {variant === "archive" && (
             <button className="btn btn-sm" disabled={busy} onClick={onRetrack} title="Move back to the inbox">
               Unarchive
+            </button>
+          )}
+          {!boardTracked && onBoardTrack && (
+            <button
+              className="btn btn-sm btn-ghost"
+              disabled={busy}
+              onClick={onBoardTrack}
+              title="Send to the kanban board"
+            >
+              Track
             </button>
           )}
         </div>

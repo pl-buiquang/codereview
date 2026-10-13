@@ -397,3 +397,57 @@ export interface FocusView {
   hunks: FocusEntry[];
   file_overrides: { file_path: string; override: FocusOverride }[];
 }
+
+// Kanban board (work tracker)
+
+export type BoardLane = "backlog" | "in_progress" | "submitted" | "reviews" | "done";
+
+export type BoardMetaKind = "file" | "link" | "note" | "claude_session";
+
+export interface BoardMeta {
+  id: number;
+  card_id: string;
+  kind: BoardMetaKind;
+  value: string;
+  tag: string | null;
+  label: string | null;
+  cwd: string | null;
+  created_at: string;
+}
+
+/** One board card (an issue or PR). Mirrors the backend `board_card` row. */
+export interface BoardCard {
+  id: string;
+  type: "pr" | "issue";
+  repo: string; // "owner/name"
+  number: number;
+  url: string;
+  title: string;
+  author_login: string | null;
+  state: string | null;
+  is_draft: boolean;
+  review_decision: string | null;
+  has_reviews: boolean;
+  head_ref: string | null;
+  is_mine: boolean;
+  pending_threads: number | null;
+  updated_at: string;
+  closed_at: string | null;
+  tracked_at: string;
+  discarded_at: string | null;
+  archived_at: string | null;
+  last_refreshed: string | null;
+  // Computed/enriched by board_list, flattened alongside the row above.
+  lane: BoardLane | null;
+  meta: BoardMeta[];
+  inherited_meta: BoardMeta[];
+  linked_issue_ids: string[];
+  linked_pr_ids: string[];
+  existing_review_id: number | null;
+}
+
+export interface BoardRefreshResult {
+  cardCount: number;
+  autoTracked: number;
+  durationMs: number;
+}

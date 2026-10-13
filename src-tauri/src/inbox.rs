@@ -312,7 +312,7 @@ pub struct EnrichTarget {
 /// Run `f` over `items` with at most `limit` workers, preserving input order.
 /// Each `gh` call is an independent subprocess, so OS threads are the natural fit
 /// (and avoid pulling in an async runtime — see CLAUDE.md).
-fn concurrent_map<T, R, F>(items: Vec<T>, limit: usize, f: F) -> Vec<R>
+pub(crate) fn concurrent_map<T, R, F>(items: Vec<T>, limit: usize, f: F) -> Vec<R>
 where
     T: Send + Sync,
     R: Send,

@@ -4398,3 +4398,173 @@ input[type="range"] {
   justify-content: flex-end;
   gap: 4px;
 }
+
+/* Kanban board */
+.board-lanes {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  gap: 12px;
+  padding: 16px 24px;
+  overflow-x: auto;
+}
+.board-lane {
+  flex: 1 0 220px;
+  min-width: 220px;
+  max-width: 320px;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-l);
+  padding: 10px;
+  min-height: 0;
+}
+.board-lane-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px 8px;
+  flex: none;
+}
+.board-lane-title {
+  font-weight: 700;
+  font-size: 12.5px;
+}
+.board-lane-add {
+  display: flex;
+  gap: 6px;
+  padding: 0 2px 8px;
+  flex: none;
+}
+.board-lane-add .input {
+  flex: 1;
+  min-width: 0;
+}
+.board-lane-cards {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+}
+
+.board-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 11px;
+}
+.board-card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+.board-card-chevron {
+  flex: none;
+  margin-top: 2px;
+}
+.board-card-title-group {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.board-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 11px;
+}
+.board-card-title {
+  font-size: 12.5px;
+  font-weight: 500;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.board-card-when {
+  flex: none;
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+.board-card-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.board-card-expand {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+.board-link-form {
+  display: flex;
+  gap: 6px;
+}
+.board-link-form .input {
+  flex: 1;
+  min-width: 0;
+}
+.board-links {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.board-meta-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.board-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--text-2);
+}
+.board-meta-value {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background: none;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+  height: auto;
+  color: var(--text-2);
+}
+.board-meta-link:hover {
+  color: var(--accent);
+  text-decoration: underline;
+  background: none;
+}
+.board-meta-add {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.board-meta-add-value {
+  display: flex;
+  gap: 6px;
+}
+.board-meta-add-value .input {
+  flex: 1;
+  min-width: 0;
+}
+.board-meta-add-actions {
+  display: flex;
+  gap: 6px;
+}
+.board-meta-add-toggle {
+  align-self: flex-start;
+}

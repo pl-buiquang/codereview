@@ -3,10 +3,12 @@ use std::sync::Mutex;
 
 use clap::{Parser, Subcommand};
 
-use codereview_lib::commands::{export, focus, inbox, repo, review};
+use codereview_lib::board;
+use codereview_lib::commands::{board as board_cmd, export, focus, inbox, repo, review};
 use codereview_lib::db::{self, Db};
 use codereview_lib::db_path::resolve_db_path;
-use codereview_lib::error::AppResult;
+use codereview_lib::error::{AppError, AppResult};
+use codereview_lib::gh::{self, GhRepo};
 use codereview_lib::provider::provider_for;
 use codereview_lib::tools;
 
@@ -105,6 +107,87 @@ enum Cmd {
         name: String,
         number: i64,
     },
+    /// Kanban board operations
+    Board {
+        #[command(subcommand)]
+        action: BoardAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum BoardAction {
+    /// List board cards, grouped by lane
+    List {
+        /// Filter to one lane: backlog, in_progress, submitted, reviews, done
+        #[arg(long)]
+        lane: Option<String>,
+    },
+    /// Show one card
+    Show {
+        /// GitHub URL or owner/repo#n
+        reference: Option<String>,
+        /// Resolve the card from the current repo + branch instead
+        #[arg(long)]
+        here: bool,
+    },
+    /// Track an issue or PR on the board
+    Track {
+        /// GitHub URL or owner/repo#n
+        reference: String,
+    },
+    /// Refresh the board from GitHub
+    Refresh,
+    /// Manually link a PR to a backlog issue card
+    Link {
+        /// The backlog issue's card id (see `cr board list --json`)
+        issue_id: String,
+        /// The PR to link: GitHub URL or owner/repo#n
+        pr_reference: String,
+    },
+    /// Card metadata (plan/spec files, links, notes, Claude sessions)
+    Meta {
+        #[command(subcommand)]
+        action: BoardMetaAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum BoardMetaAction {
+    /// Attach a metadata item to a card
+    Add {
+        /// GitHub URL or owner/repo#n
+        reference: Option<String>,
+        /// Resolve the card from the current repo + branch instead
+        #[arg(long)]
+        here: bool,
+        /// file, link, note, or claude_session
+        #[arg(long)]
+        kind: String,
+        /// Path (file/link kinds), URL, note text, or Claude session id
+        #[arg(long)]
+        value: String,
+        /// Freeform tag (e.g. "plan", "spec")
+        #[arg(long)]
+        tag: Option<String>,
+        #[arg(long)]
+        label: Option<String>,
+        /// Working directory the session was started from (claude_session only)
+        #[arg(long)]
+        cwd: Option<String>,
+        /// Track the card first if it isn't already tracked
+        #[arg(long)]
+        track: bool,
+    },
+    /// List a card's metadata
+    List {
+        /// GitHub URL or owner/repo#n
+        reference: Option<String>,
+        /// Resolve the card from the current repo + branch instead
+        #[arg(long)]
+        here: bool,
+    },
+    /// Delete a metadata item by id
+    Rm { id: i64 },
 }
 
 #[derive(Subcommand)]
@@ -328,6 +411,47 @@ fn parse_github_pr_url(url: &str) -> Option<(String, String, i64)> {
         Some((parts[0].to_string(), parts[1].to_string(), number))
     } else {
         None
+    }
+}
+
+/// Resolve the current repo + branch to a `owner/name#number` reference: the
+/// branch's open PR if it has one, else an `issue-<n>`-named branch's issue.
+fn resolve_here() -> AppResult<String> {
+    let cwd = std::env::current_dir().map_err(|e| AppError::Other(format!("cannot read cwd: {e}")))?;
+    let remote = codereview_lib::git::remote_info(&cwd);
+    let (owner, name) = match (remote.owner, remote.name) {
+        (Some(o), Some(n)) => (o, n),
+        _ => return Err(AppError::Other("not inside a repo clone with a GitHub origin remote".into())),
+    };
+
+    let ctx = GhRepo::Local(cwd.clone());
+    if let Ok(out) = gh::run_gh(&ctx, &["pr", "view", "--json", "number"]) {
+        if let Some(number) = serde_json::from_str::<serde_json::Value>(&out)
+            .ok()
+            .and_then(|v| v.get("number").and_then(|n| n.as_i64()))
+        {
+            return Ok(format!("{owner}/{name}#{number}"));
+        }
+    }
+
+    let branch = codereview_lib::git::run_git(&cwd, &["rev-parse", "--abbrev-ref", "HEAD"])
+        .map(|s| s.trim().to_string())
+        .map_err(|e| AppError::Other(format!("cannot read current branch: {e}")))?;
+    if let Some(number) = board::issue_number_from_branch(&branch) {
+        return Ok(format!("{owner}/{name}#{number}"));
+    }
+
+    Err(AppError::Other(format!(
+        "branch '{branch}' has no open PR and doesn't follow the issue-<n> naming convention"
+    )))
+}
+
+fn resolve_reference(reference: Option<String>, here: bool) -> AppResult<String> {
+    match (reference, here) {
+        (Some(r), false) => Ok(r),
+        (None, true) => resolve_here(),
+        (Some(_), true) => Err(AppError::Other("pass either a reference or --here, not both".into())),
+        (None, false) => Err(AppError::Other("pass a reference (URL or owner/repo#n) or --here".into())),
     }
 }
 
@@ -887,6 +1011,156 @@ fn run(cmd: Cmd, json: bool, db: &Db) -> AppResult<()> {
                     }
                     println!();
                 }
+            }
+        }
+
+        Cmd::Board { action } => run_board(action, json, db)?,
+    }
+    Ok(())
+}
+
+fn run_board(action: BoardAction, json: bool, db: &Db) -> AppResult<()> {
+    match action {
+        BoardAction::List { lane } => {
+            let conn = db.0.lock().unwrap();
+            let mut cards = board_cmd::board_list_impl(&conn)?;
+            if let Some(lane) = &lane {
+                cards.retain(|c| c.lane.as_deref() == Some(lane.as_str()));
+            }
+            if json {
+                println!("{}", serde_json::to_string_pretty(&cards)?);
+            } else {
+                if cards.is_empty() {
+                    println!("No cards on the board.");
+                    return Ok(());
+                }
+                println!("{:<10} {:<30} {:<8} {:<40}", "LANE", "REPO", "NUMBER", "TITLE");
+                for c in &cards {
+                    println!(
+                        "{:<10} {:<30} {:<8} {:<40}",
+                        c.lane.as_deref().unwrap_or("-"),
+                        truncate(&c.card.repo, 28),
+                        c.card.number,
+                        truncate(&c.card.title, 38),
+                    );
+                }
+            }
+        }
+
+        BoardAction::Show { reference, here } => {
+            let reference = resolve_reference(reference, here)?;
+            let (owner, name, number) = board::parse_ref(&reference)?;
+            let conn = db.0.lock().unwrap();
+            let card_id = board_cmd::find_card_id(&conn, &owner, &name, number)?
+                .ok_or_else(|| AppError::Other(format!("{owner}/{name}#{number} isn't tracked on the board")))?;
+            let card = board_cmd::board_show_impl(&conn, &card_id)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&card)?);
+            } else {
+                println!("{} {}#{} — {}", card.card.typ, card.card.repo, card.card.number, card.card.title);
+                println!("Lane:  {}", card.lane.as_deref().unwrap_or("(hidden)"));
+                println!("State: {}", card.card.state.as_deref().unwrap_or("-"));
+                println!("URL:   {}", card.card.url);
+                if !card.meta.is_empty() {
+                    println!("\nMetadata:");
+                    for m in &card.meta {
+                        let tag = m.tag.as_deref().map(|t| format!(" [{t}]")).unwrap_or_default();
+                        println!("  [#{}] {}{tag}: {}", m.id, m.kind, m.value);
+                    }
+                }
+            }
+        }
+
+        BoardAction::Track { reference } => {
+            let card_id = board_cmd::board_track_impl(db, &reference)?;
+            if json {
+                println!("{}", serde_json::json!({ "cardId": card_id }));
+            } else {
+                println!("Tracked {reference} (card {card_id})");
+            }
+        }
+
+        BoardAction::Refresh => {
+            let result = board_cmd::board_refresh_impl(db)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            } else {
+                println!(
+                    "Refreshed board — {} cards, {} newly auto-tracked ({}ms)",
+                    result.card_count, result.auto_tracked, result.duration_ms,
+                );
+            }
+        }
+
+        BoardAction::Link { issue_id, pr_reference } => {
+            board_cmd::board_link_pr_impl(db, &issue_id, &pr_reference)?;
+            if !json {
+                println!("Linked {pr_reference} to card {issue_id}");
+            }
+        }
+
+        BoardAction::Meta { action } => run_board_meta(action, json, db)?,
+    }
+    Ok(())
+}
+
+fn run_board_meta(action: BoardMetaAction, json: bool, db: &Db) -> AppResult<()> {
+    match action {
+        BoardMetaAction::Add {
+            reference,
+            here,
+            kind,
+            value,
+            tag,
+            label,
+            cwd,
+            track,
+        } => {
+            let reference = resolve_reference(reference, here)?;
+            let card_id = board_cmd::resolve_or_track_card_id(db, &reference, track)?;
+            let conn = db.0.lock().unwrap();
+            let m = board_cmd::board_meta_add_impl(
+                &conn,
+                &card_id,
+                &kind,
+                &value,
+                tag.as_deref(),
+                label.as_deref(),
+                cwd.as_deref(),
+            )?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&m)?);
+            } else {
+                println!("Added {} metadata #{} to card {card_id}", m.kind, m.id);
+            }
+        }
+
+        BoardMetaAction::List { reference, here } => {
+            let reference = resolve_reference(reference, here)?;
+            let (owner, name, number) = board::parse_ref(&reference)?;
+            let conn = db.0.lock().unwrap();
+            let card_id = board_cmd::find_card_id(&conn, &owner, &name, number)?
+                .ok_or_else(|| AppError::Other(format!("{owner}/{name}#{number} isn't tracked on the board")))?;
+            let items = board_cmd::board_meta_list_impl(&conn, &card_id)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&items)?);
+            } else {
+                if items.is_empty() {
+                    println!("No metadata on this card.");
+                    return Ok(());
+                }
+                for m in &items {
+                    let tag = m.tag.as_deref().map(|t| format!(" [{t}]")).unwrap_or_default();
+                    println!("[#{}] {}{tag}: {}", m.id, m.kind, m.value);
+                }
+            }
+        }
+
+        BoardMetaAction::Rm { id } => {
+            let conn = db.0.lock().unwrap();
+            board_cmd::board_meta_delete_impl(&conn, id)?;
+            if !json {
+                println!("Deleted metadata #{id}");
             }
         }
     }

@@ -7,6 +7,7 @@ import { Icon, type IconName } from "./icons";
 import { Tooltip } from "./Tooltip";
 
 const NAV: { key: HomeSection; label: string; icon: IconName }[] = [
+  { key: "board", label: "Board", icon: "board" },
   { key: "inbox", label: "Inbox", icon: "inbox" },
   { key: "reviews", label: "Reviews", icon: "review" },
   { key: "archive", label: "Archive", icon: "archive" },

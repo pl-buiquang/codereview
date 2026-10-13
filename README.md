@@ -13,7 +13,11 @@ Built with **Tauri v2** (Rust) + **React/TypeScript**.
 ## Features
 
 - **Local-first** — works against any local git repo; no server.
-- **Home sidebar** — Inbox / Reviews / Archive / Repositories plus your **open repositories**
+- **Board** — a kanban view of your work in flight: issues in **Backlog**, your PRs in **In
+  progress** (draft) / **Submitted** (ready), others' PRs you're reviewing in **Reviews**, and
+  everything merged/closed in **Done**. Lanes are derived from GitHub state — no dragging. Cards
+  can carry plan/spec files, links, notes and Claude Code session pointers.
+- **Home sidebar** — Board / Inbox / Reviews / Archive / Repositories plus your **open repositories**
   (they open inside the Home tab and stay loaded, so switching is instant; ✕ closes one). Fold it
   to icons only, and hover the Home tab icon or the
   window's left edge to pop the menu from anywhere.
@@ -180,6 +184,37 @@ Lower tiers collapse into one-click bars, and a digest lists what was hidden and
   **Adopt** an AI note as a draft comment, or **Copy into summary** to paste the digest.
 - **Scripting** — `cr focus hunks|hunk|set|show|clear <review-id>`. See `cr focus --help`.
 
+### Board
+
+Issues and PRs land on the Board by **tracking** them — from the Inbox's **Track** button, by
+pasting a URL into a lane's **+** header, or via `cr board track <url|owner/repo#n>`. Your own
+open PRs (in registered repos) are tracked automatically. **Discard** removes a card (you can
+always re-track it from the Inbox); your own PRs can't be discarded. Linking a PR to a backlog
+issue (automatically, via "Fixes #n" / a `pbq/issue-<n>`-named branch, or manually by pasting a PR
+URL on the issue's card) moves it to **In progress**/**Submitted**/**Reviews** and hides the
+issue until every linked PR closes. **Done** cards older than a month can be purged with the
+lane's archive button.
+
+Expand a card to see and add **metadata**: a plan or spec file, a link, a note, or a Claude Code
+session (with a one-click "copy resume command"). The same CLI that drives Focus does this:
+
+```bash
+cr board show --here                                    # resolve the card for the current repo+branch
+cr board meta add --here --kind file --value /path/to/plan.md --tag plan
+```
+
+See `skills/board/SKILL.md` for the full agent workflow, and `cr board --help` for every
+subcommand. To have Claude Code auto-link its session to the card it's working on, add this to
+`~/.claude/CLAUDE.md`:
+
+```markdown
+## CodeReview board
+
+At the start of a session in a repo, run `cr board show --here`. If the card is tracked,
+run `cr board meta add --here --kind claude_session --value <this session's id>` so the
+board can show a "resume" link back to this session.
+```
+
 ---
 
 ## Import / Export
@@ -290,14 +325,19 @@ src-tauri/                 # Rust backend
     db/                    # rusqlite connection + migrations + row models
     git.rs                 # git CLI: branches, rev-parse, diff
     gh.rs                  # gh CLI: PR list/view/diff, post review
+    inbox.rs               # GitHub inbox fetch pipeline
+    board.rs               # kanban board fetch pipeline + lane/thread logic
     export.rs              # review model -> Markdown / JSON
-    commands/              # #[tauri::command] handlers (repo, review, gh, export)
+    commands/              # #[tauri::command] handlers (repo, review, gh, export, board)
+    bin/cr.rs              # `cr` CLI, shares the same SQLite db + modules
 src/                       # React frontend
-  components/              # RepoSidebar, RepoView, ReviewView, DiffViewer
+  components/              # RepoSidebar, RepoView, ReviewView, DiffViewer, BoardView
   lib/                     # typed invoke wrappers, diff helpers
   store.ts                 # Zustand UI state
 ```
 
 **Data model** (SQLite): `repository → target (local | github_pr) → review → comment`.
 A `target` is reused across multiple reviews. The database lives in the OS app-data directory
-(e.g. `~/.local/share/com.codereview.app/codereview.db` on Linux).
+(e.g. `~/.local/share/com.codereview.app/codereview.db` on Linux) — `pnpm tauri dev` and other
+debug builds use a sibling `codereview-dev.db` instead, so local development never touches your
+real data.
