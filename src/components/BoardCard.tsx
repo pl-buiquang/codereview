@@ -57,6 +57,18 @@ function MetaRow({
       (e) => toast.error(String(e)),
     );
   };
+  const del = async () => {
+    if (
+      await confirmDialog({
+        title: "Delete metadata",
+        message: `Delete "${meta.label || meta.value}"?`,
+        confirmLabel: "Delete",
+        danger: true,
+      })
+    ) {
+      onDelete();
+    }
+  };
   return (
     <div className="board-meta-row">
       <Icon
@@ -80,7 +92,7 @@ function MetaRow({
         </button>
       )}
       {!inherited && (
-        <button className="btn-icon" title="Delete" onClick={onDelete}>
+        <button className="btn-icon" title="Delete" onClick={del}>
           <Icon name="x" size={12} />
         </button>
       )}
@@ -175,6 +187,7 @@ export function BoardCard({
   reviewBusy,
   vscodeBusy,
   onOpenGh,
+  onOpenRepo,
   onDiscard,
   onLinkPr,
   onUnlink,
@@ -189,6 +202,7 @@ export function BoardCard({
   reviewBusy: boolean;
   vscodeBusy: boolean;
   onOpenGh: () => void;
+  onOpenRepo: () => void;
   onDiscard: (() => void) | null;
   onLinkPr: ((prReference: string) => void) | null;
   onUnlink: ((prId: string) => void) | null;
@@ -227,64 +241,75 @@ export function BoardCard({
 
   return (
     <div className="card board-card">
-      <div className="board-card-head">
-        <button className="btn-icon board-card-chevron" onClick={() => setExpanded((v) => !v)}>
-          <Icon name="chev" size={12} />
-        </button>
-        <div className="board-card-title-group">
-          <div className="board-card-meta">
-            <RepoName className="mono faint" name={card.repo} />
-            <span className="mono faint">#{card.number}</span>
-            <StatusBadge card={card} />
-            {card.pending_threads != null && card.pending_threads > 0 && (
-              <span className="chip" title="Unresolved threads waiting on you">
-                <Icon name="comment" size={11} /> {card.pending_threads}
-              </span>
-            )}
-            {attachmentCount > 0 && (
-              <span className="chip" title={`${attachmentCount} attachment(s)`}>
-                <Icon name="file" size={11} /> {attachmentCount}
-              </span>
-            )}
-          </div>
-          <span className="board-card-title" title={card.title}>
-            {card.title}
+      <div className="board-card-body">
+        <span className="board-card-title" title={card.title}>
+          {card.title}
+        </span>
+        <div className="board-card-meta">
+          <button className="board-card-link board-card-repo" onClick={onOpenRepo} title="Open repository">
+            <RepoName name={card.repo} />
+          </button>
+          <button className="board-card-link board-card-number" onClick={onOpenGh} title="Open on GitHub">
+            #{card.number}
+          </button>
+          <StatusBadge card={card} />
+          <span className="cr-spacer" />
+          <span className="board-card-when faint" title={card.updated_at}>
+            {timeAgo(card.updated_at)}
           </span>
         </div>
-        <span className="board-card-when faint" title={card.updated_at}>
-          {timeAgo(card.updated_at)}
-        </span>
       </div>
 
-      <div className="board-card-actions">
-        {onOpenReview && (
-          <button className="btn btn-sm btn-primary" disabled={busy || reviewBusy} onClick={onOpenReview}>
-            {card.existing_review_id != null ? "Resume review" : "Create review"}
-          </button>
-        )}
-        {onOpenVscode && (
-          <button className="btn btn-sm" disabled={busy || vscodeBusy} onClick={onOpenVscode} title="Open in VSCode">
-            VSCode
-          </button>
-        )}
-        <button className="btn btn-sm btn-ghost" disabled={busy} onClick={onOpenGh}>
-          GitHub
-        </button>
-        {card.type === "issue" && (
-          <button
-            className="btn btn-sm btn-ghost"
-            disabled={busy}
-            onClick={() => setExpanded(true)}
-            title="Link a PR"
-          >
-            Link PR
-          </button>
-        )}
-        {onDiscard && (
-          <button className="btn btn-sm btn-ghost" disabled={busy} onClick={discard}>
-            Discard
-          </button>
-        )}
+      <div className="board-card-footer">
+        <div className="board-card-chips">
+          {card.pending_threads != null && card.pending_threads > 0 && (
+            <span className="chip" title="Unresolved threads waiting on you">
+              <Icon name="comment" size={11} /> {card.pending_threads}
+            </span>
+          )}
+          {attachmentCount > 0 && (
+            <span className="chip" title={`${attachmentCount} attachment(s)`}>
+              <Icon name="file" size={11} /> {attachmentCount}
+            </span>
+          )}
+        </div>
+        <div className="board-card-actions">
+          {onOpenReview && (
+            <button
+              className="btn-icon board-card-action board-card-action-primary"
+              disabled={busy || reviewBusy}
+              onClick={onOpenReview}
+              title={card.existing_review_id != null ? "Resume review" : "Create review"}
+            >
+              <Icon name="review" size={13} />
+            </button>
+          )}
+          {onOpenVscode && (
+            <button
+              className="btn-icon board-card-action"
+              disabled={busy || vscodeBusy}
+              onClick={onOpenVscode}
+              title="Open in VSCode"
+            >
+              <Icon name="code" size={13} />
+            </button>
+          )}
+          {card.type === "issue" && (
+            <button
+              className="btn-icon board-card-action"
+              disabled={busy}
+              onClick={() => setExpanded(true)}
+              title="Link a PR"
+            >
+              <Icon name="link" size={13} />
+            </button>
+          )}
+          {onDiscard && (
+            <button className="btn-icon board-card-action-danger" disabled={busy} onClick={discard} title="Discard">
+              <Icon name="trash" size={13} />
+            </button>
+          )}
+        </div>
       </div>
 
       {expanded && (
@@ -329,12 +354,20 @@ export function BoardCard({
           {adding ? (
             <AddMetaForm tags={tags} onAdd={onAddMeta} onClose={() => setAdding(false)} />
           ) : (
-            <button className="btn btn-sm btn-ghost board-meta-add-toggle" onClick={() => setAdding(true)}>
-              <Icon name="plus" size={11} /> Add metadata
+            <button className="btn-icon board-card-action" title="Add metadata" onClick={() => setAdding(true)}>
+              <Icon name="plus" size={13} />
             </button>
           )}
         </div>
       )}
+
+      <button
+        className="board-card-expand-toggle"
+        onClick={() => setExpanded((v) => !v)}
+        title={expanded ? "Collapse" : "Expand"}
+      >
+        <Icon name="chev" size={11} className={expanded ? "board-card-chev-open" : undefined} />
+      </button>
     </div>
   );
 }

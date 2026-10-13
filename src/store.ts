@@ -25,6 +25,8 @@ interface UIState {
   /** Repos opened in the home tab, listed in the sidebar and kept mounted. */
   openRepoIds: number[];
   sidebarCollapsed: boolean;
+  /** Board lanes collapsed to a slim column, by lane key. */
+  collapsedLanes: string[];
   openRepo: (repoId: number) => void;
   openSettingsTab: () => void;
   openReview: (reviewId: number, repoId?: number) => void;
@@ -36,12 +38,19 @@ interface UIState {
   closeRepo: (repoId: number) => void;
   forgetRepo: (repoId: number) => void;
   toggleSidebar: () => void;
+  toggleLane: (lane: string) => void;
   moveTab: (fromId: string, toId: string) => void;
 }
 
 type Persisted = Pick<
   UIState,
-  "tabs" | "activeTabId" | "homeSection" | "homeRepoId" | "openRepoIds" | "sidebarCollapsed"
+  | "tabs"
+  | "activeTabId"
+  | "homeSection"
+  | "homeRepoId"
+  | "openRepoIds"
+  | "sidebarCollapsed"
+  | "collapsedLanes"
 >;
 
 function upsertTab(tabs: Tab[], tab: Tab): Tab[] {
@@ -57,6 +66,7 @@ export const useUIStore = create<UIState>()(
       homeRepoId: null,
       openRepoIds: [],
       sidebarCollapsed: false,
+      collapsedLanes: [],
 
       openRepo: (repoId) =>
         set((s) => ({
@@ -122,6 +132,13 @@ export const useUIStore = create<UIState>()(
 
       toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
 
+      toggleLane: (lane) =>
+        set((s) => ({
+          collapsedLanes: s.collapsedLanes.includes(lane)
+            ? s.collapsedLanes.filter((l) => l !== lane)
+            : [...s.collapsedLanes, lane],
+        })),
+
       // Reorder by dropping `fromId` onto `toId`. The home tab is pinned first:
       // it never moves and nothing can be dropped onto or before it.
       moveTab: (fromId, toId) =>
@@ -150,6 +167,7 @@ export const useUIStore = create<UIState>()(
         homeRepoId: s.homeRepoId,
         openRepoIds: s.openRepoIds,
         sidebarCollapsed: s.sidebarCollapsed,
+        collapsedLanes: s.collapsedLanes,
       }),
       migrate: (persisted, version) => migratePersisted(persisted, version),
       merge: (persisted, current) => {

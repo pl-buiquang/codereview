@@ -34,6 +34,9 @@ function invalidateBoard(queryClient: ReturnType<typeof useQueryClient>) {
 export function BoardView() {
   const queryClient = useQueryClient();
   const openReviewTab = useUIStore((s) => s.openReview);
+  const openRepo = useUIStore((s) => s.openRepo);
+  const collapsedLanes = useUIStore((s) => s.collapsedLanes);
+  const toggleLane = useUIStore((s) => s.toggleLane);
   const repoBasePaths = useSettingsStore((s) => s.repoBasePaths);
   const boardPollMs = useSettingsStore((s) => s.boardPollMs);
   const setBoardPollMs = useSettingsStore((s) => s.setBoardPollMs);
@@ -44,6 +47,18 @@ export function BoardView() {
 
   const boardQuery = useQuery({ queryKey: ["board"], queryFn: api.boardList });
   const tagsQuery = useQuery({ queryKey: ["board-meta-tags"], queryFn: api.boardMetaTags });
+  const repositoriesQuery = useQuery({ queryKey: ["repositories"], queryFn: api.listRepositories });
+
+  const openCardRepo = (repo: string) => {
+    const match = repositoriesQuery.data?.find(
+      (r) => r.remote_owner && r.remote_name && `${r.remote_owner}/${r.remote_name}`.toLowerCase() === repo.toLowerCase(),
+    );
+    if (match) openRepo(match.id);
+    else {
+      api.openUrl(`https://github.com/${repo}`).catch(onErr);
+      toast.success("Repository not added locally — opened on GitHub instead");
+    }
+  };
 
   const invalidate = () => invalidateBoard(queryClient);
   const onErr = (e: unknown) => toast.error(String(e));
@@ -234,9 +249,28 @@ export function BoardView() {
           {LANES.map((lane) => {
             const cards = byLane.get(lane.key) ?? [];
             const canAdd = lane.key === "backlog" || lane.key === "reviews";
+            const collapsed = collapsedLanes.includes(lane.key);
+
+            if (collapsed) {
+              return (
+                <button
+                  className="board-lane board-lane-collapsed"
+                  key={lane.key}
+                  onClick={() => toggleLane(lane.key)}
+                  title={`Expand ${lane.label}`}
+                >
+                  <span className="board-lane-collapsed-title">{lane.label}</span>
+                  <span className="n">{cards.length}</span>
+                </button>
+              );
+            }
+
             return (
               <div className="board-lane" key={lane.key}>
                 <div className="board-lane-head">
+                  <button className="btn-icon" title={`Collapse ${lane.label}`} onClick={() => toggleLane(lane.key)}>
+                    <Icon name="chev" size={12} className="board-lane-collapse-chev" />
+                  </button>
                   <span className="board-lane-title">{lane.label}</span>
                   <span className="n">{cards.length}</span>
                   <div className="cr-spacer" />
@@ -277,6 +311,7 @@ export function BoardView() {
                       reviewBusy={openReview.isPending}
                       vscodeBusy={openVscode.isPending}
                       onOpenGh={() => api.openUrl(card.url).catch(onErr)}
+                      onOpenRepo={() => openCardRepo(card.repo)}
                       onDiscard={card.is_mine ? null : () => discard.mutate(card.id)}
                       onLinkPr={card.type === "issue" ? (reference) => linkPr.mutate({ issueId: card.id, reference }) : null}
                       onUnlink={card.type === "issue" ? (prId) => unlink.mutate({ issueId: card.id, prId }) : null}
