@@ -1,6 +1,6 @@
 # Spec 10 — Focus review
 
-Status: **spec / research** — nothing implemented yet.
+Status: **implemented** (2026-10). Follow-ups in §12.
 
 ## 1. Context & goals
 
@@ -247,7 +247,12 @@ Validation:
   - model resolution as in chat.
 - System prompt = `include_str!("../../../skills/focus-review/SKILL.md")` + a preamble: "App mode. Review id
   = N. Do not create or open reviews. Requested level = L."
-- Allowed tools: `Bash(cr focus *) Bash(cr diff *) Bash(cr show *) Read Glob Grep`.
+- Allowed tools: `Bash(cr focus:*) Bash(cr diff:*) Bash(cr show:*) Read Glob Grep`, plus
+  `Edit(/<scratch>/**)` for one per-run scratch dir under the system temp dir. The plan is written
+  there and submitted with `cr focus set --file`, because Claude Code refuses Bash commands that
+  carry inline JSON (braces mixed with quotes). Flags like `--json` must come after the subcommand
+  so that commands match the `cr focus` prefix rules.
+- The child gets `CODEREVIEW_DB` (the app's DB path), and the bundled `cr` sidecar is prepended to `PATH`.
 - Working directory: the linked clone (also passed as `--add-dir`, read-only use) if there is one, else
   a temp dir. **No worktree** is needed.
 - Runs in `tauri::async_runtime::spawn_blocking`, so the DB lock is not held during the run. On exit it

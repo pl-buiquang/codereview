@@ -175,6 +175,9 @@ Lower tiers collapse into one-click bars, and a digest lists what was hidden and
   ```
   then run `/focus-review <pr-url | owner/repo#N | branch <head> | review-id>`. Re-copy after
   updating the repo: the app embeds its own copy of the prompt at build time.
+- **In the app** — **Generate focus** in the review header (needs the `claude` CLI). Pick a level
+  and a model; the run happens in the background. Then switch levels, hide or show hunks and files,
+  **Adopt** an AI note as a draft comment, or **Copy into summary** to paste the digest.
 - **Scripting** — `cr focus hunks|hunk|set|show|clear <review-id>`. See `cr focus --help`.
 
 ---
