@@ -7,7 +7,7 @@ import { confirmDialog } from "../lib/confirm";
 import { Icon } from "./icons";
 import { Markdown } from "./Markdown";
 
-const MODEL_OPTIONS: { value: string; label: string }[] = [
+export const MODEL_OPTIONS: { value: string; label: string }[] = [
   { value: "", label: "Default" },
   { value: "sonnet", label: "Sonnet" },
   { value: "opus", label: "Opus" },

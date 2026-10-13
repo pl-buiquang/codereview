@@ -76,6 +76,8 @@ export const api = {
   dismissFocusNote: (reviewId: number, hunkId: string) =>
     invoke<void>("dismiss_focus_note", { reviewId, hunkId }),
   clearFocus: (reviewId: number) => invoke<void>("clear_focus", { reviewId }),
+  generateFocus: (reviewId: number, level: FocusLevel, model?: string) =>
+    invoke<void>("generate_focus", { reviewId, level, model: model || null }),
 
   // Chat
   crInstallNote: () => invoke<string | null>("cr_install_note"),

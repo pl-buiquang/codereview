@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient, type UseMutationResult } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { toast } from "../lib/toast";
 import { confirmDialog } from "../lib/confirm";
@@ -12,7 +12,112 @@ import {
   type HunkFocus,
 } from "../lib/focus";
 import type { FocusLevel, FocusOverride, FocusView } from "../lib/types";
+import { useSettingsStore } from "../lib/settings";
 import { Markdown } from "./Markdown";
+import { MODEL_OPTIONS } from "./ChatPanel";
+
+export type GenerateFocus = UseMutationResult<
+  void,
+  Error,
+  { level: FocusLevel; model?: string }
+>;
+
+/** Starts a background run; completion arrives as a `focus-updated` event. */
+export function useGenerateFocus(reviewId: number): GenerateFocus {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ level, model }) => api.generateFocus(reviewId, level, model),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["focus", reviewId] }),
+    onError: (e) => toast.error(`Could not start focus generation:\n${String(e)}`),
+  });
+}
+
+export function FocusGenerate({
+  view,
+  claudeAvailable,
+  generate,
+}: {
+  view: FocusView | null;
+  claudeAvailable: boolean;
+  generate: GenerateFocus;
+}) {
+  const chatModel = useSettingsStore((s) => s.chatModel);
+  const [open, setOpen] = useState(false);
+  const [level, setLevel] = useState<FocusLevel>(
+    view && view.focus.level !== "off" ? view.focus.level : "focus",
+  );
+  const [model, setModel] = useState(chatModel);
+  if (view?.focus.status === "generating" || generate.isPending) {
+    return (
+      <span className="focus-status">
+        <span className="spinner" /> Generating focus…
+      </span>
+    );
+  }
+  const label = view?.focus.planned_at ? "Regenerate focus" : "Generate focus";
+  return (
+    <span className="focus-generate">
+      <button
+        className="btn"
+        disabled={!claudeAvailable}
+        title={
+          claudeAvailable
+            ? "Tier every hunk with AI and hide the noise"
+            : "Install the `claude` CLI to generate a focus here (the /focus-review skill also works from the terminal)"
+        }
+        onClick={() => setOpen((o) => !o)}
+      >
+        <span className="ai-pill">AI</span> {label}
+      </button>
+      {open && (
+        <div className="focus-generate-pop" role="dialog" aria-label={label}>
+          <label>
+            Level
+            <select
+              className="focus-level-select"
+              value={level}
+              onChange={(e) => setLevel(e.target.value as FocusLevel)}
+            >
+              {FOCUS_LEVELS.filter((l) => l.value !== "off").map((l) => (
+                <option key={l.value} value={l.value} title={l.title}>
+                  {l.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Model
+            <select
+              className="focus-level-select"
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+            >
+              {MODEL_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <span className="focus-generate-actions">
+            <button className="btn btn-sm btn-ghost" onClick={() => setOpen(false)}>
+              Cancel
+            </button>
+            <button
+              className="btn btn-sm btn-primary"
+              onClick={() => {
+                setOpen(false);
+                generate.mutate({ level, model: model || undefined });
+              }}
+            >
+              Generate
+            </button>
+          </span>
+        </div>
+      )}
+    </span>
+  );
+}
 
 export interface FocusActions {
   setLevel: (level: FocusLevel) => void;

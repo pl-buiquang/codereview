@@ -1,6 +1,7 @@
 import { memo, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { listen } from "@tauri-apps/api/event";
+import { queryClient } from "./lib/queryClient";
 import { TabBar } from "./components/TabBar";
 import { DashboardPanel } from "./components/DashboardPanel";
 import { HomeFlyout } from "./components/HomeFlyout";
@@ -19,6 +20,7 @@ import { useDeepLinkListener } from "./lib/deepLink";
 import { useUIStore, type Tab } from "./store";
 
 const CLOSE_ACTIVE_TAB_EVENT = "close-active-tab";
+const FOCUS_UPDATED_EVENT = "focus-updated";
 
 function closeActiveTab() {
   const { activeTabId, closeTab } = useUIStore.getState();
@@ -47,6 +49,25 @@ function App() {
   const openRepoIds = useUIStore((s) => s.openRepoIds);
   const homeRepoId = useUIStore((s) => s.homeRepoId);
   const forgetRepo = useUIStore((s) => s.forgetRepo);
+
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    listen<{ review_id: number }>(FOCUS_UPDATED_EVENT, ({ payload }) => {
+      queryClient.invalidateQueries({ queryKey: ["focus", payload.review_id] });
+      queryClient.invalidateQueries({ queryKey: ["review", payload.review_id] });
+    })
+      .then((dispose) => {
+        if (disposed) dispose();
+        else unlisten = dispose;
+      })
+      .catch((e) => console.warn("Could not register focus listener", e));
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
 
   useEffect(() => {
     if (isTauriRuntime()) {

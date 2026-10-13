@@ -42,11 +42,14 @@ import { filterDiffMatches, wrapIndex, type DiffMatch } from "../lib/diffSearch"
 import { FileJumpList } from "./FileJumpList";
 import {
   FocusDigest,
+  FocusGenerate,
   FocusHiddenBar,
   FocusHunkMeta,
   FocusLevelSelect,
   useFocusActions,
+  useGenerateFocus,
   type FocusActions,
+  type GenerateFocus,
 } from "./Focus";
 import {
   buildFocusModel,
@@ -144,6 +147,8 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
     null,
   );
   const focusActions = useFocusActions(reviewId);
+  const generateFocus = useGenerateFocus(reviewId);
+  const chatModel = useSettingsStore((s) => s.chatModel);
 
   const detailQuery = useQuery({
     queryKey: ["review", reviewId],
@@ -510,6 +515,7 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
         setViewType={setViewType}
         focusView={focusView}
         focusActions={focusActions}
+        generateFocus={generateFocus}
         summaryAppend={summaryAppend}
         onSaving={() => setSaveState("saving")}
         onSaved={() => {
@@ -570,6 +576,15 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
                 onReveal={reveal}
                 onJump={jumpToFile}
                 onCopyToSummary={(text) => setSummaryAppend({ text, nonce: Date.now() })}
+                onRegenerate={
+                  focusView.focus.status === "generating"
+                    ? undefined
+                    : () =>
+                        generateFocus.mutate({
+                          level: focusView.focus.level === "off" ? "focus" : focusView.focus.level,
+                          model: chatModel || undefined,
+                        })
+                }
               />
             )}
           {diffQuery.isLoading && <p className="muted">Loading diff…</p>}
@@ -744,6 +759,7 @@ function ReviewHeader({
   setViewType,
   focusView,
   focusActions,
+  generateFocus,
   summaryAppend,
   onSaving,
   onSaved,
@@ -755,6 +771,7 @@ function ReviewHeader({
   setViewType: (v: ViewType) => void;
   focusView: FocusView | null;
   focusActions: FocusActions;
+  generateFocus: GenerateFocus;
   summaryAppend: { text: string; nonce: number } | null;
   onSaving: () => void;
   onSaved: () => void;
@@ -768,6 +785,12 @@ function ReviewHeader({
   bodyRef.current = body;
   const [showExport, setShowExport] = useState(false);
   const [collapsed, setCollapsed] = useState(true);
+  const envQuery = useQuery({
+    queryKey: ["environment"],
+    queryFn: api.checkEnvironment,
+    staleTime: Infinity,
+  });
+  const claudeAvailable = envQuery.data ? envQuery.data.claude != null : true;
 
   const save = useDebouncedCallback((nextBody: string) => {
     onSaving();
@@ -963,6 +986,12 @@ function ReviewHeader({
         {focusView?.focus.planned_at != null && (
           <FocusLevelSelect level={focusView.focus.level} onChange={focusActions.setLevel} />
         )}
+        <FocusGenerate
+          key={focusView?.focus.planned_at ?? "none"}
+          view={focusView}
+          claudeAvailable={claudeAvailable}
+          generate={generateFocus}
+        />
         {anchorsStale && (
           <span className="head-moved">
             <span

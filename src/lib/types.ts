@@ -125,6 +125,7 @@ export interface ToolEnv {
   git: string | null;
   gh: string | null;
   gh_authed: boolean;
+  claude: string | null;
 }
 
 // --- GitHub PR metadata (review header; read-only, ephemeral) ---

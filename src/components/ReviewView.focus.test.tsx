@@ -151,6 +151,10 @@ beforeEach(() => {
   handlers.setFocusLevel = vi.fn(() => Promise.resolve());
   handlers.setHunkOverride = vi.fn(() => Promise.resolve());
   handlers.adoptFocusNote = vi.fn(() => Promise.resolve({}));
+  handlers.generateFocus = vi.fn(() => Promise.resolve());
+  handlers.checkEnvironment = vi.fn(() =>
+    Promise.resolve({ git: "git", gh: "gh", gh_authed: true, claude: "/bin/claude" }),
+  );
 });
 
 describe("ReviewView focus overlay", () => {
@@ -213,5 +217,27 @@ describe("ReviewView focus overlay", () => {
     renderReview();
     expect(await screen.findByText("lockline_new")).toBeInTheDocument();
     expect(screen.queryByText(/hidden hunk/)).not.toBeInTheDocument();
+  });
+
+  it("starts a generation from the header with the chosen level", async () => {
+    const user = userEvent.setup();
+    handlers.getFocus = vi.fn(() => Promise.resolve(null));
+    renderReview();
+    await user.click(await screen.findByRole("button", { name: /Generate focus/ }));
+    const pop = screen.getByRole("dialog", { name: "Generate focus" });
+    await user.selectOptions(within(pop).getAllByRole("combobox")[0], "critical");
+    await user.click(within(pop).getByRole("button", { name: "Generate" }));
+    expect(handlers.generateFocus).toHaveBeenCalledWith(7, "critical", undefined);
+  });
+
+  it("disables Generate without the claude CLI", async () => {
+    handlers.getFocus = vi.fn(() => Promise.resolve(null));
+    handlers.checkEnvironment = vi.fn(() =>
+      Promise.resolve({ git: "git", gh: "gh", gh_authed: true, claude: null }),
+    );
+    renderReview();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /Generate focus/ })).toBeDisabled(),
+    );
   });
 });
