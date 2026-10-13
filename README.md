@@ -164,6 +164,19 @@ of this.
 The **Reviews** tab shows every saved review for the repo — open to resume,
 or ✕ to delete.
 
+### Focus review
+
+**Focus** is an AI-assisted lens over a review. Every hunk is tiered `critical` / `review` / `skim` / `trivial`.
+Lower tiers collapse into one-click bars, and a digest lists what was hidden and why. Focus content is never published.
+
+- **From the terminal** — install the Claude Code skill once:
+  ```bash
+  cp -r skills/focus-review ~/.claude/skills/
+  ```
+  then run `/focus-review <pr-url | owner/repo#N | branch <head> | review-id>`. Re-copy after
+  updating the repo: the app embeds its own copy of the prompt at build time.
+- **Scripting** — `cr focus hunks|hunk|set|show|clear <review-id>`. See `cr focus --help`.
+
 ---
 
 ## Import / Export
