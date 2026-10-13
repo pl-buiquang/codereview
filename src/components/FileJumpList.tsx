@@ -11,6 +11,13 @@ import { useQuery } from "@tanstack/react-query";
 import { parseDiff } from "react-diff-view";
 import { api } from "../lib/api";
 import { countChanges, fileDisplayPath } from "../lib/diff";
+import {
+  FILE_CATEGORIES,
+  categorize,
+  compileCategoryRules,
+  type FileCategory,
+} from "../lib/fileCategory";
+import { useSettingsStore } from "../lib/settings";
 import { isDraftReply } from "../lib/threads";
 import { summaryLine } from "../lib/text";
 import { timeAgo } from "../lib/timeAgo";
@@ -25,6 +32,7 @@ interface Row {
   del: number;
   count: number;
   viewed: boolean;
+  category: FileCategory;
 }
 
 type TreeNode =
@@ -168,8 +176,15 @@ export function FileJumpList({
     [detail?.viewed_files],
   );
 
+  const fileTestPatterns = useSettingsStore((s) => s.fileTestPatterns);
+  const fileConfigPatterns = useSettingsStore((s) => s.fileConfigPatterns);
+  const categoryRules = useMemo(
+    () => compileCategoryRules(fileTestPatterns, fileConfigPatterns),
+    [fileTestPatterns, fileConfigPatterns],
+  );
+
   const rows = useMemo(
-    () =>
+    (): Row[] =>
       files.map((file, index) => {
         const path = fileDisplayPath(file);
         const { add, del } = countChanges(file);
@@ -180,9 +195,21 @@ export function FileJumpList({
           del,
           count: countByPath.get(path) ?? 0,
           viewed: viewedSet.has(path),
+          category: categorize(path, categoryRules),
         };
       }),
-    [files, countByPath, viewedSet],
+    [files, countByPath, viewedSet, categoryRules],
+  );
+
+  const [typeFilter, setTypeFilter] = useState<"all" | FileCategory>("all");
+  const categoryCounts = useMemo(() => {
+    const counts: Record<FileCategory, number> = { code: 0, tests: 0, config: 0 };
+    for (const r of rows) counts[r.category]++;
+    return counts;
+  }, [rows]);
+  const visibleRows = useMemo(
+    () => (typeFilter === "all" ? rows : rows.filter((r) => r.category === typeFilter)),
+    [rows, typeFilter],
   );
 
   const [activeIndex, setActiveIndex] = useState(0);
@@ -280,7 +307,7 @@ export function FileJumpList({
     };
   });
 
-  const tree = useMemo(() => buildTree(rows), [rows]);
+  const tree = useMemo(() => buildTree(visibleRows), [visibleRows]);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const toggleDir = (path: string) =>
     setCollapsed((prev) => {
@@ -574,9 +601,29 @@ export function FileJumpList({
           </div>
 
           {activeTab === "files" ? (
-            <div className="jump-list-content">
-              {renderNodes(tree, 0)}
-            </div>
+            <>
+              <div className="comment-filters">
+                <div className="comment-filter-group">
+                  {[{ key: "all" as const, label: "All" }, ...FILE_CATEGORIES].map((c) => (
+                    <button
+                      key={c.key}
+                      type="button"
+                      className={`comment-filter-btn${typeFilter === c.key ? " active" : ""}`}
+                      onClick={() => setTypeFilter(c.key)}
+                    >
+                      {c.label} {c.key === "all" ? rows.length : categoryCounts[c.key]}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="jump-list-content">
+                {visibleRows.length === 0 && rows.length > 0 ? (
+                  <p className="comment-list-empty">No matching files.</p>
+                ) : (
+                  renderNodes(tree, 0)
+                )}
+              </div>
+            </>
           ) : (
             <>
               <div className="comment-filters">

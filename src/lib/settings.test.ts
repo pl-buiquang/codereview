@@ -5,6 +5,8 @@ import {
   parseRepoStripPrefixes,
   stripRepoPrefix,
   DEFAULT_DIFF_FONT_SIZE,
+  exportSettings,
+  importSettings,
 } from "./settings";
 
 beforeEach(() => {
@@ -18,6 +20,8 @@ beforeEach(() => {
     repoStripPrefixes: "",
     prListPollMs: 0,
     inboxPollMs: 0,
+    fileTestPatterns: "",
+    fileConfigPatterns: "",
   });
 });
 
@@ -69,6 +73,8 @@ describe("useSettingsStore", () => {
         "defaultViewType",
         "diffFontSize",
         "direction",
+        "fileConfigPatterns",
+        "fileTestPatterns",
         "inboxPollMs",
         "markEdits",
         "mode",
@@ -77,6 +83,44 @@ describe("useSettingsStore", () => {
         "repoStripPrefixes",
       ].sort(),
     );
+  });
+});
+
+describe("exportSettings / importSettings", () => {
+  it("round-trips the persisted settings", () => {
+    const s = useSettingsStore.getState();
+    s.setMode("light");
+    s.setDiffFontSize(15);
+    s.setFileTestPatterns("*.spec.rb");
+    const json = exportSettings();
+    expect(JSON.parse(json)).toMatchObject({ app: "codereview", kind: "settings" });
+
+    s.setMode("dark");
+    s.setDiffFontSize(11);
+    s.setFileTestPatterns("");
+    const applied = importSettings(json);
+    const n = useSettingsStore.getState();
+    expect(applied).toBe(14);
+    expect(n.mode).toBe("light");
+    expect(n.diffFontSize).toBe(15);
+    expect(n.fileTestPatterns).toBe("*.spec.rb");
+  });
+
+  it("accepts a bare settings object and skips unknown or mistyped keys", () => {
+    const applied = importSettings(
+      JSON.stringify({ mode: "neon", diffFontSize: "big", botLogins: "renovate", foo: 1 }),
+    );
+    const n = useSettingsStore.getState();
+    expect(applied).toBe(1);
+    expect(n.botLogins).toBe("renovate");
+    expect(n.mode).toBe("system");
+    expect(n.diffFontSize).toBe(DEFAULT_DIFF_FONT_SIZE);
+  });
+
+  it("rejects invalid JSON and files with no recognized settings", () => {
+    expect(() => importSettings("not json")).toThrow(/valid JSON/);
+    expect(() => importSettings("[]")).toThrow(/No recognized/);
+    expect(() => importSettings("42")).toThrow(/No settings/);
   });
 });
 

@@ -1,9 +1,17 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useUIStore } from "../store";
-import { effectiveTheme, parseRepoBasePaths, useSettingsStore, type ThemeMode } from "../lib/settings";
+import {
+  effectiveTheme,
+  exportSettings,
+  importSettings,
+  parseRepoBasePaths,
+  useSettingsStore,
+  type ThemeMode,
+} from "../lib/settings";
+import { DEFAULT_CONFIG_PATTERNS, DEFAULT_TEST_PATTERNS } from "../lib/fileCategory";
 import { DIRECTIONS } from "../lib/themes";
-import { api } from "../lib/api";
+import { api, pickJsonFile, pickSavePath } from "../lib/api";
 import { toast } from "../lib/toast";
 import type { ToolEnv } from "../lib/types";
 import { Icon, type IconName } from "./icons";
@@ -147,6 +155,32 @@ function GeneralSection() {
   const setRepoBasePaths = useSettingsStore((s) => s.setRepoBasePaths);
   const setChatModel = useSettingsStore((s) => s.setChatModel);
   const setMarkEdits = useSettingsStore((s) => s.setMarkEdits);
+  const fileTestPatterns = useSettingsStore((s) => s.fileTestPatterns);
+  const fileConfigPatterns = useSettingsStore((s) => s.fileConfigPatterns);
+  const setFileTestPatterns = useSettingsStore((s) => s.setFileTestPatterns);
+  const setFileConfigPatterns = useSettingsStore((s) => s.setFileConfigPatterns);
+
+  const onExportSettings = async () => {
+    try {
+      const dest = await pickSavePath("codereview-settings.json", "json");
+      if (!dest) return;
+      await api.writeSettingsFile(dest, exportSettings());
+      toast.success("Settings exported");
+    } catch (err) {
+      toast.error(`Export failed:\n${String(err)}`);
+    }
+  };
+
+  const onImportSettings = async () => {
+    try {
+      const src = await pickJsonFile();
+      if (!src) return;
+      const count = importSettings(await api.readSettingsFile(src));
+      toast.success(`Imported ${count} setting${count === 1 ? "" : "s"}`);
+    } catch (err) {
+      toast.error(`Import failed:\n${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
 
   const queryClient = useQueryClient();
   const autoLink = useMutation({
@@ -234,6 +268,48 @@ function GeneralSection() {
       </section>
 
       <section className="settings-group">
+        <h3>File types</h3>
+        <label className="settings-row settings-row-stack">
+          <span>Test patterns</span>
+          <textarea
+            className="textarea settings-patterns"
+            rows={6}
+            spellCheck={false}
+            value={fileTestPatterns}
+            onChange={(e) => setFileTestPatterns(e.target.value)}
+          />
+        </label>
+        <label className="settings-row settings-row-stack">
+          <span>Config &amp; docs patterns</span>
+          <textarea
+            className="textarea settings-patterns"
+            rows={6}
+            spellCheck={false}
+            value={fileConfigPatterns}
+            onChange={(e) => setFileConfigPatterns(e.target.value)}
+          />
+          <span className="settings-hint muted">
+            One glob per line (<code>#</code> for comments). Patterns without a <code>/</code>{" "}
+            match the file name (<code>*_spec.rb</code>); others match the full path (
+            <code>**/tests/**</code>). Tests are checked first, then config &amp; docs; anything
+            else counts as code.
+          </span>
+        </label>
+        <div className="settings-row">
+          <span />
+          <button
+            className="btn btn-sm"
+            onClick={() => {
+              setFileTestPatterns(DEFAULT_TEST_PATTERNS);
+              setFileConfigPatterns(DEFAULT_CONFIG_PATTERNS);
+            }}
+          >
+            Reset to defaults
+          </button>
+        </div>
+      </section>
+
+      <section className="settings-group">
         <h3>Inbox</h3>
         <label className="settings-row settings-row-stack">
           <span>Bot logins</span>
@@ -309,6 +385,21 @@ function GeneralSection() {
             env-configured default (Bedrock ARN, model name, etc.).
           </span>
         </label>
+      </section>
+
+      <section className="settings-group">
+        <h3>Backup</h3>
+        <div className="settings-row">
+          <span>Settings file (JSON)</span>
+          <span className="settings-control">
+            <button className="btn btn-sm" onClick={onExportSettings}>
+              Export…
+            </button>
+            <button className="btn btn-sm" onClick={onImportSettings}>
+              Import…
+            </button>
+          </span>
+        </div>
       </section>
 
       <section className="settings-group">

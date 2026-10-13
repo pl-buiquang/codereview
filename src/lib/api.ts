@@ -252,6 +252,12 @@ export const api = {
   // Import
   importReview: (srcPath: string) =>
     invoke<Review>("import_review", { srcPath }),
+
+  // Settings backup
+  writeSettingsFile: (destPath: string, contents: string) =>
+    invoke<void>("write_settings_file", { destPath, contents }),
+  readSettingsFile: (srcPath: string) =>
+    invoke<string>("read_settings_file", { srcPath }),
 };
 
 /** Native save dialog; returns chosen path or null. */

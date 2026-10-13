@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { Direction } from "./themes";
+import { DIRECTIONS, type Direction } from "./themes";
+import { DEFAULT_CONFIG_PATTERNS, DEFAULT_TEST_PATTERNS } from "./fileCategory";
 
 export type ThemeMode = "dark" | "light" | "system";
 export type ThemeBase = "dark" | "light";
@@ -39,7 +40,28 @@ type PersistedSettings = Pick<
   | "inboxPollMs"
   | "chatModel"
   | "markEdits"
+  | "fileTestPatterns"
+  | "fileConfigPatterns"
 >;
+
+const DEFAULTS: PersistedSettings = {
+  direction: "a",
+  mode: "system",
+  diffFontSize: DEFAULT_DIFF_FONT_SIZE,
+  defaultViewType: "split",
+  defaultThreeDot: true,
+  botLogins: "",
+  repoStripPrefixes: "",
+  repoBasePaths: "~/projects",
+  prListPollMs: 0,
+  inboxPollMs: 0,
+  chatModel: "",
+  markEdits: false,
+  fileTestPatterns: DEFAULT_TEST_PATTERNS,
+  fileConfigPatterns: DEFAULT_CONFIG_PATTERNS,
+};
+
+const PERSISTED_KEYS = Object.keys(DEFAULTS) as (keyof PersistedSettings)[];
 
 interface SettingsState {
   /** Design direction (A/B/C) — selects the `cr-{a|b|c}` token block. */
@@ -63,6 +85,10 @@ interface SettingsState {
   markEdits: boolean;
   /** Model passed to `claude -p --model`. Empty = use env default (opus). */
   chatModel: string;
+  /** Newline-separated globs classifying changed files as tests (checked first). */
+  fileTestPatterns: string;
+  /** Newline-separated globs classifying changed files as config/docs. */
+  fileConfigPatterns: string;
   setDirection: (d: Direction) => void;
   setMode: (m: ThemeMode) => void;
   setDiffFontSize: (n: number) => void;
@@ -75,23 +101,14 @@ interface SettingsState {
   setInboxPollMs: (ms: number) => void;
   setChatModel: (s: string) => void;
   setMarkEdits: (b: boolean) => void;
+  setFileTestPatterns: (s: string) => void;
+  setFileConfigPatterns: (s: string) => void;
 }
 
 export const useSettingsStore = create<SettingsState>()(
   persist(
     (set) => ({
-      direction: "a",
-      mode: "system",
-      diffFontSize: DEFAULT_DIFF_FONT_SIZE,
-      defaultViewType: "split",
-      defaultThreeDot: true,
-      botLogins: "",
-      repoStripPrefixes: "",
-      repoBasePaths: "~/projects",
-      prListPollMs: 0,
-      inboxPollMs: 0,
-      chatModel: "",
-      markEdits: false,
+      ...DEFAULTS,
       setDirection: (direction) => set({ direction }),
       setMode: (mode) => set({ mode }),
       setDiffFontSize: (diffFontSize) => set({ diffFontSize }),
@@ -104,24 +121,13 @@ export const useSettingsStore = create<SettingsState>()(
       setInboxPollMs: (inboxPollMs) => set({ inboxPollMs }),
       setChatModel: (chatModel) => set({ chatModel }),
       setMarkEdits: (markEdits) => set({ markEdits }),
+      setFileTestPatterns: (fileTestPatterns) => set({ fileTestPatterns }),
+      setFileConfigPatterns: (fileConfigPatterns) => set({ fileConfigPatterns }),
     }),
     {
       name: "codereview-settings",
       version: 6,
-      partialize: (s) => ({
-        direction: s.direction,
-        mode: s.mode,
-        diffFontSize: s.diffFontSize,
-        defaultViewType: s.defaultViewType,
-        defaultThreeDot: s.defaultThreeDot,
-        botLogins: s.botLogins,
-        repoStripPrefixes: s.repoStripPrefixes,
-        repoBasePaths: s.repoBasePaths,
-        prListPollMs: s.prListPollMs,
-        inboxPollMs: s.inboxPollMs,
-        chatModel: s.chatModel,
-        markEdits: s.markEdits,
-      }),
+      partialize: (s) => pickPersisted(s),
       // v0 (flat: `theme`) and v1 (`themeMode` + theme slots) collapse the same
       // way: direction resets to "a", the old mode maps over (custom themes,
       // dark/light slot ids are intentionally dropped), non-theme settings carry.
@@ -141,11 +147,67 @@ export const useSettingsStore = create<SettingsState>()(
           inboxPollMs: (p.inboxPollMs as number) ?? 0,
           chatModel: (p.chatModel as string) ?? "",
           markEdits: (p.markEdits as boolean) ?? false,
+          fileTestPatterns: (p.fileTestPatterns as string) ?? DEFAULT_TEST_PATTERNS,
+          fileConfigPatterns: (p.fileConfigPatterns as string) ?? DEFAULT_CONFIG_PATTERNS,
         } satisfies PersistedSettings;
       },
     },
   ),
 );
+
+function pickPersisted(s: PersistedSettings): PersistedSettings {
+  return Object.fromEntries(PERSISTED_KEYS.map((k) => [k, s[k]])) as PersistedSettings;
+}
+
+const ENUMS: Partial<Record<keyof PersistedSettings, readonly string[]>> = {
+  direction: DIRECTIONS.map((d) => d.id),
+  mode: ["dark", "light", "system"],
+  defaultViewType: ["split", "unified"],
+};
+
+/** Serialize the persisted settings to a portable JSON document. */
+export function exportSettings(): string {
+  return JSON.stringify(
+    {
+      app: "codereview",
+      kind: "settings",
+      exportedAt: new Date().toISOString(),
+      settings: pickPersisted(useSettingsStore.getState()),
+    },
+    null,
+    2,
+  );
+}
+
+/** Apply settings from an exported JSON document (or a bare settings object).
+ *  Unknown or mistyped keys are skipped; returns how many were applied. */
+export function importSettings(json: string): number {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch {
+    throw new Error("Not a valid JSON file");
+  }
+  if (!parsed || typeof parsed !== "object") throw new Error("No settings found in file");
+  const root = parsed as Record<string, unknown>;
+  const source = (
+    root.settings && typeof root.settings === "object" ? root.settings : root
+  ) as Record<string, unknown>;
+
+  const picked: Record<string, unknown> = {};
+  for (const key of PERSISTED_KEYS) {
+    const value = source[key];
+    if (typeof value !== typeof DEFAULTS[key]) continue;
+    if (typeof value === "number" && !Number.isFinite(value)) continue;
+    const allowed = ENUMS[key];
+    if (allowed && !allowed.includes(value as string)) continue;
+    picked[key] = value;
+  }
+  const count = Object.keys(picked).length;
+  if (count === 0) throw new Error("No recognized settings in file");
+  useSettingsStore.setState(picked as Partial<PersistedSettings>);
+  return count;
+}
 
 /** Parse the configured repository base paths. */
 export function parseRepoBasePaths(raw: string): string[] {

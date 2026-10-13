@@ -303,6 +303,17 @@ pub fn import_review(src_path: String, db: State<Db>) -> AppResult<Review> {
     import_review_impl(&conn, payload)
 }
 
+#[tauri::command]
+pub fn write_settings_file(dest_path: String, contents: String) -> AppResult<()> {
+    fs::write(&dest_path, contents)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn read_settings_file(src_path: String) -> AppResult<String> {
+    Ok(fs::read_to_string(&src_path)?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

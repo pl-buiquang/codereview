@@ -163,6 +163,8 @@ pub fn run() {
             commands::export::export_review,
             commands::export::export_vscode_review,
             commands::export::import_review,
+            commands::export::write_settings_file,
+            commands::export::read_settings_file,
             commands::editor::open_in_default_app,
             commands::editor::open_url,
             commands::gh::gh_auth_status,
