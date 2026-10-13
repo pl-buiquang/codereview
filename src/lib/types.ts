@@ -350,3 +350,48 @@ export interface WipStatus {
   unstaged: ChangedFile[];
   untracked: string[];
 }
+
+// --- Focus review (spec 10) ---
+
+export type FocusLevel = "off" | "thorough" | "focus" | "critical";
+export type FocusTier = "trivial" | "skim" | "review" | "critical";
+export type FocusOverride = "show" | "hide";
+
+export interface Focus {
+  id: number;
+  review_id: number;
+  head_sha: string | null;
+  base_sha: string | null;
+  level: FocusLevel;
+  summary: string | null;
+  model: string | null;
+  status: "generating" | "ready" | "failed";
+  error: string | null;
+  planned_at: string | null;
+  created_at: string;
+}
+
+export interface FocusEntry {
+  hunk_id: string;
+  file_path: string;
+  old_start: number;
+  new_start: number;
+  /** Empty for a whole-file pseudo-hunk (rename-only, binary, mode change). */
+  header: string;
+  additions: number;
+  deletions: number;
+  tier: FocusTier;
+  source: "rule" | "ai" | "default" | null;
+  reason: string | null;
+  note: string | null;
+  note_dismissed: boolean;
+  override: FocusOverride | null;
+  is_new: boolean;
+}
+
+export interface FocusView {
+  focus: Focus;
+  stale: boolean;
+  hunks: FocusEntry[];
+  file_overrides: { file_path: string; override: FocusOverride }[];
+}

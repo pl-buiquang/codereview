@@ -40,6 +40,21 @@ import {
 } from "../lib/diff";
 import { filterDiffMatches, wrapIndex, type DiffMatch } from "../lib/diffSearch";
 import { FileJumpList } from "./FileJumpList";
+import {
+  FocusDigest,
+  FocusHiddenBar,
+  FocusHunkMeta,
+  FocusLevelSelect,
+  useFocusActions,
+  type FocusActions,
+} from "./Focus";
+import {
+  buildFocusModel,
+  originalsIn,
+  type Anchor,
+  type FileFocus,
+  type HunkFocus,
+} from "../lib/focus";
 import { FileViewPane } from "./FileViewPane";
 import { GithubThread } from "./GithubThread";
 import { ShortcutHelp } from "./ShortcutHelp";
@@ -65,6 +80,7 @@ import { summaryLine } from "../lib/text";
 import { statusLabel, statusBadgeClass } from "../lib/status";
 import type {
   Comment,
+  FocusView,
   PrThread,
   PrThreadCtx,
   ReviewDetail,
@@ -108,6 +124,26 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchIdx, setSearchIdx] = useState(0);
   const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // Hunk ids shown temporarily by "show" / search; never persisted.
+  const [revealed, setRevealed] = useState<ReadonlySet<string>>(new Set());
+  const reveal = useCallback(
+    (ids: string[]) => setRevealed((prev) => new Set([...prev, ...ids])),
+    [],
+  );
+  const unreveal = useCallback(
+    (ids: string[]) =>
+      setRevealed((prev) => {
+        const next = new Set(prev);
+        for (const id of ids) next.delete(id);
+        return next;
+      }),
+    [],
+  );
+  const [summaryAppend, setSummaryAppend] = useState<{ text: string; nonce: number } | null>(
+    null,
+  );
+  const focusActions = useFocusActions(reviewId);
 
   const detailQuery = useQuery({
     queryKey: ["review", reviewId],
@@ -245,6 +281,58 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
     () => (diffQuery.data != null ? parseDiff(diffQuery.data) : []),
     [diffQuery.data],
   );
+  const focusQuery = useQuery({
+    queryKey: ["focus", reviewId, detailQuery.data?.target.head_sha],
+    enabled: detailQuery.data != null,
+    queryFn: () => api.getFocus(reviewId),
+  });
+  const focusView = focusQuery.data ?? null;
+
+  const focusAnchors = useMemo<Anchor[]>(() => {
+    const out: Anchor[] = [];
+    for (const c of detailQuery.data?.comments ?? []) {
+      if (c.origin === "file_view" || isDraftReply(c) || c.parent_id != null) continue;
+      if (c.subject_type === "file") {
+        out.push({ path: c.file_path, side: "FILE", line: -1 });
+        continue;
+      }
+      out.push({ path: c.file_path, side: c.side, line: c.line });
+      if (c.start_line != null) out.push({ path: c.file_path, side: c.side, line: c.start_line });
+    }
+    for (const t of threadsQuery.data ?? []) {
+      if (!t.path) continue;
+      out.push({ path: t.path, side: t.line == null ? "FILE" : (t.diffSide ?? "RIGHT"), line: t.line ?? -1 });
+    }
+    return out;
+  }, [detailQuery.data?.comments, threadsQuery.data]);
+
+  const focusModel = useMemo(
+    () =>
+      buildFocusModel(
+        files.map((f) => ({ path: fileDisplayPath(f), hunks: f.hunks })),
+        focusView,
+        focusAnchors,
+        revealed,
+      ),
+    [files, focusView, focusAnchors, revealed],
+  );
+
+  const focusHiddenFiles = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const f of focusModel ?? []) {
+      if (!f.fullyHidden) continue;
+      const all = f.whole ? [f.whole] : f.hunks;
+      m.set(f.path, [...new Set(all.map((h) => h.reason).filter(Boolean))].join(", "));
+    }
+    return m;
+  }, [focusModel]);
+
+  const jumpToFile = useCallback((fileIndex: number) => {
+    diffAreaRef.current
+      ?.querySelector(`#file-${fileIndex}`)
+      ?.scrollIntoView({ block: "start" });
+  }, []);
+
   // Per-file change index, built once the find bar opens (covers every file,
   // including collapsed ones); search then re-filters it per keystroke.
   const perFileMeta = useMemo(
@@ -305,7 +393,18 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
     });
     return () => cancelAnimationFrame(raf);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchOpen, searchIdx, matches, viewedSig, files]);
+  }, [searchOpen, searchIdx, matches, viewedSig, files, revealed]);
+
+  // A match inside a focus-hidden hunk reveals it, like un-viewing a file.
+  useEffect(() => {
+    if (!searchOpen || !curMatch || !focusModel) return;
+    const meta = perFileMeta[curMatch.fileIndex]?.get(curMatch.changeKey);
+    const file = files[curMatch.fileIndex];
+    if (!meta || !file) return;
+    const i = file.hunks.findIndex((h) => h.content === meta.hunk);
+    const hf = focusModel[curMatch.fileIndex]?.hunks[i];
+    if (hf?.hidden && hf.entry) reveal([hf.entry.hunk_id]);
+  }, [searchOpen, curMatch, focusModel, perFileMeta, files, reveal]);
 
   useEffect(() => {
     if (!isActiveTab) return;
@@ -409,6 +508,9 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
         readOnly={readOnly}
         viewType={viewType}
         setViewType={setViewType}
+        focusView={focusView}
+        focusActions={focusActions}
+        summaryAppend={summaryAppend}
         onSaving={() => setSaveState("saving")}
         onSaved={() => {
           setSaveState("saved");
@@ -430,6 +532,7 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
           paneCollapsed={sidebarCollapsed}
           onToggle={toggleSidebar}
           threads={threadsQuery.data ?? []}
+          focusHidden={focusHiddenFiles}
         />
         {!sidebarCollapsed && <div className="resize-handle" onMouseDown={startResize("left")} />}
         <div className="diff-area" ref={diffAreaRef}>
@@ -454,6 +557,21 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
               · press ? for shortcuts
             </p>
           )}
+          {focusView &&
+            (focusView.focus.planned_at == null ||
+              focusView.focus.level !== "off" ||
+              focusView.focus.status !== "ready") && (
+              <FocusDigest
+                view={focusView}
+                model={focusModel}
+                headSha={detail.target.head_sha}
+                readOnly={readOnly}
+                actions={focusActions}
+                onReveal={reveal}
+                onJump={jumpToFile}
+                onCopyToSummary={(text) => setSummaryAppend({ text, nonce: Date.now() })}
+              />
+            )}
           {diffQuery.isLoading && <p className="muted">Loading diff…</p>}
           {diffQuery.isError && <p className="error">Diff failed: {String(diffQuery.error)}</p>}
           {diffQuery.data != null && (
@@ -466,6 +584,10 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
               kbHandles={fileKbRef}
               searchKeysByFile={matchKeysByFile}
               searchCurrent={curMatch}
+              focusModel={focusModel}
+              focusActions={focusActions}
+              onReveal={reveal}
+              onUnreveal={unreveal}
               onOpenFilePane={setFilePanePath}
               onSaving={() => setSaveState("saving")}
               onSaved={() => {
@@ -620,6 +742,9 @@ function ReviewHeader({
   readOnly,
   viewType,
   setViewType,
+  focusView,
+  focusActions,
+  summaryAppend,
   onSaving,
   onSaved,
 }: {
@@ -628,6 +753,9 @@ function ReviewHeader({
   readOnly: boolean;
   viewType: ViewType;
   setViewType: (v: ViewType) => void;
+  focusView: FocusView | null;
+  focusActions: FocusActions;
+  summaryAppend: { text: string; nonce: number } | null;
   onSaving: () => void;
   onSaved: () => void;
 }) {
@@ -636,6 +764,8 @@ function ReviewHeader({
   const openRepo = useUIStore((s) => s.openRepo);
   const { review, target } = detail;
   const [body, setBody] = useState(review.body);
+  const bodyRef = useRef(body);
+  bodyRef.current = body;
   const [showExport, setShowExport] = useState(false);
   const [collapsed, setCollapsed] = useState(true);
 
@@ -646,6 +776,16 @@ function ReviewHeader({
       .then(onSaved)
       .catch((e) => toast.error(String(e)));
   }, 400);
+
+  useEffect(() => {
+    if (!summaryAppend) return;
+    const prev = bodyRef.current.trimEnd();
+    const next = prev ? `${prev}\n\n${summaryAppend.text}` : summaryAppend.text;
+    setBody(next);
+    save(next);
+    setCollapsed(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [summaryAppend]);
 
   const deleteReview = useMutation({
     mutationFn: () => api.deleteReview(review.id),
@@ -820,6 +960,9 @@ function ReviewHeader({
             Unified
           </button>
         </div>
+        {focusView?.focus.planned_at != null && (
+          <FocusLevelSelect level={focusView.focus.level} onChange={focusActions.setLevel} />
+        )}
         {anchorsStale && (
           <span className="head-moved">
             <span
@@ -1007,6 +1150,10 @@ function ReviewDiff({
   kbHandles,
   searchKeysByFile,
   searchCurrent,
+  focusModel,
+  focusActions,
+  onReveal,
+  onUnreveal,
   onOpenFilePane,
   onSaving,
   onSaved,
@@ -1021,6 +1168,10 @@ function ReviewDiff({
   kbHandles: MutableRefObject<Map<number, FileKbHandle>>;
   searchKeysByFile: Map<number, Set<string>>;
   searchCurrent: DiffMatch | null;
+  focusModel: FileFocus[] | null;
+  focusActions: FocusActions;
+  onReveal: (ids: string[]) => void;
+  onUnreveal: (ids: string[]) => void;
   onOpenFilePane: (path: string) => void;
   onSaving: () => void;
   onSaved: () => void;
@@ -1043,6 +1194,10 @@ function ReviewDiff({
           searchCurrentKey={
             searchCurrent?.fileIndex === index ? searchCurrent.changeKey : null
           }
+          focus={focusModel?.[index] ?? null}
+          focusActions={focusActions}
+          onReveal={onReveal}
+          onUnreveal={onUnreveal}
           onOpenFilePane={onOpenFilePane}
           onSaving={onSaving}
           onSaved={onSaved}
@@ -1071,6 +1226,10 @@ function FileReview({
   kbHandles,
   searchKeys,
   searchCurrentKey,
+  focus,
+  focusActions,
+  onReveal,
+  onUnreveal,
   onOpenFilePane,
   onSaving,
   onSaved,
@@ -1086,6 +1245,10 @@ function FileReview({
   kbHandles: MutableRefObject<Map<number, FileKbHandle>>;
   searchKeys: Set<string> | undefined;
   searchCurrentKey: string | null;
+  focus: FileFocus | null;
+  focusActions: FocusActions;
+  onReveal: (ids: string[]) => void;
+  onUnreveal: (ids: string[]) => void;
   onOpenFilePane: (path: string) => void;
   onSaving: () => void;
   onSaved: () => void;
@@ -1607,6 +1770,27 @@ function FileReview({
           >
             <Icon name="ext" size={12} /> Open
           </button>
+          {focus && (
+            <button
+              className="btn btn-sm btn-ghost"
+              title={
+                focus.fullyHidden
+                  ? "Show this file's hunks (focus override)"
+                  : "Hide this file's hunks (focus override)"
+              }
+              onClick={() => {
+                const all = focus.whole ? [focus.whole] : focus.hunks;
+                const overridden = all
+                  .map((h) => h.entry)
+                  .filter((e) => e?.override != null)
+                  .map((e) => e!.hunk_id);
+                if (overridden.length) focusActions.setHunkOverride(overridden, null);
+                focusActions.setFileOverride(path, focus.fullyHidden ? "show" : "hide");
+              }}
+            >
+              <Icon name="eye" size={12} /> {focus.fullyHidden ? "Show file" : "Hide file"}
+            </button>
+          )}
           <label className="viewed-toggle check" title="Collapse this file">
             <input
               type="checkbox"
@@ -1658,6 +1842,10 @@ function FileReview({
           baseSha={detail.target.base_sha}
           readOnly={readOnly}
           canExpand={canExpand}
+          focus={focus}
+          focusActions={focusActions}
+          onReveal={onReveal}
+          onUnreveal={onUnreveal}
           expanding={expanding}
           expandError={expandError}
           oldLineCount={oldLineCount}
@@ -1691,6 +1879,10 @@ function FileBody({
   baseSha,
   readOnly,
   canExpand,
+  focus,
+  focusActions,
+  onReveal,
+  onUnreveal,
   expanding,
   expandError,
   oldLineCount,
@@ -1718,6 +1910,10 @@ function FileBody({
   baseSha: string | null;
   readOnly: boolean;
   canExpand: boolean;
+  focus: FileFocus | null;
+  focusActions: FocusActions;
+  onReveal: (ids: string[]) => void;
+  onUnreveal: (ids: string[]) => void;
   expanding: boolean;
   expandError: string | null;
   oldLineCount: number | null; // null until the base source is fetched
@@ -1776,7 +1972,13 @@ function FileBody({
           ))}
         </div>
       )}
-      {file.isBinary ? (
+      {focus?.whole?.hidden ? (
+        <FocusHiddenBar
+          hunks={[focus.whole]}
+          onReveal={() => onReveal(focusIds([focus.whole!]))}
+          onAlwaysShow={() => focusActions.setHunkOverride(focusIds([focus.whole!]), "show")}
+        />
+      ) : file.isBinary ? (
         <p className="muted binary-note">Binary file not shown.</p>
       ) : (
         <Diff
@@ -1789,15 +1991,46 @@ function FileBody({
           generateLineClassName={generateLineClassName}
           gutterEvents={{ onClick: onLineClick }}
         >
-          {(renderedHunks) =>
-            renderedHunks.flatMap((hunk, i) => {
+          {(renderedHunks) => {
+            // Each rendered hunk maps back to the parsed hunks it covers (context
+            // expansion merges neighbours). Hidden hunks stay in `hunks` so line
+            // numbers and gap math are unchanged; they render as one bar per run.
+            const focusOf = (h: HunkData): HunkFocus[] =>
+              focus ? originalsIn(h, file.hunks).map((i) => focus.hunks[i]) : [];
+            const isHidden = (h: HunkData | null) => {
+              if (!h) return false;
+              const fs = focusOf(h);
+              return fs.length > 0 && fs.every((f) => f.hidden);
+            };
+            const rows: React.ReactElement[] = [];
+            let run: HunkFocus[] = [];
+            const flushRun = (key: string) => {
+              if (run.length === 0) return;
+              const ids = focusIds(run);
+              rows.push(
+                <Decoration key={`focus-bar-${key}`} className="focus-bar-row">
+                  <FocusHiddenBar
+                    hunks={run}
+                    onReveal={() => onReveal(ids)}
+                    onAlwaysShow={() => focusActions.setHunkOverride(ids, "show")}
+                  />
+                </Decoration>,
+              );
+              run = [];
+            };
+            renderedHunks.forEach((hunk, i) => {
               // All three gap kinds expand: leading (above the first hunk),
               // between hunks, and trailing (below the last hunk — its size is
               // unknown until the base source is fetched, so it renders
-              // optimistically with no count).
+              // optimistically with no count). Gaps next to a hidden hunk don't.
               const prev = i === 0 ? null : renderedHunks[i - 1];
+              const hidden = isHidden(hunk);
+              if (hidden) {
+                run.push(...focusOf(hunk));
+                return;
+              }
+              flushRun(hunk.content);
               const collapsed = getCollapsedLinesCountBetween(prev, hunk);
-              const rows: React.ReactElement[] = [];
               if (canExpand && prev == null && collapsed > 0) {
                 rows.push(
                   <Decoration key="exp-top" className="diff-expander">
@@ -1811,7 +2044,7 @@ function FileBody({
                   </Decoration>,
                 );
               }
-              if (canExpand && prev != null && collapsed > 0) {
+              if (canExpand && prev != null && !isHidden(prev) && collapsed > 0) {
                 rows.push(
                   <Decoration key={`exp-${hunk.content}`} className="diff-expander">
                     <ExpandControl
@@ -1820,6 +2053,28 @@ function FileBody({
                       onExpandChunk={() => onExpandBetween(prev, hunk, EXPAND_CHUNK)}
                       onExpandAll={() => onExpandBetween(prev, hunk, collapsed)}
                     />
+                  </Decoration>,
+                );
+              }
+              const metas = focusOf(hunk).filter((f) => f.entry);
+              if (metas.length > 0) {
+                rows.push(
+                  <Decoration key={`focus-meta-${hunk.content}`} className="focus-meta-row-wrap">
+                    <>
+                      {metas.map((f) => (
+                        <FocusHunkMeta
+                          key={f.entry!.hunk_id}
+                          hunk={f}
+                          readOnly={readOnly}
+                          onHide={() => {
+                            onUnreveal([f.entry!.hunk_id]);
+                            focusActions.setHunkOverride([f.entry!.hunk_id], "hide");
+                          }}
+                          onAdopt={() => focusActions.adoptNote(f.entry!.hunk_id)}
+                          onDismiss={() => focusActions.dismissNote(f.entry!.hunk_id)}
+                        />
+                      ))}
+                    </>
                   </Decoration>,
                 );
               }
@@ -1841,13 +2096,18 @@ function FileBody({
                   </Decoration>,
                 );
               }
-              return rows;
-            })
-          }
+            });
+            flushRun("end");
+            return rows;
+          }}
         </Diff>
       )}
     </>
   );
+}
+
+function focusIds(hunks: HunkFocus[]): string[] {
+  return hunks.flatMap((h) => (h.entry ? [h.entry.hunk_id] : []));
 }
 
 function ExpandControl({

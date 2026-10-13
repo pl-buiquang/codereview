@@ -7,6 +7,9 @@ import type {
   Comment,
   CommitDetail,
   DeleteGoneOutcome,
+  FocusLevel,
+  FocusOverride,
+  FocusView,
   FreshnessResult,
   GraphCommit,
   GraphScope,
@@ -59,6 +62,20 @@ export const api = {
     invoke<void>("set_chat_collapsed", { reviewId, collapsed }),
   setPanelWidths: (reviewId: number, leftPanelWidth: number, rightPanelWidth: number) =>
     invoke<void>("set_panel_widths", { reviewId, leftPanelWidth, rightPanelWidth }),
+
+  // Focus
+  getFocus: (reviewId: number) => invoke<FocusView | null>("get_focus", { reviewId }),
+  setFocusLevel: (reviewId: number, level: FocusLevel) =>
+    invoke<void>("set_focus_level", { reviewId, level }),
+  setHunkOverride: (reviewId: number, hunkId: string, value: FocusOverride | null) =>
+    invoke<void>("set_hunk_override", { reviewId, hunkId, value }),
+  setFileOverride: (reviewId: number, filePath: string, value: FocusOverride | null) =>
+    invoke<void>("set_file_override", { reviewId, filePath, value }),
+  adoptFocusNote: (reviewId: number, hunkId: string) =>
+    invoke<Comment>("adopt_focus_note", { reviewId, hunkId }),
+  dismissFocusNote: (reviewId: number, hunkId: string) =>
+    invoke<void>("dismiss_focus_note", { reviewId, hunkId }),
+  clearFocus: (reviewId: number) => invoke<void>("clear_focus", { reviewId }),
 
   // Chat
   crInstallNote: () => invoke<string | null>("cr_install_note"),

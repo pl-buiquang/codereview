@@ -139,6 +139,7 @@ export function FileJumpList({
   paneCollapsed,
   onToggle,
   threads = [],
+  focusHidden,
 }: {
   reviewId: number;
   scrollRootRef: RefObject<HTMLElement | null>;
@@ -146,6 +147,8 @@ export function FileJumpList({
   paneCollapsed?: boolean;
   onToggle?: () => void;
   threads?: PrThread[];
+  /** Files fully hidden by focus, mapped to the hide reasons (tooltip). */
+  focusHidden?: Map<string, string>;
 }) {
   const detailQuery = useQuery({
     queryKey: ["review", reviewId],
@@ -339,16 +342,21 @@ export function FileJumpList({
         ];
       }
       const { row } = node;
+      const hiddenReason = focusHidden?.get(row.path);
       return [
         <button
           key={`file:${row.index}`}
           type="button"
           className={`tree-row${row.index === activeIndex ? " active" : ""}${
             row.viewed ? " viewed" : ""
-          }`}
+          }${hiddenReason != null ? " focus-hidden" : ""}`}
           style={indent}
           onClick={() => jumpTo(row.index)}
-          title={row.path}
+          title={
+            hiddenReason != null
+              ? `${row.path} — hidden by focus${hiddenReason ? `: ${hiddenReason}` : ""}`
+              : row.path
+          }
         >
           <Icon name="file" size={13} className="tree-file" />
           <span className="tree-name">{node.name}</span>

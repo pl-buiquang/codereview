@@ -2,6 +2,7 @@ import { listen } from "@tauri-apps/api/event";
 import { useEffect } from "react";
 import { useUIStore, type HomeSection } from "../store";
 import { api } from "./api";
+import { queryClient } from "./queryClient";
 import { toast } from "./toast";
 import { parseRepoBasePaths, useSettingsStore } from "./settings";
 
@@ -18,6 +19,9 @@ export async function handleDeepLinkAction(action: DeepLinkAction): Promise<void
 
   switch (action.kind) {
     case "openReview":
+      // The review may already be open with stale data (e.g. `cr focus set` ran).
+      queryClient.invalidateQueries({ queryKey: ["review", action.review_id] });
+      queryClient.invalidateQueries({ queryKey: ["focus", action.review_id] });
       openReview(action.review_id);
       break;
 
