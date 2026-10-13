@@ -3521,6 +3521,30 @@ input[type="range"] {
   right: auto;
   min-width: 120px;
 }
+.review-worktree-vscode-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  vertical-align: middle;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border: none;
+  border-radius: calc(var(--radius-m) - 2px);
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-2);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.review-worktree-vscode-btn:hover {
+  background: var(--surface-2);
+  color: var(--accent);
+}
+.review-worktree-vscode-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
 
 .nav-list {
   list-style: none;

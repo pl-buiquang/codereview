@@ -1022,13 +1022,13 @@ function ReviewHeader({
               ) : null}
               {detail.local_path && (
                 <button
-                  className="btn-icon"
+                  className="review-worktree-vscode-btn"
                   title="Open chat worktree in VSCode"
                   aria-label="Open chat worktree in VSCode"
                   disabled={openingWorktree}
                   onClick={openChatWorktreeInVscode}
                 >
-                  <Icon name="ext" size={12} />
+                  <Icon name="ext" size={11} /> VSCode
                 </button>
               )}
             </span>
