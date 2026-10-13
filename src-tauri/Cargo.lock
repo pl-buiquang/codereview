@@ -631,7 +631,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "clap",
- "dirs 5.0.1",
+ "dirs",
  "log",
  "open",
  "reqwest",

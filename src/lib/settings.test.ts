@@ -67,6 +67,8 @@ describe("useSettingsStore", () => {
     ) as Record<string, unknown>;
     expect(Object.keys(snapshot).sort()).toEqual(
       [
+        "boardPollMs",
+        "boardStatusBorderSide",
         "botLogins",
         "chatModel",
         "defaultThreeDot",
@@ -100,7 +102,7 @@ describe("exportSettings / importSettings", () => {
     s.setFileTestPatterns("");
     const applied = importSettings(json);
     const n = useSettingsStore.getState();
-    expect(applied).toBe(14);
+    expect(applied).toBe(16);
     expect(n.mode).toBe("light");
     expect(n.diffFontSize).toBe(15);
     expect(n.fileTestPatterns).toBe("*.spec.rb");
