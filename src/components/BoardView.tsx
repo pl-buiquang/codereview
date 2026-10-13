@@ -7,7 +7,7 @@ import { BOARD_POLL_OPTIONS, parseRepoBasePaths, useSettingsStore } from "../lib
 import { findRepoByFullName } from "../lib/repoLabel";
 import { useUIStore } from "../store";
 import type { BoardCard as BoardCardT, BoardLane, BoardMetaKind } from "../lib/types";
-import { BoardCard, prStatus, prStatusLabel } from "./BoardCard";
+import { BoardCard, ciStatus, prStatus, prStatusLabel } from "./BoardCard";
 import { RepoName } from "./RepoName";
 import { Icon } from "./icons";
 
@@ -28,6 +28,14 @@ const STATUS_ORDER: Record<string, number> = {
   ready: 5,
 };
 
+const CI_ORDER: Record<string, number> = {
+  failure: 0,
+  error: 1,
+  pending: 2,
+  expected: 3,
+  success: 4,
+};
+
 function invalidateBoard(queryClient: ReturnType<typeof useQueryClient>) {
   queryClient.invalidateQueries({ queryKey: ["board"] });
 }
@@ -43,6 +51,7 @@ export function BoardView() {
   const setBoardPollMs = useSettingsStore((s) => s.setBoardPollMs);
   const [repoFilter, setRepoFilter] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
+  const [ciFilter, setCiFilter] = useState<string | null>(null);
   const [addingLane, setAddingLane] = useState<BoardLane | null>(null);
   const [addValue, setAddValue] = useState("");
 
@@ -133,29 +142,37 @@ export function BoardView() {
 
   const allCards = useMemo(() => (boardQuery.data ?? []).filter((c) => c.lane != null), [boardQuery.data]);
 
-  const { repoEntries, statusEntries } = useMemo(() => {
+  const { repoEntries, statusEntries, ciEntries } = useMemo(() => {
     const repo = new Map<string, number>();
     const status = new Map<string, number>();
+    const ci = new Map<string, number>();
     for (const c of allCards) {
       repo.set(c.repo, (repo.get(c.repo) ?? 0) + 1);
       const s = prStatus(c);
       if (s) status.set(s, (status.get(s) ?? 0) + 1);
+      const ciS = ciStatus(c);
+      if (ciS) ci.set(ciS, (ci.get(ciS) ?? 0) + 1);
     }
     const byCount = (a: [string, number], b: [string, number]) => b[1] - a[1] || a[0].localeCompare(b[0]);
     const byStatusOrder = (a: [string, number], b: [string, number]) =>
       (STATUS_ORDER[a[0]] ?? 99) - (STATUS_ORDER[b[0]] ?? 99);
+    const byCiOrder = (a: [string, number], b: [string, number]) =>
+      (CI_ORDER[a[0]] ?? 99) - (CI_ORDER[b[0]] ?? 99);
     return {
       repoEntries: [...repo.entries()].sort(byCount),
       statusEntries: [...status.entries()].sort(byStatusOrder),
+      ciEntries: [...ci.entries()].sort(byCiOrder),
     };
   }, [allCards]);
 
   const effRepo = repoFilter && allCards.some((c) => c.repo === repoFilter) ? repoFilter : null;
   const effStatus = statusFilter && allCards.some((c) => prStatus(c) === statusFilter) ? statusFilter : null;
+  const effCi = ciFilter && allCards.some((c) => ciStatus(c) === ciFilter) ? ciFilter : null;
 
   const filtered = allCards.filter((c) => {
     if (effRepo && c.repo !== effRepo) return false;
     if (effStatus && c.type === "pr" && prStatus(c) !== effStatus) return false;
+    if (effCi && ciStatus(c) !== effCi) return false;
     return true;
   });
 
@@ -233,6 +250,13 @@ export function BoardView() {
             entries={statusEntries}
             selected={effStatus}
             onSelect={setStatusFilter}
+            renderLabel={(k) => <span className="lbl">{prStatusLabel(k)}</span>}
+          />
+          <FilterList
+            title="CI"
+            entries={ciEntries}
+            selected={effCi}
+            onSelect={setCiFilter}
             renderLabel={(k) => <span className="lbl">{prStatusLabel(k)}</span>}
           />
           <FilterList

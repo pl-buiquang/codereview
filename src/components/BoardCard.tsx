@@ -38,6 +38,13 @@ export function prStatusLabel(status: string): string {
   return status.replace(/_/g, " ");
 }
 
+/** CI facet (lowercased `ci_status`) for the board's CI filter. Issue cards
+ *  and PRs with no reported checks have no facet (return null). */
+export function ciStatus(card: BoardCardT): string | null {
+  if (card.type !== "pr" || !card.ci_status) return null;
+  return card.ci_status.toLowerCase();
+}
+
 // Drafts live only in the "in progress" lane (redundant to call out) and
 // "ready" has nothing to flag yet, so only these four get a color.
 const STATUS_BORDER_COLOR: Record<string, string> = {
