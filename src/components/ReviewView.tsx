@@ -958,10 +958,6 @@ function ReviewHeader({
     (c) => c.github_thread_root_id != null,
   ).length;
 
-  const taggedCommentCount = detail.comments.filter(
-    (c) => c.parent_id == null && c.tag != null,
-  ).length;
-
   const publishDraftReplies = useMutation({
     mutationFn: () => api.publishDraftReplies(review.id),
     onSuccess: (result) => {
@@ -1134,12 +1130,6 @@ function ReviewHeader({
             onPublish={(event) => publishReview.mutate(event)}
             onPublishDraft={(event) => publishPending.mutate(event)}
           />
-        )}
-        {isPr && isDraft && taggedCommentCount > 0 && (
-          <span className="muted" title="ai/local-tagged comments stay off GitHub until untagged">
-            {taggedCommentCount} tagged comment{taggedCommentCount === 1 ? "" : "s"} won't be
-            published
-          </span>
         )}
         {isPr && pending && (
           <>
