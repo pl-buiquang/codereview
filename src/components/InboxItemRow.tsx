@@ -162,15 +162,15 @@ export function InboxItemRow({
                 className="btn btn-sm btn-ghost"
                 disabled={busy}
                 onClick={onUntrack}
-                title="Untrack — dismiss (find it again in Archive)"
+                title="Archive — hide from inbox (find it again in Archive)"
               >
-                Untrack
+                Archive
               </button>
             </>
           )}
           {variant === "archive" && (
-            <button className="btn btn-sm" disabled={busy} onClick={onRetrack} title="Re-track">
-              Re-track
+            <button className="btn btn-sm" disabled={busy} onClick={onRetrack} title="Move back to the inbox">
+              Unarchive
             </button>
           )}
         </div>
