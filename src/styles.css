@@ -4484,10 +4484,12 @@ input[type="range"] {
 .board-lane-cards {
   flex: 1;
   min-height: 0;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 8px;
   overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .board-card {
@@ -4495,7 +4497,8 @@ input[type="range"] {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 11px;
+  min-width: 0;
+  padding: 8px 11px;
   transition: border-color 0.1s ease;
 }
 .board-card:hover {
@@ -4503,8 +4506,8 @@ input[type="range"] {
 }
 .board-card-comment-badge {
   position: absolute;
-  top: -7px;
-  right: -7px;
+  top: 7px;
+  right: 10px;
   min-width: 18px;
   height: 18px;
   padding: 0 5px;
@@ -4528,6 +4531,7 @@ input[type="range"] {
   border: none;
   box-shadow: none;
   padding: 0;
+  padding-right: 22px;
   height: auto;
   font-size: 12.5px;
   font-weight: 600;
@@ -4569,11 +4573,37 @@ input[type="range"] {
   font-size: 10.5px;
   white-space: nowrap;
 }
+.board-card-bottom-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: -2px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+.board-card-add-meta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 2px;
+}
 .board-card-actions {
   display: flex;
   align-items: center;
   gap: 6px;
-  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+.board-card-action-btn {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+}
+.board-card-action-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .board-card-chev-open {
   transform: rotate(180deg);
@@ -4582,6 +4612,7 @@ input[type="range"] {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  min-width: 0;
   padding-top: 8px;
   border-top: 1px solid var(--border);
 }
@@ -4589,10 +4620,12 @@ input[type="range"] {
   display: flex;
   align-items: center;
   gap: 2px;
+  flex-wrap: wrap;
 }
 .board-link-form {
   display: flex;
   gap: 6px;
+  min-width: 0;
 }
 .board-link-form .input {
   flex: 1;
@@ -4638,10 +4671,15 @@ input[type="range"] {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  min-width: 0;
+}
+.board-meta-add select.select {
+  min-width: 0;
 }
 .board-meta-add-value {
   display: flex;
   gap: 6px;
+  min-width: 0;
 }
 .board-meta-add-value .input {
   flex: 1;
@@ -4650,6 +4688,7 @@ input[type="range"] {
 .board-meta-add-actions {
   display: flex;
   gap: 6px;
+  flex-wrap: wrap;
 }
 
 /* Settings: Logs */

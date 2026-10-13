@@ -228,6 +228,8 @@ export function BoardCard({
   const inheritedIds = new Set(card.inherited_meta.map((m) => m.id));
   const hasMoreMeta = allMeta.length > 3;
   const visibleMeta = metaExpanded ? allMeta : allMeta.slice(0, 3);
+  const showLinkForm = card.type === "issue" && !!onLinkPr;
+  const hasExtra = showLinkForm || card.linked_pr_ids.length > 0 || visibleMeta.length > 0 || hasMoreMeta || adding;
 
   const borderSide = useSettingsStore((s) => s.boardStatusBorderSide);
   const status = prStatus(card);
@@ -272,86 +274,102 @@ export function BoardCard({
         <button className="board-card-link board-card-repo" onClick={onOpenRepo} title="Open repository">
           <RepoName name={card.repo} />
         </button>
-        <span className="cr-spacer" />
-        <span className="board-card-when faint" title={card.updated_at}>
-          {timeAgo(card.updated_at)}
-        </span>
       </div>
 
       <div className="board-card-actions">
         {onOpenReview && (
-          <button className="btn btn-sm btn-primary" disabled={busy || reviewBusy} onClick={onOpenReview}>
-            <Icon name="review" size={13} /> {card.existing_review_id != null ? "Resume review" : "Create review"}
+          <button
+            className="btn btn-sm btn-primary board-card-action-btn"
+            disabled={busy || reviewBusy}
+            onClick={onOpenReview}
+            title={card.existing_review_id != null ? "Resume review" : "Create review"}
+          >
+            <Icon name="review" size={13} /> <span className="board-card-action-label">Review</span>
           </button>
         )}
         {onOpenVscode && (
-          <button className="btn btn-sm" disabled={busy || vscodeBusy} onClick={onOpenVscode}>
-            <Icon name="code" size={13} /> VSCode
+          <button
+            className="btn btn-sm board-card-action-btn"
+            disabled={busy || vscodeBusy}
+            onClick={onOpenVscode}
+            title="Open in VSCode"
+          >
+            <Icon name="code" size={13} /> <span className="board-card-action-label">VSCode</span>
           </button>
         )}
         {onDiscard && (
-          <button className="btn btn-sm btn-ghost" disabled={busy} onClick={discard}>
-            <Icon name="trash" size={13} /> Discard
+          <button className="btn btn-sm btn-ghost board-card-action-btn" disabled={busy} onClick={discard} title="Discard">
+            <Icon name="trash" size={13} /> <span className="board-card-action-label">Discard</span>
           </button>
         )}
       </div>
 
-      <div className="board-card-extra">
-        {card.type === "issue" && onLinkPr && (
-          <form className="board-link-form" onSubmit={submitLink}>
-            <input
-              className="input"
-              placeholder="PR URL or owner/repo#n"
-              value={linkInput}
-              onChange={(e) => setLinkInput(e.target.value)}
-            />
-            <button type="submit" className="btn btn-sm">
-              Link
-            </button>
-          </form>
-        )}
-
-        {card.linked_pr_ids.length > 0 && (
-          <div className="board-links">
-            {card.linked_pr_ids.map((prId) => (
-              <span key={prId} className="chip">
-                linked PR
-                {onUnlink && (
-                  <button className="btn-icon" title="Unlink" onClick={() => onUnlink(prId)}>
-                    <Icon name="x" size={10} />
-                  </button>
-                )}
-              </span>
-            ))}
-          </div>
-        )}
-
-        {visibleMeta.length > 0 && (
-          <div className="board-meta-list">
-            {visibleMeta.map((m) => (
-              <MetaRow key={m.id} meta={m} inherited={inheritedIds.has(m.id)} onDelete={() => onDeleteMeta(m.id)} />
-            ))}
-          </div>
-        )}
-
-        <div className="board-card-meta-actions">
-          {hasMoreMeta && (
-            <button
-              className="btn-icon"
-              title={metaExpanded ? "Show fewer" : `Show ${allMeta.length - 3} more`}
-              onClick={() => setMetaExpanded((v) => !v)}
-            >
-              <Icon name="chev" size={12} className={metaExpanded ? "board-card-chev-open" : undefined} />
-            </button>
+      {hasExtra && (
+        <div className="board-card-extra">
+          {showLinkForm && (
+            <form className="board-link-form" onSubmit={submitLink}>
+              <input
+                className="input"
+                placeholder="PR URL or owner/repo#n"
+                value={linkInput}
+                onChange={(e) => setLinkInput(e.target.value)}
+              />
+              <button type="submit" className="btn btn-sm">
+                Link
+              </button>
+            </form>
           )}
-          {adding ? (
-            <AddMetaForm tags={tags} onAdd={onAddMeta} onClose={() => setAdding(false)} />
-          ) : (
-            <button className="btn-icon" title="Add metadata" onClick={() => setAdding(true)}>
-              <Icon name="plus" size={13} />
-            </button>
+
+          {card.linked_pr_ids.length > 0 && (
+            <div className="board-links">
+              {card.linked_pr_ids.map((prId) => (
+                <span key={prId} className="chip">
+                  linked PR
+                  {onUnlink && (
+                    <button className="btn-icon" title="Unlink" onClick={() => onUnlink(prId)}>
+                      <Icon name="x" size={10} />
+                    </button>
+                  )}
+                </span>
+              ))}
+            </div>
+          )}
+
+          {visibleMeta.length > 0 && (
+            <div className="board-meta-list">
+              {visibleMeta.map((m) => (
+                <MetaRow key={m.id} meta={m} inherited={inheritedIds.has(m.id)} onDelete={() => onDeleteMeta(m.id)} />
+              ))}
+            </div>
+          )}
+
+          {(hasMoreMeta || adding) && (
+            <div className="board-card-meta-actions">
+              {hasMoreMeta && (
+                <button
+                  className="btn-icon"
+                  title={metaExpanded ? "Show fewer" : `Show ${allMeta.length - 3} more`}
+                  onClick={() => setMetaExpanded((v) => !v)}
+                >
+                  <Icon name="chev" size={12} className={metaExpanded ? "board-card-chev-open" : undefined} />
+                </button>
+              )}
+              {adding && <AddMetaForm tags={tags} onAdd={onAddMeta} onClose={() => setAdding(false)} />}
+            </div>
           )}
         </div>
+      )}
+
+      <div className="board-card-bottom-row">
+        {!adding && (
+          <button className="btn-icon board-card-add-meta" title="Add metadata" onClick={() => setAdding(true)}>
+            <Icon name="plus" size={13} />
+          </button>
+        )}
+        <span className="cr-spacer" />
+        <span className="board-card-when faint" title={`Last updated ${card.updated_at}`}>
+          {timeAgo(card.updated_at)}
+        </span>
       </div>
     </div>
   );
