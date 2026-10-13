@@ -171,6 +171,8 @@ export const api = {
     invoke<Repository>("link_local_path", { repoId, path }),
   autoLinkRepos: (basePaths: string[]) =>
     invoke<number>("auto_link_repos", { basePaths }),
+  setRepositoryFriendlyName: (repoId: number, friendlyName: string | null) =>
+    invoke<Repository>("set_repository_friendly_name", { repoId, friendlyName }),
 
   // Kanban board
   boardRefresh: () => invoke<BoardRefreshResult>("board_refresh"),

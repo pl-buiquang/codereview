@@ -998,6 +998,7 @@ function ReviewHeader({
       ? githubPrUrl(detail.remote_owner, detail.remote_name, target.github_pr_number)
       : null;
   const sourceRepo = owner && name ? `${owner}/${name}` : null;
+  const displayRepo = detail.friendly_name?.trim() || sourceRepo;
 
   return (
     <header className="review-header">
@@ -1019,7 +1020,7 @@ function ReviewHeader({
                   title={`Open ${sourceRepo}`}
                   onClick={() => openRepo(detail.target.repo_id)}
                 >
-                  {sourceRepo}
+                  {displayRepo}
                 </button>
               )}
               {prNumber != null && prUrl ? (

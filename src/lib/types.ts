@@ -5,6 +5,7 @@ export interface Repository {
   remote_name: string | null;
   default_branch: string | null;
   added_at: string;
+  friendly_name: string | null;
 }
 
 export interface Branch {
@@ -84,6 +85,7 @@ export interface ReviewDetail {
   local_path: string | null;
   remote_owner: string | null;
   remote_name: string | null;
+  friendly_name: string | null;
   comments: Comment[];
   viewed_files: string[];
 }

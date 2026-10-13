@@ -147,6 +147,30 @@ pub fn diff_refs(
     git::diff(Path::new(&path), &base, &head, three_dot)
 }
 
+/// Set (or clear, when blank) a repository's user-facing display name.
+pub fn set_repository_friendly_name_impl(
+    conn: &Connection,
+    repo_id: i64,
+    friendly_name: Option<String>,
+) -> AppResult<Repository> {
+    let trimmed = friendly_name.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    conn.execute(
+        "UPDATE repository SET friendly_name = ?1 WHERE id = ?2",
+        params![trimmed, repo_id],
+    )?;
+    get_repository(conn, repo_id)
+}
+
+#[tauri::command]
+pub fn set_repository_friendly_name(
+    repo_id: i64,
+    friendly_name: Option<String>,
+    db: State<Db>,
+) -> AppResult<Repository> {
+    let conn = db.0.lock().unwrap();
+    set_repository_friendly_name_impl(&conn, repo_id, friendly_name)
+}
+
 /// Manually link a local git clone to an existing remote-only repository row.
 #[tauri::command]
 pub fn link_local_path(repo_id: i64, path: String, db: State<Db>) -> AppResult<Repository> {
@@ -294,5 +318,22 @@ mod tests {
     fn get_repository_by_local_path_errors_when_missing() {
         let conn = open_memory();
         assert!(get_repository_by_local_path(&conn, "/absent").is_err());
+    }
+
+    #[test]
+    fn friendly_name_set_and_cleared() {
+        let conn = open_memory();
+        let repo = upsert_repository(&conn, "/repo", None, None, None).unwrap();
+
+        let named = set_repository_friendly_name_impl(&conn, repo.id, Some("  Widget  ".into()))
+            .unwrap();
+        assert_eq!(named.friendly_name.as_deref(), Some("Widget"));
+
+        let blanked = set_repository_friendly_name_impl(&conn, repo.id, Some("   ".into()))
+            .unwrap();
+        assert_eq!(blanked.friendly_name, None);
+
+        let cleared = set_repository_friendly_name_impl(&conn, repo.id, None).unwrap();
+        assert_eq!(cleared.friendly_name, None);
     }
 }

@@ -4,6 +4,7 @@ import { api } from "../lib/api";
 import { toast } from "../lib/toast";
 import { confirmDialog } from "../lib/confirm";
 import { BOARD_POLL_OPTIONS, parseRepoBasePaths, useSettingsStore } from "../lib/settings";
+import { findRepoByFullName } from "../lib/repoLabel";
 import { useUIStore } from "../store";
 import type { BoardCard as BoardCardT, BoardLane, BoardMetaKind } from "../lib/types";
 import { BoardCard, prStatus, prStatusLabel } from "./BoardCard";
@@ -50,9 +51,7 @@ export function BoardView() {
   const repositoriesQuery = useQuery({ queryKey: ["repositories"], queryFn: api.listRepositories });
 
   const openCardRepo = (repo: string) => {
-    const match = repositoriesQuery.data?.find(
-      (r) => r.remote_owner && r.remote_name && `${r.remote_owner}/${r.remote_name}`.toLowerCase() === repo.toLowerCase(),
-    );
+    const match = findRepoByFullName(repositoriesQuery.data ?? [], repo);
     if (match) openRepo(match.id);
     else {
       api.openUrl(`https://github.com/${repo}`).catch(onErr);

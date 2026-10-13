@@ -28,6 +28,7 @@ const repo: Repository = {
   remote_name: "w",
   default_branch: "main",
   added_at: "",
+  friendly_name: null,
 };
 const SHA = "f".repeat(40);
 const PARENT = "e".repeat(40);

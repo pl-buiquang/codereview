@@ -37,6 +37,7 @@ const repo: Repository = {
   remote_name: "widget",
   default_branch: "main",
   added_at: "2026-01-01",
+  friendly_name: null,
 };
 
 const pr: PrSummary = {

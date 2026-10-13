@@ -815,7 +815,7 @@ pub fn list_reviews_impl(conn: &Connection, repo_id: Option<i64>) -> AppResult<V
     for review in reviews {
         let target = get_target(conn, review.target_id)?;
         let (repo_id_v, label): (i64, String) = conn.query_row(
-            "SELECT id, COALESCE(remote_owner || '/' || remote_name, local_path, 'unknown') FROM repository WHERE id = ?1",
+            "SELECT id, COALESCE(friendly_name, remote_owner || '/' || remote_name, local_path, 'unknown') FROM repository WHERE id = ?1",
             params![target.repo_id],
             |r| Ok((r.get(0)?, r.get(1)?)),
         )?;
@@ -841,10 +841,11 @@ pub fn list_reviews(repo_id: Option<i64>, db: State<Db>) -> AppResult<Vec<Review
     list_reviews_impl(&conn, repo_id)
 }
 
-/// Human-friendly repo label: `owner/name` if known, else the local path.
+/// Human-friendly repo label: the user-set friendly name if any, else
+/// `owner/name` if known, else the local path.
 pub fn repo_label(conn: &Connection, repo_id: i64) -> AppResult<String> {
     conn.query_row(
-        "SELECT COALESCE(remote_owner || '/' || remote_name, local_path, 'unknown') FROM repository WHERE id = ?1",
+        "SELECT COALESCE(friendly_name, remote_owner || '/' || remote_name, local_path, 'unknown') FROM repository WHERE id = ?1",
         params![repo_id],
         |r| r.get(0),
     )
@@ -855,12 +856,16 @@ pub fn repo_label(conn: &Connection, repo_id: i64) -> AppResult<String> {
 pub fn load_detail(conn: &Connection, review_id: i64) -> AppResult<ReviewDetail> {
     let review = get_review_row(conn, review_id)?;
     let target = get_target(conn, review.target_id)?;
-    let (local_path, remote_owner, remote_name): (Option<String>, Option<String>, Option<String>) =
-        conn.query_row(
-            "SELECT local_path, remote_owner, remote_name FROM repository WHERE id = ?1",
-            params![target.repo_id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-        )?;
+    let (local_path, remote_owner, remote_name, friendly_name): (
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    ) = conn.query_row(
+        "SELECT local_path, remote_owner, remote_name, friendly_name FROM repository WHERE id = ?1",
+        params![target.repo_id],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+    )?;
     let comments: Vec<Comment> = {
         let mut stmt = conn.prepare(
             "SELECT * FROM comment WHERE review_id = ?1 ORDER BY file_path, line, created_at",
@@ -884,6 +889,7 @@ pub fn load_detail(conn: &Connection, review_id: i64) -> AppResult<ReviewDetail>
         local_path,
         remote_owner,
         remote_name,
+        friendly_name,
         comments,
         viewed_files,
     })
@@ -2998,6 +3004,18 @@ mod tests {
     }
 
     #[test]
+    fn repo_label_prefers_friendly_name_over_owner_name() {
+        let conn = open_memory();
+        let with_remote = seed_repo(&conn, Some("acme"), Some("widget"));
+        conn.execute(
+            "UPDATE repository SET friendly_name = 'Widget' WHERE id = ?1",
+            params![with_remote],
+        )
+        .unwrap();
+        assert_eq!(repo_label(&conn, with_remote).unwrap(), "Widget");
+    }
+
+    #[test]
     fn remote_repository_creates_remote_only_then_reuses() {
         let conn = open_memory();
 
@@ -3097,6 +3115,7 @@ mod tests {
             local_path: Some("/repo".into()),
             remote_owner: Some("owner".into()),
             remote_name: Some("name".into()),
+            friendly_name: None,
             comments,
             viewed_files: vec![],
         }

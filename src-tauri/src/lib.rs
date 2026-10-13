@@ -160,6 +160,7 @@ pub fn run() {
             commands::repo::diff_refs,
             commands::repo::link_local_path,
             commands::repo::auto_link_repos,
+            commands::repo::set_repository_friendly_name,
             commands::focus::focus_hunks,
             commands::focus::get_focus,
             commands::focus::set_focus_plan,

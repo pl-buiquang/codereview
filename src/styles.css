@@ -3412,6 +3412,22 @@ input[type="range"] {
   font-family: var(--font-mono);
   font-size: 15px;
   font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.repo-title-edit {
+  color: var(--text-3);
+}
+.repo-title-edit:hover {
+  color: var(--accent);
+  background: var(--surface-2);
+}
+.repo-title-input {
+  font-family: var(--font-mono);
+  font-size: 15px;
+  font-weight: 600;
+  min-width: 280px;
 }
 .repo-body {
   flex: 1;

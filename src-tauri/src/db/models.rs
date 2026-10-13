@@ -9,6 +9,8 @@ pub struct Repository {
     pub remote_name: Option<String>,
     pub default_branch: Option<String>,
     pub added_at: String,
+    /// User-set display name, shown instead of owner/name wherever the repo is listed.
+    pub friendly_name: Option<String>,
 }
 
 impl Repository {
@@ -20,6 +22,7 @@ impl Repository {
             remote_name: row.get("remote_name")?,
             default_branch: row.get("default_branch")?,
             added_at: row.get("added_at")?,
+            friendly_name: row.get("friendly_name")?,
         })
     }
 
@@ -225,6 +228,8 @@ pub struct ReviewDetail {
     /// build the PR's web URL for the "Open PR" action.
     pub remote_owner: Option<String>,
     pub remote_name: Option<String>,
+    /// User-set display name for the repo, if any — preferred over owner/name.
+    pub friendly_name: Option<String>,
     pub comments: Vec<Comment>,
     /// File paths the user has marked "viewed" (collapsed) for this review.
     pub viewed_files: Vec<String>,

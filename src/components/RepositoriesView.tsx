@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, pickFolder } from "../lib/api";
 import { toast } from "../lib/toast";
 import { confirmDialog } from "../lib/confirm";
-import { repoLabel } from "../lib/repoLabel";
+import { repoLabel, repoDisplayName } from "../lib/repoLabel";
 import { useUIStore } from "../store";
 import type { Repository } from "../lib/types";
 import { Icon } from "./icons";
@@ -106,7 +106,9 @@ export function RepositoriesView() {
               <Icon name="repo" size={16} />
             </span>
             <div className="repo-row-main">
-              <span className="repo-row-name">{repoLabel(repo)}</span>
+              <span className="repo-row-name" title={repoLabel(repo)}>
+                {repoDisplayName(repo)}
+              </span>
               <span className="repo-row-path" title={repo.local_path ?? undefined}>
                 {repo.local_path ?? <em className="muted">No local clone</em>}
               </span>

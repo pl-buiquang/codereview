@@ -325,6 +325,7 @@ mod tests {
             local_path: Some("/repo".into()),
             remote_owner: Some("owner".into()),
             remote_name: Some("name".into()),
+            friendly_name: None,
             comments,
             viewed_files: vec![],
         }

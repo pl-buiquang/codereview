@@ -41,6 +41,7 @@ export type IconName =
   | "board"
   | "code"
   | "trash"
+  | "edit"
   | "dot";
 
 const STROKE: Record<Exclude<IconName, "dot">, ReactNode> = {
@@ -184,6 +185,12 @@ const STROKE: Record<Exclude<IconName, "dot">, ReactNode> = {
       <path d="M3 4.5h10M6.5 4.5V3a1 1 0 0 1 1-1h1a1 1 0 0 1 1 1v1.5" />
       <path d="M4.2 4.5 5 13.5h6l.8-9" />
       <path d="M6.5 7.2v4M9.5 7.2v4" />
+    </>
+  ),
+  edit: (
+    <>
+      <path d="M10.5 2.5 13.5 5.5 5.5 13.5H2.5V10.5Z" />
+      <path d="M9 4 11 6" />
     </>
   ),
 };

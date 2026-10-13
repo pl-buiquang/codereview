@@ -5,6 +5,7 @@ import { toast } from "../lib/toast";
 import { confirmDialog } from "../lib/confirm";
 import { PR_LIST_POLL_OPTIONS, useSettingsStore, parseRepoBasePaths } from "../lib/settings";
 import { timeAgo } from "../lib/timeAgo";
+import { repoLabel, repoDisplayName } from "../lib/repoLabel";
 import { GraphView } from "./graph/GraphView";
 import { OpenPrButton } from "./OpenPrButton";
 import { Icon } from "./icons";
@@ -19,6 +20,27 @@ export function RepoView({ repo }: { repo: Repository }) {
   const openReview = useUIStore((s) => s.openReview);
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<Tab>(repo.local_path ? "graph" : "prs");
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState("");
+
+  const setFriendlyName = useMutation({
+    mutationFn: (friendlyName: string | null) => api.setRepositoryFriendlyName(repo.id, friendlyName),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["repositories"] }),
+    onError: (e) => toast.error(`Could not rename repository:\n${String(e)}`),
+  });
+
+  const fullName = repoLabel(repo);
+
+  const startEditingName = () => {
+    setNameDraft(repo.friendly_name ?? "");
+    setEditingName(true);
+  };
+
+  const commitName = () => {
+    setEditingName(false);
+    const trimmed = nameDraft.trim() || null;
+    if (trimmed !== (repo.friendly_name ?? null)) setFriendlyName.mutate(trimmed);
+  };
 
   const reviewsQuery = useQuery({
     queryKey: ["reviews", repo.id],
@@ -36,11 +58,27 @@ export function RepoView({ repo }: { repo: Repository }) {
   return (
     <section className="cr-main">
       <header className="cr-pagehead">
-        <h1 className="cr-h1 repo-title">
-          {repo.remote_owner && repo.remote_name
-            ? `${repo.remote_owner}/${repo.remote_name}`
-            : repo.local_path ?? "Repository"}
-        </h1>
+        {editingName ? (
+          <input
+            className="input repo-title-input"
+            value={nameDraft}
+            placeholder={fullName}
+            autoFocus
+            onChange={(e) => setNameDraft(e.target.value)}
+            onBlur={commitName}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+              else if (e.key === "Escape") setEditingName(false);
+            }}
+          />
+        ) : (
+          <h1 className="cr-h1 repo-title" title={fullName}>
+            {repoDisplayName(repo)}
+            <button className="btn-icon repo-title-edit" title="Rename repository" onClick={startEditingName}>
+              <Icon name="edit" size={13} />
+            </button>
+          </h1>
+        )}
       </header>
 
       <div className="cr-tabs">

@@ -37,6 +37,7 @@ const repo = (over: Partial<Repository> = {}): Repository => ({
   remote_name: null,
   default_branch: "main",
   added_at: "2026-01-01",
+  friendly_name: null,
   ...over,
 });
 
