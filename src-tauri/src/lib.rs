@@ -106,6 +106,7 @@ pub fn run() {
                 std::fs::create_dir_all(parent)?;
             }
             let conn = db::open(&db_path)?;
+            commands::focus::fail_interrupted(&conn)?;
             app.manage(Db(Mutex::new(conn)));
 
             // Handle deep links delivered while the app is already running
@@ -129,6 +130,15 @@ pub fn run() {
             commands::repo::diff_refs,
             commands::repo::link_local_path,
             commands::repo::auto_link_repos,
+            commands::focus::focus_hunks,
+            commands::focus::get_focus,
+            commands::focus::set_focus_plan,
+            commands::focus::set_focus_level,
+            commands::focus::set_hunk_override,
+            commands::focus::set_file_override,
+            commands::focus::adopt_focus_note,
+            commands::focus::dismiss_focus_note,
+            commands::focus::clear_focus,
             commands::review::create_review,
             commands::review::list_reviews,
             commands::review::get_review,

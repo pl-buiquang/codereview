@@ -190,6 +190,22 @@ pub fn diff_shas(repo: &Path, old_sha: &str, new_sha: &str) -> AppResult<String>
     diff(repo, old_sha, new_sha, false)
 }
 
+/// The subset of `paths` that `.gitattributes` marks `linguist-generated`.
+pub fn linguist_generated(repo: &Path, paths: &[&str]) -> AppResult<Vec<String>> {
+    if paths.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut args = vec!["check-attr", "-z", "linguist-generated", "--"];
+    args.extend_from_slice(paths);
+    let out = run_git(repo, &args)?;
+    let fields: Vec<&str> = out.split('\0').collect();
+    Ok(fields
+        .chunks(3)
+        .filter(|c| c.len() == 3 && matches!(c[2], "set" | "true"))
+        .map(|c| c[0].to_string())
+        .collect())
+}
+
 /// Two-dot diff scoped to a single file, so the diff parser only sees one file.
 pub fn diff_shas_path(
     repo: &Path,
@@ -297,6 +313,17 @@ mod tests {
         git(p, &["commit", "-q", "-am", "add line3"]);
         git(p, &["checkout", "-q", "main"]);
         dir
+    }
+
+    #[test]
+    fn linguist_generated_reads_gitattributes() {
+        let dir = fixture_repo();
+        let p = dir.path();
+        fs::write(p.join(".gitattributes"), "gen/** linguist-generated\nx.pb.go linguist-generated=true\n")
+            .unwrap();
+        let got = linguist_generated(p, &["gen/a.ts", "x.pb.go", "file.txt"]).unwrap();
+        assert_eq!(got, ["gen/a.ts", "x.pb.go"]);
+        assert!(linguist_generated(p, &[]).unwrap().is_empty());
     }
 
     /// Build a repo with two linear commits on `main`. H1 has a few lines; H2
