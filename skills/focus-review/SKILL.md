@@ -15,7 +15,9 @@ Focus is a lens over a normal CodeReview review. You classify hunks; the app
 hides the low tiers behind one-click bars and lists them in a digest. Nothing you
 write is published to GitHub. Tiers, summary and notes are only a reading aid.
 
-All data goes through the `cr` CLI. You never write review comments yourself:
+All data goes through the `cr` CLI. Always put flags such as `--json` **after**
+the subcommand (`cr focus hunks 12 --json`): in app mode only commands starting
+with `cr focus`, `cr diff` or `cr show` are permitted. You never write review comments yourself:
 notes become comments only if the user clicks **Adopt** in the app.
 
 ## Modes
@@ -38,18 +40,18 @@ If `cr` is not on PATH: `cargo install --path ~/projects/codereview/src-tauri --
 
 Reuse the latest draft review on the target, so a focus lands next to any comments the user already wrote.
 
-- PR URL / `o/r#123`: `cr --json create pr <owner> <name> <number> --reuse-draft`
+- PR URL / `o/r#123`: `cr create pr <owner> <name> <number> --reuse-draft --json`
 - Branch: get the repo path (`--repo`, else `git rev-parse --show-toplevel`), then:
-  - `cr --json repo add <path>` and capture `id`;
-  - `cr --json create local <repo-id> <base> <head> --three-dot --reuse-draft`.
-- Review id: use it as-is (`cr --json show <id>` to check it exists).
+  - `cr repo add <path> --json` and capture `id`;
+  - `cr create local <repo-id> <base> <head> --three-dot --reuse-draft --json`.
+- Review id: use it as-is (`cr show <id> --json` to check it exists).
 
 Capture the review id `RID` from the `id` field.
 
 ## Step 2: Gather
 
 ```bash
-cr --json focus hunks RID
+cr focus hunks RID --json
 ```
 
 Each entry has `hunk_id`, `file_path`, `header`, `additions`, `deletions`,
@@ -107,13 +109,15 @@ or `review`.
 
 ## Step 5: Submit
 
-Pipe the plan in on stdin (this works in both modes; app mode has no file-write tool):
+Write the plan JSON to a file with the Write tool, then submit it. Don't pass JSON
+inline in a Bash command: Claude Code blocks commands that mix braces and quotes.
 
 ```bash
-cr focus set RID --level <level> --file - <<'EOF'
-{ "summary": "…", "hunks": [ … ] }
-EOF
+cr focus set RID --level <level> --file <plan.json>
 ```
+
+In terminal mode use any temp path (e.g. `/tmp/focus-RID.json`). In app mode use the
+path given in the app-mode instructions, which is the only writable location.
 
 If it reports unknown ids, the diff changed under you. Re-run Step 2 and fix the plan.
 
