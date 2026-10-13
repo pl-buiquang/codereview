@@ -21,6 +21,8 @@ on a 3-direction (Continuity / Modern / Terminal) × dark/light token-based desi
   the fetched base file's line count). Prototyped once, then reverted.
 - **Resolve / unresolve threads** — mark a comment thread resolved; collapse resolved threads.
 - **Word-level intra-line highlighting** — `markEdits` from `react-diff-view`.
+- **Focus review** — AI-tiered hunks with a level filter, a digest of what was hidden, and AI notes,
+  as an overlay on a normal review. See `specs/10-focus-review.md`.
 
 ## 2. Comment anchoring & staleness
 
