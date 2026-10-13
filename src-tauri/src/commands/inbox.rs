@@ -459,7 +459,7 @@ pub async fn open_pr_review(
             params![now(), item_id],
         )?;
     }
-    crate::commands::review::create_review_for_pr_impl(&db, &owner, &name, number, &base_paths)
+    crate::commands::review::create_review_for_pr_impl(&db, &owner, &name, number, &base_paths, false)
 }
 
 #[derive(Debug, Serialize)]

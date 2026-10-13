@@ -3,7 +3,7 @@ use std::sync::Mutex;
 
 use clap::{Parser, Subcommand};
 
-use codereview_lib::commands::{export, inbox, repo, review};
+use codereview_lib::commands::{export, focus, inbox, repo, review};
 use codereview_lib::db::{self, Db};
 use codereview_lib::db_path::resolve_db_path;
 use codereview_lib::error::AppResult;
@@ -94,6 +94,11 @@ enum Cmd {
         #[command(subcommand)]
         target: OpenTarget,
     },
+    /// Focus overlay: AI-tiered hunks shown as a filter over the review's diff
+    Focus {
+        #[command(subcommand)]
+        action: FocusAction,
+    },
     /// List GitHub review threads for a PR (for drafting replies with `cr comment draft-reply`)
     Threads {
         owner: String,
@@ -112,6 +117,9 @@ enum CreateTarget {
         /// Use three-dot diff (merge-base semantics, like GitHub PRs)
         #[arg(long)]
         three_dot: bool,
+        /// Reuse the latest draft review on this target instead of creating one
+        #[arg(long)]
+        reuse_draft: bool,
     },
     /// Create a review for a GitHub PR.
     /// Accepts either a GitHub URL (https://github.com/owner/name/pull/123)
@@ -123,8 +131,35 @@ enum CreateTarget {
         name: Option<String>,
         /// PR number (required when not using a URL)
         number: Option<i64>,
+        /// Reuse the latest draft review on this target instead of creating one
+        #[arg(long)]
+        reuse_draft: bool,
     },
 }
+
+#[derive(Subcommand)]
+enum FocusAction {
+    /// List the review's current hunks (id, file, header, +/- counts, rule tier, preview)
+    Hunks { review_id: i64 },
+    /// Print one hunk's full text (header + body)
+    Hunk { review_id: i64, hunk_id: String },
+    /// Write a focus plan, replacing any previous one (overrides are kept)
+    Set {
+        review_id: i64,
+        /// Plan JSON file ({"summary", "hunks": [{"id","tier","reason","note"}]}); "-" for stdin
+        #[arg(long)]
+        file: String,
+        /// Level to show: off, thorough, focus, or critical
+        #[arg(long)]
+        level: Option<String>,
+    },
+    /// Show the review's focus
+    Show { review_id: i64 },
+    /// Delete the review's focus
+    Clear { review_id: i64 },
+}
+
+const FOCUS_HUNK_WARN: usize = 500;
 
 #[derive(Subcommand)]
 enum CommentAction {
@@ -423,6 +458,7 @@ fn run(cmd: Cmd, json: bool, db: &Db) -> AppResult<()> {
                 base_ref,
                 head_ref,
                 three_dot,
+                reuse_draft,
             } => {
                 let conn = db.0.lock().unwrap();
                 let repos = repo::list_repositories_impl(&conn)?;
@@ -443,6 +479,7 @@ fn run(cmd: Cmd, json: bool, db: &Db) -> AppResult<()> {
                     &base_ref,
                     &head_ref,
                     three_dot,
+                    reuse_draft,
                 )?;
                 if json {
                     println!("{}", serde_json::to_string_pretty(&r)?);
@@ -454,6 +491,7 @@ fn run(cmd: Cmd, json: bool, db: &Db) -> AppResult<()> {
                 owner_or_url,
                 name,
                 number,
+                reuse_draft,
             } => {
                 let (owner, repo_name, pr_number) =
                     if owner_or_url.contains("github.com/") {
@@ -481,7 +519,7 @@ fn run(cmd: Cmd, json: bool, db: &Db) -> AppResult<()> {
                     .map(|s| s.trim().to_string())
                     .filter(|s| !s.is_empty())
                     .collect();
-                let r = review::create_review_for_pr_impl(db, &owner, &repo_name, pr_number, &base_paths)?;
+                let r = review::create_review_for_pr_impl(db, &owner, &repo_name, pr_number, &base_paths, reuse_draft)?;
                 if json {
                     println!("{}", serde_json::to_string_pretty(&r)?);
                 } else {
@@ -782,6 +820,8 @@ fn run(cmd: Cmd, json: bool, db: &Db) -> AppResult<()> {
             }
         },
 
+        Cmd::Focus { action } => run_focus(action, json, db)?,
+
         Cmd::Threads {
             owner,
             name,
@@ -814,6 +854,120 @@ fn run(cmd: Cmd, json: bool, db: &Db) -> AppResult<()> {
         }
     }
     Ok(())
+}
+
+fn run_focus(action: FocusAction, json: bool, db: &Db) -> AppResult<()> {
+    let conn = db.0.lock().unwrap();
+    match action {
+        FocusAction::Hunks { review_id } => {
+            let hunks = focus::focus_hunks_impl(&conn, review_id)?;
+            if hunks.len() > FOCUS_HUNK_WARN {
+                eprintln!(
+                    "warning: {} hunks — consider tiering by file and fetching only what you need",
+                    hunks.len()
+                );
+            }
+            if json {
+                println!("{}", serde_json::to_string_pretty(&hunks)?);
+                return Ok(());
+            }
+            for h in &hunks {
+                let rule = match (&h.rule_tier, &h.rule_reason) {
+                    (Some(t), Some(r)) => format!("  [{t}: {r}]"),
+                    _ => String::new(),
+                };
+                let header = if h.header.is_empty() { "(no hunks)" } else { &h.header };
+                println!(
+                    "{}  {}  {}  +{} -{}{rule}",
+                    h.hunk_id, h.file_path, header, h.additions, h.deletions
+                );
+                for l in &h.preview {
+                    println!("    {l}");
+                }
+            }
+        }
+        FocusAction::Hunk { review_id, hunk_id } => {
+            println!("{}", focus::focus_hunk_text_impl(&conn, review_id, &hunk_id)?);
+        }
+        FocusAction::Set {
+            review_id,
+            file,
+            level,
+        } => {
+            let raw = if file == "-" {
+                std::io::read_to_string(std::io::stdin())?
+            } else {
+                std::fs::read_to_string(&file)?
+            };
+            let plan: focus::Plan = serde_json::from_str(&raw)?;
+            let view = focus::set_focus_plan_impl(&conn, review_id, plan, level.as_deref())?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&view)?);
+            } else {
+                println!(
+                    "Focus set on review #{review_id}: {} hunks, level {}",
+                    view.hunks.len(),
+                    view.focus.level
+                );
+                print_tier_counts(&view.hunks);
+            }
+        }
+        FocusAction::Show { review_id } => {
+            let view = focus::get_focus_impl(&conn, review_id)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&view)?);
+                return Ok(());
+            }
+            let Some(view) = view else {
+                println!("Review #{review_id} has no focus.");
+                return Ok(());
+            };
+            let f = &view.focus;
+            println!("Focus on review #{review_id}");
+            println!("Status: {}", f.status);
+            if let Some(e) = &f.error {
+                println!("Error:  {e}");
+            }
+            println!("Level:  {}", f.level);
+            if let Some(m) = &f.model {
+                println!("Model:  {m}");
+            }
+            println!(
+                "Head:   {}{}",
+                f.head_sha.as_deref().unwrap_or("-"),
+                if view.stale { " (stale: head or base moved)" } else { "" }
+            );
+            if let Some(s) = &f.summary {
+                println!("\n## Summary\n{s}");
+            }
+            println!();
+            print_tier_counts(&view.hunks);
+            for h in view.hunks.iter().filter(|h| h.note.is_some() && !h.note_dismissed) {
+                println!(
+                    "\n  [{}] {} {} ({})\n        {}",
+                    h.hunk_id,
+                    h.file_path,
+                    h.header,
+                    h.tier,
+                    h.note.as_deref().unwrap_or("")
+                );
+            }
+        }
+        FocusAction::Clear { review_id } => {
+            focus::clear_focus_impl(&conn, review_id)?;
+            println!("Cleared focus on review #{review_id}");
+        }
+    }
+    Ok(())
+}
+
+fn print_tier_counts(hunks: &[focus::FocusEntry]) {
+    let counts: Vec<String> = focus::TIERS
+        .iter()
+        .rev()
+        .map(|t| format!("{t}: {}", hunks.iter().filter(|h| h.tier == *t).count()))
+        .collect();
+    println!("{}", counts.join("  "));
 }
 
 fn truncate(s: &str, max: usize) -> String {

@@ -575,7 +575,25 @@ fn new_review_for_target(conn: &Connection, target_id: i64) -> AppResult<Review>
     get_review_row(conn, conn.last_insert_rowid())
 }
 
-/// Start a fresh draft review for a local virtual PR (creating/reusing its target).
+/// The most recently updated draft review on a target, else a fresh one.
+fn review_for_target(conn: &Connection, target_id: i64, reuse_draft: bool) -> AppResult<Review> {
+    if reuse_draft {
+        let existing: Option<i64> = conn
+            .query_row(
+                "SELECT id FROM review WHERE target_id = ?1 AND status = 'draft'
+                 ORDER BY updated_at DESC, id DESC LIMIT 1",
+                params![target_id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if let Some(id) = existing {
+            return get_review_row(conn, id);
+        }
+    }
+    new_review_for_target(conn, target_id)
+}
+
+/// Start a draft review for a local virtual PR (creating/reusing its target).
 pub fn create_review_impl(
     conn: &Connection,
     repo_id: i64,
@@ -583,10 +601,11 @@ pub fn create_review_impl(
     base_ref: &str,
     head_ref: &str,
     three_dot: bool,
+    reuse_draft: bool,
 ) -> AppResult<Review> {
     let target =
         get_or_create_local_target(conn, repo_id, repo_path, base_ref, head_ref, three_dot)?;
-    new_review_for_target(conn, target.id)
+    review_for_target(conn, target.id, reuse_draft)
 }
 
 #[tauri::command]
@@ -608,7 +627,7 @@ pub fn create_review(
     let repo_path = local_path.ok_or_else(|| {
         AppError::Other("creating a local review requires a local clone".into())
     })?;
-    create_review_impl(&conn, repo_id, &repo_path, &base_ref, &head_ref, three_dot)
+    create_review_impl(&conn, repo_id, &repo_path, &base_ref, &head_ref, three_dot, false)
 }
 
 /// Start a fresh draft review against a real GitHub PR (creating/reusing its
@@ -621,6 +640,7 @@ pub fn create_review_for_pr_impl(
     name: &str,
     pr_number: i64,
     base_paths: &[String],
+    reuse_draft: bool,
 ) -> AppResult<Review> {
     let (repo_id, ctx) = {
         let conn = db.0.lock().unwrap();
@@ -634,7 +654,7 @@ pub fn create_review_for_pr_impl(
         .ok();
     let conn = db.0.lock().unwrap();
     let target = get_or_create_pr_target(&conn, repo_id, pr_number, &info, merge_base.as_deref())?;
-    new_review_for_target(&conn, target.id)
+    review_for_target(&conn, target.id, reuse_draft)
 }
 
 #[tauri::command]
@@ -645,7 +665,7 @@ pub fn create_review_for_pr(
     base_paths: Vec<String>,
     db: State<Db>,
 ) -> AppResult<Review> {
-    create_review_for_pr_impl(&db, &owner, &name, pr_number, &base_paths)
+    create_review_for_pr_impl(&db, &owner, &name, pr_number, &base_paths, false)
 }
 
 /// The diff for a review's target: GitHub PR diff via `gh`, or a local
@@ -2286,6 +2306,23 @@ mod tests {
         assert_eq!(review.status, "draft");
         assert_eq!(review.body, "");
         assert!(review.event.is_none());
+    }
+
+    #[test]
+    fn review_for_target_reuses_latest_draft_only_when_asked() {
+        let conn = open_memory();
+        let repo = seed_repo(&conn, None, None);
+        let target =
+            get_or_create_local_target(&conn, repo, "/nope", "main", "feature", true).unwrap();
+
+        let fresh = review_for_target(&conn, target.id, true).unwrap();
+        let second = review_for_target(&conn, target.id, false).unwrap();
+        assert_ne!(fresh.id, second.id);
+        assert_eq!(review_for_target(&conn, target.id, true).unwrap().id, second.id);
+
+        conn.execute("UPDATE review SET status = 'published' WHERE id = ?1", params![second.id])
+            .unwrap();
+        assert_eq!(review_for_target(&conn, target.id, true).unwrap().id, fresh.id);
     }
 
     #[test]
