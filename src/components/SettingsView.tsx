@@ -7,6 +7,7 @@ import {
   importSettings,
   parseRepoBasePaths,
   useSettingsStore,
+  type BoardBorderSide,
   type ThemeMode,
 } from "../lib/settings";
 import { DEFAULT_CONFIG_PATTERNS, DEFAULT_TEST_PATTERNS } from "../lib/fileCategory";
@@ -208,11 +209,13 @@ function GeneralSection() {
   const setDefaultThreeDot = useSettingsStore((s) => s.setDefaultThreeDot);
   const chatModel = useSettingsStore((s) => s.chatModel);
   const markEdits = useSettingsStore((s) => s.markEdits);
+  const boardStatusBorderSide = useSettingsStore((s) => s.boardStatusBorderSide);
   const setBotLogins = useSettingsStore((s) => s.setBotLogins);
   const setRepoStripPrefixes = useSettingsStore((s) => s.setRepoStripPrefixes);
   const setRepoBasePaths = useSettingsStore((s) => s.setRepoBasePaths);
   const setChatModel = useSettingsStore((s) => s.setChatModel);
   const setMarkEdits = useSettingsStore((s) => s.setMarkEdits);
+  const setBoardStatusBorderSide = useSettingsStore((s) => s.setBoardStatusBorderSide);
   const fileTestPatterns = useSettingsStore((s) => s.fileTestPatterns);
   const fileConfigPatterns = useSettingsStore((s) => s.fileConfigPatterns);
   const setFileTestPatterns = useSettingsStore((s) => s.setFileTestPatterns);
@@ -322,6 +325,23 @@ function GeneralSection() {
             checked={markEdits}
             onChange={(e) => setMarkEdits(e.target.checked)}
           />
+        </label>
+      </section>
+
+      <section className="settings-group">
+        <h3>Board</h3>
+        <label className="settings-row">
+          <span>PR status border side</span>
+          <select
+            className="select"
+            value={boardStatusBorderSide}
+            onChange={(e) => setBoardStatusBorderSide(e.target.value as BoardBorderSide)}
+          >
+            <option value="top">Top</option>
+            <option value="right">Right</option>
+            <option value="bottom">Bottom</option>
+            <option value="left">Left</option>
+          </select>
         </label>
       </section>
 

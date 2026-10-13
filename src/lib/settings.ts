@@ -6,6 +6,8 @@ import { DEFAULT_CONFIG_PATTERNS, DEFAULT_TEST_PATTERNS } from "./fileCategory";
 export type ThemeMode = "dark" | "light" | "system";
 export type ThemeBase = "dark" | "light";
 export type DiffViewType = "split" | "unified";
+/** Which edge of a board card shows the PR-status color. */
+export type BoardBorderSide = "left" | "right" | "top" | "bottom";
 
 export const DEFAULT_DIFF_FONT_SIZE = 12.5;
 
@@ -43,6 +45,7 @@ type PersistedSettings = Pick<
   | "prListPollMs"
   | "inboxPollMs"
   | "boardPollMs"
+  | "boardStatusBorderSide"
   | "chatModel"
   | "markEdits"
   | "fileTestPatterns"
@@ -61,6 +64,7 @@ const DEFAULTS: PersistedSettings = {
   prListPollMs: 0,
   inboxPollMs: 0,
   boardPollMs: 0,
+  boardStatusBorderSide: "top",
   chatModel: "",
   markEdits: false,
   fileTestPatterns: DEFAULT_TEST_PATTERNS,
@@ -89,6 +93,8 @@ interface SettingsState {
   inboxPollMs: number;
   /** Board auto-refresh interval in ms; 0 = off. */
   boardPollMs: number;
+  /** Which edge of a board card shows the PR-status color. */
+  boardStatusBorderSide: BoardBorderSide;
   /** Highlight intra-line character-level changes (markEdits). */
   markEdits: boolean;
   /** Model passed to `claude -p --model`. Empty = use env default (opus). */
@@ -108,6 +114,7 @@ interface SettingsState {
   setPrListPollMs: (ms: number) => void;
   setInboxPollMs: (ms: number) => void;
   setBoardPollMs: (ms: number) => void;
+  setBoardStatusBorderSide: (side: BoardBorderSide) => void;
   setChatModel: (s: string) => void;
   setMarkEdits: (b: boolean) => void;
   setFileTestPatterns: (s: string) => void;
@@ -129,6 +136,7 @@ export const useSettingsStore = create<SettingsState>()(
       setPrListPollMs: (prListPollMs) => set({ prListPollMs }),
       setInboxPollMs: (inboxPollMs) => set({ inboxPollMs }),
       setBoardPollMs: (boardPollMs) => set({ boardPollMs }),
+      setBoardStatusBorderSide: (boardStatusBorderSide) => set({ boardStatusBorderSide }),
       setChatModel: (chatModel) => set({ chatModel }),
       setMarkEdits: (markEdits) => set({ markEdits }),
       setFileTestPatterns: (fileTestPatterns) => set({ fileTestPatterns }),
@@ -156,6 +164,7 @@ export const useSettingsStore = create<SettingsState>()(
           prListPollMs: (p.prListPollMs as number) ?? 0,
           inboxPollMs: (p.inboxPollMs as number) ?? 0,
           boardPollMs: (p.boardPollMs as number) ?? 0,
+          boardStatusBorderSide: (p.boardStatusBorderSide as BoardBorderSide) ?? "top",
           chatModel: (p.chatModel as string) ?? "",
           markEdits: (p.markEdits as boolean) ?? false,
           fileTestPatterns: (p.fileTestPatterns as string) ?? DEFAULT_TEST_PATTERNS,
@@ -174,6 +183,7 @@ const ENUMS: Partial<Record<keyof PersistedSettings, readonly string[]>> = {
   direction: DIRECTIONS.map((d) => d.id),
   mode: ["dark", "light", "system"],
   defaultViewType: ["split", "unified"],
+  boardStatusBorderSide: ["left", "right", "top", "bottom"],
 };
 
 /** Serialize the persisted settings to a portable JSON document. */

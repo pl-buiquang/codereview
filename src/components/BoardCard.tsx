@@ -4,8 +4,22 @@ import { api, pickFile } from "../lib/api";
 import { toast } from "../lib/toast";
 import { confirmDialog } from "../lib/confirm";
 import { timeAgo } from "../lib/timeAgo";
+import { useSettingsStore, type BoardBorderSide } from "../lib/settings";
 import { RepoName } from "./RepoName";
 import { Icon } from "./icons";
+
+const BORDER_STYLE_KEY: Record<BoardBorderSide, "borderTopColor" | "borderRightColor" | "borderBottomColor" | "borderLeftColor"> = {
+  top: "borderTopColor",
+  right: "borderRightColor",
+  bottom: "borderBottomColor",
+  left: "borderLeftColor",
+};
+const BORDER_WIDTH_KEY: Record<BoardBorderSide, "borderTopWidth" | "borderRightWidth" | "borderBottomWidth" | "borderLeftWidth"> = {
+  top: "borderTopWidth",
+  right: "borderRightWidth",
+  bottom: "borderBottomWidth",
+  left: "borderLeftWidth",
+};
 
 /** PR status facet shown as a badge and used by the board's status filter.
  *  Issue cards have no status (return null). */
@@ -23,19 +37,14 @@ export function prStatusLabel(status: string): string {
   return status.replace(/_/g, " ");
 }
 
-function StatusBadge({ card }: { card: BoardCardT }) {
-  const status = prStatus(card);
-  if (!status) return null;
-  const kind =
-    status === "approved"
-      ? "badge-open"
-      : status === "changes_requested"
-        ? "badge-review"
-        : status === "draft"
-          ? "badge-draft"
-          : "badge-pr";
-  return <span className={`badge ${kind}`}>{prStatusLabel(status)}</span>;
-}
+// Drafts live only in the "in progress" lane (redundant to call out) and
+// "ready" has nothing to flag yet, so only these four get a color.
+const STATUS_BORDER_COLOR: Record<string, string> = {
+  review_required: "var(--accent)",
+  commented: "var(--warning)",
+  approved: "var(--success)",
+  changes_requested: "var(--danger)",
+};
 
 function MetaRow({
   meta,
@@ -211,13 +220,21 @@ export function BoardCard({
   onAddMeta: (args: { kind: BoardMetaKind; value: string; tag: string | null; label: string | null }) => void;
   onDeleteMeta: (id: number) => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const [metaExpanded, setMetaExpanded] = useState(false);
   const [adding, setAdding] = useState(false);
   const [linkInput, setLinkInput] = useState("");
 
   const allMeta = [...card.meta, ...card.inherited_meta];
   const inheritedIds = new Set(card.inherited_meta.map((m) => m.id));
-  const attachmentCount = allMeta.length;
+  const hasMoreMeta = allMeta.length > 3;
+  const visibleMeta = metaExpanded ? allMeta : allMeta.slice(0, 3);
+
+  const borderSide = useSettingsStore((s) => s.boardStatusBorderSide);
+  const status = prStatus(card);
+  const borderColor = status ? STATUS_BORDER_COLOR[status] : undefined;
+  const borderStyle = borderColor
+    ? { [BORDER_STYLE_KEY[borderSide]]: borderColor, [BORDER_WIDTH_KEY[borderSide]]: "3px" }
+    : undefined;
 
   const discard = async () => {
     if (!onDiscard) return;
@@ -240,134 +257,102 @@ export function BoardCard({
   };
 
   return (
-    <div className="card board-card">
-      <div className="board-card-body">
-        <span className="board-card-title" title={card.title}>
-          {card.title}
+    <div className="card board-card" style={borderStyle}>
+      {card.pending_threads != null && card.pending_threads > 0 && (
+        <span className="board-card-comment-badge" title={`${card.pending_threads} unresolved thread(s)`}>
+          {card.pending_threads}
         </span>
-        <div className="board-card-meta">
-          <button className="board-card-link board-card-repo" onClick={onOpenRepo} title="Open repository">
-            <RepoName name={card.repo} />
-          </button>
-          <button className="board-card-link board-card-number" onClick={onOpenGh} title="Open on GitHub">
-            #{card.number}
-          </button>
-          <StatusBadge card={card} />
-          <span className="cr-spacer" />
-          <span className="board-card-when faint" title={card.updated_at}>
-            {timeAgo(card.updated_at)}
-          </span>
-        </div>
+      )}
+
+      <button className="board-card-title-link" onClick={onOpenGh} title={`Open ${card.repo}#${card.number} on GitHub`}>
+        {card.title} <span className="board-card-number">#{card.number}</span>
+      </button>
+
+      <div className="board-card-subtitle-row">
+        <button className="board-card-link board-card-repo" onClick={onOpenRepo} title="Open repository">
+          <RepoName name={card.repo} />
+        </button>
+        <span className="cr-spacer" />
+        <span className="board-card-when faint" title={card.updated_at}>
+          {timeAgo(card.updated_at)}
+        </span>
       </div>
 
-      <div className="board-card-footer">
-        <div className="board-card-chips">
-          {card.pending_threads != null && card.pending_threads > 0 && (
-            <span className="chip" title="Unresolved threads waiting on you">
-              <Icon name="comment" size={11} /> {card.pending_threads}
-            </span>
-          )}
-          {attachmentCount > 0 && (
-            <span className="chip" title={`${attachmentCount} attachment(s)`}>
-              <Icon name="file" size={11} /> {attachmentCount}
-            </span>
-          )}
-        </div>
-        <div className="board-card-actions">
-          {onOpenReview && (
-            <button
-              className="btn-icon board-card-action board-card-action-primary"
-              disabled={busy || reviewBusy}
-              onClick={onOpenReview}
-              title={card.existing_review_id != null ? "Resume review" : "Create review"}
-            >
-              <Icon name="review" size={13} />
-            </button>
-          )}
-          {onOpenVscode && (
-            <button
-              className="btn-icon board-card-action"
-              disabled={busy || vscodeBusy}
-              onClick={onOpenVscode}
-              title="Open in VSCode"
-            >
-              <Icon name="code" size={13} />
-            </button>
-          )}
-          {card.type === "issue" && (
-            <button
-              className="btn-icon board-card-action"
-              disabled={busy}
-              onClick={() => setExpanded(true)}
-              title="Link a PR"
-            >
-              <Icon name="link" size={13} />
-            </button>
-          )}
-          {onDiscard && (
-            <button className="btn-icon board-card-action-danger" disabled={busy} onClick={discard} title="Discard">
-              <Icon name="trash" size={13} />
-            </button>
-          )}
-        </div>
+      <div className="board-card-actions">
+        {onOpenReview && (
+          <button className="btn btn-sm btn-primary" disabled={busy || reviewBusy} onClick={onOpenReview}>
+            <Icon name="review" size={13} /> {card.existing_review_id != null ? "Resume review" : "Create review"}
+          </button>
+        )}
+        {onOpenVscode && (
+          <button className="btn btn-sm" disabled={busy || vscodeBusy} onClick={onOpenVscode}>
+            <Icon name="code" size={13} /> VSCode
+          </button>
+        )}
+        {onDiscard && (
+          <button className="btn btn-sm btn-ghost" disabled={busy} onClick={discard}>
+            <Icon name="trash" size={13} /> Discard
+          </button>
+        )}
       </div>
 
-      {expanded && (
-        <div className="board-card-expand">
-          {card.type === "issue" && onLinkPr && (
-            <form className="board-link-form" onSubmit={submitLink}>
-              <input
-                className="input"
-                placeholder="PR URL or owner/repo#n"
-                value={linkInput}
-                onChange={(e) => setLinkInput(e.target.value)}
-              />
-              <button type="submit" className="btn btn-sm">
-                Link
-              </button>
-            </form>
-          )}
+      <div className="board-card-extra">
+        {card.type === "issue" && onLinkPr && (
+          <form className="board-link-form" onSubmit={submitLink}>
+            <input
+              className="input"
+              placeholder="PR URL or owner/repo#n"
+              value={linkInput}
+              onChange={(e) => setLinkInput(e.target.value)}
+            />
+            <button type="submit" className="btn btn-sm">
+              Link
+            </button>
+          </form>
+        )}
 
-          {card.linked_pr_ids.length > 0 && (
-            <div className="board-links">
-              {card.linked_pr_ids.map((prId) => (
-                <span key={prId} className="chip">
-                  linked PR
-                  {onUnlink && (
-                    <button className="btn-icon" title="Unlink" onClick={() => onUnlink(prId)}>
-                      <Icon name="x" size={10} />
-                    </button>
-                  )}
-                </span>
-              ))}
-            </div>
-          )}
+        {card.linked_pr_ids.length > 0 && (
+          <div className="board-links">
+            {card.linked_pr_ids.map((prId) => (
+              <span key={prId} className="chip">
+                linked PR
+                {onUnlink && (
+                  <button className="btn-icon" title="Unlink" onClick={() => onUnlink(prId)}>
+                    <Icon name="x" size={10} />
+                  </button>
+                )}
+              </span>
+            ))}
+          </div>
+        )}
 
-          {allMeta.length > 0 && (
-            <div className="board-meta-list">
-              {allMeta.map((m) => (
-                <MetaRow key={m.id} meta={m} inherited={inheritedIds.has(m.id)} onDelete={() => onDeleteMeta(m.id)} />
-              ))}
-            </div>
-          )}
+        {visibleMeta.length > 0 && (
+          <div className="board-meta-list">
+            {visibleMeta.map((m) => (
+              <MetaRow key={m.id} meta={m} inherited={inheritedIds.has(m.id)} onDelete={() => onDeleteMeta(m.id)} />
+            ))}
+          </div>
+        )}
 
+        <div className="board-card-meta-actions">
+          {hasMoreMeta && (
+            <button
+              className="btn-icon"
+              title={metaExpanded ? "Show fewer" : `Show ${allMeta.length - 3} more`}
+              onClick={() => setMetaExpanded((v) => !v)}
+            >
+              <Icon name="chev" size={12} className={metaExpanded ? "board-card-chev-open" : undefined} />
+            </button>
+          )}
           {adding ? (
             <AddMetaForm tags={tags} onAdd={onAddMeta} onClose={() => setAdding(false)} />
           ) : (
-            <button className="btn-icon board-card-action" title="Add metadata" onClick={() => setAdding(true)}>
+            <button className="btn-icon" title="Add metadata" onClick={() => setAdding(true)}>
               <Icon name="plus" size={13} />
             </button>
           )}
         </div>
-      )}
-
-      <button
-        className="board-card-expand-toggle"
-        onClick={() => setExpanded((v) => !v)}
-        title={expanded ? "Collapse" : "Expand"}
-      >
-        <Icon name="chev" size={11} className={expanded ? "board-card-chev-open" : undefined} />
-      </button>
+      </div>
     </div>
   );
 }
