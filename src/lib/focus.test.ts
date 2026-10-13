@@ -26,8 +26,6 @@ function entry(over: Partial<FocusEntry>): FocusEntry {
     tier: "review",
     source: "ai",
     reason: null,
-    note: null,
-    note_dismissed: false,
     override: null,
     is_new: false,
     ...over,

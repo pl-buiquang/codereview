@@ -80,8 +80,9 @@ pub fn render_markdown(detail: &ReviewDetail, repo_label: &str) -> String {
             }
             let folded = fold_replies(&c.body, replies.get(&c.id).map_or(&[][..], Vec::as_slice));
             let resolved = if c.resolved_at.is_some() { " (resolved)" } else { "" };
+            let tag = c.tag.as_deref().map(|t| format!(" [{t}]")).unwrap_or_default();
             if c.subject_type == "file" {
-                out.push_str(&format!("### {} (whole file){resolved}\n\n", c.file_path));
+                out.push_str(&format!("### {} (whole file){resolved}{tag}\n\n", c.file_path));
                 out.push_str(&folded);
                 out.push_str("\n\n");
                 continue;
@@ -93,7 +94,7 @@ pub fn render_markdown(detail: &ReviewDetail, repo_label: &str) -> String {
                     }
                     _ => format!("{}:L{}", c.file_path, c.line),
                 };
-                out.push_str(&format!("### {loc} (file view){resolved}\n\n"));
+                out.push_str(&format!("### {loc} (file view){resolved}{tag}\n\n"));
                 out.push_str(&folded);
                 out.push_str("\n\n");
                 continue;
@@ -104,7 +105,7 @@ pub fn render_markdown(detail: &ReviewDetail, repo_label: &str) -> String {
                 }
                 _ => format!("{}:{}", c.file_path, c.line),
             };
-            out.push_str(&format!("### {} ({}){resolved}\n\n", loc, c.side));
+            out.push_str(&format!("### {} ({}){resolved}{tag}\n\n", loc, c.side));
             if let Some(hunk) = &c.diff_hunk {
                 if !hunk.trim().is_empty() {
                     out.push_str("```diff\n");
@@ -146,6 +147,7 @@ pub fn render_json(detail: &ReviewDetail, repo_label: &str) -> String {
                 "diff_hunk": c.diff_hunk,
                 "body": c.body,
                 "resolved_at": c.resolved_at,
+                "tag": c.tag,
                 "replies": nested,
             })
         })
@@ -310,6 +312,7 @@ mod tests {
             github_comment_id: None,
             resolved_at: None,
             github_thread_root_id: None,
+            tag: None,
             created_at: "2026-01-01T00:00:00Z".into(),
             updated_at: "2026-01-01T00:00:00Z".into(),
         }

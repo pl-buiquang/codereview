@@ -429,8 +429,6 @@ pub struct FocusEntry {
     pub tier: String,
     pub source: Option<String>,
     pub reason: Option<String>,
-    pub note: Option<String>,
-    pub note_dismissed: bool,
     #[serde(rename = "override")]
     pub override_: Option<String>,
     pub is_new: bool,
@@ -524,8 +522,6 @@ struct StoredHunk {
     tier: String,
     source: String,
     reason: Option<String>,
-    note: Option<String>,
-    note_dismissed: bool,
 }
 
 pub fn get_focus_from(
@@ -537,7 +533,7 @@ pub fn get_focus_from(
         return Ok(None);
     };
     let mut stmt = conn.prepare(
-        "SELECT hunk_id, tier, source, reason, note, note_dismissed FROM focus_hunk
+        "SELECT hunk_id, tier, source, reason FROM focus_hunk
          WHERE focus_id = ?1",
     )?;
     let stored: HashMap<String, StoredHunk> = stmt
@@ -548,8 +544,6 @@ pub fn get_focus_from(
                     tier: r.get(1)?,
                     source: r.get(2)?,
                     reason: r.get(3)?,
-                    note: r.get(4)?,
-                    note_dismissed: r.get::<_, i64>(5)? != 0,
                 },
             ))
         })?
@@ -586,8 +580,6 @@ pub fn get_focus_from(
                 tier: "review".into(),
                 source: None,
                 reason: None,
-                note: None,
-                note_dismissed: false,
                 override_: overrides.get(&h.hunk_id).cloned(),
                 is_new: false,
             };
@@ -596,8 +588,6 @@ pub fn get_focus_from(
                     tier: s.tier.clone(),
                     source: Some(s.source.clone()),
                     reason: s.reason.clone(),
-                    note: s.note.clone(),
-                    note_dismissed: s.note_dismissed,
                     ..base
                 },
                 None if planned => FocusEntry { is_new: true, ..base },
@@ -667,12 +657,32 @@ pub fn set_focus_plan_from(
         params![review_id, head, base, level, plan.summary, now()],
     )?;
     let fid = focus_id(&tx, review_id)?;
+
+    // Drop this focus's AI comments from the previous run: delete the ones
+    // still tagged `ai` (untouched since then — cascades its focus_comment
+    // link), then drop the link for any that were edited/retagged instead,
+    // which leaves the comment itself as the user's own.
+    {
+        let mut stmt = tx.prepare(
+            "SELECT fc.comment_id FROM focus_comment fc
+             JOIN comment c ON c.id = fc.comment_id
+             WHERE fc.focus_id = ?1 AND c.tag = 'ai'",
+        )?;
+        let ai_ids: Vec<i64> = stmt
+            .query_map(params![fid], |r| r.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
+        for id in ai_ids {
+            tx.execute("DELETE FROM comment WHERE id = ?1", params![id])?;
+        }
+        tx.execute("DELETE FROM focus_comment WHERE focus_id = ?1", params![fid])?;
+    }
+
     tx.execute("DELETE FROM focus_hunk WHERE focus_id = ?1", params![fid])?;
     {
         let mut ins = tx.prepare(
             "INSERT INTO focus_hunk
-               (focus_id, hunk_id, file_path, old_start, new_start, tier, source, reason, note)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+               (focus_id, hunk_id, file_path, old_start, new_start, tier, source, reason)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         )?;
         for h in hunks {
             let (tier, source, reason, note) = match planned.get(h.hunk_id.as_str()) {
@@ -696,8 +706,14 @@ pub fn set_focus_plan_from(
                 tier,
                 source,
                 reason,
-                note
             ])?;
+            if let Some(note) = note {
+                let comment_id = note_comment(&tx, review_id, h, &note)?;
+                tx.execute(
+                    "INSERT INTO focus_comment (focus_id, comment_id) VALUES (?1, ?2)",
+                    params![fid, comment_id],
+                )?;
+            }
         }
     }
     tx.commit()?;
@@ -756,16 +772,22 @@ pub fn set_file_override_impl(
     Ok(())
 }
 
-pub fn dismiss_focus_note_impl(conn: &Connection, review_id: i64, hunk_id: &str) -> AppResult<()> {
-    let fid = focus_id(conn, review_id)?;
-    conn.execute(
-        "UPDATE focus_hunk SET note_dismissed = 1 WHERE focus_id = ?1 AND hunk_id = ?2",
-        params![fid, hunk_id],
-    )?;
-    Ok(())
-}
-
+/// Remove the focus and its still-`ai`-tagged comments (edited/retagged ones
+/// are kept, same rule as regenerating). Other comments are untouched.
 pub fn clear_focus_impl(conn: &Connection, review_id: i64) -> AppResult<()> {
+    if let Ok(fid) = focus_id(conn, review_id) {
+        let mut stmt = conn.prepare(
+            "SELECT fc.comment_id FROM focus_comment fc
+             JOIN comment c ON c.id = fc.comment_id
+             WHERE fc.focus_id = ?1 AND c.tag = 'ai'",
+        )?;
+        let ai_ids: Vec<i64> = stmt
+            .query_map(params![fid], |r| r.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
+        for id in ai_ids {
+            conn.execute("DELETE FROM comment WHERE id = ?1", params![id])?;
+        }
+    }
     conn.execute("DELETE FROM focus WHERE review_id = ?1", params![review_id])?;
     Ok(())
 }
@@ -802,31 +824,14 @@ fn first_changed_line(h: &DiffHunk) -> Option<(&'static str, i64, usize)> {
     first_del
 }
 
-pub fn adopt_focus_note_from(
-    conn: &Connection,
-    review_id: i64,
-    hunks: &[DiffHunk],
-    hunk_id: &str,
-) -> AppResult<Comment> {
-    let fid = focus_id(conn, review_id)?;
-    let note: Option<String> = conn
-        .query_row(
-            "SELECT note FROM focus_hunk WHERE focus_id = ?1 AND hunk_id = ?2",
-            params![fid, hunk_id],
-            |r| r.get(0),
-        )
-        .optional()?
-        .flatten();
-    let note = note
-        .filter(|n| !n.trim().is_empty())
-        .ok_or_else(|| AppError::Other(format!("hunk {hunk_id} has no focus note")))?;
-    let h = hunks
-        .iter()
-        .find(|h| h.hunk_id == hunk_id)
-        .ok_or_else(|| AppError::Other(format!("hunk {hunk_id} is no longer in the diff")))?;
-
+/// Create a hunk's AI note as an `ai`-tagged draft comment, anchored the same
+/// way `cr comment add`/`add-file` would. Returns the new comment's id so the
+/// caller can link it in `focus_comment`.
+fn note_comment(conn: &Connection, review_id: i64, h: &DiffHunk, note: &str) -> AppResult<i64> {
     let comment = match first_changed_line(h) {
-        None => add_file_comment_impl(conn, review_id, h.file_path.clone(), note)?,
+        None => {
+            add_file_comment_impl(conn, review_id, h.file_path.clone(), note.into(), Some("ai"))?
+        }
         Some((side, line, idx)) => {
             let lo = idx.saturating_sub(SNIPPET_CONTEXT);
             let hi = (idx + SNIPPET_CONTEXT).min(h.body.len() - 1);
@@ -843,14 +848,14 @@ pub fn adopt_focus_note_from(
                 line,
                 None,
                 Some(snippet),
-                note,
+                note.into(),
                 head,
                 None,
+                Some("ai"),
             )?
         }
     };
-    dismiss_focus_note_impl(conn, review_id, hunk_id)?;
-    Ok(comment)
+    Ok(comment.id)
 }
 
 // ---------------------------------------------------------------------------
@@ -858,6 +863,23 @@ pub fn adopt_focus_note_from(
 
 pub fn focus_hunks_impl(conn: &Connection, review_id: i64) -> AppResult<Vec<DiffHunk>> {
     current_hunks(conn, review_id)
+}
+
+/// Comments the current focus run created (the `ai`-tagged notes), for `cr
+/// focus show`. Empty once the review has no focus or none of its notes
+/// survive untouched (regenerating/clearing drops the ones still tagged `ai`).
+pub fn focus_comments_impl(conn: &Connection, review_id: i64) -> AppResult<Vec<Comment>> {
+    let Ok(fid) = focus_id(conn, review_id) else {
+        return Ok(vec![]);
+    };
+    let mut stmt = conn.prepare(
+        "SELECT c.* FROM focus_comment fc JOIN comment c ON c.id = fc.comment_id
+         WHERE fc.focus_id = ?1 ORDER BY c.file_path, c.line",
+    )?;
+    let rows = stmt
+        .query_map(params![fid], Comment::from_row)?
+        .collect::<rusqlite::Result<_>>()?;
+    Ok(rows)
 }
 
 pub fn focus_hunk_text_impl(conn: &Connection, review_id: i64, hunk_id: &str) -> AppResult<String> {
@@ -892,11 +914,6 @@ pub fn set_focus_plan_impl(
 ) -> AppResult<FocusView> {
     let hunks = current_hunks(conn, review_id)?;
     set_focus_plan_from(conn, review_id, &hunks, plan, level)
-}
-
-pub fn adopt_focus_note_impl(conn: &Connection, review_id: i64, hunk_id: &str) -> AppResult<Comment> {
-    let hunks = current_hunks(conn, review_id)?;
-    adopt_focus_note_from(conn, review_id, &hunks, hunk_id)
 }
 
 // ---------------------------------------------------------------------------
@@ -939,13 +956,13 @@ pub fn finish_generation(conn: &Connection, review_id: i64, error: Option<String
     Ok(())
 }
 
-fn app_mode_prompt(review_id: i64, level: &str, plan_path: &Path) -> String {
+fn app_mode_prompt(review_id: i64, plan_path: &Path) -> String {
     let plan = plan_path.display();
     format!(
         "{SKILL_PROMPT}\n\n---\n\nApp mode. Review id = {review_id}. Do not create or open reviews. \
-         Requested level = {level}. The `cr` CLI on PATH already points at the app's database. \
+         The `cr` CLI on PATH already points at the app's database. \
          Write the plan with the Write tool to `{plan}` (the only writable path), then run \
-         `cr focus set {review_id} --level {level} --file {plan}`."
+         `cr focus set {review_id} --file {plan}`."
     )
 }
 
@@ -965,7 +982,6 @@ fn child_path() -> Option<std::ffi::OsString> {
 
 fn run_generation(
     review_id: i64,
-    level: &str,
     model: &str,
     local_path: Option<String>,
     db_path: &Path,
@@ -993,7 +1009,7 @@ fn run_generation(
     let write_rule = format!("Edit(/{}/**)", scratch.display());
     let mut tools: Vec<&str> = FOCUS_TOOLS.to_vec();
     tools.push(&write_rule);
-    let system_prompt = app_mode_prompt(review_id, level, &plan_path);
+    let system_prompt = app_mode_prompt(review_id, &plan_path);
     let result = crate::commands::chat::run_claude(crate::commands::chat::ClaudeRun {
         model,
         allowed_tools: &tools,
@@ -1004,7 +1020,7 @@ fn run_generation(
         extra_dirs: &[scratch.as_path()],
         session: None,
         env,
-        prompt: &format!("Generate the focus for review {review_id} at level {level}."),
+        prompt: &format!("Generate the focus for review {review_id}."),
     });
     let _ = std::fs::remove_dir_all(&scratch);
     result.map(|_| ())
@@ -1020,15 +1036,12 @@ struct FocusUpdated {
 pub fn generate_focus(
     app: tauri::AppHandle,
     review_id: i64,
-    level: Option<String>,
     model: Option<String>,
     db: State<Db>,
     db_path: State<crate::db::DbPath>,
 ) -> AppResult<()> {
     use tauri::{Emitter, Manager};
 
-    let level = level.unwrap_or_else(|| "focus".into());
-    validate_level(&level)?;
     if crate::tools::claude_path().is_none() {
         return Err(AppError::Other("the `claude` CLI was not found on PATH".into()));
     }
@@ -1041,7 +1054,7 @@ pub fn generate_focus(
     let db_path = db_path.0.clone();
     let _ = app.emit("focus-updated", FocusUpdated { review_id });
     tauri::async_runtime::spawn_blocking(move || {
-        let result = run_generation(review_id, &level, &model, local_path, &db_path);
+        let result = run_generation(review_id, &model, local_path, &db_path);
         {
             let db = app.state::<Db>();
             let conn = db.0.lock().unwrap();
@@ -1104,18 +1117,6 @@ pub fn set_file_override(
 ) -> AppResult<()> {
     let conn = db.0.lock().unwrap();
     set_file_override_impl(&conn, review_id, &file_path, value.as_deref())
-}
-
-#[tauri::command]
-pub fn adopt_focus_note(review_id: i64, hunk_id: String, db: State<Db>) -> AppResult<Comment> {
-    let conn = db.0.lock().unwrap();
-    adopt_focus_note_impl(&conn, review_id, &hunk_id)
-}
-
-#[tauri::command]
-pub fn dismiss_focus_note(review_id: i64, hunk_id: String, db: State<Db>) -> AppResult<()> {
-    let conn = db.0.lock().unwrap();
-    dismiss_focus_note_impl(&conn, review_id, &hunk_id)
 }
 
 #[tauri::command]
@@ -1258,7 +1259,10 @@ mod tests {
         assert!(!view.stale);
         let e = |id: &str| view.hunks.iter().find(|h| h.hunk_id == id).unwrap();
         assert_eq!(e(&app[0].hunk_id).tier, "critical");
-        assert_eq!(e(&app[0].hunk_id).note.as_deref(), Some("check"));
+        let notes = focus_comments_impl(&conn, rid).unwrap();
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].body, "check");
+        assert_eq!(notes[0].tag.as_deref(), Some("ai"));
         assert_eq!(e(&app[1].hunk_id).tier, "review");
         assert_eq!(e(&app[1].hunk_id).source.as_deref(), Some("default"));
         let lock = by_file(&hunks, "Cargo.lock")[0];
@@ -1302,7 +1306,7 @@ mod tests {
     }
 
     #[test]
-    fn adopt_note_lands_on_first_changed_line() {
+    fn plan_notes_land_as_ai_tagged_comments_on_the_first_changed_line() {
         let conn = open_memory();
         let rid = seed_review(&conn, "head1");
         let hunks = parse_diff_hunks(DIFF);
@@ -1314,21 +1318,62 @@ mod tests {
         );
         set_focus_plan_from(&conn, rid, &hunks, plan(&p), None).unwrap();
 
-        let c = adopt_focus_note_from(&conn, rid, &hunks, &app[0].hunk_id).unwrap();
-        assert_eq!((c.side.as_str(), c.line), ("RIGHT", 2));
-        assert_eq!(c.body, "add?");
-        assert_eq!(c.anchored_head_sha.as_deref(), Some("head1"));
-        assert!(c.diff_hunk.unwrap().starts_with("@@ -1,3 +1,4 @@"));
+        let notes = focus_comments_impl(&conn, rid).unwrap();
+        assert_eq!(notes.len(), 2);
+        let add_note = notes.iter().find(|c| c.body == "add?").unwrap();
+        assert_eq!((add_note.side.as_str(), add_note.line), ("RIGHT", 2));
+        assert_eq!(add_note.anchored_head_sha.as_deref(), Some("head1"));
+        assert_eq!(add_note.tag.as_deref(), Some("ai"));
+        assert!(add_note.diff_hunk.as_deref().unwrap().starts_with("@@ -1,3 +1,4 @@"));
+        let del_note = notes.iter().find(|c| c.body == "del?").unwrap();
+        assert_eq!((del_note.side.as_str(), del_note.line), ("LEFT", 1));
+    }
 
-        let c = adopt_focus_note_from(&conn, rid, &hunks, &gone.hunk_id).unwrap();
-        assert_eq!((c.side.as_str(), c.line), ("LEFT", 1));
+    #[test]
+    fn regenerating_focus_replaces_untouched_ai_comments_but_keeps_edited_ones() {
+        let conn = open_memory();
+        let rid = seed_review(&conn, "head1");
+        let hunks = parse_diff_hunks(DIFF);
+        let app = by_file(&hunks, "src/app.rs");
+        let p = format!(
+            r#"{{"hunks":[{{"id":"{}","tier":"review","note":"first"}}]}}"#,
+            app[0].hunk_id
+        );
+        set_focus_plan_from(&conn, rid, &hunks, plan(&p), None).unwrap();
+        let first = focus_comments_impl(&conn, rid).unwrap();
+        assert_eq!(first.len(), 1);
+        let kept_id = first[0].id;
+        crate::commands::review::update_comment_impl(&conn, kept_id, "edited by me".into())
+            .unwrap();
 
-        let view = get_focus_from(&conn, rid, &hunks).unwrap().unwrap();
-        assert!(view.hunks.iter().find(|h| h.hunk_id == app[0].hunk_id).unwrap().note_dismissed);
-        assert!(adopt_focus_note_from(&conn, rid, &hunks, &app[1].hunk_id).is_err(), "no note");
+        // Regenerating drops the link for the edited (now untagged) comment and
+        // writes a fresh `ai` comment for the still-planned note.
+        set_focus_plan_from(&conn, rid, &hunks, plan(&p), None).unwrap();
+        let after = focus_comments_impl(&conn, rid).unwrap();
+        assert_eq!(after.len(), 1, "a fresh ai comment replaces the untouched one");
+        assert_ne!(after[0].id, kept_id);
 
-        conn.execute("UPDATE review SET status = 'published'", []).unwrap();
-        assert!(adopt_focus_note_from(&conn, rid, &hunks, &app[0].hunk_id).is_err());
+        let edited: String = conn
+            .query_row("SELECT body FROM comment WHERE id = ?1", params![kept_id], |r| r.get(0))
+            .unwrap();
+        assert_eq!(edited, "edited by me", "the edited comment survives, just untracked");
+    }
+
+    #[test]
+    fn clear_focus_removes_only_untouched_ai_comments() {
+        let conn = open_memory();
+        let rid = seed_review(&conn, "head1");
+        let hunks = parse_diff_hunks(DIFF);
+        let app = by_file(&hunks, "src/app.rs");
+        let p = format!(
+            r#"{{"hunks":[{{"id":"{}","tier":"review","note":"n"}}]}}"#,
+            app[0].hunk_id
+        );
+        set_focus_plan_from(&conn, rid, &hunks, plan(&p), None).unwrap();
+        clear_focus_impl(&conn, rid).unwrap();
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM comment", [], |r| r.get(0)).unwrap();
+        assert_eq!(count, 0, "the untouched ai comment is removed with the focus");
+        assert!(load_focus(&conn, rid).unwrap().is_none());
     }
 
     #[test]
@@ -1351,7 +1396,7 @@ mod tests {
         assert_eq!(f.status, "ready", "a submitted plan wins over a late error");
         assert_eq!(f.level, "critical");
         assert!(f.error.is_none());
-        let prompt = app_mode_prompt(rid, "focus", Path::new("/tmp/p.json"));
+        let prompt = app_mode_prompt(rid, Path::new("/tmp/p.json"));
         assert!(prompt.contains("App mode. Review id = 1."));
         assert!(prompt.contains("--file /tmp/p.json"));
     }
@@ -1402,7 +1447,7 @@ mod tests {
         .unwrap();
         std::env::set_var("PATH", path);
 
-        let result = run_generation(rid, "focus", "sonnet", Some(repo.to_str().unwrap().into()), &db_path);
+        let result = run_generation(rid, "sonnet", Some(repo.to_str().unwrap().into()), &db_path);
         let conn = crate::db::open(&db_path).unwrap();
         finish_generation(&conn, rid, result.err().map(|e| e.to_string())).unwrap();
         let f = load_focus(&conn, rid).unwrap().unwrap();

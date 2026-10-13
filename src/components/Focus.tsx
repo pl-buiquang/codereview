@@ -16,17 +16,13 @@ import { useSettingsStore } from "../lib/settings";
 import { Markdown } from "./Markdown";
 import { MODEL_OPTIONS } from "./ChatPanel";
 
-export type GenerateFocus = UseMutationResult<
-  void,
-  Error,
-  { level: FocusLevel; model?: string }
->;
+export type GenerateFocus = UseMutationResult<void, Error, { model?: string }>;
 
 /** Starts a background run; completion arrives as a `focus-updated` event. */
 export function useGenerateFocus(reviewId: number): GenerateFocus {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ level, model }) => api.generateFocus(reviewId, level, model),
+    mutationFn: ({ model }) => api.generateFocus(reviewId, model),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["focus", reviewId] }),
     onError: (e) => toast.error(`Could not start focus generation:\n${String(e)}`),
   });
@@ -43,9 +39,6 @@ export function FocusGenerate({
 }) {
   const chatModel = useSettingsStore((s) => s.chatModel);
   const [open, setOpen] = useState(false);
-  const [level, setLevel] = useState<FocusLevel>(
-    view && view.focus.level !== "off" ? view.focus.level : "focus",
-  );
   const [model, setModel] = useState(chatModel);
   if (view?.focus.status === "generating" || generate.isPending) {
     return (
@@ -72,20 +65,6 @@ export function FocusGenerate({
       {open && (
         <div className="focus-generate-pop" role="dialog" aria-label={label}>
           <label>
-            Level
-            <select
-              className="focus-level-select"
-              value={level}
-              onChange={(e) => setLevel(e.target.value as FocusLevel)}
-            >
-              {FOCUS_LEVELS.filter((l) => l.value !== "off").map((l) => (
-                <option key={l.value} value={l.value} title={l.title}>
-                  {l.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
             Model
             <select
               className="focus-level-select"
@@ -107,7 +86,7 @@ export function FocusGenerate({
               className="btn btn-sm btn-primary"
               onClick={() => {
                 setOpen(false);
-                generate.mutate({ level, model: model || undefined });
+                generate.mutate({ model: model || undefined });
               }}
             >
               Generate
@@ -123,8 +102,6 @@ export interface FocusActions {
   setLevel: (level: FocusLevel) => void;
   setHunkOverride: (hunkIds: string[], value: FocusOverride | null) => void;
   setFileOverride: (path: string, value: FocusOverride | null) => void;
-  adoptNote: (hunkId: string) => void;
-  dismissNote: (hunkId: string) => void;
   clear: () => void;
 }
 
@@ -141,11 +118,6 @@ export function useFocusActions(reviewId: number): FocusActions {
       toast.error(String(e));
       queryClient.invalidateQueries({ queryKey: key });
     });
-  const markDismissed = (hunkId: string) =>
-    patch((v) => ({
-      ...v,
-      hunks: v.hunks.map((h) => (h.hunk_id === hunkId ? { ...h, note_dismissed: true } : h)),
-    }));
 
   return {
     setLevel: (level) => {
@@ -170,33 +142,24 @@ export function useFocusActions(reviewId: number): FocusActions {
       }));
       run(api.setFileOverride(reviewId, path, value));
     },
-    adoptNote: (hunkId) => {
-      api
-        .adoptFocusNote(reviewId, hunkId)
-        .then(() => {
-          markDismissed(hunkId);
-          queryClient.invalidateQueries({ queryKey: ["review", reviewId] });
-          queryClient.invalidateQueries({ queryKey: ["reviews"] });
-          toast.success("Note added as a draft comment.");
-        })
-        .catch((e) => toast.error(String(e)));
-    },
-    dismissNote: (hunkId) => {
-      markDismissed(hunkId);
-      run(api.dismissFocusNote(reviewId, hunkId));
-    },
     clear: async () => {
       if (
         !(await confirmDialog({
           title: "Clear focus",
-          message: "Remove the focus (tiers, summary, notes and overrides)? Comments are kept.",
+          message:
+            "Remove the focus (tiers, summary and overrides)? AI comments it added that you haven't edited are removed too; comments you wrote or edited are kept.",
           confirmLabel: "Clear focus",
           danger: true,
         }))
       )
         return;
       queryClient.setQueriesData<FocusView | null>({ queryKey: key }, null);
-      run(api.clearFocus(reviewId));
+      run(
+        api.clearFocus(reviewId).then(() => {
+          queryClient.invalidateQueries({ queryKey: ["review", reviewId] });
+          queryClient.invalidateQueries({ queryKey: ["reviews"] });
+        }),
+      );
     },
   };
 }
@@ -378,11 +341,11 @@ export function FocusHiddenBar({
         ▸ {n} hidden {n === 1 ? "hunk" : "hunks"}
         {reasons.length > 0 ? ` — ${reasons.join(", ")}` : ""}
       </span>
-      <button className="expand-btn" onClick={onReveal} title="Show until you leave the review">
+      <button className="expand-btn" onClick={onReveal} title="Show for this session">
         show
       </button>
-      <button className="expand-btn" onClick={onAlwaysShow} title="Always show (override)">
-        always show
+      <button className="expand-btn" onClick={onAlwaysShow} title="Show at every level (saved)">
+        keep shown
       </button>
     </div>
   );
@@ -391,19 +354,12 @@ export function FocusHiddenBar({
 /** Tier pill, AI note and hide action above a visible hunk. */
 export function FocusHunkMeta({
   hunk,
-  readOnly,
   onHide,
-  onAdopt,
-  onDismiss,
 }: {
   hunk: HunkFocus;
-  readOnly: boolean;
   onHide: () => void;
-  onAdopt: () => void;
-  onDismiss: () => void;
 }) {
   const e = hunk.entry!;
-  const showNote = e.note && !e.note_dismissed;
   return (
     <div className="focus-meta">
       <div className="focus-meta-row">
@@ -421,33 +377,6 @@ export function FocusHunkMeta({
           hide
         </button>
       </div>
-      {showNote && (
-        <div className="focus-note">
-          <span className="ai-pill" title="Written by the focus model; not part of the review">
-            AI
-          </span>
-          <div className="focus-note-body">
-            <Markdown source={e.note!} />
-          </div>
-          <span className="focus-note-actions">
-            <button
-              className="btn btn-sm"
-              disabled={readOnly}
-              title={
-                readOnly
-                  ? "Published reviews cannot get new comments"
-                  : "Turn this note into a draft comment on the hunk"
-              }
-              onClick={onAdopt}
-            >
-              Adopt
-            </button>
-            <button className="btn btn-sm btn-ghost" onClick={onDismiss}>
-              Dismiss
-            </button>
-          </span>
-        </div>
-      )}
     </div>
   );
 }

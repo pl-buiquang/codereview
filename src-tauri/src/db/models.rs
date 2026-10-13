@@ -181,6 +181,9 @@ pub struct Comment {
     /// databaseId of the GitHub thread's root comment this draft reply targets.
     /// NULL for normal local comments.
     pub github_thread_root_id: Option<i64>,
+    /// 'ai' or 'local', or NULL. Tagged comments are never published and don't
+    /// pin a focus-hidden hunk/file visible.
+    pub tag: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -204,6 +207,7 @@ impl Comment {
             github_comment_id: row.get("github_comment_id")?,
             resolved_at: row.get("resolved_at")?,
             github_thread_root_id: row.get("github_thread_root_id")?,
+            tag: row.get("tag")?,
             created_at: row.get("created_at")?,
             updated_at: row.get("updated_at")?,
         })

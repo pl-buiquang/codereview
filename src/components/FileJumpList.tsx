@@ -107,7 +107,7 @@ function Chevron({ open }: { open: boolean }) {
 }
 
 type ResolutionFilter = "all" | "unresolved" | "resolved";
-type SourceFilter = "all" | "draft" | "published" | "github";
+type SourceFilter = "all" | "draft" | "published" | "github" | "ai" | "local";
 type SortMode = "file" | "time";
 
 interface ReplyEntry {
@@ -127,6 +127,8 @@ interface DisplayItem {
   isResolved: boolean;
   createdAt: string;
   source: "draft" | "published" | "github";
+  /** `ai`/`local`/none, for local comments only (GitHub threads are untagged). */
+  tag: "ai" | "local" | null;
   scrollId: string;
   scrollAttr: "comment-id" | "thread-id";
   replies: ReplyEntry[];
@@ -139,7 +141,7 @@ export function FileJumpList({
   paneCollapsed,
   onToggle,
   threads = [],
-  focusHidden,
+  hiddenPaths,
   typeFilter,
   onTypeFilterChange,
 }: {
@@ -149,8 +151,8 @@ export function FileJumpList({
   paneCollapsed?: boolean;
   onToggle?: () => void;
   threads?: PrThread[];
-  /** Files fully hidden by focus, mapped to the hide reasons (tooltip). */
-  focusHidden?: Map<string, string>;
+  /** Paths focus hides entirely; removed from the list like a type filter. */
+  hiddenPaths?: Set<string>;
   typeFilter: "all" | FileCategory;
   onTypeFilterChange: (filter: "all" | FileCategory) => void;
 }) {
@@ -214,8 +216,12 @@ export function FileJumpList({
     return counts;
   }, [rows]);
   const visibleRows = useMemo(
-    () => (typeFilter === "all" ? rows : rows.filter((r) => r.category === typeFilter)),
-    [rows, typeFilter],
+    () =>
+      rows.filter(
+        (r) =>
+          (typeFilter === "all" || r.category === typeFilter) && !hiddenPaths?.has(r.path),
+      ),
+    [rows, typeFilter, hiddenPaths],
   );
 
   const [activeIndex, setActiveIndex] = useState(0);
@@ -345,21 +351,16 @@ export function FileJumpList({
         ];
       }
       const { row } = node;
-      const hiddenReason = focusHidden?.get(row.path);
       return [
         <button
           key={`file:${row.index}`}
           type="button"
           className={`tree-row${row.index === activeIndex ? " active" : ""}${
             row.viewed ? " viewed" : ""
-          }${hiddenReason != null ? " focus-hidden" : ""}`}
+          }`}
           style={indent}
           onClick={() => jumpTo(row.index)}
-          title={
-            hiddenReason != null
-              ? `${row.path} — hidden by focus${hiddenReason ? `: ${hiddenReason}` : ""}`
-              : row.path
-          }
+          title={row.path}
         >
           <Icon name="file" size={13} className="tree-file" />
           <span className="tree-name">{node.name}</span>
@@ -410,6 +411,7 @@ export function FileJumpList({
         isResolved: c.resolved_at != null,
         createdAt: c.created_at,
         source: c.github_comment_id != null ? "published" : "draft",
+        tag: c.tag,
         scrollId: String(c.id),
         scrollAttr: "comment-id",
         replies: rawReplies.map((r) => ({
@@ -435,6 +437,7 @@ export function FileJumpList({
         isResolved: t.isResolved,
         createdAt: root.createdAt,
         source: "github",
+        tag: null,
         scrollId: t.id,
         scrollAttr: "thread-id",
         replies: rest.map((r) => ({
@@ -453,7 +456,13 @@ export function FileJumpList({
     return displayItems.filter((item) => {
       if (resolutionFilter === "unresolved" && item.isResolved) return false;
       if (resolutionFilter === "resolved" && !item.isResolved) return false;
-      if (sourceFilter !== "all" && item.source !== sourceFilter) return false;
+      if (sourceFilter === "ai" || sourceFilter === "local") {
+        if (item.tag !== sourceFilter) return false;
+      } else if (sourceFilter === "draft") {
+        if (item.source !== "draft" || item.tag != null) return false;
+      } else if (sourceFilter !== "all" && item.source !== sourceFilter) {
+        return false;
+      }
       return true;
     });
   }, [displayItems, resolutionFilter, sourceFilter]);
@@ -496,6 +505,8 @@ export function FileJumpList({
             {item.source === "github" && (
               <span className="comment-list-source-gh">GH</span>
             )}
+            {item.tag === "ai" && <span className="ai-pill">AI</span>}
+            {item.tag === "local" && <span className="local-pill">Local</span>}
             {item.isResolved && (
               <Icon name="check" size={11} className="comment-list-resolved-icon" />
             )}
@@ -572,6 +583,9 @@ export function FileJumpList({
   };
 
   const hasGithubThreads = threads.length > 0;
+  const hasAiComments = displayItems.some((i) => i.tag === "ai");
+  const hasLocalComments = displayItems.some((i) => i.tag === "local");
+  const hasTaggedComments = hasAiComments || hasLocalComments;
 
   return (
     <nav className={`jump-list${paneCollapsed ? " jump-list--collapsed" : ""}`}>
@@ -626,6 +640,11 @@ export function FileJumpList({
                     </button>
                   ))}
                 </div>
+                {!!hiddenPaths?.size && (
+                  <p className="muted focus-hidden-count">
+                    {hiddenPaths.size} {hiddenPaths.size === 1 ? "file" : "files"} hidden by focus
+                  </p>
+                )}
               </div>
               <div className="jump-list-content">
                 {visibleRows.length === 0 && rows.length > 0 ? (
@@ -650,16 +669,35 @@ export function FileJumpList({
                     </button>
                   ))}
                 </div>
-                {hasGithubThreads && (
+                {(hasGithubThreads || hasTaggedComments) && (
                   <div className="comment-filter-group">
-                    {(["all", "draft", "published", "github"] as SourceFilter[]).map((s) => (
+                    {(
+                      [
+                        "all",
+                        "draft",
+                        "published",
+                        ...(hasGithubThreads ? (["github"] as const) : []),
+                        ...(hasAiComments ? (["ai"] as const) : []),
+                        ...(hasLocalComments ? (["local"] as const) : []),
+                      ] as SourceFilter[]
+                    ).map((s) => (
                       <button
                         key={s}
                         type="button"
                         className={`comment-filter-btn${sourceFilter === s ? " active" : ""}`}
                         onClick={() => setSourceFilter(s)}
                       >
-                        {s === "all" ? "All" : s === "draft" ? "Draft" : s === "published" ? "Pub" : "GH"}
+                        {s === "all"
+                          ? "All"
+                          : s === "draft"
+                            ? "Draft"
+                            : s === "published"
+                              ? "Pub"
+                              : s === "github"
+                                ? "GH"
+                                : s === "ai"
+                                  ? "AI"
+                                  : "Local"}
                       </button>
                     ))}
                   </div>

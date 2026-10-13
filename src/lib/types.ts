@@ -65,6 +65,9 @@ export interface Comment {
   resolved_at: string | null;
   /** databaseId of the GitHub thread's root comment this draft reply targets. */
   github_thread_root_id: number | null;
+  /** `ai`/`local`/none. Tagged comments are never published and don't pin a
+   *  focus-hidden hunk/file visible. Editing an `ai` comment clears the tag. */
+  tag: "ai" | "local" | null;
   created_at: string;
   updated_at: string;
 }
@@ -384,8 +387,6 @@ export interface FocusEntry {
   tier: FocusTier;
   source: "rule" | "ai" | "default" | null;
   reason: string | null;
-  note: string | null;
-  note_dismissed: boolean;
   override: FocusOverride | null;
   is_new: boolean;
 }

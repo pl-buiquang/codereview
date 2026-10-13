@@ -17,8 +17,9 @@ write is published to GitHub. Tiers, summary and notes are only a reading aid.
 
 All data goes through the `cr` CLI. Always put flags such as `--json` **after**
 the subcommand (`cr focus hunks 12 --json`): in app mode only commands starting
-with `cr focus`, `cr diff` or `cr show` are permitted. You never write review comments yourself:
-notes become comments only if the user clicks **Adopt** in the app.
+with `cr focus`, `cr diff` or `cr show` are permitted. Notes you write are added
+as `ai`-tagged draft comments — never published to GitHub unless the user removes
+the tag or edits them.
 
 ## Modes
 
@@ -31,8 +32,8 @@ notes become comments only if the user clicks **Adopt** in the app.
 
 **App mode**: the system prompt says `App mode. Review id = N.` Use review N.
 Skip Step 1 (resolving the review) and Step 6 (opening the app), and don't create or open any review.
-
-The default level is `focus`. Pass the requested level through to `cr focus set`.
+Don't pass `--level` to `cr focus set` in app mode — the user controls the display
+level in the app at any time, independent of generation.
 
 If `cr` is not on PATH: `cargo install --path ~/projects/codereview/src-tauri --bin cr`.
 
@@ -104,6 +105,8 @@ or `review`.
   Keep it short and lowercase, without hunk-specific details.
 - `note`: only on visible tiers (`critical`/`review`), and only when it says something concrete to
   check ("`timeout` is now seconds, callers pass ms"). Skip generic praise or restating the diff. Most hunks need no note.
+  `cr focus set` turns each one into an `ai`-tagged draft comment on that hunk — you never call
+  `cr comment add` yourself for this.
 - List every hunk you tiered. Omitted hunks fall back to their rule tier, else `review`.
 - Use only ids from Step 2. Unknown ids make the whole plan fail.
 
@@ -115,6 +118,9 @@ inline in a Bash command: Claude Code blocks commands that mix braces and quotes
 ```bash
 cr focus set RID --level <level> --file <plan.json>
 ```
+
+`--level` is optional and only matters in terminal mode: it sets the review's starting
+display level (default `focus`). Omit it in app mode — see Modes above.
 
 In terminal mode use any temp path (e.g. `/tmp/focus-RID.json`). In app mode use the
 path given in the app-mode instructions, which is the only writable location.

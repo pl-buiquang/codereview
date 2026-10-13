@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use chrono::Utc;
@@ -128,6 +129,17 @@ fn ensure_draft(conn: &Connection, review_id: i64) -> AppResult<()> {
         _ => Err(AppError::Other(
             "this review is published and can no longer be edited".into(),
         )),
+    }
+}
+
+/// `ai` or `local`, or none. Tagged comments are never published and don't pin
+/// a focus-hidden hunk/file visible.
+fn validate_tag(tag: Option<&str>) -> AppResult<()> {
+    match tag {
+        None | Some("ai") | Some("local") => Ok(()),
+        Some(t) => Err(AppError::Other(format!(
+            "invalid tag '{t}' (expected ai or local)"
+        ))),
     }
 }
 
@@ -993,6 +1005,18 @@ fn is_anchored_to(c: &Comment, target: &Target) -> bool {
     }
 }
 
+/// Replies to fold under a published root: never a tagged (`ai`/`local`) reply,
+/// which stays local the same as a tagged root would.
+fn publishable_replies<'a>(
+    replies: &'a HashMap<i64, Vec<&'a Comment>>,
+    root_id: i64,
+) -> Vec<&'a Comment> {
+    replies
+        .get(&root_id)
+        .map(|rs| rs.iter().filter(|r| r.tag.is_none()).copied().collect())
+        .unwrap_or_default()
+}
+
 /// The comments publish posts inline, each paired with the exact body text sent
 /// to GitHub. Single source of truth shared by `build_publish_payload` and the
 /// post-publish id capture (Spec 17), so the matcher compares like-for-like.
@@ -1009,13 +1033,11 @@ fn inline_publish_comments(detail: &ReviewDetail) -> Vec<(&Comment, String)> {
                 && c.origin != "file_view"
                 && c.parent_id.is_none()
                 && c.github_thread_root_id.is_none()
+                && c.tag.is_none()
                 && is_anchored_to(c, &detail.target)
         })
         .map(|c| {
-            let body = export::fold_replies(
-                &c.body,
-                replies.get(&c.id).map_or(&[][..], Vec::as_slice),
-            );
+            let body = export::fold_replies(&c.body, &publishable_replies(&replies, c.id));
             (c, body)
         })
         .collect()
@@ -1072,14 +1094,12 @@ fn build_pending_payload(detail: &ReviewDetail) -> serde_json::Value {
 fn body_with_file_comments(detail: &ReviewDetail) -> String {
     let mut body = detail.review.body.trim().to_string();
     let replies = export::replies_by_root(&detail.comments);
-    let folded = |c: &Comment| {
-        export::fold_replies(&c.body, replies.get(&c.id).map_or(&[][..], Vec::as_slice))
-    };
+    let folded = |c: &Comment| export::fold_replies(&c.body, &publishable_replies(&replies, c.id));
 
     let file_comments: Vec<&Comment> = detail
         .comments
         .iter()
-        .filter(|c| c.subject_type == "file" && c.parent_id.is_none())
+        .filter(|c| c.subject_type == "file" && c.parent_id.is_none() && c.tag.is_none())
         .collect();
     if !file_comments.is_empty() {
         if !body.is_empty() {
@@ -1094,7 +1114,7 @@ fn body_with_file_comments(detail: &ReviewDetail) -> String {
     let file_view_comments: Vec<&Comment> = detail
         .comments
         .iter()
-        .filter(|c| c.origin == "file_view" && c.parent_id.is_none())
+        .filter(|c| c.origin == "file_view" && c.parent_id.is_none() && c.tag.is_none())
         .collect();
     if !file_view_comments.is_empty() {
         if !body.is_empty() {
@@ -1121,6 +1141,7 @@ fn body_with_file_comments(detail: &ReviewDetail) -> String {
                 && c.origin != "file_view"
                 && c.parent_id.is_none()
                 && c.github_thread_root_id.is_none()
+                && c.tag.is_none()
                 && !is_anchored_to(c, &detail.target)
         })
         .collect();
@@ -1642,8 +1663,10 @@ pub fn add_comment_impl(
     body: String,
     anchored_head_sha: Option<String>,
     parent_id: Option<i64>,
+    tag: Option<&str>,
 ) -> AppResult<Comment> {
     ensure_draft(conn, review_id)?;
+    validate_tag(tag)?;
     let ts = now();
     match parent_id {
         None => {
@@ -1661,9 +1684,9 @@ pub fn add_comment_impl(
             };
             conn.execute(
                 "INSERT INTO comment
-                    (review_id, file_path, side, line, start_line, diff_hunk, body, anchored_head_sha, anchored_base_sha, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10)",
-                params![review_id, file_path, side, line, start_line, diff_hunk, body, anchored_head_sha, anchored_base_sha, ts],
+                    (review_id, file_path, side, line, start_line, diff_hunk, body, anchored_head_sha, anchored_base_sha, tag, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11)",
+                params![review_id, file_path, side, line, start_line, diff_hunk, body, anchored_head_sha, anchored_base_sha, tag, ts],
             )?;
         }
         Some(pid) => {
@@ -1671,8 +1694,8 @@ pub fn add_comment_impl(
             conn.execute(
                 "INSERT INTO comment
                     (review_id, file_path, subject_type, origin, side, line, start_line,
-                     diff_hunk, body, parent_id, anchored_head_sha, anchored_base_sha, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?13)",
+                     diff_hunk, body, parent_id, anchored_head_sha, anchored_base_sha, tag, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?14)",
                 params![
                     review_id,
                     p.file_path,
@@ -1686,6 +1709,7 @@ pub fn add_comment_impl(
                     pid,
                     p.anchored_head_sha,
                     p.anchored_base_sha,
+                    tag,
                     ts,
                 ],
             )?;
@@ -1724,6 +1748,7 @@ pub fn add_comment(
         body,
         anchored_head_sha,
         parent_id,
+        None,
     )
 }
 
@@ -1735,13 +1760,15 @@ pub fn add_file_comment_impl(
     review_id: i64,
     file_path: String,
     body: String,
+    tag: Option<&str>,
 ) -> AppResult<Comment> {
     ensure_draft(conn, review_id)?;
+    validate_tag(tag)?;
     let ts = now();
     conn.execute(
-        "INSERT INTO comment (review_id, file_path, subject_type, body, line, created_at, updated_at)
-         VALUES (?1, ?2, 'file', ?3, 0, ?4, ?4)",
-        params![review_id, file_path, body, ts],
+        "INSERT INTO comment (review_id, file_path, subject_type, body, line, tag, created_at, updated_at)
+         VALUES (?1, ?2, 'file', ?3, 0, ?4, ?5, ?5)",
+        params![review_id, file_path, body, tag, ts],
     )?;
     conn.execute(
         "UPDATE review SET updated_at = ?1 WHERE id = ?2",
@@ -1758,7 +1785,7 @@ pub fn add_file_comment(
     db: State<Db>,
 ) -> AppResult<Comment> {
     let conn = db.0.lock().unwrap();
-    add_file_comment_impl(&conn, review_id, file_path, body)
+    add_file_comment_impl(&conn, review_id, file_path, body, None)
 }
 
 /// Add a comment authored in the full-file pane, anchored to an absolute
@@ -1799,8 +1826,13 @@ pub fn update_comment_impl(conn: &Connection, comment_id: i64, body: String) -> 
         |r| r.get(0),
     )?;
     ensure_draft(conn, review_id)?;
+    // Editing an AI-written comment makes it yours: drop the tag so it
+    // publishes like any other comment. A `local` tag is a deliberate choice
+    // and survives edits.
     conn.execute(
-        "UPDATE comment SET body = ?1, updated_at = ?2 WHERE id = ?3",
+        "UPDATE comment SET body = ?1, updated_at = ?2,
+            tag = CASE WHEN tag = 'ai' THEN NULL ELSE tag END
+         WHERE id = ?3",
         params![body, now(), comment_id],
     )?;
     Ok(())
@@ -1810,6 +1842,27 @@ pub fn update_comment_impl(conn: &Connection, comment_id: i64, body: String) -> 
 pub fn update_comment(comment_id: i64, body: String, db: State<Db>) -> AppResult<()> {
     let conn = db.0.lock().unwrap();
     update_comment_impl(&conn, comment_id, body)
+}
+
+pub fn set_comment_tag_impl(conn: &Connection, comment_id: i64, tag: Option<&str>) -> AppResult<()> {
+    let review_id: i64 = conn.query_row(
+        "SELECT review_id FROM comment WHERE id = ?1",
+        params![comment_id],
+        |r| r.get(0),
+    )?;
+    ensure_draft(conn, review_id)?;
+    validate_tag(tag)?;
+    conn.execute(
+        "UPDATE comment SET tag = ?1, updated_at = ?2 WHERE id = ?3",
+        params![tag, now(), comment_id],
+    )?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn set_comment_tag(comment_id: i64, tag: Option<String>, db: State<Db>) -> AppResult<()> {
+    let conn = db.0.lock().unwrap();
+    set_comment_tag_impl(&conn, comment_id, tag.as_deref())
 }
 
 pub fn delete_comment_impl(conn: &Connection, comment_id: i64) -> AppResult<()> {
@@ -2558,6 +2611,7 @@ mod tests {
             "root note".into(),
             Some("rootsha".into()),
             None,
+            None,
         )
         .unwrap();
         (conn, review.id, root.id)
@@ -2587,6 +2641,7 @@ mod tests {
             "on the old side".into(),
             None,
             None,
+            None,
         )
         .unwrap();
         assert_eq!(left.anchored_base_sha.as_deref(), Some("basesha"));
@@ -2601,6 +2656,7 @@ mod tests {
             None,
             "on the new side".into(),
             Some("headsha".into()),
+            None,
             None,
         )
         .unwrap();
@@ -2631,6 +2687,7 @@ mod tests {
             "left root".into(),
             None,
             None,
+            None,
         )
         .unwrap();
         assert_eq!(root.anchored_base_sha.as_deref(), Some("basesha"));
@@ -2646,6 +2703,7 @@ mod tests {
             "reply".into(),
             None,
             Some(root.id),
+            None,
         )
         .unwrap();
         assert_eq!(
@@ -2670,6 +2728,7 @@ mod tests {
             "a reply".into(),
             None,
             Some(root_id),
+            None,
         )
         .unwrap();
 
@@ -2700,6 +2759,7 @@ mod tests {
             "second level".into(),
             None,
             Some(reply_id),
+            None,
         )
         .unwrap_err();
         match err {
@@ -2725,6 +2785,7 @@ mod tests {
             "wrong review".into(),
             None,
             Some(root_id),
+            None,
         )
         .unwrap_err();
         assert!(matches!(err, AppError::Other(_)));
@@ -2744,6 +2805,7 @@ mod tests {
             "no parent".into(),
             None,
             Some(9999),
+            None,
         )
         .unwrap_err();
         match err {
@@ -2771,6 +2833,7 @@ mod tests {
             "late reply".into(),
             None,
             Some(root_id),
+            None,
         )
         .unwrap_err();
         assert!(matches!(err, AppError::Other(_)));
@@ -2803,6 +2866,7 @@ mod tests {
             "reply to file".into(),
             None,
             Some(root_id),
+            None,
         )
         .unwrap();
         assert_eq!(reply.subject_type, "file");
@@ -3056,6 +3120,7 @@ mod tests {
             github_comment_id: None,
             resolved_at: None,
             github_thread_root_id: None,
+            tag: None,
             created_at: "now".into(),
             updated_at: "now".into(),
         }

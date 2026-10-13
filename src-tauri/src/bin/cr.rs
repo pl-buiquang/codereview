@@ -161,6 +161,12 @@ enum FocusAction {
 
 const FOCUS_HUNK_WARN: usize = 500;
 
+/// `--tag` values map "none" to no tag; `ai`/`local` pass through as-is
+/// (validated downstream by `add_comment_impl`/`set_comment_tag_impl`).
+fn parse_tag(tag: &str) -> Option<&str> {
+    (tag != "none").then_some(tag)
+}
+
 #[derive(Subcommand)]
 enum CommentAction {
     /// Add a line-level comment
@@ -178,6 +184,11 @@ enum CommentAction {
         /// Comment body text
         #[arg(long)]
         body: String,
+        /// ai, local, or none. Tagged comments are never published. Defaults
+        /// to local: a comment made from the CLI stays off GitHub until you
+        /// untag it or edit it in the app.
+        #[arg(long, default_value = "local")]
+        tag: String,
     },
     /// Add a whole-file comment (not anchored to a line)
     AddFile {
@@ -188,6 +199,9 @@ enum CommentAction {
         /// Comment body text
         #[arg(long)]
         body: String,
+        /// ai, local, or none. See `comment add --tag`.
+        #[arg(long, default_value = "local")]
+        tag: String,
     },
     /// Update a comment's body
     Update {
@@ -195,6 +209,13 @@ enum CommentAction {
         /// New body text
         #[arg(long)]
         body: String,
+    },
+    /// Set or clear a comment's tag
+    Tag {
+        comment_id: i64,
+        /// ai, local, or none
+        #[arg(long)]
+        tag: String,
     },
     /// Delete a comment
     Delete {
@@ -217,6 +238,9 @@ enum CommentAction {
         /// Reply body text
         #[arg(long)]
         body: String,
+        /// ai, local, or none. See `comment add --tag`.
+        #[arg(long, default_value = "local")]
+        tag: String,
     },
     /// Draft a local reply to an existing GitHub review thread comment. Not
     /// posted to GitHub until `cr comment publish-replies` is run.
@@ -404,7 +428,8 @@ fn run(cmd: Cmd, json: bool, db: &Db) -> AppResult<()> {
                         } else {
                             format!("{}:{} ({})", c.file_path, c.line, c.side)
                         };
-                        println!("  [#{}] {}", c.id, loc);
+                        let tag = c.tag.as_deref().map(|t| format!(" [{t}]")).unwrap_or_default();
+                        println!("  [#{}]{tag} {}", c.id, loc);
                         for line in c.body.lines() {
                             println!("        {line}");
                         }
@@ -555,6 +580,7 @@ fn run(cmd: Cmd, json: bool, db: &Db) -> AppResult<()> {
                 line,
                 side,
                 body,
+                tag,
             } => {
                 let conn = db.0.lock().unwrap();
                 let c = review::add_comment_impl(
@@ -568,6 +594,7 @@ fn run(cmd: Cmd, json: bool, db: &Db) -> AppResult<()> {
                     body,
                     None, // anchored_head_sha
                     None, // parent_id
+                    parse_tag(&tag),
                 )?;
                 if json {
                     println!("{}", serde_json::to_string_pretty(&c)?);
@@ -579,9 +606,10 @@ fn run(cmd: Cmd, json: bool, db: &Db) -> AppResult<()> {
                 review_id,
                 file,
                 body,
+                tag,
             } => {
                 let conn = db.0.lock().unwrap();
-                let c = review::add_file_comment_impl(&conn, review_id, file, body)?;
+                let c = review::add_file_comment_impl(&conn, review_id, file, body, parse_tag(&tag))?;
                 if json {
                     println!("{}", serde_json::to_string_pretty(&c)?);
                 } else {
@@ -593,6 +621,13 @@ fn run(cmd: Cmd, json: bool, db: &Db) -> AppResult<()> {
                 review::update_comment_impl(&conn, comment_id, body)?;
                 if !json {
                     println!("Updated comment #{comment_id}");
+                }
+            }
+            CommentAction::Tag { comment_id, tag } => {
+                let conn = db.0.lock().unwrap();
+                review::set_comment_tag_impl(&conn, comment_id, parse_tag(&tag))?;
+                if !json {
+                    println!("Tagged comment #{comment_id} as {tag}");
                 }
             }
             CommentAction::Delete { comment_id } => {
@@ -620,6 +655,7 @@ fn run(cmd: Cmd, json: bool, db: &Db) -> AppResult<()> {
                 review_id,
                 parent_id,
                 body,
+                tag,
             } => {
                 let conn = db.0.lock().unwrap();
                 let c = review::add_comment_impl(
@@ -633,6 +669,7 @@ fn run(cmd: Cmd, json: bool, db: &Db) -> AppResult<()> {
                     body,
                     None,
                     Some(parent_id),
+                    parse_tag(&tag),
                 )?;
                 if json {
                     println!("{}", serde_json::to_string_pretty(&c)?);
@@ -942,15 +979,9 @@ fn run_focus(action: FocusAction, json: bool, db: &Db) -> AppResult<()> {
             }
             println!();
             print_tier_counts(&view.hunks);
-            for h in view.hunks.iter().filter(|h| h.note.is_some() && !h.note_dismissed) {
-                println!(
-                    "\n  [{}] {} {} ({})\n        {}",
-                    h.hunk_id,
-                    h.file_path,
-                    h.header,
-                    h.tier,
-                    h.note.as_deref().unwrap_or("")
-                );
+            let notes = focus::focus_comments_impl(&conn, review_id)?;
+            for c in &notes {
+                println!("\n  [#{}] {}:{} ({})\n        {}", c.id, c.file_path, c.line, c.side, c.body);
             }
         }
         FocusAction::Clear { review_id } => {

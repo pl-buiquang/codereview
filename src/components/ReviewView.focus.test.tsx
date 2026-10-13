@@ -26,6 +26,9 @@ globalThis.ResizeObserver ??= class {
   disconnect() {}
 } as unknown as typeof ResizeObserver;
 
+// src/a.ts has two hunks: a visible critical one, and a trivial one that focus
+// hides but stays inside the file (collapsed bar). Cargo.lock has a single
+// trivial hunk, so hiding it hides the whole file (removed from the diff).
 const DIFF = `diff --git a/src/a.ts b/src/a.ts
 index 1111111..2222222 100644
 --- a/src/a.ts
@@ -35,6 +38,10 @@ index 1111111..2222222 100644
 -const b = 2;
 +const b = 3;
  const c = 4;
+@@ -10,2 +10,2 @@
+-const d = 5;
++const d = 6;
+ const e = 7;
 diff --git a/Cargo.lock b/Cargo.lock
 index 3333333..4444444 100644
 --- a/Cargo.lock
@@ -43,6 +50,30 @@ index 3333333..4444444 100644
 -lockline_old
 +lockline_new
 `;
+
+function comment(over: Partial<Comment> & { id: number }): Comment {
+  return {
+    review_id: 7,
+    file_path: "src/a.ts",
+    subject_type: "line",
+    origin: "diff",
+    side: "RIGHT",
+    line: 1,
+    start_line: null,
+    diff_hunk: null,
+    body: `body ${over.id}`,
+    parent_id: null,
+    anchored_head_sha: "head",
+    anchored_base_sha: null,
+    github_comment_id: null,
+    resolved_at: null,
+    github_thread_root_id: null,
+    tag: null,
+    created_at: "now",
+    updated_at: "now",
+    ...over,
+  };
+}
 
 function detail(comments: Comment[] = []): ReviewDetail {
   return {
@@ -95,8 +126,6 @@ function entry(over: Partial<FocusEntry>): FocusEntry {
     tier: "critical",
     source: "ai",
     reason: null,
-    note: "Is **3** right?",
-    note_dismissed: false,
     override: null,
     is_new: false,
     ...over,
@@ -122,13 +151,21 @@ function focusView(): FocusView {
     hunks: [
       entry({}),
       entry({
+        hunk_id: "a2",
+        old_start: 10,
+        new_start: 10,
+        header: "@@ -10,2 +10,2 @@",
+        tier: "trivial",
+        source: "rule",
+        reason: "import reorder",
+      }),
+      entry({
         hunk_id: "l1",
         file_path: "Cargo.lock",
         header: "@@ -1,1 +1,1 @@",
         tier: "trivial",
         source: "rule",
         reason: "lockfile",
-        note: null,
       }),
     ],
     file_overrides: [],
@@ -150,7 +187,7 @@ beforeEach(() => {
   handlers.getFocus = vi.fn(() => Promise.resolve(focusView()));
   handlers.setFocusLevel = vi.fn(() => Promise.resolve());
   handlers.setHunkOverride = vi.fn(() => Promise.resolve());
-  handlers.adoptFocusNote = vi.fn(() => Promise.resolve({}));
+  handlers.setFileOverride = vi.fn(() => Promise.resolve());
   handlers.generateFocus = vi.fn(() => Promise.resolve());
   handlers.checkEnvironment = vi.fn(() =>
     Promise.resolve({ git: "git", gh: "gh", gh_authed: true, claude: "/bin/claude" }),
@@ -158,76 +195,88 @@ beforeEach(() => {
 });
 
 describe("ReviewView focus overlay", () => {
-  it("collapses low-tier hunks into a bar and shows the digest, tier and note", async () => {
+  it("collapses a trivial hunk into a bar inside its file, hides a fully-trivial file entirely", async () => {
     renderReview();
-    expect(await screen.findByText(/1 hidden hunk — lockfile/)).toBeInTheDocument();
-    expect(screen.queryByText("lockline_new")).not.toBeInTheDocument();
-    expect(screen.getByText("Bumps b.")).toBeInTheDocument();
+    expect(await screen.findByText("Bumps b.")).toBeInTheDocument();
     expect(screen.getByText("critical")).toBeInTheDocument();
-    expect(screen.getByText("right?", { exact: false })).toBeInTheDocument();
+    // The in-file hunk stays inside src/a.ts, collapsed.
+    expect(await screen.findByText(/1 hidden hunk — import reorder/)).toBeInTheDocument();
+    // Cargo.lock is fully hidden: removed from the diff, not just collapsed.
+    expect(screen.queryByText("lockline_new")).not.toBeInTheDocument();
+    expect(screen.queryByText(/1 hidden hunk — lockfile/)).not.toBeInTheDocument();
+    // ... but still shows up in the digest, grouped by reason.
+    expect(screen.getByText("lockfile")).toBeInTheDocument();
+    expect(screen.getByText("Cargo.lock")).toBeInTheDocument();
   });
 
-  it("reveals a hidden hunk temporarily, or permanently via an override", async () => {
+  it("reveals an in-file hidden hunk temporarily via show, without an API call", async () => {
     const user = userEvent.setup();
     renderReview();
-    const bar = (await screen.findByText(/1 hidden hunk/)).closest(".focus-bar") as HTMLElement;
-    await user.click(within(bar).getByRole("button", { name: "always show" }));
-    expect(handlers.setHunkOverride).toHaveBeenCalledWith(7, "l1", "show");
+    const bar = (await screen.findByText(/1 hidden hunk — import reorder/)).closest(
+      ".focus-bar",
+    ) as HTMLElement;
+    await user.click(within(bar).getByRole("button", { name: "show" }));
+    await waitFor(() =>
+      expect(screen.queryByText(/1 hidden hunk — import reorder/)).not.toBeInTheDocument(),
+    );
+    expect(handlers.setHunkOverride).not.toHaveBeenCalled();
+  });
+
+  it("keep shown persists an in-file hidden hunk as a hunk override", async () => {
+    const user = userEvent.setup();
+    renderReview();
+    const bar = (await screen.findByText(/1 hidden hunk — import reorder/)).closest(
+      ".focus-bar",
+    ) as HTMLElement;
+    await user.click(within(bar).getByRole("button", { name: "keep shown" }));
+    expect(handlers.setHunkOverride).toHaveBeenCalledWith(7, "a2", "show");
+  });
+
+  it("reveals a fully-hidden file from the digest", async () => {
+    const user = userEvent.setup();
+    renderReview();
+    const group = (await screen.findByText("lockfile")).closest("li") as HTMLElement;
+    await user.click(within(group).getByRole("button", { name: "show" }));
     await waitFor(() => expect(screen.getByText("lockline_new")).toBeInTheDocument());
   });
 
-  it("adopts a note and switches levels", async () => {
-    const user = userEvent.setup();
-    renderReview();
-    await user.click(await screen.findByRole("button", { name: "Adopt" }));
-    expect(handlers.adoptFocusNote).toHaveBeenCalledWith(7, "a1");
-
-    await user.selectOptions(screen.getByRole("combobox"), "off");
-    expect(handlers.setFocusLevel).toHaveBeenCalledWith(7, "off");
-    await waitFor(() => expect(screen.getByText("lockline_new")).toBeInTheDocument());
-    expect(screen.queryByText(/hidden hunk/)).not.toBeInTheDocument();
-  });
-
-  it("never hides a hunk that has a comment", async () => {
+  it("never hides a hunk that has an untagged comment", async () => {
     handlers.getReview = vi.fn(() =>
       Promise.resolve(
-        detail([
-          {
-            id: 1,
-            review_id: 7,
-            file_path: "Cargo.lock",
-            subject_type: "line",
-            origin: "diff",
-            side: "RIGHT",
-            line: 1,
-            start_line: null,
-            diff_hunk: null,
-            body: "why?",
-            parent_id: null,
-            anchored_head_sha: "head",
-            anchored_base_sha: null,
-            github_thread_root_id: null,
-            resolved_at: null,
-            created_at: "now",
-            updated_at: "now",
-          } as unknown as Comment,
-        ]),
+        detail([comment({ id: 1, file_path: "Cargo.lock", line: 1, body: "why?" })]),
       ),
     );
     renderReview();
     expect(await screen.findByText("lockline_new")).toBeInTheDocument();
-    expect(screen.queryByText(/hidden hunk/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/hidden hunk — lockfile/)).not.toBeInTheDocument();
   });
 
-  it("starts a generation from the header with the chosen level", async () => {
+  it("shows the AI pill on an ai-tagged comment, and doesn't let it pin a hidden hunk visible", async () => {
+    handlers.getReview = vi.fn(() =>
+      Promise.resolve(
+        detail([
+          comment({ id: 1, line: 1, body: "visible-hunk note", tag: "ai" }),
+          comment({ id: 2, line: 10, body: "hidden-hunk note", tag: "ai" }),
+        ]),
+      ),
+    );
+    renderReview();
+    expect(await screen.findByText("visible-hunk note")).toBeInTheDocument();
+    expect(screen.getAllByText("AI").length).toBeGreaterThan(0);
+    // The second comment is anchored inside the trivial hunk; being `ai`-tagged,
+    // it must not force that hunk visible.
+    expect(screen.getByText(/1 hidden hunk — import reorder/)).toBeInTheDocument();
+    expect(screen.queryByText("hidden-hunk note")).not.toBeInTheDocument();
+  });
+
+  it("starts a generation from the header", async () => {
     const user = userEvent.setup();
     handlers.getFocus = vi.fn(() => Promise.resolve(null));
     renderReview();
     await user.click(await screen.findByRole("button", { name: /Generate focus/ }));
     const pop = screen.getByRole("dialog", { name: "Generate focus" });
-    await user.selectOptions(within(pop).getAllByRole("combobox")[0], "critical");
     await user.click(within(pop).getByRole("button", { name: "Generate" }));
-    expect(handlers.generateFocus).toHaveBeenCalledWith(7, "critical", undefined);
+    expect(handlers.generateFocus).toHaveBeenCalledWith(7, undefined);
   });
 
   it("disables Generate without the claude CLI", async () => {

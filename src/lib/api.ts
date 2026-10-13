@@ -71,13 +71,9 @@ export const api = {
     invoke<void>("set_hunk_override", { reviewId, hunkId, value }),
   setFileOverride: (reviewId: number, filePath: string, value: FocusOverride | null) =>
     invoke<void>("set_file_override", { reviewId, filePath, value }),
-  adoptFocusNote: (reviewId: number, hunkId: string) =>
-    invoke<Comment>("adopt_focus_note", { reviewId, hunkId }),
-  dismissFocusNote: (reviewId: number, hunkId: string) =>
-    invoke<void>("dismiss_focus_note", { reviewId, hunkId }),
   clearFocus: (reviewId: number) => invoke<void>("clear_focus", { reviewId }),
-  generateFocus: (reviewId: number, level: FocusLevel, model?: string) =>
-    invoke<void>("generate_focus", { reviewId, level, model: model || null }),
+  generateFocus: (reviewId: number, model?: string) =>
+    invoke<void>("generate_focus", { reviewId, model: model || null }),
 
   // Chat
   crInstallNote: () => invoke<string | null>("cr_install_note"),
@@ -257,6 +253,8 @@ export const api = {
   }) => invoke<Comment>("add_file_view_comment", args),
   updateComment: (commentId: number, body: string) =>
     invoke<void>("update_comment", { commentId, body }),
+  setCommentTag: (commentId: number, tag: "ai" | "local" | null) =>
+    invoke<void>("set_comment_tag", { commentId, tag }),
   deleteComment: (commentId: number) =>
     invoke<void>("delete_comment", { commentId }),
   setCommentResolved: (commentId: number, resolved: boolean) =>

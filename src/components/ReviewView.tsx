@@ -295,14 +295,6 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
     () => compileCategoryRules(fileTestPatterns, fileConfigPatterns),
     [fileTestPatterns, fileConfigPatterns],
   );
-  const visibleFileIdx = useMemo(() => {
-    if (typeFilter === "all") return null;
-    const set = new Set<number>();
-    files.forEach((f, i) => {
-      if (categorize(fileDisplayPath(f), categoryRules) === typeFilter) set.add(i);
-    });
-    return set;
-  }, [files, categoryRules, typeFilter]);
 
   const focusQuery = useQuery({
     queryKey: ["focus", reviewId, detailQuery.data?.target.head_sha],
@@ -314,7 +306,8 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
   const focusAnchors = useMemo<Anchor[]>(() => {
     const out: Anchor[] = [];
     for (const c of detailQuery.data?.comments ?? []) {
-      if (c.origin === "file_view" || isDraftReply(c) || c.parent_id != null) continue;
+      if (c.origin === "file_view" || isDraftReply(c) || c.parent_id != null || c.tag === "ai")
+        continue;
       if (c.subject_type === "file") {
         out.push({ path: c.file_path, side: "FILE", line: -1 });
         continue;
@@ -340,20 +333,34 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
     [files, focusView, focusAnchors, revealed],
   );
 
-  const focusHiddenFiles = useMemo(() => {
-    const m = new Map<string, string>();
-    for (const f of focusModel ?? []) {
-      if (!f.fullyHidden) continue;
-      const all = f.whole ? [f.whole] : f.hunks;
-      m.set(f.path, [...new Set(all.map((h) => h.reason).filter(Boolean))].join(", "));
-    }
-    return m;
+  // Files focus hides entirely are removed from both panes, same as the type
+  // filter — not just greyed out.
+  const focusHiddenPaths = useMemo(() => {
+    const set = new Set<string>();
+    for (const f of focusModel ?? []) if (f.fullyHidden) set.add(f.path);
+    return set;
   }, [focusModel]);
 
+  const visibleFileIdx = useMemo(() => {
+    if (typeFilter === "all" && focusHiddenPaths.size === 0) return null;
+    const set = new Set<number>();
+    files.forEach((f, i) => {
+      const path = fileDisplayPath(f);
+      if (focusHiddenPaths.has(path)) return;
+      if (typeFilter !== "all" && categorize(path, categoryRules) !== typeFilter) return;
+      set.add(i);
+    });
+    return set;
+  }, [files, categoryRules, typeFilter, focusHiddenPaths]);
+
   const jumpToFile = useCallback((fileIndex: number) => {
-    diffAreaRef.current
-      ?.querySelector(`#file-${fileIndex}`)
-      ?.scrollIntoView({ block: "start" });
+    // Deferred a frame: revealing a focus-hidden file re-renders it into the
+    // DOM, which hasn't happened yet when onReveal/onJump fire together.
+    requestAnimationFrame(() => {
+      diffAreaRef.current
+        ?.querySelector(`#file-${fileIndex}`)
+        ?.scrollIntoView({ block: "start" });
+    });
   }, []);
 
   // Per-file change index, built once the find bar opens (covers every file,
@@ -573,7 +580,7 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
           paneCollapsed={sidebarCollapsed}
           onToggle={toggleSidebar}
           threads={threadsQuery.data ?? []}
-          focusHidden={focusHiddenFiles}
+          hiddenPaths={focusHiddenPaths}
           typeFilter={typeFilter}
           onTypeFilterChange={setTypeFilter}
         />
@@ -616,11 +623,7 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
                 onRegenerate={
                   focusView.focus.status === "generating"
                     ? undefined
-                    : () =>
-                        generateFocus.mutate({
-                          level: focusView.focus.level === "off" ? "focus" : focusView.focus.level,
-                          model: chatModel || undefined,
-                        })
+                    : () => generateFocus.mutate({ model: chatModel || undefined })
                 }
               />
             )}
@@ -955,6 +958,10 @@ function ReviewHeader({
     (c) => c.github_thread_root_id != null,
   ).length;
 
+  const taggedCommentCount = detail.comments.filter(
+    (c) => c.parent_id == null && c.tag != null,
+  ).length;
+
   const publishDraftReplies = useMutation({
     mutationFn: () => api.publishDraftReplies(review.id),
     onSuccess: (result) => {
@@ -1126,6 +1133,12 @@ function ReviewHeader({
             onPublish={(event) => publishReview.mutate(event)}
             onPublishDraft={(event) => publishPending.mutate(event)}
           />
+        )}
+        {isPr && isDraft && taggedCommentCount > 0 && (
+          <span className="muted" title="ai/local-tagged comments stay off GitHub until untagged">
+            {taggedCommentCount} tagged comment{taggedCommentCount === 1 ? "" : "s"} won't be
+            published
+          </span>
         )}
         {isPr && pending && (
           <>
@@ -1877,14 +1890,10 @@ function FileReview({
           >
             <Icon name="ext" size={12} /> Open
           </button>
-          {focus && (
+          {focus && !focus.fullyHidden && (
             <button
               className="btn btn-sm btn-ghost"
-              title={
-                focus.fullyHidden
-                  ? "Show this file's hunks (focus override)"
-                  : "Hide this file's hunks (focus override)"
-              }
+              title="Hide this file's hunks (focus override)"
               onClick={() => {
                 const all = focus.whole ? [focus.whole] : focus.hunks;
                 const overridden = all
@@ -1892,10 +1901,10 @@ function FileReview({
                   .filter((e) => e?.override != null)
                   .map((e) => e!.hunk_id);
                 if (overridden.length) focusActions.setHunkOverride(overridden, null);
-                focusActions.setFileOverride(path, focus.fullyHidden ? "show" : "hide");
+                focusActions.setFileOverride(path, "hide");
               }}
             >
-              <Icon name="eye" size={12} /> {focus.fullyHidden ? "Show file" : "Hide file"}
+              <Icon name="eye" size={12} /> Hide file
             </button>
           )}
           <label className="viewed-toggle check" title="Collapse this file">
@@ -2079,13 +2088,7 @@ function FileBody({
           ))}
         </div>
       )}
-      {focus?.whole?.hidden ? (
-        <FocusHiddenBar
-          hunks={[focus.whole]}
-          onReveal={() => onReveal(focusIds([focus.whole!]))}
-          onAlwaysShow={() => focusActions.setHunkOverride(focusIds([focus.whole!]), "show")}
-        />
-      ) : file.isBinary ? (
+      {file.isBinary ? (
         <p className="muted binary-note">Binary file not shown.</p>
       ) : (
         <Diff
@@ -2172,13 +2175,10 @@ function FileBody({
                         <FocusHunkMeta
                           key={f.entry!.hunk_id}
                           hunk={f}
-                          readOnly={readOnly}
                           onHide={() => {
                             onUnreveal([f.entry!.hunk_id]);
                             focusActions.setHunkOverride([f.entry!.hunk_id], "hide");
                           }}
-                          onAdopt={() => focusActions.adoptNote(f.entry!.hunk_id)}
-                          onDismiss={() => focusActions.dismissNote(f.entry!.hunk_id)}
                         />
                       ))}
                     </>
@@ -2437,6 +2437,89 @@ export function ThreadItem({
   );
 }
 
+/** Root-comment-only tag pill: none/ai/local. Tagged comments never publish. */
+function CommentTagPill({ comment, readOnly }: { comment: Comment; readOnly: boolean }) {
+  const queryClient = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLSpanElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [open]);
+
+  if (readOnly) {
+    if (!comment.tag) return null;
+    return comment.tag === "ai" ? (
+      <span className="ai-pill" title="Written by AI; not published">
+        AI
+      </span>
+    ) : (
+      <span className="local-pill" title="Local only; never published">
+        Local
+      </span>
+    );
+  }
+
+  const setTag = (tag: "ai" | "local" | null) => {
+    setOpen(false);
+    const key = ["review", comment.review_id];
+    queryClient.setQueriesData<ReviewDetail>({ queryKey: key }, (old) =>
+      old
+        ? { ...old, comments: old.comments.map((c) => (c.id === comment.id ? { ...c, tag } : c)) }
+        : old,
+    );
+    api.setCommentTag(comment.id, tag).catch((e) => {
+      toast.error(String(e));
+      queryClient.invalidateQueries({ queryKey: key });
+    });
+  };
+
+  return (
+    <span className="comment-tag-menu" ref={ref}>
+      <button
+        type="button"
+        className={
+          comment.tag === "ai" ? "ai-pill" : comment.tag === "local" ? "local-pill" : "expand-btn"
+        }
+        title="Tag: ai/local comments are never published to GitHub"
+        onClick={() => setOpen((o) => !o)}
+      >
+        {comment.tag === "ai" ? "AI" : comment.tag === "local" ? "Local" : "+ tag"}
+      </button>
+      {open && (
+        <span className="comment-tag-pop" role="menu">
+          <button
+            type="button"
+            className={comment.tag == null ? "active" : ""}
+            onClick={() => setTag(null)}
+          >
+            None
+          </button>
+          <button
+            type="button"
+            className={comment.tag === "ai" ? "active" : ""}
+            onClick={() => setTag("ai")}
+          >
+            AI
+          </button>
+          <button
+            type="button"
+            className={comment.tag === "local" ? "active" : ""}
+            onClick={() => setTag("local")}
+          >
+            Local
+          </button>
+        </span>
+      )}
+    </span>
+  );
+}
+
 export function CommentItem({
   comment,
   headSha,
@@ -2480,6 +2563,7 @@ export function CommentItem({
 
   return (
     <div className="comment-item">
+      {comment.parent_id == null && <CommentTagPill comment={comment} readOnly={readOnly} />}
       {showOrigin && comment.origin === "file_view" && (
         <span
           className="origin-badge"

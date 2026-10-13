@@ -57,6 +57,7 @@ function App() {
     listen<{ review_id: number }>(FOCUS_UPDATED_EVENT, ({ payload }) => {
       queryClient.invalidateQueries({ queryKey: ["focus", payload.review_id] });
       queryClient.invalidateQueries({ queryKey: ["review", payload.review_id] });
+      queryClient.invalidateQueries({ queryKey: ["reviews"] });
     })
       .then((dispose) => {
         if (disposed) dispose();
