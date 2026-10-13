@@ -4568,3 +4568,33 @@ input[type="range"] {
 .board-meta-add-toggle {
   align-self: flex-start;
 }
+
+/* Settings: Logs */
+.settings-log-path {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-2);
+  font-size: 11.5px;
+}
+.settings-log-hint {
+  margin: 0;
+  font-size: 11px;
+}
+.settings-log-view {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--radius-m);
+  border: 1px solid var(--border);
+  background: var(--bg-sunken);
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 420px;
+  overflow-y: auto;
+}

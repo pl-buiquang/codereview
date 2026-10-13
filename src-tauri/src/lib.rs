@@ -12,6 +12,7 @@ pub mod gh;
 pub mod git;
 pub mod graph;
 pub mod inbox;
+pub mod logging;
 mod path_env;
 pub mod provider;
 pub mod tools;
@@ -36,7 +37,7 @@ fn handle_deep_link_url<R: tauri::Runtime>(app: &tauri::AppHandle<R>, raw_url: &
             let _ = app.emit("deep-link-action", &action);
         }
         Err(err) => {
-            eprintln!("[deep-link] failed to parse {raw_url:?}: {err}");
+            logging::warn(&format!("[deep-link] failed to parse {raw_url:?}: {err}"));
             let _ = app.emit("deep-link-error", &err);
         }
     }
@@ -54,6 +55,16 @@ fn app_version() -> &'static str {
 #[tauri::command]
 fn cr_install_note(note: tauri::State<CrNote>) -> Option<String> {
     note.0.lock().unwrap().take()
+}
+
+#[tauri::command]
+fn log_path(dir: tauri::State<logging::LogDir>) -> String {
+    logging::log_file_path(&dir.0).to_string_lossy().into_owned()
+}
+
+#[tauri::command]
+fn read_app_log(max_lines: usize, dir: tauri::State<logging::LogDir>) -> Result<String, String> {
+    logging::read_tail(&dir.0, max_lines).map_err(|e| format!("failed to read log: {e}"))
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -111,6 +122,21 @@ pub fn run() {
             app.manage(Db(Mutex::new(conn)));
             app.manage(db::DbPath(db_path.clone()));
 
+            let log_dir = db_path
+                .parent()
+                .map(std::path::Path::to_path_buf)
+                .unwrap_or_else(|| std::path::PathBuf::from("."));
+            if let Err(e) = logging::init(&log_dir) {
+                eprintln!("[logging] failed to open log file in {}: {e}", log_dir.display());
+            }
+            log::info!(
+                "codereview starting (version {}, debug_assertions={}, db={})",
+                env!("CODEREVIEW_VERSION"),
+                cfg!(debug_assertions),
+                db_path.display(),
+            );
+            app.manage(logging::LogDir(log_dir));
+
             // Handle deep links delivered while the app is already running
             // (macOS open-url Apple Events, Linux D-Bus activation).
             // The plugin buffers any URL received before this listener is
@@ -125,6 +151,8 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            log_path,
+            read_app_log,
             commands::repo::add_repository,
             commands::repo::list_repositories,
             commands::repo::remove_repository,

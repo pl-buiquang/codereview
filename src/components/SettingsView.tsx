@@ -16,10 +16,11 @@ import { toast } from "../lib/toast";
 import type { ToolEnv } from "../lib/types";
 import { Icon, type IconName } from "./icons";
 
-type SettingsSection = "general";
+type SettingsSection = "general" | "logs";
 
 const SECTIONS: { key: SettingsSection; label: string; icon: IconName }[] = [
   { key: "general", label: "General", icon: "gear" },
+  { key: "logs", label: "Logs", icon: "file" },
 ];
 
 const MODES: { value: ThemeMode; label: string }[] = [
@@ -124,6 +125,63 @@ function DirectionPicker() {
         </button>
       ))}
     </div>
+  );
+}
+
+const LOG_LINES = 400;
+
+function LogsSection() {
+  const pathQuery = useQuery({ queryKey: ["log-path"], queryFn: api.logPath });
+  const logQuery = useQuery({
+    queryKey: ["app-log"],
+    queryFn: () => api.readAppLog(LOG_LINES),
+    refetchInterval: 3000,
+  });
+
+  const copyPath = () => {
+    if (!pathQuery.data) return;
+    navigator.clipboard.writeText(pathQuery.data).then(
+      () => toast.success("Copied log path"),
+      (e) => toast.error(String(e)),
+    );
+  };
+
+  return (
+    <section className="settings-group">
+      <h3>Logs</h3>
+      <div className="settings-row">
+        <span>Log file</span>
+        <span className="settings-control">
+          <code className="mono settings-log-path" title={pathQuery.data ?? undefined}>
+            {pathQuery.data ?? "…"}
+          </code>
+          <button className="btn btn-sm" disabled={!pathQuery.data} onClick={copyPath}>
+            Copy path
+          </button>
+          <button
+            className="btn btn-sm"
+            disabled={!pathQuery.data}
+            onClick={() => pathQuery.data && api.openInDefaultApp(pathQuery.data).catch((e) => toast.error(String(e)))}
+          >
+            Open
+          </button>
+          <button className="btn btn-sm" onClick={() => logQuery.refetch()} disabled={logQuery.isFetching}>
+            Refresh
+          </button>
+        </span>
+      </div>
+      <p className="muted settings-log-hint">
+        Last {LOG_LINES} lines. Rotates to <code className="mono">.log.old</code> past 5&nbsp;MB. Auto-refreshes
+        every few seconds while this page is open.
+      </p>
+      <pre className="settings-log-view">
+        {logQuery.isLoading
+          ? "Loading…"
+          : logQuery.data && logQuery.data.length > 0
+            ? logQuery.data
+            : "Nothing logged yet."}
+      </pre>
+    </section>
   );
 }
 
@@ -438,7 +496,8 @@ export function SettingsView() {
         </nav>
 
         <div className="settings-content">
-          <GeneralSection />
+          {section === "general" && <GeneralSection />}
+          {section === "logs" && <LogsSection />}
         </div>
       </div>
     </section>

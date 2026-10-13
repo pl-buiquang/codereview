@@ -1400,9 +1400,9 @@ pub async fn publish_review(review_id: i64, db: State<'_, Db>) -> AppResult<Revi
         Ok(n) => {
             eprintln!("[publish.capture_ids] stored {n} github comment ids for review {review_id}")
         }
-        Err(e) => eprintln!(
+        Err(e) => crate::logging::warn(&format!(
             "[publish.capture_ids] best-effort capture failed for review {review_id}: {e}"
-        ),
+        )),
     }
 
     get_review_row(&conn, review_id)

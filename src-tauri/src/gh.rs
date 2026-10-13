@@ -114,7 +114,7 @@ pub fn graphql<T: DeserializeOwned>(query: &str, variables: serde_json::Value) -
     match (env.data, env.errors) {
         (Some(data), errors) => {
             if let Some(errors) = errors {
-                eprintln!("[gh.graphql] partial errors: {errors}");
+                crate::logging::warn(&format!("[gh.graphql] partial errors: {errors}"));
             }
             Ok(data)
         }

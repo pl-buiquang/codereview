@@ -130,7 +130,7 @@ pub fn board_refresh_impl(db: &Db) -> AppResult<BoardRefreshResult> {
     let tracked_set: HashSet<&str> = tracked_ids.iter().map(String::as_str).collect();
 
     let authored = board::search_authored_open_prs().unwrap_or_else(|e| {
-        eprintln!("[board.refresh] authored search failed: {e}");
+        crate::logging::warn(&format!("[board.refresh] authored search failed: {e}"));
         Vec::new()
     });
     let mut auto_tracked = 0i64;

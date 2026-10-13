@@ -83,6 +83,10 @@ export const api = {
   crInstallNote: () => invoke<string | null>("cr_install_note"),
   appVersion: () => invoke<string>("app_version"),
 
+  // Logs
+  logPath: () => invoke<string>("log_path"),
+  readAppLog: (maxLines: number) => invoke<string>("read_app_log", { maxLines }),
+
   chatSend: (reviewId: number, text: string, model?: string) =>
     invoke<ChatTurnResult>("chat_send", { reviewId, text, model: model || null }),
   chatMessages: (reviewId: number) =>

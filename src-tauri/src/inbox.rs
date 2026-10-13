@@ -504,7 +504,7 @@ fn run_search(task: &SearchTask) -> Vec<ReasonedNode> {
             })
             .collect(),
         Err(e) => {
-            eprintln!("[inbox.search] q={:?} failed: {e}", task.query);
+            crate::logging::warn(&format!("[inbox.search] q={:?} failed: {e}", task.query));
             Vec::new()
         }
     }
@@ -532,7 +532,7 @@ pub fn fetch_viewer() -> AppResult<ViewerInfo> {
             let teams = match gh::graphql::<OrgTeamsData>(ORG_TEAMS_QUERY, vars) {
                 Ok(d) => d.organization.and_then(|o| o.teams),
                 Err(e) => {
-                    eprintln!("[inbox.viewer] org={org} teams failed: {e}");
+                    crate::logging::warn(&format!("[inbox.viewer] org={org} teams failed: {e}"));
                     break;
                 }
             };
@@ -575,7 +575,7 @@ pub fn enrich_top_files(repo: &str, number: i64) -> Option<String> {
             Some(serde_json::Value::Array(top).to_string())
         }
         Err(e) => {
-            eprintln!("[inbox.enrich] top-files failed for {repo}#{number}: {e}");
+            crate::logging::warn(&format!("[inbox.enrich] top-files failed for {repo}#{number}: {e}"));
             None
         }
     }
@@ -602,7 +602,7 @@ pub fn refetch_nodes(ids: &[String]) -> HashMap<String, SearchNode> {
                     }
                 }
             }
-            Err(e) => eprintln!("[inbox.refetch] batch failed: {e}"),
+            Err(e) => crate::logging::warn(&format!("[inbox.refetch] batch failed: {e}")),
         }
     }
     result

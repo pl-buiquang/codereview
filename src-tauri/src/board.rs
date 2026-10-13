@@ -375,7 +375,7 @@ pub fn refetch_nodes(ids: &[String]) -> HashMap<String, BoardNode> {
                     }
                 }
             }
-            Err(e) => eprintln!("[board.refetch] batch failed: {e}"),
+            Err(e) => crate::logging::warn(&format!("[board.refetch] batch failed: {e}")),
         }
     }
     result
