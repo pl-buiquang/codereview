@@ -55,11 +55,11 @@ struct ClaudeUsage {
     output_tokens: i64,
 }
 
-struct TurnResult {
-    text: String,
-    input_tokens: i64,
-    output_tokens: i64,
-    cost_usd: f64,
+pub(crate) struct TurnResult {
+    pub text: String,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub cost_usd: f64,
 }
 
 /// Response returned to the frontend after a chat turn.
@@ -69,6 +69,23 @@ pub struct ChatTurnResult {
     pub input_tokens: i64,
     pub output_tokens: i64,
     pub cost_usd: f64,
+}
+
+/// Options for one non-interactive `claude -p` run.
+pub(crate) struct ClaudeRun<'a> {
+    pub model: &'a str,
+    pub allowed_tools: &'a [&'a str],
+    pub permission_mode: &'a str,
+    pub system_prompt: Option<&'a str>,
+    /// Name for the temp system-prompt file; must be unique per concurrent run.
+    pub prompt_file_tag: &'a str,
+    pub cwd: &'a Path,
+    /// Directories beyond `cwd` the tools may access.
+    pub extra_dirs: &'a [&'a Path],
+    /// `(session_id, is_first_turn)`; None runs without session persistence.
+    pub session: Option<(&'a str, bool)>,
+    pub env: Vec<(String, std::ffi::OsString)>,
+    pub prompt: &'a str,
 }
 
 /// Call `claude -p` for one conversation turn. On the first turn (no session)
@@ -82,10 +99,40 @@ fn call_claude_turn(
     worktree_path: &Path,
     text: &str,
 ) -> AppResult<TurnResult> {
+    run_claude(ClaudeRun {
+        model,
+        allowed_tools: &["Bash", "Read", "Glob", "Grep", "Edit", "Write"],
+        // Explicit, so the user's own `~/.claude/settings.json` (e.g. a
+        // `defaultMode: plan`) never leaks into this non-interactive session.
+        permission_mode: "acceptEdits",
+        system_prompt: if is_first_turn { system_prompt } else { None },
+        prompt_file_tag: &format!("chat_{session_id}"),
+        cwd: worktree_path,
+        extra_dirs: &[],
+        session: Some((session_id, is_first_turn)),
+        env: Vec::new(),
+        prompt: text,
+    })
+}
+
+/// Model resolution priority:
+/// 1. Explicit setting from the app (passed by the frontend)
+/// 2. CODEREVIEW_CHAT_MODEL env var (manual override)
+/// 3. ANTHROPIC_DEFAULT_OPUS_MODEL env var (Bedrock ARN etc.)
+/// 4. Empty → no --model flag; claude uses its own configured default
+pub(crate) fn resolve_model(model: Option<String>) -> String {
+    model
+        .filter(|m| !m.is_empty())
+        .or_else(|| std::env::var("CODEREVIEW_CHAT_MODEL").ok())
+        .or_else(|| std::env::var("ANTHROPIC_DEFAULT_OPUS_MODEL").ok())
+        .unwrap_or_default()
+}
+
+pub(crate) fn run_claude(run: ClaudeRun) -> AppResult<TurnResult> {
     let mut cmd = Command::new(crate::tools::claude_bin());
-    // Run from the worktree so CLAUDE.md, git context, etc. come from the
-    // reviewed project, not the Tauri app's directory.
-    cmd.current_dir(worktree_path);
+    // Run from the reviewed project so CLAUDE.md, git context, etc. come from
+    // it, not the Tauri app's directory.
+    cmd.current_dir(run.cwd);
     cmd.arg("-p")
         .arg("--output-format")
         .arg("json")
@@ -93,40 +140,45 @@ fn call_claude_turn(
         // Note: we deliberately omit --setting-sources "" so claude can read its
         // own auth and Bedrock configuration from ~/.claude/.
         .arg("--strict-mcp-config")
-        .arg("--allowedTools")
-        .arg("Bash Read Glob Grep Edit Write")
-        // Explicit, so the user's own `~/.claude/settings.json` (e.g. a
-        // `defaultMode: plan`) never leaks into this non-interactive session.
         .arg("--permission-mode")
-        .arg("acceptEdits")
+        .arg(run.permission_mode)
         .arg("--add-dir")
-        .arg(worktree_path);
-
-    if !model.is_empty() {
-        cmd.arg("--model").arg(model);
+        .arg(run.cwd)
+        .args(run.extra_dirs.iter().flat_map(|d| [std::ffi::OsStr::new("--add-dir"), d.as_os_str()]))
+        .arg("--allowedTools")
+        .args(run.allowed_tools);
+    for (k, v) in &run.env {
+        cmd.env(k, v);
     }
 
-    if is_first_turn {
-        cmd.arg("--session-id").arg(session_id);
-    } else {
-        cmd.arg("--resume").arg(session_id);
+    if !run.model.is_empty() {
+        cmd.arg("--model").arg(run.model);
     }
 
-    // Write system prompt to a temp file (only on first turn). The file name
-    // is deterministic per session to avoid leaking temp files on crash.
-    let system_prompt_path = if is_first_turn {
-        if let Some(sys) = system_prompt {
-            let path = std::env::temp_dir().join(format!("codereview_chat_{session_id}.txt"));
+    match run.session {
+        Some((id, true)) => {
+            cmd.arg("--session-id").arg(id);
+        }
+        Some((id, false)) => {
+            cmd.arg("--resume").arg(id);
+        }
+        None => {
+            cmd.arg("--no-session-persistence");
+        }
+    }
+
+    // The file name is deterministic per tag to avoid leaking temp files on crash.
+    let system_prompt_path = match run.system_prompt {
+        Some(sys) => {
+            let path = std::env::temp_dir().join(format!("codereview_{}.txt", run.prompt_file_tag));
             std::fs::write(&path, sys)
                 .map_err(|e| AppError::Chat(format!("failed to write system prompt: {e}")))?;
             cmd.arg("--append-system-prompt-file").arg(&path);
             Some(path)
-        } else {
-            None
         }
-    } else {
-        None
+        None => None,
     };
+    let text = run.prompt;
 
     let mut child = cmd
         .stdin(Stdio::piped())
@@ -412,16 +464,7 @@ pub async fn chat_send(
         .and_then(|c| c.session_id.clone())
         .unwrap_or_else(new_session_id);
 
-    // Model resolution priority:
-    // 1. Explicit setting from the app's Settings panel (passed by the frontend)
-    // 2. CODEREVIEW_CHAT_MODEL env var (manual override)
-    // 3. ANTHROPIC_DEFAULT_OPUS_MODEL env var (Bedrock ARN etc.)
-    // 4. Empty → no --model flag; claude uses its own configured default
-    let model = model
-        .filter(|m| !m.is_empty())
-        .or_else(|| std::env::var("CODEREVIEW_CHAT_MODEL").ok())
-        .or_else(|| std::env::var("ANTHROPIC_DEFAULT_OPUS_MODEL").ok())
-        .unwrap_or_default();
+    let model = resolve_model(model);
 
     let system_prompt = if is_first_turn {
         let diff_summary = diff_file_summary(&diff);

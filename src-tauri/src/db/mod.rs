@@ -11,6 +11,9 @@ use crate::error::AppResult;
 /// single connection is sufficient for a desktop single-user app.
 pub struct Db(pub Mutex<Connection>);
 
+/// Where the app's database lives, so child processes (`cr`) can share it.
+pub struct DbPath(pub std::path::PathBuf);
+
 /// Ordered list of migration SQL scripts. The current schema version is stored
 /// in SQLite's `user_version` pragma; on open we apply any scripts beyond it.
 const MIGRATIONS: &[&str] = &[

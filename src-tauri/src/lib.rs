@@ -108,6 +108,7 @@ pub fn run() {
             let conn = db::open(&db_path)?;
             commands::focus::fail_interrupted(&conn)?;
             app.manage(Db(Mutex::new(conn)));
+            app.manage(db::DbPath(db_path.clone()));
 
             // Handle deep links delivered while the app is already running
             // (macOS open-url Apple Events, Linux D-Bus activation).
@@ -139,6 +140,7 @@ pub fn run() {
             commands::focus::adopt_focus_note,
             commands::focus::dismiss_focus_note,
             commands::focus::clear_focus,
+            commands::focus::generate_focus,
             commands::review::create_review,
             commands::review::list_reviews,
             commands::review::get_review,

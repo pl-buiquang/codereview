@@ -64,6 +64,7 @@ pub struct ToolEnv {
     pub git: Option<String>,
     pub gh: Option<String>,
     pub gh_authed: bool,
+    pub claude: Option<String>,
 }
 
 /// Fetch a GitHub image URL (e.g. user-attachments) with auth, return as data URL.
@@ -79,5 +80,6 @@ pub fn check_environment() -> ToolEnv {
         git: tools::git_path(),
         gh: tools::gh_path(),
         gh_authed: provider_for().auth_status(),
+        claude: tools::claude_path(),
     }
 }

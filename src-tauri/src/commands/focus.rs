@@ -900,6 +900,159 @@ pub fn adopt_focus_note_impl(conn: &Connection, review_id: i64, hunk_id: &str) -
 }
 
 // ---------------------------------------------------------------------------
+// In-app runner
+
+const SKILL_PROMPT: &str = include_str!("../../../skills/focus-review/SKILL.md");
+const FOCUS_TOOLS: &[&str] = &[
+    "Bash(cr focus:*)",
+    "Bash(cr diff:*)",
+    "Bash(cr show:*)",
+    "Bash(cr --json focus:*)",
+    "Bash(cr --json show:*)",
+    "Read",
+    "Glob",
+    "Grep",
+];
+const NO_PLAN_ERROR: &str = "the model finished without submitting a plan (`cr focus set` was never called)";
+
+/// Mark the review's focus as generating (creating the row if needed).
+pub fn begin_generation(conn: &Connection, review_id: i64, model: &str) -> AppResult<()> {
+    if load_focus(conn, review_id)?.is_some_and(|f| f.status == "generating") {
+        return Err(AppError::Other("a focus is already being generated for this review".into()));
+    }
+    let model = (!model.is_empty()).then_some(model);
+    conn.execute(
+        "INSERT INTO focus (review_id, status, model) VALUES (?1, 'generating', ?2)
+         ON CONFLICT(review_id) DO UPDATE SET status = 'generating', error = NULL, model = excluded.model",
+        params![review_id, model],
+    )?;
+    Ok(())
+}
+
+/// Close a run. `cr focus set` already flips the status to ready on success, so
+/// a row still `generating` means the run failed or never submitted a plan.
+pub fn finish_generation(conn: &Connection, review_id: i64, error: Option<String>) -> AppResult<()> {
+    conn.execute(
+        "UPDATE focus SET status = 'failed', error = ?2 WHERE review_id = ?1 AND status = 'generating'",
+        params![review_id, error.unwrap_or_else(|| NO_PLAN_ERROR.into())],
+    )?;
+    Ok(())
+}
+
+fn app_mode_prompt(review_id: i64, level: &str, plan_path: &Path) -> String {
+    let plan = plan_path.display();
+    format!(
+        "{SKILL_PROMPT}\n\n---\n\nApp mode. Review id = {review_id}. Do not create or open reviews. \
+         Requested level = {level}. The `cr` CLI on PATH already points at the app's database. \
+         Write the plan with the Write tool to `{plan}` (the only writable path), then run \
+         `cr focus set {review_id} --level {level} --file {plan}`."
+    )
+}
+
+/// PATH for the child with the app's bundled `cr` sidecar first, when present.
+fn child_path() -> Option<std::ffi::OsString> {
+    let exe_dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
+    let cr = exe_dir.join(if cfg!(windows) { "cr.exe" } else { "cr" });
+    if !cr.exists() {
+        return None;
+    }
+    let mut dirs = vec![exe_dir];
+    if let Some(p) = std::env::var_os("PATH") {
+        dirs.extend(std::env::split_paths(&p));
+    }
+    std::env::join_paths(dirs).ok()
+}
+
+fn run_generation(
+    review_id: i64,
+    level: &str,
+    model: &str,
+    local_path: Option<String>,
+    db_path: &Path,
+) -> AppResult<()> {
+    let temp;
+    let cwd = match &local_path {
+        Some(p) if Path::new(p).exists() => Path::new(p),
+        _ => {
+            temp = std::env::temp_dir().join(format!("codereview_focus_{review_id}"));
+            std::fs::create_dir_all(&temp)?;
+            temp.as_path()
+        }
+    };
+    let mut env = vec![("CODEREVIEW_DB".to_string(), db_path.as_os_str().to_owned())];
+    if let Some(path) = child_path() {
+        env.push(("PATH".to_string(), path));
+    }
+    // Plans go through a file: Claude Code refuses Bash commands that carry
+    // inline JSON. Canonical so the Edit rule matches (macOS /var → /private/var).
+    let scratch = std::env::temp_dir()
+        .canonicalize()?
+        .join(format!("codereview-focus-{review_id}"));
+    std::fs::create_dir_all(&scratch)?;
+    let plan_path = scratch.join("plan.json");
+    let write_rule = format!("Edit(/{}/**)", scratch.display());
+    let mut tools: Vec<&str> = FOCUS_TOOLS.to_vec();
+    tools.push(&write_rule);
+    let system_prompt = app_mode_prompt(review_id, level, &plan_path);
+    let result = crate::commands::chat::run_claude(crate::commands::chat::ClaudeRun {
+        model,
+        allowed_tools: &tools,
+        permission_mode: "default",
+        system_prompt: Some(&system_prompt),
+        prompt_file_tag: &format!("focus_{review_id}"),
+        cwd,
+        extra_dirs: &[scratch.as_path()],
+        session: None,
+        env,
+        prompt: &format!("Generate the focus for review {review_id} at level {level}."),
+    });
+    let _ = std::fs::remove_dir_all(&scratch);
+    result.map(|_| ())
+}
+
+#[derive(Clone, Serialize)]
+struct FocusUpdated {
+    review_id: i64,
+}
+
+/// Start a background focus run; emits `focus-updated` when it ends.
+#[tauri::command]
+pub fn generate_focus(
+    app: tauri::AppHandle,
+    review_id: i64,
+    level: Option<String>,
+    model: Option<String>,
+    db: State<Db>,
+    db_path: State<crate::db::DbPath>,
+) -> AppResult<()> {
+    use tauri::{Emitter, Manager};
+
+    let level = level.unwrap_or_else(|| "focus".into());
+    validate_level(&level)?;
+    if crate::tools::claude_path().is_none() {
+        return Err(AppError::Other("the `claude` CLI was not found on PATH".into()));
+    }
+    let model = crate::commands::chat::resolve_model(model);
+    let local_path = {
+        let conn = db.0.lock().unwrap();
+        begin_generation(&conn, review_id, &model)?;
+        review_local_path(&conn, review_id)?
+    };
+    let db_path = db_path.0.clone();
+    let _ = app.emit("focus-updated", FocusUpdated { review_id });
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = run_generation(review_id, &level, &model, local_path, &db_path);
+        {
+            let db = app.state::<Db>();
+            let conn = db.0.lock().unwrap();
+            let _ = finish_generation(&conn, review_id, result.err().map(|e| e.to_string()));
+        }
+        let _ = app.emit("focus-updated", FocusUpdated { review_id });
+    });
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // Tauri commands
 
 #[tauri::command]
@@ -1176,6 +1329,93 @@ mod tests {
 
         conn.execute("UPDATE review SET status = 'published'", []).unwrap();
         assert!(adopt_focus_note_from(&conn, rid, &hunks, &app[0].hunk_id).is_err());
+    }
+
+    #[test]
+    fn generation_lifecycle() {
+        let conn = open_memory();
+        let rid = seed_review(&conn, "head1");
+        let hunks = parse_diff_hunks(DIFF);
+
+        begin_generation(&conn, rid, "opus").unwrap();
+        assert!(begin_generation(&conn, rid, "opus").is_err(), "one run at a time");
+        finish_generation(&conn, rid, None).unwrap();
+        let f = load_focus(&conn, rid).unwrap().unwrap();
+        assert_eq!((f.status.as_str(), f.model.as_deref()), ("failed", Some("opus")));
+        assert_eq!(f.error.as_deref(), Some(NO_PLAN_ERROR));
+
+        begin_generation(&conn, rid, "").unwrap();
+        set_focus_plan_from(&conn, rid, &hunks, plan(r#"{"summary":"ok"}"#), Some("critical")).unwrap();
+        finish_generation(&conn, rid, Some("claude exited 1".into())).unwrap();
+        let f = load_focus(&conn, rid).unwrap().unwrap();
+        assert_eq!(f.status, "ready", "a submitted plan wins over a late error");
+        assert_eq!(f.level, "critical");
+        assert!(f.error.is_none());
+        let prompt = app_mode_prompt(rid, "focus", Path::new("/tmp/p.json"));
+        assert!(prompt.contains("App mode. Review id = 1."));
+        assert!(prompt.contains("--file /tmp/p.json"));
+    }
+
+    /// Runs the real `claude` CLI. `cargo build --bin cr` first, then:
+    /// `cargo test live_generation -- --ignored`.
+    #[test]
+    #[ignore]
+    fn live_generation() {
+        use std::process::Command;
+        crate::tools::init();
+        let dir = tempfile::TempDir::new().unwrap();
+        let repo = dir.path().join("repo");
+        std::fs::create_dir(&repo).unwrap();
+        let git = |args: &[&str]| {
+            assert!(Command::new("git").arg("-C").arg(&repo).args(args).status().unwrap().success())
+        };
+        git(&["init", "-q", "-b", "main"]);
+        git(&["config", "user.email", "t@t"]);
+        git(&["config", "user.name", "t"]);
+        std::fs::write(repo.join("auth.py"), "def check(u):\n    return u.admin\n").unwrap();
+        std::fs::write(repo.join("Cargo.lock"), "v=1\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "-qm", "init"]);
+        git(&["checkout", "-qb", "feat"]);
+        std::fs::write(repo.join("auth.py"), "def check(u):\n    return True\n").unwrap();
+        std::fs::write(repo.join("Cargo.lock"), "v=2\n").unwrap();
+        git(&["commit", "-qam", "change"]);
+
+        let db_path = dir.path().join("db.sqlite");
+        let rid = {
+            let conn = crate::db::open(&db_path).unwrap();
+            let repo_s = repo.to_str().unwrap();
+            conn.execute(
+                "INSERT INTO repository (local_path, default_branch, added_at) VALUES (?1, 'main', 'now')",
+                params![repo_s],
+            )
+            .unwrap();
+            let r = crate::commands::review::create_review_impl(&conn, 1, repo_s, "main", "feat", true, false)
+                .unwrap();
+            begin_generation(&conn, r.id, "").unwrap();
+            r.id
+        };
+        let bin = std::env::current_exe().unwrap().parent().unwrap().parent().unwrap().to_path_buf();
+        let path = std::env::join_paths(
+            std::iter::once(bin).chain(std::env::split_paths(&std::env::var_os("PATH").unwrap())),
+        )
+        .unwrap();
+        std::env::set_var("PATH", path);
+
+        let result = run_generation(rid, "focus", "sonnet", Some(repo.to_str().unwrap().into()), &db_path);
+        let conn = crate::db::open(&db_path).unwrap();
+        finish_generation(&conn, rid, result.err().map(|e| e.to_string())).unwrap();
+        let f = load_focus(&conn, rid).unwrap().unwrap();
+        assert_eq!(f.status, "ready", "error: {:?}", f.error);
+        let tiers: Vec<(String, String)> = conn
+            .prepare("SELECT file_path, tier FROM focus_hunk WHERE focus_id = ?1 ORDER BY file_path")
+            .unwrap()
+            .query_map(params![f.id], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        eprintln!("summary: {:?}\ntiers: {tiers:?}", f.summary);
+        assert!(tiers.contains(&("Cargo.lock".into(), "trivial".into())));
     }
 
     #[test]
