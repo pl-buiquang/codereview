@@ -4,7 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import { queryClient } from "./lib/queryClient";
 import { TabBar } from "./components/TabBar";
 import { DashboardPanel } from "./components/DashboardPanel";
-import { HomeFlyout } from "./components/HomeFlyout";
+import { HomeNav } from "./components/HomeNav";
 import { ReviewView } from "./components/ReviewView";
 import { Toaster } from "./components/Toaster";
 import { ConfirmDialog } from "./components/ConfirmDialog";
@@ -139,13 +139,20 @@ function App() {
     <div className="app-shell">
       <UpdateBanner />
       <TabBar />
-      <TabPanes />
-      <HomeFlyout />
+      <div className="app-body">
+        <AppSidebar />
+        <TabPanes />
+      </div>
       <Toaster />
       <ConfirmDialog />
       <CommandPalette />
     </div>
   );
+}
+
+function AppSidebar() {
+  const collapsed = useUIStore((s) => s.sidebarCollapsed);
+  return <HomeNav collapsed={collapsed} />;
 }
 
 // Keep every tab mounted (hidden when inactive) so switching preserves each

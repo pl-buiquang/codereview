@@ -5,7 +5,6 @@ import { api } from "../lib/api";
 import { useUIStore, type Tab } from "../store";
 import { toast } from "../lib/toast";
 import { Icon, type IconName } from "./icons";
-import { flyoutHover } from "./HomeFlyout";
 
 function tabMagicLink(tab: Tab): string | null {
   if (tab.kind === "review" && tab.reviewId != null) {
@@ -134,8 +133,6 @@ function TabItem({ tab }: { tab: Tab }) {
         dragOver ? "drag-over" : ""
       }`}
       onClick={() => setActiveTab(tab.id)}
-      onMouseEnter={tab.kind === "home" ? flyoutHover.enter : undefined}
-      onMouseLeave={tab.kind === "home" ? flyoutHover.leave : undefined}
       onContextMenu={(e) => {
         if (!hasContextMenu) return;
         e.preventDefault();

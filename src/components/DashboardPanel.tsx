@@ -7,19 +7,16 @@ import { ReviewsView } from "./ReviewsView";
 import { ArchiveView } from "./ArchiveView";
 import { RepositoriesView } from "./RepositoriesView";
 import { RepoView } from "./RepoView";
-import { HomeNav } from "./HomeNav";
 
 export function DashboardPanel() {
   const section = useUIStore((s) => s.homeSection);
   const homeRepoId = useUIStore((s) => s.homeRepoId);
-  const collapsed = useUIStore((s) => s.sidebarCollapsed);
   const openRepoIds = useUIStore((s) => s.openRepoIds);
   // Stable order so closing/opening repos never moves the mounted subtrees.
   const panes = [...openRepoIds].sort((a, b) => a - b);
 
   return (
     <div className="dashboard">
-      <HomeNav collapsed={collapsed} />
       <div className="dashboard-main">
         {panes.map((id) => (
           <RepoSlot key={id} repoId={id} active={id === homeRepoId} />

@@ -15,15 +15,14 @@ const NAV: { key: HomeSection; label: string; icon: IconName }[] = [
 
 export function HomeNav({
   collapsed,
-  showToggle = true,
   onNavigate,
   className = "",
 }: {
   collapsed: boolean;
-  showToggle?: boolean;
   onNavigate?: () => void;
   className?: string;
 }) {
+  const activeTabId = useUIStore((s) => s.activeTabId);
   const section = useUIStore((s) => s.homeSection);
   const homeRepoId = useUIStore((s) => s.homeRepoId);
   const openRepoIds = useUIStore((s) => s.openRepoIds);
@@ -32,6 +31,7 @@ export function HomeNav({
   const closeRepo = useUIStore((s) => s.closeRepo);
   const toggleSidebar = useUIStore((s) => s.toggleSidebar);
   const openSettingsTab = useUIStore((s) => s.openSettingsTab);
+  const onHome = activeTabId === "home";
 
   const { data: repos } = useQuery({
     queryKey: ["repositories"],
@@ -49,22 +49,20 @@ export function HomeNav({
       <div className="cr-side-brand">
         <span className="cr-side-logo">cr</span>
         {!collapsed && <span className="cr-side-brand-name">codereview</span>}
-        {showToggle && (
-          <button
-            className="btn-icon cr-side-toggle"
-            onClick={toggleSidebar}
-            title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          >
-            <Icon name="sidebar" size={14} />
-          </button>
-        )}
+        <button
+          className="btn-icon cr-side-toggle"
+          onClick={toggleSidebar}
+          title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+        >
+          <Icon name="sidebar" size={14} />
+        </button>
       </div>
       <div className="cr-nav">
         {NAV.map((n) => (
           <button
             key={n.key}
-            className={`cr-nav-item${section === n.key && homeRepoId == null ? " active" : ""}`}
+            className={`cr-nav-item${onHome && homeRepoId == null && section === n.key ? " active" : ""}`}
             onClick={go(() => setSection(n.key))}
             title={collapsed ? n.label : undefined}
           >
@@ -87,7 +85,7 @@ export function HomeNav({
               <div
                 role="button"
                 tabIndex={0}
-                className={`cr-nav-item cr-open-repo${homeRepoId === repo.id ? " active" : ""}`}
+                className={`cr-nav-item cr-open-repo${onHome && homeRepoId === repo.id ? " active" : ""}`}
                 onClick={go(() => openRepo(repo.id))}
                 onMouseDown={(e) => {
                   if (e.button === 1) e.preventDefault();
@@ -128,7 +126,11 @@ export function HomeNav({
         </div>
       )}
       <div className="cr-side-foot cr-nav">
-        <button className="cr-nav-item" onClick={go(openSettingsTab)} title="Settings">
+        <button
+          className={`cr-nav-item${activeTabId === "settings" ? " active" : ""}`}
+          onClick={go(openSettingsTab)}
+          title="Settings"
+        >
           <Icon name="gear" size={15} />
           {!collapsed && "Settings"}
         </button>
