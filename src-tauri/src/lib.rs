@@ -201,6 +201,7 @@ pub fn run() {
             commands::chat::chat_messages,
             commands::chat::chat_clear,
             commands::chat::chat_branch,
+            commands::chat::ensure_chat_worktree,
             commands::chat::set_chat_collapsed,
             commands::worktree::list_worktrees,
             commands::worktree::remove_worktree,

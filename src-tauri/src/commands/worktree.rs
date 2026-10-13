@@ -63,10 +63,13 @@ pub fn prune_worktrees(repo_id: i64, db: State<Db>) -> AppResult<String> {
 }
 
 #[tauri::command]
-pub fn open_in_vscode(path: String) -> AppResult<()> {
-    Command::new("code")
-        .arg(&path)
-        .spawn()
+pub fn open_in_vscode(path: String, file: Option<String>) -> AppResult<()> {
+    let mut cmd = Command::new("code");
+    cmd.arg(&path);
+    if let Some(file) = file {
+        cmd.arg(Path::new(&path).join(file));
+    }
+    cmd.spawn()
         .map_err(|e| AppError::Other(format!("failed to open VSCode: {e}")))?;
     Ok(())
 }

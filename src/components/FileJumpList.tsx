@@ -140,6 +140,8 @@ export function FileJumpList({
   onToggle,
   threads = [],
   focusHidden,
+  typeFilter,
+  onTypeFilterChange,
 }: {
   reviewId: number;
   scrollRootRef: RefObject<HTMLElement | null>;
@@ -149,6 +151,8 @@ export function FileJumpList({
   threads?: PrThread[];
   /** Files fully hidden by focus, mapped to the hide reasons (tooltip). */
   focusHidden?: Map<string, string>;
+  typeFilter: "all" | FileCategory;
+  onTypeFilterChange: (filter: "all" | FileCategory) => void;
 }) {
   const detailQuery = useQuery({
     queryKey: ["review", reviewId],
@@ -204,7 +208,6 @@ export function FileJumpList({
     [files, countByPath, viewedSet, categoryRules],
   );
 
-  const [typeFilter, setTypeFilter] = useState<"all" | FileCategory>("all");
   const categoryCounts = useMemo(() => {
     const counts: Record<FileCategory, number> = { code: 0, tests: 0, config: 0 };
     for (const r of rows) counts[r.category]++;
@@ -617,7 +620,7 @@ export function FileJumpList({
                       key={c.key}
                       type="button"
                       className={`comment-filter-btn${typeFilter === c.key ? " active" : ""}`}
-                      onClick={() => setTypeFilter(c.key)}
+                      onClick={() => onTypeFilterChange(c.key)}
                     >
                       {c.label} {c.key === "all" ? rows.length : categoryCounts[c.key]}
                     </button>

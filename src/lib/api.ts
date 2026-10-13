@@ -91,6 +91,8 @@ export const api = {
     invoke<void>("chat_clear", { reviewId }),
   chatBranch: (reviewId: number) =>
     invoke<string | null>("chat_branch", { reviewId }),
+  ensureChatWorktree: (reviewId: number) =>
+    invoke<string>("ensure_chat_worktree", { reviewId }),
   reviewDiff: (reviewId: number) => invoke<string>("review_diff", { reviewId }),
   fileSource: (reviewId: number, filePath: string, side: Side) =>
     invoke<string>("file_source", { reviewId, filePath, side }),
@@ -173,8 +175,8 @@ export const api = {
     invoke<void>("remove_worktree", { repoId, worktreePath }),
   pruneWorktrees: (repoId: number) =>
     invoke<string>("prune_worktrees", { repoId }),
-  openInVscode: (path: string) =>
-    invoke<void>("open_in_vscode", { path }),
+  openInVscode: (path: string, file?: string) =>
+    invoke<void>("open_in_vscode", { path, file: file ?? null }),
 
   // Git graph
   graphLog: (args: {

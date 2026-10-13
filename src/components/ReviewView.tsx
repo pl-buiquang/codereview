@@ -39,6 +39,7 @@ import {
   trailingGap,
 } from "../lib/diff";
 import { filterDiffMatches, wrapIndex, type DiffMatch } from "../lib/diffSearch";
+import { categorize, compileCategoryRules, type FileCategory } from "../lib/fileCategory";
 import { FileJumpList } from "./FileJumpList";
 import {
   FocusDigest,
@@ -106,6 +107,7 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
   const [leftWidth, setLeftWidth] = useState(248);
   const [rightWidth, setRightWidth] = useState(360);
   const [pendingChatMessage, setPendingChatMessage] = useState<string | null>(null);
+  const [typeFilter, setTypeFilter] = useState<"all" | FileCategory>("all");
   const diffAreaRef = useRef<HTMLDivElement>(null);
 
   // Keyboard navigation. The single window listener lives here (see the effect
@@ -286,6 +288,22 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
     () => (diffQuery.data != null ? parseDiff(diffQuery.data) : []),
     [diffQuery.data],
   );
+
+  const fileTestPatterns = useSettingsStore((s) => s.fileTestPatterns);
+  const fileConfigPatterns = useSettingsStore((s) => s.fileConfigPatterns);
+  const categoryRules = useMemo(
+    () => compileCategoryRules(fileTestPatterns, fileConfigPatterns),
+    [fileTestPatterns, fileConfigPatterns],
+  );
+  const visibleFileIdx = useMemo(() => {
+    if (typeFilter === "all") return null;
+    const set = new Set<number>();
+    files.forEach((f, i) => {
+      if (categorize(fileDisplayPath(f), categoryRules) === typeFilter) set.add(i);
+    });
+    return set;
+  }, [files, categoryRules, typeFilter]);
+
   const focusQuery = useQuery({
     queryKey: ["focus", reviewId, detailQuery.data?.target.head_sha],
     enabled: detailQuery.data != null,
@@ -344,10 +362,11 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
     () => (searchOpen ? files.map((f) => indexFile(f).metaByKey) : []),
     [searchOpen, files],
   );
-  const matches = useMemo<DiffMatch[]>(
-    () => (searchOpen ? filterDiffMatches(perFileMeta, searchQuery) : []),
-    [searchOpen, perFileMeta, searchQuery],
-  );
+  const matches = useMemo<DiffMatch[]>(() => {
+    if (!searchOpen) return [];
+    const all = filterDiffMatches(perFileMeta, searchQuery);
+    return visibleFileIdx == null ? all : all.filter((m) => visibleFileIdx.has(m.fileIndex));
+  }, [searchOpen, perFileMeta, searchQuery, visibleFileIdx]);
   const curMatch = matches.length ? matches[wrapIndex(searchIdx, matches.length)] : null;
   const matchKeysByFile = useMemo(() => {
     const m = new Map<number, Set<string>>();
@@ -447,10 +466,17 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
         case "[": {
           if (!jl || jl.fileCount === 0) return;
           const delta = e.key === "]" ? 1 : -1;
-          const next = Math.min(
-            jl.fileCount - 1,
-            Math.max(0, jl.activeIndex + delta),
+          const visible =
+            visibleFileIdx == null
+              ? Array.from({ length: jl.fileCount }, (_, i) => i)
+              : [...visibleFileIdx].sort((a, b) => a - b);
+          if (visible.length === 0) return;
+          const pos = visible.indexOf(jl.activeIndex);
+          const nextPos = Math.min(
+            visible.length - 1,
+            Math.max(0, (pos === -1 ? 0 : pos) + delta),
           );
+          const next = visible[nextPos];
           if (next !== jl.activeIndex) jl.jumpTo(next);
           break;
         }
@@ -492,7 +518,16 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [isActiveTab, showHelp, filePanePath, npThreadNav, searchOpen, toggleSidebar, toggleChat]);
+  }, [
+    isActiveTab,
+    showHelp,
+    filePanePath,
+    npThreadNav,
+    searchOpen,
+    toggleSidebar,
+    toggleChat,
+    visibleFileIdx,
+  ]);
 
   if (detailQuery.isLoading) return <section className="main-panel">Loading review…</section>;
   if (detailQuery.isError || !detailQuery.data)
@@ -539,6 +574,8 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
           onToggle={toggleSidebar}
           threads={threadsQuery.data ?? []}
           focusHidden={focusHiddenFiles}
+          typeFilter={typeFilter}
+          onTypeFilterChange={setTypeFilter}
         />
         {!sidebarCollapsed && <div className="resize-handle" onMouseDown={startResize("left")} />}
         <div className="diff-area" ref={diffAreaRef}>
@@ -589,9 +626,13 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
             )}
           {diffQuery.isLoading && <p className="muted">Loading diff…</p>}
           {diffQuery.isError && <p className="error">Diff failed: {String(diffQuery.error)}</p>}
+          {diffQuery.data != null && visibleFileIdx != null && visibleFileIdx.size === 0 && (
+            <p className="muted">No files match the filter.</p>
+          )}
           {diffQuery.data != null && (
             <ReviewDiff
               files={files}
+              visibleFileIdx={visibleFileIdx}
               viewType={viewType}
               detail={detail}
               threads={threadsQuery.data ?? []}
@@ -785,6 +826,21 @@ function ReviewHeader({
   bodyRef.current = body;
   const [showExport, setShowExport] = useState(false);
   const [collapsed, setCollapsed] = useState(true);
+  const [openingWorktree, setOpeningWorktree] = useState(false);
+  const openChatWorktreeInVscode = async () => {
+    if (openingWorktree) return;
+    setOpeningWorktree(true);
+    try {
+      const worktreePath = await api.ensureChatWorktree(review.id);
+      await api.openInVscode(worktreePath);
+      queryClient.invalidateQueries({ queryKey: ["chat-branch", review.id] });
+      queryClient.invalidateQueries({ queryKey: ["worktrees", target.repo_id] });
+    } catch (err) {
+      toast.error(`Could not open VSCode: ${String(err)}`);
+    } finally {
+      setOpeningWorktree(false);
+    }
+  };
   const envQuery = useQuery({
     queryKey: ["environment"],
     queryFn: api.checkEnvironment,
@@ -948,20 +1004,33 @@ function ReviewHeader({
         </button>
         <div className="review-title-wrap">
           <h2 className="review-title">{target.title}</h2>
-          {sourceRepo && (
+          {(sourceRepo || detail.local_path) && (
             <span className="review-repo mono">
-              <button
-                className="review-repo-link"
-                title={`Open ${sourceRepo}`}
-                onClick={() => openRepo(detail.target.repo_id)}
-              >
-                {sourceRepo}
-              </button>
+              {sourceRepo && (
+                <button
+                  className="review-repo-link"
+                  title={`Open ${sourceRepo}`}
+                  onClick={() => openRepo(detail.target.repo_id)}
+                >
+                  {sourceRepo}
+                </button>
+              )}
               {prNumber != null && prUrl ? (
                 <PrNumberLink prNumber={prNumber} prUrl={prUrl} />
               ) : prNumber != null ? (
                 <span> #{prNumber}</span>
               ) : null}
+              {detail.local_path && (
+                <button
+                  className="btn-icon"
+                  title="Open chat worktree in VSCode"
+                  aria-label="Open chat worktree in VSCode"
+                  disabled={openingWorktree}
+                  onClick={openChatWorktreeInVscode}
+                >
+                  <Icon name="ext" size={12} />
+                </button>
+              )}
             </span>
           )}
         </div>
@@ -1172,6 +1241,7 @@ function ReviewHeader({
 
 function ReviewDiff({
   files,
+  visibleFileIdx,
   viewType,
   detail,
   threads,
@@ -1190,6 +1260,8 @@ function ReviewDiff({
   onSendToChat,
 }: {
   files: FileData[];
+  /** Indices to render; `null` means render everything (no type filter active). */
+  visibleFileIdx: Set<number> | null;
   viewType: ViewType;
   detail: ReviewDetail;
   threads: PrThread[];
@@ -1209,31 +1281,34 @@ function ReviewDiff({
 }) {
   return (
     <div className="diff-files">
-      {files.map((file, index) => (
-        <FileReview
-          key={`${file.oldRevision}-${file.newRevision}-${index}`}
-          index={index}
-          file={file}
-          viewType={viewType}
-          detail={detail}
-          threads={threads}
-          readOnly={readOnly}
-          kbHandles={kbHandles}
-          searchKeys={searchKeysByFile.get(index)}
-          searchCurrentKey={
-            searchCurrent?.fileIndex === index ? searchCurrent.changeKey : null
-          }
-          focus={focusModel?.[index] ?? null}
-          focusActions={focusActions}
-          onReveal={onReveal}
-          onUnreveal={onUnreveal}
-          onOpenFilePane={onOpenFilePane}
-          onSaving={onSaving}
-          onSaved={onSaved}
-          onCommentsChanged={onCommentsChanged}
-          onSendToChat={onSendToChat}
-        />
-      ))}
+      {files.map((file, index) => {
+        if (visibleFileIdx != null && !visibleFileIdx.has(index)) return null;
+        return (
+          <FileReview
+            key={`${file.oldRevision}-${file.newRevision}-${index}`}
+            index={index}
+            file={file}
+            viewType={viewType}
+            detail={detail}
+            threads={threads}
+            readOnly={readOnly}
+            kbHandles={kbHandles}
+            searchKeys={searchKeysByFile.get(index)}
+            searchCurrentKey={
+              searchCurrent?.fileIndex === index ? searchCurrent.changeKey : null
+            }
+            focus={focusModel?.[index] ?? null}
+            focusActions={focusActions}
+            onReveal={onReveal}
+            onUnreveal={onUnreveal}
+            onOpenFilePane={onOpenFilePane}
+            onSaving={onSaving}
+            onSaved={onSaved}
+            onCommentsChanged={onCommentsChanged}
+            onSendToChat={onSendToChat}
+          />
+        );
+      })}
     </div>
   );
 }
@@ -1310,14 +1385,17 @@ function FileReview({
   }, [detail.comments]);
 
   const isDeleted = file.type === "delete";
-  const openInDefaultApp = async () => {
-    if (isDeleted) return;
-    if (!detail.local_path) return;
-    const fullPath = `${detail.local_path}/${path}`;
+  const [openingInVscode, setOpeningInVscode] = useState(false);
+  const openInChatWorktree = async () => {
+    if (isDeleted || openingInVscode) return;
+    setOpeningInVscode(true);
     try {
-      await api.openInDefaultApp(fullPath);
+      const worktreePath = await api.ensureChatWorktree(detail.review.id);
+      await api.openInVscode(worktreePath, path);
     } catch (err) {
       toast.error(`Could not open file:\n${String(err)}`);
+    } finally {
+      setOpeningInVscode(false);
     }
   };
 
@@ -1792,10 +1870,10 @@ function FileReview({
             title={
               isDeleted
                 ? "File was deleted; no working copy to open"
-                : "Open working copy in default app"
+                : "Open in VSCode (chat worktree)"
             }
-            disabled={isDeleted}
-            onClick={openInDefaultApp}
+            disabled={isDeleted || openingInVscode}
+            onClick={openInChatWorktree}
           >
             <Icon name="ext" size={12} /> Open
           </button>

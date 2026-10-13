@@ -644,6 +644,40 @@ pub fn chat_clear(review_id: i64, db: State<Db>) -> AppResult<()> {
     Ok(())
 }
 
+/// Resolves (creating if needed) the worktree `chat_send` would use for this
+/// review, without starting a chat turn. Lets other UI (the "open in VSCode"
+/// buttons) point at the same checkout Claude edits.
+#[tauri::command]
+pub async fn ensure_chat_worktree(review_id: i64, db: State<'_, Db>) -> AppResult<String> {
+    let (detail, existing_worktree_path) = {
+        let conn = db.0.lock().unwrap();
+        let detail = crate::commands::review::load_detail(&conn, review_id)?;
+        let existing_worktree_path: Option<String> = conn
+            .query_row(
+                "SELECT worktree_path FROM chat WHERE review_id = ?1",
+                params![review_id],
+                |row| row.get(0),
+            )
+            .optional()?
+            .flatten();
+        (detail, existing_worktree_path)
+    };
+
+    let local_path_str = detail.local_path.as_deref().ok_or_else(|| {
+        AppError::Chat("Chat requires a local clone. Link one in the Repositories section.".into())
+    })?;
+    let repo_path = Path::new(local_path_str);
+
+    if let Some(p) = existing_worktree_path.as_deref().map(Path::new) {
+        if p.exists() {
+            return Ok(p.to_string_lossy().into_owned());
+        }
+    }
+
+    let worktree_path = worktree::ensure_branch_worktree(repo_path, &detail.target)?;
+    Ok(worktree_path.to_string_lossy().into_owned())
+}
+
 /// Returns the branch currently checked out in the chat's worktree, if any.
 #[tauri::command]
 pub fn chat_branch(review_id: i64, db: State<Db>) -> AppResult<Option<String>> {
