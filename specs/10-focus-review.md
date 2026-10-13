@@ -62,7 +62,7 @@ Effective visibility of a hunk = the hunk override, else the file override, else
 5. **Rules first, then AI.** `cr` deterministically tiers obvious noise as `trivial`, so the AI only
    sees the rest. The AI may override a rule tier.
 6. **Fail safe.** Any hunk without a tier (missed by the AI, or new since generation) is treated as `review`, i.e. visible.
-7. **One prompt, two runners.** `skills/focus/SKILL.md` is the single source of truth. It is used by
+7. **One prompt, two runners.** `skills/focus-review/SKILL.md` is the single source of truth. It is used by
    Claude Code in the terminal and embedded in the app for the in-app runner. Both runners hand back
    results through `cr focus set`.
 
@@ -70,10 +70,10 @@ Effective visibility of a hunk = the hunk override, else the file override, else
 
 ### 4.1 Terminal (Claude Code skill)
 ```
-/focus https://github.com/o/r/pull/123 [--level focus|thorough|critical]
-/focus o/r#123
-/focus branch feature-x [--base main] [--repo <path>]
-/focus <review-id>
+/focus-review https://github.com/o/r/pull/123 [--level focus|thorough|critical]
+/focus-review o/r#123
+/focus-review branch feature-x [--base main] [--repo <path>]
+/focus-review <review-id>
 ```
 1. The skill resolves the target and reuses the **latest draft review** on it, or creates one
    (`cr create … --reuse-draft`). A review id targets that review directly.
@@ -104,7 +104,7 @@ Effective visibility of a hunk = the hunk override, else the file override, else
 
   **Copy into summary** inserts the digest as markdown into `review.body`. This is opt-in only.
 - File tree: fully hidden files stay listed but are dimmed, with a tier/reason tooltip. While Focus is
-  on they don't count toward the "unviewed" total. Viewed state in the DB is unchanged.
+  on they are only dimmed: there is no "unviewed" count to adjust. Viewed state in the DB is unchanged.
 - The level selector sits in the review header and is persisted on the focus. "Off" shows the full diff.
 
 ### 4.4 Head moves (stale focus)
@@ -143,7 +143,13 @@ CREATE TABLE focus_hunk (
   reason         TEXT,
   note           TEXT,
   note_dismissed INTEGER NOT NULL DEFAULT 0,
-  override       TEXT CHECK (override IN ('show','hide')),
+  PRIMARY KEY (focus_id, hunk_id)
+);
+
+CREATE TABLE focus_hunk_override (
+  focus_id  INTEGER NOT NULL REFERENCES focus(id) ON DELETE CASCADE,
+  hunk_id   TEXT NOT NULL,
+  override  TEXT NOT NULL CHECK (override IN ('show','hide')),
   PRIMARY KEY (focus_id, hunk_id)
 );
 
@@ -156,6 +162,9 @@ CREATE TABLE focus_file_override (
 ```
 
 Overrides are plain `show`/`hide` rather than re-tiers, so they behave predictably across levels.
+They live in their own tables, not on `focus_hunk`, for two reasons:
+- a hunk that is "new since focus" (no tier row) can still be overridden;
+- regenerating replaces `focus_hunk` without touching overrides. Overrides on ids that no longer exist are ignored.
 
 ## 6. Backend
 
@@ -163,9 +172,14 @@ New module `src-tauri/src/commands/focus.rs`. As elsewhere, `*_impl(conn, …)` 
 by the Tauri commands and `cr`.
 
 ### 6.1 Hunk enumeration
-- Built on `review_diff_impl` (`commands/review.rs`) and `anchor.rs::parse_file_patch`, extended if
-  needed to expose per-hunk `old_start`, `new_start`, header and body.
-- `hunk_id = sha1(file_path + "\0" + changed_lines)[..12]`.
+- Built on `review_diff_impl` (`commands/review.rs`), which returns the full multi-file diff.
+- `anchor.rs` keeps only line markers, so `focus.rs` has its own parser. It splits the diff on
+  `diff --git` and keeps each hunk's header and body. File paths must match the frontend's
+  `fileDisplayPath` (`src/lib/diff.ts`): the new path, or the old path for deletions.
+- `hunk_id = sha1(file_path + "\0" + changed_lines + "\0" + occurrence)[..12]` (`sha1_smol` crate).
+  `occurrence` is the index of the hunk among hunks in the same file that have identical changed lines.
+- Files with no hunks (rename-only, mode-only, binary) get one pseudo-hunk with
+  `old_start = new_start = 0`. It stands for the whole file.
 - Rule pre-tiering (`source='rule'`, `tier='trivial'`) applies to:
   - lockfiles: `pnpm-lock.yaml`, `package-lock.json`, `yarn.lock`, `Cargo.lock`, `poetry.lock`,
     `uv.lock`, `Gemfile.lock`, `go.sum`, …;
@@ -179,7 +193,7 @@ by the Tauri commands and `cr`.
 |---------|---------|
 | `focus_hunks(review_id)` | Current hunks: id, file, header, +/- counts, rule tier, preview |
 | `get_focus(review_id)` | Focus row, plus per *current* hunk `{file, old_start, new_start, hunk_id, effective_tier, reason, note, override, is_new}` and file overrides |
-| `set_focus_plan(review_id, plan, level?)` | Validate and replace the focus (§7.2); pins current SHAs; `status='ready'` |
+| `set_focus_plan(review_id, plan, level?)` | Validate, then upsert the `focus` row by `review_id` (this also completes a `generating` row) and replace its `focus_hunk` rows (§7.2). Pins current SHAs; `status='ready'`; overrides untouched |
 | `set_focus_level(review_id, level)` | Persist the level |
 | `set_hunk_override(review_id, hunk_id, override?)` / `set_file_override(review_id, file, override?)` | Set or clear an override |
 | `adopt_focus_note(review_id, hunk_id)` | Create a draft comment via `add_comment_impl`, then mark the note dismissed |
@@ -231,7 +245,7 @@ Validation:
   - a system prompt file;
   - JSON output for the error/cost envelope;
   - model resolution as in chat.
-- System prompt = `include_str!("../../../skills/focus/SKILL.md")` + a preamble: "App mode. Review id
+- System prompt = `include_str!("../../../skills/focus-review/SKILL.md")` + a preamble: "App mode. Review id
   = N. Do not create or open reviews. Requested level = L."
 - Allowed tools: `Bash(cr focus *) Bash(cr diff *) Bash(cr show *) Read Glob Grep`.
 - Working directory: the linked clone (also passed as `--add-dir`, read-only use) if there is one, else
@@ -241,9 +255,9 @@ Validation:
 - Frontend: `listen("focus-updated")` → invalidate `["focus", id]` and `["review", id]`.
 - `focus` rows left at `generating` by an app crash are marked `failed` on startup.
 
-## 9. Skill (`skills/focus/SKILL.md`)
+## 9. Skill (`skills/focus-review/SKILL.md`)
 
-Versioned in this repo. Install for the terminal with `cp -r skills/focus ~/.claude/skills/` (documented
+Versioned in this repo. Install for the terminal with `cp -r skills/focus-review ~/.claude/skills/` (documented
 in the README). The app embeds it at build time, so the installed copy and the app can differ until you
 re-copy it.
 
@@ -273,7 +287,7 @@ Outline:
   - `FileBody`: filter hunks, insert hidden-run bars and note banners as `<Decoration>` rows around
     `<Hunk>` (where the expand controls are pushed today);
   - "new since focus" badge.
-- `src/components/FileJumpList.tsx`: dim fully hidden files, exclude them from the unviewed count.
+- `src/components/FileJumpList.tsx`: dim fully hidden files and add a tier/reason tooltip.
 - Expanding context between hunks keeps working; hidden hunks count as a gap that can be expanded.
 
 ## 11. Edge cases
@@ -300,7 +314,7 @@ Outline:
 - **Hunk matching:** the Rust parser and react-diff-view must agree on `(file, old_start, new_start)`
   for the same diff text. Needs a test on the shared diff fixtures.
 - **Hunk id collisions:** identical changed lines in the same file, e.g. a repeated edit, produce the
-  same id. Disambiguate with an occurrence index.
+  same id. Handled by the occurrence index in the id (§6.1).
 - **Cost and latency** on large PRs. Mitigated by rule pre-tiering and compact hunk listings.
 - **Prompt drift** between the installed skill copy and the copy embedded in the app (copy-install is intentional).
 - **AI under-tiering** something important. Mitigated by "tier up when in doubt", fail-safe defaults,
