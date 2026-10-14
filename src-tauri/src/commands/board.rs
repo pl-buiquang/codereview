@@ -495,6 +495,49 @@ pub async fn board_track(reference: String, db: State<'_, Db>) -> AppResult<Stri
     board_track_impl(&db, &reference)
 }
 
+/// A card's id for `owner/repo#number`, but only if it's currently visible on
+/// the board (not discarded/archived) — used to detect duplicates before
+/// tracking a PR from the "+ Track" dialog.
+fn tracked_card_id(conn: &Connection, owner: &str, name: &str, number: i64) -> AppResult<Option<String>> {
+    let repo = format!("{owner}/{name}");
+    conn.query_row(
+        "SELECT id FROM board_card WHERE repo = ?1 AND number = ?2 AND discarded_at IS NULL AND archived_at IS NULL",
+        params![repo, number],
+        |r| r.get(0),
+    )
+    .optional()
+    .map_err(Into::into)
+}
+
+/// Track a PR by URL / `owner/repo#n` from the board's "+ Track" dialog.
+/// Unlike `board_track_impl`, this refuses issues and already-tracked PRs
+/// instead of silently refreshing them, so the dialog can surface a clear
+/// warning rather than a no-op success.
+pub fn board_track_pr_impl(db: &Db, reference: &str) -> AppResult<String> {
+    let (owner, name, number) = board::parse_ref(reference)?;
+    {
+        let conn = db.0.lock().unwrap();
+        if tracked_card_id(&conn, &owner, &name, number)?.is_some() {
+            return Err(AppError::Other(format!("{owner}/{name}#{number} is already tracked on the board")));
+        }
+    }
+    let node = board::resolve_node(&owner, &name, number)?;
+    if !node.is_pr() {
+        return Err(AppError::Other(format!("{owner}/{name}#{number} is not a pull request")));
+    }
+    let viewer = crate::commands::inbox::cached_or_fetch_viewer(db)?;
+    let ts = now();
+    let conn = db.0.lock().unwrap();
+    upsert_card(&conn, &node, &viewer.login, &ts, true)?;
+    conn.execute("UPDATE board_card SET archived_at = NULL WHERE id = ?1", params![node.id])?;
+    Ok(node.id)
+}
+
+#[tauri::command]
+pub async fn board_track_pr(reference: String, db: State<'_, Db>) -> AppResult<String> {
+    board_track_pr_impl(&db, &reference)
+}
+
 /// Resolve a reference to its card id, tracking it first if `track` is set
 /// and it isn't tracked yet. Used by `cr board meta add` so a single command
 /// can both track and annotate a card.
@@ -837,5 +880,27 @@ mod tests {
         seed_card(&conn, "pr1", "owner/repo", 1, "pr");
 
         assert!(board_meta_add_impl(&conn, "pr1", "link", "", Some("urgent"), None, None).is_err());
+    }
+
+    #[test]
+    fn tracked_card_id_finds_a_live_card() {
+        let conn = open_memory();
+        seed_card(&conn, "pr1", "owner/repo", 42, "pr");
+
+        assert_eq!(tracked_card_id(&conn, "owner", "repo", 42).unwrap(), Some("pr1".to_string()));
+    }
+
+    #[test]
+    fn tracked_card_id_ignores_discarded_and_archived_cards() {
+        let conn = open_memory();
+        seed_card(&conn, "pr1", "owner/repo", 42, "pr");
+        seed_card(&conn, "pr2", "owner/repo", 43, "pr");
+        conn.execute("UPDATE board_card SET discarded_at = 'now' WHERE id = 'pr1'", [])
+            .unwrap();
+        conn.execute("UPDATE board_card SET archived_at = 'now' WHERE id = 'pr2'", [])
+            .unwrap();
+
+        assert_eq!(tracked_card_id(&conn, "owner", "repo", 42).unwrap(), None);
+        assert_eq!(tracked_card_id(&conn, "owner", "repo", 43).unwrap(), None);
     }
 }

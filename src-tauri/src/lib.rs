@@ -239,6 +239,7 @@ pub fn run() {
             commands::board::board_list,
             commands::board::board_tracked_ids,
             commands::board::board_track,
+            commands::board::board_track_pr,
             commands::board::board_discard,
             commands::board::board_link_pr,
             commands::board::board_unlink,

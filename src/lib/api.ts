@@ -185,6 +185,7 @@ export const api = {
   boardList: () => invoke<BoardCard[]>("board_list"),
   boardTrackedIds: () => invoke<string[]>("board_tracked_ids"),
   boardTrack: (reference: string) => invoke<string>("board_track", { reference }),
+  boardTrackPr: (reference: string) => invoke<string>("board_track_pr", { reference }),
   boardDiscard: (cardId: string) => invoke<void>("board_discard", { cardId }),
   boardLinkPr: (issueId: string, prReference: string) =>
     invoke<void>("board_link_pr", { issueId, prReference }),

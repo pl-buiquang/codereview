@@ -2093,6 +2093,21 @@ tr.kb-focus {
   color: var(--text);
 }
 
+/* --- Track PR dialog ------------------------------------------------------- */
+.track-pr-modal {
+  width: min(480px, 90vw);
+}
+.form-warning {
+  margin: 8px 0 0;
+  padding: 6px 10px;
+  color: var(--danger);
+  background: var(--danger-soft);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-s);
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
 /* --- Confirm dialog ------------------------------------------------------- */
 .confirm-modal {
   width: min(440px, 90vw);

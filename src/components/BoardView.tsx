@@ -10,6 +10,7 @@ import type { BoardCard as BoardCardT, BoardLane, BoardMetaKind } from "../lib/t
 import { BoardCard, cardTags, ciStatus, prStatus, prStatusLabel } from "./BoardCard";
 import { RepoName } from "./RepoName";
 import { TagFilter } from "./TagFilter";
+import { TrackPrDialog } from "./TrackPrDialog";
 import { Icon } from "./icons";
 
 const LANES: { key: BoardLane; label: string }[] = [
@@ -56,6 +57,7 @@ export function BoardView() {
   const [tagFilter, setTagFilter] = useState<string[]>([]);
   const [addingLane, setAddingLane] = useState<BoardLane | null>(null);
   const [addValue, setAddValue] = useState("");
+  const [showTrackDialog, setShowTrackDialog] = useState(false);
 
   const boardQuery = useQuery({ queryKey: ["board"], queryFn: api.boardList });
   const tagsQuery = useQuery({ queryKey: ["board-meta-tags"], queryFn: api.boardMetaTags });
@@ -236,6 +238,9 @@ export function BoardView() {
                 ))}
               </select>
             </label>
+            <button className="btn" onClick={() => setShowTrackDialog(true)}>
+              <Icon name="plus" size={13} /> Track
+            </button>
             <button className="btn btn-primary" onClick={() => refresh.mutate({})} disabled={refresh.isPending}>
               {refresh.isPending ? (
                 <>
@@ -359,6 +364,8 @@ export function BoardView() {
           })}
         </div>
       </div>
+
+      {showTrackDialog && <TrackPrDialog onClose={() => setShowTrackDialog(false)} />}
     </section>
   );
 }
