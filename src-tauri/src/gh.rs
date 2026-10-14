@@ -865,6 +865,23 @@ pub fn pr_meta(owner: &str, name: &str, number: i64) -> AppResult<PrMeta> {
     Ok(map_pr_meta(pr))
 }
 
+/// Flip a PR's draft status. Clone-less (owner/name/number), like `pr_meta`.
+pub fn set_pr_draft(owner: &str, name: &str, number: i64, draft: bool) -> AppResult<()> {
+    let ctx = GhRepo::Remote {
+        owner: owner.to_string(),
+        name: name.to_string(),
+    };
+    let num = number.to_string();
+    let mut args = vec!["pr", "ready", num.as_str()];
+    if draft {
+        args.push("--undo");
+    }
+    let suffix = ctx.pr_args_suffix();
+    args.extend(suffix.iter().map(String::as_str));
+    run_gh(&ctx, &args)?;
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Batch PR state lookup (clone-less, read-only, ephemeral)
 // ---------------------------------------------------------------------------

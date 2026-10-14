@@ -86,6 +86,7 @@ import { summaryLine } from "../lib/text";
 import type {
   Comment,
   FocusView,
+  PrMeta,
   PrThread,
   PrThreadCtx,
   ReviewDetail,
@@ -952,6 +953,32 @@ function ReviewHeader({
     onError: (e) => toast.error(`Refresh failed:\n${String(e)}`),
   });
 
+  const togglePrDraft = useMutation({
+    mutationFn: (nextDraft: boolean) => {
+      if (owner == null || name == null || prNumber == null) {
+        throw new Error("missing PR identity");
+      }
+      return api.setPrDraft(owner, name, prNumber, nextDraft);
+    },
+    onMutate: async (nextDraft) => {
+      const key = ["pr-meta", owner, name, prNumber];
+      await queryClient.cancelQueries({ queryKey: key });
+      const previous = queryClient.getQueryData<PrMeta>(key);
+      if (previous) {
+        queryClient.setQueryData<PrMeta>(key, { ...previous, isDraft: nextDraft });
+      }
+      return { previous };
+    },
+    onError: (e, _nextDraft, context) => {
+      const key = ["pr-meta", owner, name, prNumber];
+      if (context?.previous) queryClient.setQueryData<PrMeta>(key, context.previous);
+      toast.error(`Could not update PR draft status:\n${String(e)}`);
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["pr-meta", owner, name, prNumber] });
+    },
+  });
+
   const reanchorComments = useMutation({
     mutationFn: () => api.reanchorComments(review.id),
     onSuccess: (r) => {
@@ -1048,10 +1075,25 @@ function ReviewHeader({
         <ReviewSwitcher targetId={target.id} currentReviewId={review.id} />
         {isPr && (
           <span className="review-pr-chips">
-            <StatusPill
-              state={prMetaQuery.data ? prMetaQuery.data.state.toLowerCase() : null}
-              isDraft={prMetaQuery.data?.isDraft ?? false}
-            />
+            {prMetaQuery.data?.state === "OPEN" ? (
+              <button
+                className={`badge badge-toggle ${prMetaQuery.data.isDraft ? "badge-draft" : "badge-open"}`}
+                title={
+                  prMetaQuery.data.isDraft
+                    ? "Mark ready for review"
+                    : "Convert to draft"
+                }
+                disabled={togglePrDraft.isPending}
+                onClick={() => togglePrDraft.mutate(!prMetaQuery.data!.isDraft)}
+              >
+                {prMetaQuery.data.isDraft ? "draft" : "open"}
+              </button>
+            ) : (
+              <StatusPill
+                state={prMetaQuery.data ? prMetaQuery.data.state.toLowerCase() : null}
+                isDraft={prMetaQuery.data?.isDraft ?? false}
+              />
+            )}
             <CiBadge state={prMetaQuery.data?.ciState ? prMetaQuery.data.ciState.toLowerCase() : null} />
           </span>
         )}

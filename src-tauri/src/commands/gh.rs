@@ -27,6 +27,12 @@ pub async fn pr_meta(owner: String, name: String, number: i64) -> AppResult<gh::
     provider_for().pr_meta(&owner, &name, number)
 }
 
+/// `async` for the same reason as `pr_meta`.
+#[tauri::command]
+pub async fn set_pr_draft(owner: String, name: String, number: i64, draft: bool) -> AppResult<()> {
+    provider_for().set_pr_draft(&owner, &name, number, draft)
+}
+
 /// `async` for the same reason as `pr_meta` — keeps the (paginated) review-thread
 /// fetch off the UI thread so it loads concurrently with the diff and metadata.
 #[tauri::command]

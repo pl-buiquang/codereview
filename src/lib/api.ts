@@ -125,6 +125,8 @@ export const api = {
   listPrs: (repoId: number) => invoke<PrSummary[]>("list_prs", { repoId }),
   prMeta: (owner: string, name: string, number: number) =>
     invoke<PrMeta>("pr_meta", { owner, name, number }),
+  setPrDraft: (owner: string, name: string, number: number, draft: boolean) =>
+    invoke<void>("set_pr_draft", { owner, name, number, draft }),
   prReviewThreads: (owner: string, name: string, number: number) =>
     invoke<PrThread[]>("pr_review_threads", { owner, name, number }),
   replyToThread: (owner: string, name: string, number: number, commentId: number, body: string) =>

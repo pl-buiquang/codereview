@@ -29,6 +29,8 @@ pub trait ReviewProvider: Send + Sync {
     fn pr_view(&self, ctx: &GhRepo, number: i64) -> AppResult<PrInfo>;
     fn pr_diff(&self, ctx: &GhRepo, number: i64) -> AppResult<String>;
     fn pr_meta(&self, owner: &str, name: &str, number: i64) -> AppResult<PrMeta>;
+    /// Flip a PR between draft and ready-for-review.
+    fn set_pr_draft(&self, owner: &str, name: &str, number: i64, draft: bool) -> AppResult<()>;
     /// Batch state (`OPEN`/`CLOSED`/`MERGED`) lookup, keyed by `(owner, name, number)`.
     /// Used by the "clean up merged PRs" review-list action.
     fn pr_states(&self, prs: &[(String, String, i64)]) -> AppResult<HashMap<(String, String, i64), String>>;
@@ -129,6 +131,10 @@ impl ReviewProvider for GithubProvider {
 
     fn pr_meta(&self, owner: &str, name: &str, number: i64) -> AppResult<PrMeta> {
         gh::pr_meta(owner, name, number)
+    }
+
+    fn set_pr_draft(&self, owner: &str, name: &str, number: i64, draft: bool) -> AppResult<()> {
+        gh::set_pr_draft(owner, name, number, draft)
     }
 
     fn pr_states(&self, prs: &[(String, String, i64)]) -> AppResult<HashMap<(String, String, i64), String>> {

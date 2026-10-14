@@ -219,6 +219,7 @@ pub fn run() {
             commands::gh::gh_auth_status,
             commands::gh::list_prs,
             commands::gh::pr_meta,
+            commands::gh::set_pr_draft,
             commands::gh::pr_review_threads,
             commands::gh::reply_to_thread,
             commands::gh::set_pr_thread_resolved,

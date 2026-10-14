@@ -207,6 +207,19 @@ button:hover {
   color: var(--danger);
   background: var(--danger-soft);
 }
+.badge-toggle {
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+}
+.badge-toggle:hover:not(:disabled) {
+  filter: brightness(1.15);
+}
+.badge-toggle:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
 .badge-pr {
   color: var(--accent);
   background: var(--accent-soft);
