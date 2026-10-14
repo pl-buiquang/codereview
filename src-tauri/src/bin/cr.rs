@@ -164,7 +164,8 @@ enum BoardMetaAction {
         #[arg(long)]
         kind: String,
         /// Path (file/link kinds), URL, note text, or Claude session id
-        #[arg(long)]
+        /// (optional for a note that has --tag set)
+        #[arg(long, default_value = "")]
         value: String,
         /// Freeform tag (e.g. "plan", "spec")
         #[arg(long)]

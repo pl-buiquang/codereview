@@ -641,6 +641,12 @@ pub fn board_meta_add_impl(
 ) -> AppResult<BoardMetaRow> {
     validate_meta_kind(kind)?;
 
+    let value = value.trim();
+    let has_tag = tag.is_some_and(|t| !t.trim().is_empty());
+    if value.is_empty() && !(kind == "note" && has_tag) {
+        return Err(AppError::Other("a note needs text or a tag".into()));
+    }
+
     if kind == "claude_session" {
         let existing = conn
             .query_row(
@@ -804,5 +810,32 @@ mod tests {
         assert!(found.card.discarded_at.is_some());
         assert_eq!(found.inherited_meta.len(), 1);
         assert_eq!(found.inherited_meta[0].value, "from issue");
+    }
+
+    #[test]
+    fn board_meta_add_allows_tag_only_note() {
+        let conn = open_memory();
+        seed_card(&conn, "pr1", "owner/repo", 1, "pr");
+
+        let m = board_meta_add_impl(&conn, "pr1", "note", "", Some("urgent"), None, None).unwrap();
+        assert_eq!(m.value, "");
+        assert_eq!(m.tag.as_deref(), Some("urgent"));
+    }
+
+    #[test]
+    fn board_meta_add_rejects_empty_note_without_tag() {
+        let conn = open_memory();
+        seed_card(&conn, "pr1", "owner/repo", 1, "pr");
+
+        assert!(board_meta_add_impl(&conn, "pr1", "note", "", None, None, None).is_err());
+        assert!(board_meta_add_impl(&conn, "pr1", "note", "  ", Some(""), None, None).is_err());
+    }
+
+    #[test]
+    fn board_meta_add_rejects_empty_link() {
+        let conn = open_memory();
+        seed_card(&conn, "pr1", "owner/repo", 1, "pr");
+
+        assert!(board_meta_add_impl(&conn, "pr1", "link", "", Some("urgent"), None, None).is_err());
     }
 }

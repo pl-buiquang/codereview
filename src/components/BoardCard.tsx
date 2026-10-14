@@ -45,6 +45,16 @@ export function ciStatus(card: BoardCardT): string | null {
   return card.ci_status.toLowerCase();
 }
 
+/** Distinct tags carried by a card's own + inherited metadata, for the
+ *  board's Tags filter. */
+export function cardTags(card: BoardCardT): string[] {
+  const tags = new Set<string>();
+  for (const m of [...card.meta, ...card.inherited_meta]) {
+    if (m.tag) tags.add(m.tag);
+  }
+  return [...tags];
+}
+
 // Drafts live only in the "in progress" lane (redundant to call out) and
 // "ready" has nothing to flag yet, so only these four get a color.
 const STATUS_BORDER_COLOR: Record<string, string> = {
@@ -78,7 +88,7 @@ export function MetaRow({
     if (
       await confirmDialog({
         title: "Delete metadata",
-        message: `Delete "${meta.label || meta.value}"?`,
+        message: `Delete "${meta.label || meta.value || meta.tag}"?`,
         confirmLabel: "Delete",
         danger: true,
       })
@@ -96,7 +106,7 @@ export function MetaRow({
       />
       {meta.tag && <span className="chip">{meta.tag}</span>}
       {meta.kind === "note" ? (
-        <span className="board-meta-value">{meta.value}</span>
+        meta.value && <span className="board-meta-value">{meta.value}</span>
       ) : (
         <button className="board-meta-value board-meta-link" onClick={open} title={meta.value}>
           {meta.label || meta.value}
@@ -136,10 +146,13 @@ export function AddMetaForm({
     if (path) setValue(path);
   };
 
+  const trimmedTag = tag.trim();
+  const canSubmit = value.trim() || (kind === "note" && trimmedTag);
+
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!value.trim()) return;
-    onAdd({ kind, value: value.trim(), tag: tag.trim() || null, label: label.trim() || null });
+    if (!canSubmit) return;
+    onAdd({ kind, value: value.trim(), tag: trimmedTag || null, label: label.trim() || null });
     setValue("");
     setTag("");
     setLabel("");
@@ -156,7 +169,7 @@ export function AddMetaForm({
       <div className="board-meta-add-value">
         <input
           className="input"
-          placeholder={kind === "file" ? "Path" : kind === "link" ? "URL" : "Note text"}
+          placeholder={kind === "file" ? "Path" : kind === "link" ? "URL" : "Note text (optional with a tag)"}
           value={value}
           onChange={(e) => setValue(e.target.value)}
           autoFocus
@@ -186,7 +199,7 @@ export function AddMetaForm({
         onChange={(e) => setLabel(e.target.value)}
       />
       <div className="board-meta-add-actions">
-        <button type="submit" className="btn btn-sm btn-primary">
+        <button type="submit" className="btn btn-sm btn-primary" disabled={!canSubmit}>
           Add
         </button>
         <button type="button" className="btn btn-sm btn-ghost" onClick={onClose}>
