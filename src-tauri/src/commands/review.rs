@@ -321,8 +321,11 @@ fn refresh_target_shas(db: &Db, target: &Target) -> AppResult<FreshnessResult> {
                 local_old_side_sha(repo, &target.base_ref, &target.head_ref, target.three_dot);
             let head_sha = git::rev_parse(repo, &target.head_ref).ok();
             let conn = db.0.lock().unwrap();
+            // A deleted/renamed branch degrades resolution to None — COALESCE keeps
+            // the last pinned SHA (same as the github_pr arm above) instead of
+            // wiping out the only remaining way to diff this target.
             conn.execute(
-                "UPDATE target SET base_sha = ?1, head_sha = ?2 WHERE id = ?3",
+                "UPDATE target SET base_sha = COALESCE(?1, base_sha), head_sha = COALESCE(?2, head_sha) WHERE id = ?3",
                 params![base_sha, head_sha, target.id],
             )?;
             head_sha
@@ -697,10 +700,15 @@ pub fn review_diff_impl(conn: &Connection, review_id: i64) -> AppResult<String> 
             let local_path = detail.local_path.as_deref().ok_or_else(|| {
                 AppError::Other("local diff requires a local clone".into())
             })?;
+            // Prefer the pinned SHA over the branch name: a branch can be deleted
+            // or moved out from under a review, but the SHA it was last resolved
+            // to still diffs correctly as long as the commit itself survives.
+            let base = detail.target.base_sha.as_deref().unwrap_or(&detail.target.base_ref);
+            let head = detail.target.head_sha.as_deref().unwrap_or(&detail.target.head_ref);
             git::diff(
                 std::path::Path::new(local_path),
-                &detail.target.base_ref,
-                &detail.target.head_ref,
+                base,
+                head,
                 detail.target.three_dot,
             )
         }
@@ -4428,5 +4436,52 @@ mod tests {
         assert_eq!(owner, "o");
         assert_eq!(name, "n");
         assert_eq!(*number, 1);
+    }
+
+    fn git_in(dir: &std::path::Path, args: &[&str]) {
+        let status = Command::new("git").current_dir(dir).args(args).status().unwrap();
+        assert!(status.success(), "git {args:?} failed");
+    }
+
+    /// A deleted local branch must not wipe the pinned SHAs that let a review's
+    /// diff keep working: refresh_target_shas should keep the last-known-good
+    /// base_sha/head_sha when the fresh git lookup can no longer resolve them.
+    #[test]
+    fn refresh_target_shas_keeps_pinned_sha_when_local_branch_is_deleted() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path();
+        git_in(path, &["init", "-q"]);
+        git_in(path, &["config", "user.email", "t@t.com"]);
+        git_in(path, &["config", "user.name", "t"]);
+        fs::write(path.join("a.txt"), "1").unwrap();
+        git_in(path, &["add", "."]);
+        git_in(path, &["commit", "-q", "-m", "base"]);
+        git_in(path, &["checkout", "-q", "-b", "feature"]);
+        fs::write(path.join("a.txt"), "2").unwrap();
+        git_in(path, &["commit", "-q", "-am", "feature"]);
+        git_in(path, &["checkout", "-q", "main"]);
+
+        let conn = open_memory();
+        conn.execute(
+            "INSERT INTO repository (local_path, default_branch, added_at)
+             VALUES (?1, 'main', 'now')",
+            params![path.to_string_lossy()],
+        )
+        .unwrap();
+        let repo_id = conn.last_insert_rowid();
+        let target = get_or_create_local_target(&conn, repo_id, &path.to_string_lossy(), "main", "feature", true).unwrap();
+        assert!(target.head_sha.is_some(), "sha resolves while the branch exists");
+        let pinned_head = target.head_sha.clone().unwrap();
+        let pinned_base = target.base_sha.clone().unwrap();
+
+        git_in(path, &["branch", "-D", "feature"]);
+
+        let db = Db(Mutex::new(conn));
+        refresh_target_shas(&db, &target).unwrap();
+
+        let conn = db.0.lock().unwrap();
+        let refreshed = get_target(&conn, target.id).unwrap();
+        assert_eq!(refreshed.head_sha, Some(pinned_head), "head_sha preserved, not wiped to NULL");
+        assert_eq!(refreshed.base_sha, Some(pinned_base), "base_sha preserved, not wiped to NULL");
     }
 }
