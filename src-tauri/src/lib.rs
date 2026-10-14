@@ -69,7 +69,9 @@ fn read_app_log(max_lines: usize, dir: tauri::State<logging::LogDir>) -> Result<
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let t0 = std::time::Instant::now();
     path_env::ensure_login_path();
+    let login_env_ms = t0.elapsed().as_millis();
     let cr_note = cr_install::maybe_install().map(|r| {
         let verb = if r.updated { "updated" } else { "installed" };
         format!("cr CLI {verb} → {}", r.path.display())
@@ -100,7 +102,7 @@ pub fn run() {
             }
         })
         .manage(CrNote(Mutex::new(cr_note)))
-        .setup(|app| {
+        .setup(move |app| {
             // Ensure ~/.codereview/ exists for worktrees and future per-user data.
             if let Some(home) = dirs::home_dir() {
                 let _ = std::fs::create_dir_all(home.join(".codereview"));
@@ -134,6 +136,10 @@ pub fn run() {
                 env!("CODEREVIEW_VERSION"),
                 cfg!(debug_assertions),
                 db_path.display(),
+            );
+            log::info!(
+                "startup: login env {login_env_ms}ms, setup done {}ms since launch",
+                t0.elapsed().as_millis(),
             );
             app.manage(logging::LogDir(log_dir));
 

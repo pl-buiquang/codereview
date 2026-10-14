@@ -17,6 +17,7 @@ import { isCloseTabShortcut, isCommandPaletteShortcut } from "./lib/keyboard";
 import { toggleCommandPalette } from "./lib/commandPalette";
 import { useApplySettings } from "./lib/useApplySettings";
 import { useDeepLinkListener } from "./lib/deepLink";
+import { dismissSplash } from "./lib/splash";
 import { useUIStore, type Tab } from "./store";
 
 const CLOSE_ACTIVE_TAB_EVENT = "close-active-tab";
@@ -110,6 +111,12 @@ function App() {
   });
   const repos = reposQuery.data;
   const reposFetching = reposQuery.isFetching;
+  const reposFetched = reposQuery.isFetched;
+
+  useEffect(() => {
+    if (!reposFetched) return;
+    document.fonts.ready.then(() => requestAnimationFrame(dismissSplash));
+  }, [reposFetched]);
 
   // Show a one-time toast when the app installs/updates the bundled cr CLI.
   useEffect(() => {
