@@ -106,7 +106,7 @@ export function MetaRow({
       />
       {meta.tag && <span className="chip">{meta.tag}</span>}
       {meta.kind === "note" ? (
-        meta.value && <span className="board-meta-value">{meta.value}</span>
+        <span className="board-meta-value">{meta.value}</span>
       ) : (
         <button className="board-meta-value board-meta-link" onClick={open} title={meta.value}>
           {meta.label || meta.value}
