@@ -55,6 +55,7 @@ export function BoardView() {
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [ciFilter, setCiFilter] = useState<string | null>(null);
   const [tagFilter, setTagFilter] = useState<string[]>([]);
+  const [tagExclude, setTagExclude] = useState<string[]>([]);
   const [addingLane, setAddingLane] = useState<BoardLane | null>(null);
   const [addValue, setAddValue] = useState("");
   const [showTrackDialog, setShowTrackDialog] = useState(false);
@@ -177,12 +178,14 @@ export function BoardView() {
   const effCi = ciFilter && allCards.some((c) => ciStatus(c) === ciFilter) ? ciFilter : null;
   const availableTags = new Set(tagEntries.map(([t]) => t));
   const effTags = tagFilter.filter((t) => availableTags.has(t));
+  const effExcludeTags = tagExclude.filter((t) => availableTags.has(t));
 
   const filtered = allCards.filter((c) => {
     if (effRepo && c.repo !== effRepo) return false;
     if (effStatus && c.type === "pr" && prStatus(c) !== effStatus) return false;
     if (effCi && ciStatus(c) !== effCi) return false;
     if (effTags.length > 0 && !cardTags(c).some((t) => effTags.includes(t))) return false;
+    if (effExcludeTags.length > 0 && cardTags(c).some((t) => effExcludeTags.includes(t))) return false;
     return true;
   });
 
@@ -279,7 +282,16 @@ export function BoardView() {
             onSelect={setRepoFilter}
             renderLabel={(k) => <RepoName className="lbl mono" name={k} />}
           />
-          <TagFilter tags={tagEntries} selected={effTags} onChange={setTagFilter} />
+          <TagFilter tags={tagEntries} selected={effTags} onChange={setTagFilter} unavailable={effExcludeTags} />
+          <TagFilter
+            tags={tagEntries}
+            selected={effExcludeTags}
+            onChange={setTagExclude}
+            unavailable={effTags}
+            title="Exclude tags"
+            placeholder="Exclude tag…"
+            variant="exclude"
+          />
         </aside>
 
         <div className="board-lanes">

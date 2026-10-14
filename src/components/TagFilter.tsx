@@ -1,21 +1,33 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Icon } from "./icons";
 
 /** Tag autocomplete + chip filter for the board rail. Matching across
- *  selected tags is OR: a card shows if it carries any of them. */
+ *  selected tags within one instance is OR (include: card shows if it
+ *  carries any selected tag; exclude: card is hidden if it carries any
+ *  selected tag). `unavailable` hides tags already picked in a sibling
+ *  filter (e.g. the exclude list hides tags already included). */
 export function TagFilter({
   tags,
   selected,
   onChange,
+  unavailable,
+  title = "Tags",
+  placeholder = "Filter by tag…",
+  variant = "include",
 }: {
   tags: [string, number][];
   selected: string[];
   onChange: (next: string[]) => void;
+  unavailable?: string[];
+  title?: string;
+  placeholder?: string;
+  variant?: "include" | "exclude";
 }) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [highlight, setHighlight] = useState(0);
   const rootRef = useRef<HTMLDivElement>(null);
+  const listboxId = useId();
 
   useEffect(() => {
     if (!open) return;
@@ -29,7 +41,9 @@ export function TagFilter({
   if (tags.length === 0 && selected.length === 0) return null;
 
   const q = query.trim().toLowerCase();
-  const options = tags.filter(([t]) => !selected.includes(t) && (!q || t.toLowerCase().includes(q)));
+  const options = tags.filter(
+    ([t]) => !selected.includes(t) && !unavailable?.includes(t) && (!q || t.toLowerCase().includes(q)),
+  );
   const activeHighlight = Math.min(highlight, Math.max(options.length - 1, 0));
 
   const select = (tag: string) => {
@@ -63,7 +77,7 @@ export function TagFilter({
   return (
     <div className="cr-rail-group tag-filter" ref={rootRef}>
       <div className="cr-rail-h">
-        <span>Tags</span>
+        <span>{title}</span>
         {selected.length > 0 && (
           <button className="cr-rail-clear" onClick={() => onChange([])}>
             clear
@@ -75,8 +89,8 @@ export function TagFilter({
           className="input tag-filter-input"
           role="combobox"
           aria-expanded={open}
-          aria-controls="tag-filter-listbox"
-          placeholder="Filter by tag…"
+          aria-controls={listboxId}
+          placeholder={placeholder}
           value={query}
           onChange={(e) => {
             setQuery(e.target.value);
@@ -87,7 +101,7 @@ export function TagFilter({
           onKeyDown={onKeyDown}
         />
         {open && (
-          <div className="tag-filter-dropdown card" id="tag-filter-listbox" role="listbox">
+          <div className="tag-filter-dropdown card" id={listboxId} role="listbox">
             {options.length === 0 && <div className="tag-filter-empty faint">No matching tags</div>}
             {options.map(([tag, count], i) => (
               <button
@@ -109,7 +123,7 @@ export function TagFilter({
       {selected.length > 0 && (
         <div className="tag-filter-chips">
           {selected.map((tag) => (
-            <span key={tag} className="tag-chip">
+            <span key={tag} className={`tag-chip${variant === "exclude" ? " tag-chip-exclude" : ""}`}>
               {tag}
               <button className="btn-icon" title={`Remove ${tag} filter`} onClick={() => remove(tag)}>
                 <Icon name="x" size={10} />

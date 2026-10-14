@@ -55,4 +55,22 @@ describe("TagFilter", () => {
     expect(screen.queryByRole("option", { name: /urgent/ })).not.toBeInTheDocument();
     expect(screen.getByRole("option", { name: /projA/ })).toBeInTheDocument();
   });
+
+  it("hides tags marked unavailable from the dropdown", async () => {
+    const user = userEvent.setup();
+    render(<TagFilter tags={TAGS} selected={[]} onChange={vi.fn()} unavailable={["projA"]} />);
+
+    await user.click(screen.getByPlaceholderText("Filter by tag…"));
+    expect(screen.queryByRole("option", { name: /projA/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /urgent/ })).toBeInTheDocument();
+  });
+
+  it("renders a custom title and placeholder", () => {
+    render(
+      <TagFilter tags={TAGS} selected={[]} onChange={vi.fn()} title="Exclude tags" placeholder="Exclude tag…" />,
+    );
+
+    expect(screen.getByText("Exclude tags")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Exclude tag…")).toBeInTheDocument();
+  });
 });

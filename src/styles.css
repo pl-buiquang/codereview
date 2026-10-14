@@ -4861,6 +4861,15 @@ input[type="range"] {
   padding: 0;
   color: var(--accent);
 }
+.tag-chip-exclude {
+  background: var(--danger-soft);
+  border-color: var(--danger);
+  color: var(--danger);
+  text-decoration: line-through;
+}
+.tag-chip-exclude .btn-icon {
+  color: var(--danger);
+}
 
 /* Review left pane: Context tab */
 .context-pane {
