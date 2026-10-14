@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { BoardCard as BoardCardT, BoardMeta, BoardMetaKind } from "../lib/types";
 import { api, pickFile } from "../lib/api";
 import { toast } from "../lib/toast";
@@ -231,6 +231,17 @@ export function BoardCard({
   const [metaExpanded, setMetaExpanded] = useState(false);
   const [adding, setAdding] = useState(false);
   const [linkInput, setLinkInput] = useState("");
+  const [titleMenuOpen, setTitleMenuOpen] = useState(false);
+  const titleMenuRef = useRef<HTMLSpanElement>(null);
+
+  useEffect(() => {
+    if (!titleMenuOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (titleMenuRef.current && !titleMenuRef.current.contains(e.target as Node)) setTitleMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [titleMenuOpen]);
 
   const allMeta = [...card.meta, ...card.inherited_meta];
   const inheritedIds = new Set(card.inherited_meta.map((m) => m.id));
@@ -274,9 +285,35 @@ export function BoardCard({
         </span>
       )}
 
-      <button className="board-card-title-link" onClick={onOpenGh} title={`Open ${card.repo}#${card.number} on GitHub`}>
-        {card.title} <span className="board-card-number">#{card.number}</span>
-      </button>
+      <span ref={titleMenuRef} className="board-card-title-wrap">
+        <button
+          className="board-card-title-link"
+          onClick={onOpenGh}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            setTitleMenuOpen(true);
+          }}
+          title={`Open ${card.repo}#${card.number} on GitHub`}
+        >
+          {card.title} <span className="board-card-number">#{card.number}</span>
+        </button>
+        {titleMenuOpen && (
+          <div className="btn-split-menu card" role="menu">
+            <button
+              role="menuitem"
+              onClick={() => {
+                setTitleMenuOpen(false);
+                navigator.clipboard.writeText(card.url).then(
+                  () => toast.success("GitHub link copied to clipboard"),
+                  (e) => toast.error(`Could not copy link: ${String(e)}`),
+                );
+              }}
+            >
+              Copy GitHub link
+            </button>
+          </div>
+        )}
+      </span>
 
       <div className="board-card-subtitle-row">
         <button className="board-card-link board-card-repo" onClick={onOpenRepo} title="Open repository">

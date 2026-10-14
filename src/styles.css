@@ -4568,6 +4568,16 @@ input[type="range"] {
   align-items: center;
   justify-content: center;
 }
+.board-card-title-wrap {
+  position: relative;
+  display: block;
+}
+.board-card-title-wrap .btn-split-menu {
+  top: 100%;
+  left: 0;
+  right: auto;
+  min-width: 160px;
+}
 .board-card-title-link {
   display: -webkit-box;
   -webkit-line-clamp: 2;
