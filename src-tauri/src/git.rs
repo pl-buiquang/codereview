@@ -121,6 +121,22 @@ pub fn validate_commit_ref(rev: &str) -> AppResult<()> {
     Ok(())
 }
 
+/// Make sure `sha` is present as a local object, fetching it from `origin` if not.
+/// GitHub serves any commit reachable from a PR (fork PRs included) this way.
+pub fn ensure_commit(repo: &Path, sha: &str) -> AppResult<()> {
+    validate_commit_ref(sha)?;
+    if run_git(repo, &["cat-file", "-e", &format!("{sha}^{{commit}}")]).is_ok() {
+        return Ok(());
+    }
+    run_git(repo, &["fetch", "--quiet", "origin", sha])
+        .map(|_| ())
+        .map_err(|e| {
+            AppError::Git(format!(
+                "commit {sha} is not in the local clone and could not be fetched from origin: {e}"
+            ))
+        })
+}
+
 pub fn rev_parse(path: &Path, rev: &str) -> AppResult<String> {
     validate_commit_ref(rev)?;
     Ok(run_git(
@@ -388,6 +404,53 @@ mod tests {
             rev_parse(repo.path(), "feature~1").unwrap(),
             rev_parse(repo.path(), "main").unwrap()
         );
+    }
+
+    /// Clone `fixture_repo()` so the clone has an `origin` remote, then advance
+    /// the origin with a new commit the clone has never fetched. Returns
+    /// `(origin_dir, clone_dir, missing_sha)` — the caller must keep `origin_dir`
+    /// alive for as long as `clone_dir`'s remote needs to be reachable.
+    fn fixture_clone_missing_commit() -> (TempDir, TempDir, String) {
+        let origin = fixture_repo();
+        let clone = TempDir::new().unwrap();
+        git(
+            clone.path(),
+            &[
+                "clone",
+                "-q",
+                origin.path().to_str().unwrap(),
+                clone.path().to_str().unwrap(),
+            ],
+        );
+
+        git(origin.path(), &["checkout", "-q", "main"]);
+        fs::write(origin.path().join("file.txt"), "line1\nline2\nextra\n").unwrap();
+        git(origin.path(), &["commit", "-q", "-am", "advance origin"]);
+        let missing_sha = rev_parse(origin.path(), "HEAD").unwrap();
+
+        (origin, clone, missing_sha)
+    }
+
+    #[test]
+    fn ensure_commit_fetches_a_missing_sha() {
+        let (_origin, clone, missing_sha) = fixture_clone_missing_commit();
+        assert!(rev_parse(clone.path(), &missing_sha).is_err());
+
+        ensure_commit(clone.path(), &missing_sha).unwrap();
+        assert_eq!(rev_parse(clone.path(), &missing_sha).unwrap(), missing_sha);
+    }
+
+    #[test]
+    fn ensure_commit_is_a_no_op_for_a_present_sha() {
+        let repo = fixture_repo();
+        let sha = rev_parse(repo.path(), "main").unwrap();
+        ensure_commit(repo.path(), &sha).unwrap();
+    }
+
+    #[test]
+    fn ensure_commit_rejects_invalid_refs() {
+        let repo = fixture_repo();
+        assert!(ensure_commit(repo.path(), "--all").is_err());
     }
 
     #[test]

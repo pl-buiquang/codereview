@@ -5,7 +5,7 @@ use serde::Serialize;
 use crate::db::models::Target;
 use crate::error::{AppError, AppResult};
 use crate::gh::{run_gh, GhRepo};
-use crate::git::run_git;
+use crate::git::{ensure_commit, run_git};
 
 fn worktrees_base() -> PathBuf {
     worktrees_base_in(&dirs::home_dir().unwrap_or_else(|| PathBuf::from("/tmp")))
@@ -48,10 +48,7 @@ fn ensure_branch_worktree_in(repo: &Path, target: &Target, base: &Path) -> AppRe
             .as_deref()
             .ok_or_else(|| AppError::Git("PR head SHA is not resolved yet".into()))?;
 
-        if run_git(repo, &["cat-file", "-e", head_sha]).is_err() {
-            run_git(repo, &["fetch", "origin", head_sha])
-                .map_err(|e| AppError::Git(format!("failed to fetch PR head {head_sha}: {e}")))?;
-        }
+        ensure_commit(repo, head_sha)?;
 
         run_git(
             repo,

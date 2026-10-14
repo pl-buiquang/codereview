@@ -469,6 +469,7 @@ fn reanchor_pass(
     let is_remote = detail.local_path.is_none();
     let mut compare_cache: std::collections::HashMap<String, Vec<ComparedFile>> =
         std::collections::HashMap::new();
+    let mut ensured_commits: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     for ((pinned_sha, file_path), comments) in &groups {
         let patch: Option<String> = if is_remote {
@@ -493,6 +494,16 @@ fn reanchor_pass(
                 .and_then(|f| f.patch.clone())
         } else {
             let local = detail.local_path.as_deref().unwrap();
+            if detail.target.kind == "github_pr" {
+                // The repo's local clone may not have fetched the PR's current
+                // or pinned head yet (e.g. after a force-push) — `diff_shas_path`
+                // needs both as local objects.
+                for sha in [pinned_sha.as_str(), current] {
+                    if ensured_commits.insert(sha.to_string()) {
+                        git::ensure_commit(Path::new(local), sha)?;
+                    }
+                }
+            }
             Some(git::diff_shas_path(
                 Path::new(local),
                 pinned_sha,
