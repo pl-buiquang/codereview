@@ -63,7 +63,10 @@ export function ReviewsView() {
 
   const deleteReview = useMutation({
     mutationFn: (id: number) => api.deleteReview(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["reviews"] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["reviews"] });
+      queryClient.invalidateQueries({ queryKey: ["target-reviews"] });
+    },
     onError: (e) => toast.error(`Could not delete review:\n${String(e)}`),
   });
 
@@ -82,7 +85,10 @@ export function ReviewsView() {
     },
     onSuccess: (deleted) => {
       if (deleted == null) return;
-      if (deleted > 0) queryClient.invalidateQueries({ queryKey: ["reviews"] });
+      if (deleted > 0) {
+        queryClient.invalidateQueries({ queryKey: ["reviews"] });
+        queryClient.invalidateQueries({ queryKey: ["target-reviews"] });
+      }
       toast.success(deleted === 0 ? "No reviews of merged or closed PRs" : `Deleted ${deleted} review${deleted === 1 ? "" : "s"}`);
     },
     onError: (e) => toast.error(`Clean up failed:\n${String(e)}`),

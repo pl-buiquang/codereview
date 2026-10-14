@@ -875,6 +875,7 @@ function ReviewHeader({
     mutationFn: () => api.deleteReview(review.id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["reviews"] });
+      queryClient.invalidateQueries({ queryKey: ["target-reviews", review.target_id] });
       closeReview();
     },
   });
@@ -889,6 +890,7 @@ function ReviewHeader({
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["review", review.id] });
       queryClient.invalidateQueries({ queryKey: ["reviews"] });
+      queryClient.invalidateQueries({ queryKey: ["target-reviews", review.target_id] });
       toast.success("Review published to GitHub.");
       closeReview();
     },
@@ -898,6 +900,7 @@ function ReviewHeader({
   const invalidateReview = () => {
     queryClient.invalidateQueries({ queryKey: ["review", review.id] });
     queryClient.invalidateQueries({ queryKey: ["reviews"] });
+    queryClient.invalidateQueries({ queryKey: ["target-reviews", review.target_id] });
   };
 
   const publishPending = useMutation({
