@@ -136,7 +136,7 @@ export function AddMetaForm({
   onAdd: (args: { kind: BoardMetaKind; value: string; tag: string | null; label: string | null }) => void;
   onClose: () => void;
 }) {
-  const [kind, setKind] = useState<BoardMetaKind>("file");
+  const [kind, setKind] = useState<BoardMetaKind>("note");
   const [value, setValue] = useState("");
   const [tag, setTag] = useState("");
   const [label, setLabel] = useState("");
@@ -162,9 +162,9 @@ export function AddMetaForm({
   return (
     <form className="board-meta-add" onSubmit={submit}>
       <select className="select" value={kind} onChange={(e) => setKind(e.target.value as BoardMetaKind)}>
+        <option value="note">Note</option>
         <option value="file">File</option>
         <option value="link">Link</option>
-        <option value="note">Note</option>
       </select>
       <div className="board-meta-add-value">
         <input
