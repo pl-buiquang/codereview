@@ -1,0 +1,14 @@
+{
+  "productName": "CodeReview Dev",
+  "identifier": "com.codereview.app.dev",
+  "app": {
+    "windows": [
+      {
+        "title": "CodeReview (Dev)",
+        "width": 1280,
+        "height": 860,
+        "dragDropEnabled": false
+      }
+    ]
+  }
+}

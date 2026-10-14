@@ -4749,11 +4749,9 @@ input[type="range"] {
 }
 
 /* Board rail: Tags filter (autocomplete combobox + removable chips) */
-.tag-filter {
-  padding: 0 8px;
-}
 .tag-filter-combobox {
   position: relative;
+  padding: 0 8px;
 }
 .tag-filter-input {
   width: 100%;
@@ -4761,8 +4759,8 @@ input[type="range"] {
 .tag-filter-dropdown {
   position: absolute;
   top: calc(100% + 4px);
-  left: 0;
-  right: 0;
+  left: 8px;
+  right: 8px;
   z-index: 20;
   max-height: 220px;
   overflow-y: auto;
@@ -4810,6 +4808,7 @@ input[type="range"] {
   display: flex;
   flex-wrap: wrap;
   gap: var(--sp-1);
+  padding: 0 8px;
   margin-top: 6px;
 }
 .tag-chip {

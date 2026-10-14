@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 // Wrapper for the tauri CLI. For `build`, auto-prepares the cr sidecar binary
 // and injects the externalBin config overlay so `pnpm tauri build` just works.
+// For `dev`, overlays a distinct identifier/title so the dev build doesn't
+// get swallowed by tauri-plugin-single-instance if a release build (same
+// identifier otherwise) is already running.
 import { spawnSync } from "child_process";
 
 function run(cmd, args = [], opts = {}) {
@@ -14,6 +17,8 @@ const [cmd, ...rest] = process.argv.slice(2);
 if (cmd === "build") {
   run("bash", ["scripts/prepare-cr-sidecar.sh"]);
   run("tauri", ["build", ...rest, "--config", "src-tauri/tauri.sidecar.conf.json"]);
+} else if (cmd === "dev") {
+  run("tauri", ["dev", ...rest, "--config", "src-tauri/tauri.dev.conf.json"]);
 } else {
   run("tauri", [cmd, ...rest].filter(Boolean));
 }

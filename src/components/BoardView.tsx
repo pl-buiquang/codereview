@@ -253,7 +253,6 @@ export function BoardView() {
 
       <div className="inbox-layout">
         <aside className="cr-rail">
-          <TagFilter tags={tagEntries} selected={effTags} onChange={setTagFilter} />
           <FilterList
             title="Status"
             entries={statusEntries}
@@ -275,6 +274,7 @@ export function BoardView() {
             onSelect={setRepoFilter}
             renderLabel={(k) => <RepoName className="lbl mono" name={k} />}
           />
+          <TagFilter tags={tagEntries} selected={effTags} onChange={setTagFilter} />
         </aside>
 
         <div className="board-lanes">
