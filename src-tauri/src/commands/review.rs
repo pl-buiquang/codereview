@@ -1125,6 +1125,24 @@ fn build_publish_payload(detail: &ReviewDetail) -> serde_json::Value {
     payload
 }
 
+/// GitHub rejects a COMMENT-event review with neither a body nor inline comments
+/// (422 Validation Failed) — catch that locally with a clear message instead of
+/// surfacing GitHub's opaque error. APPROVE/REQUEST_CHANGES are fine empty.
+fn ensure_submittable(detail: &ReviewDetail, event: &str) -> AppResult<()> {
+    if event != "COMMENT" {
+        return Ok(());
+    }
+    if !inline_publish_comments(detail).is_empty() {
+        return Ok(());
+    }
+    if !body_with_file_comments(detail).trim().is_empty() {
+        return Ok(());
+    }
+    Err(AppError::Other(
+        "this review has no comments and no summary — add one, or pick Approve/Request changes, before submitting".into(),
+    ))
+}
+
 /// Same payload as a normal publish but with `event` omitted: GitHub's REST API
 /// creates a PENDING review exactly when `event` is absent.
 fn build_pending_payload(detail: &ReviewDetail) -> serde_json::Value {
@@ -1428,6 +1446,7 @@ fn prepare_publish(review_id: i64, db: &Db) -> AppResult<(ReviewDetail, String, 
 #[tauri::command]
 pub async fn publish_review(review_id: i64, db: State<'_, Db>) -> AppResult<Review> {
     let (detail, owner, name, number) = prepare_publish(review_id, &db)?;
+    ensure_submittable(&detail, gh_event(detail.review.event.as_deref()))?;
 
     let conn = db.0.lock().unwrap();
 
@@ -1528,18 +1547,14 @@ pub fn submit_pending_review(review_id: i64, db: State<Db>) -> AppResult<Review>
     let conn = db.0.lock().unwrap();
     let detail = load_detail(&conn, review_id)?;
     let gh_id = ensure_pending(&detail)?;
+    let event = gh_event(detail.review.event.as_deref());
+    ensure_submittable(&detail, event)?;
     let number = detail
         .target
         .github_pr_number
         .ok_or_else(|| AppError::Other("PR target missing number".into()))?;
     let (owner, name) = pr_remote(&conn, detail.target.repo_id)?;
-    provider_for().submit_pending_review(
-        &owner,
-        &name,
-        number,
-        gh_id,
-        gh_event(detail.review.event.as_deref()),
-    )?;
+    provider_for().submit_pending_review(&owner, &name, number, gh_id, event)?;
     mark_submitted(&conn, review_id)?;
     get_review_row(&conn, review_id)
 }
@@ -2556,6 +2571,32 @@ mod tests {
         assert_eq!(pending["comments"], publish["comments"]);
         assert_eq!(pending["body"], publish["body"]);
         assert_eq!(pending["commit_id"], publish["commit_id"]);
+    }
+
+    #[test]
+    fn ensure_submittable_rejects_empty_comment_review() {
+        let detail = detail_with(None, "", vec![]);
+        let err = ensure_submittable(&detail, "COMMENT").unwrap_err();
+        match err {
+            AppError::Other(m) => assert!(m.contains("no comments"), "message: {m}"),
+            other => panic!("expected Other, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ensure_submittable_accepts_comment_review_with_body_or_comments() {
+        let with_body = detail_with(None, "Looks good", vec![]);
+        ensure_submittable(&with_body, "COMMENT").unwrap();
+
+        let with_comment = detail_with(None, "", vec![payload_comment(5, None, "RIGHT")]);
+        ensure_submittable(&with_comment, "COMMENT").unwrap();
+    }
+
+    #[test]
+    fn ensure_submittable_allows_empty_approve_or_request_changes() {
+        let detail = detail_with(Some("approve"), "", vec![]);
+        ensure_submittable(&detail, "APPROVE").unwrap();
+        ensure_submittable(&detail, "REQUEST_CHANGES").unwrap();
     }
 
     #[test]

@@ -53,8 +53,9 @@ pub fn run_gh(ctx: &GhRepo, args: &[&str]) -> AppResult<String> {
         .map_err(|e| AppError::Gh(format!("failed to spawn gh: {e}")))?;
 
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(AppError::Gh(stderr.trim().to_string()));
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        crate::logging::warn(&format!("[gh] `gh {}` failed: {stderr}", args.join(" ")));
+        return Err(AppError::Gh(stderr));
     }
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
@@ -82,8 +83,9 @@ pub fn run_gh_stdin(ctx: &GhRepo, args: &[&str], input: &str) -> AppResult<Strin
         .wait_with_output()
         .map_err(|e| AppError::Gh(format!("gh failed: {e}")))?;
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(AppError::Gh(stderr.trim().to_string()));
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        crate::logging::warn(&format!("[gh] `gh {}` failed: {stderr}", args.join(" ")));
+        return Err(AppError::Gh(stderr));
     }
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
