@@ -56,6 +56,10 @@ export const api = {
   }) => invoke<Review>("create_review", args),
   listReviews: (repoId: number | null) =>
     invoke<ReviewSummary[]>("list_reviews", { repoId }),
+  listTargetReviews: (targetId: number) =>
+    invoke<ReviewSummary[]>("list_target_reviews", { targetId }),
+  newReviewOnTarget: (targetId: number) =>
+    invoke<Review>("new_review_on_target", { targetId }),
   getReview: (reviewId: number) =>
     invoke<ReviewDetail>("get_review", { reviewId }),
   setFileViewed: (reviewId: number, filePath: string, viewed: boolean) =>
@@ -206,6 +210,8 @@ export const api = {
     }),
   boardMetaDelete: (id: number) => invoke<void>("board_meta_delete", { id }),
   boardMetaTags: () => invoke<string[]>("board_meta_tags"),
+  boardCardForPr: (owner: string, name: string, number: number) =>
+    invoke<BoardCard | null>("board_card_for_pr", { owner, name, number }),
 
   // Worktrees
   listWorktrees: (repoId: number) =>

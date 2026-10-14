@@ -2,8 +2,19 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { Markdown } from "./Markdown";
-import { CiBadge, StatusPill } from "./InboxBadges";
 import type { PrCheck, PrLabel, PrReviewer } from "../lib/types";
+
+/** Shared with the review header's status chips, which need the same PR
+ *  metadata even while this panel is collapsed — same query key, so there's
+ *  only one fetch. `owner`/`name`/`number` may be null for a non-PR target. */
+export function usePrMeta(owner: string | null, name: string | null, number: number | null) {
+  return useQuery({
+    queryKey: ["pr-meta", owner, name, number],
+    queryFn: () => api.prMeta(owner as string, name as string, number as number),
+    enabled: owner != null && name != null && number != null,
+    refetchOnWindowFocus: true,
+  });
+}
 
 export function PrMetaPanel({
   owner,
@@ -14,10 +25,7 @@ export function PrMetaPanel({
   name: string;
   number: number;
 }) {
-  const q = useQuery({
-    queryKey: ["pr-meta", owner, name, number],
-    queryFn: () => api.prMeta(owner, name, number),
-  });
+  const q = usePrMeta(owner, name, number);
 
   if (q.isLoading) return <div className="pr-meta-panel muted">Loading PR details…</div>;
   if (q.isError || !q.data)
@@ -32,8 +40,6 @@ export function PrMetaPanel({
   return (
     <div className="pr-meta-panel">
       <div className="pr-meta-row">
-        <StatusPill state={meta.state.toLowerCase()} isDraft={meta.isDraft} />
-        <CiBadge state={meta.ciState ? meta.ciState.toLowerCase() : null} />
         <Mergeability mergeable={meta.mergeable} />
         <span className="pr-meta-counts">
           <span className="add">+{meta.additions}</span>{" "}

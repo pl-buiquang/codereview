@@ -417,15 +417,48 @@ pub fn board_show_impl(conn: &Connection, card_id: &str) -> AppResult<BoardCardW
         .query_row("SELECT * FROM board_card WHERE id = ?1", params![card_id], BoardCardRow::from_row)
         .map_err(AppError::from)?;
     let meta = board_meta_list_impl(conn, card_id)?;
+    let linked_issue_ids: Vec<String> = {
+        let mut stmt = conn.prepare("SELECT issue_id FROM board_link WHERE pr_id = ?1")?;
+        let rows = stmt.query_map(params![card_id], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
+        rows
+    };
+    let inherited_meta = linked_issue_ids
+        .iter()
+        .map(|iid| board_meta_list_impl(conn, iid))
+        .collect::<AppResult<Vec<_>>>()?
+        .into_iter()
+        .flatten()
+        .collect();
     Ok(BoardCardWithExtras {
         card,
         lane: None,
         meta,
-        inherited_meta: Vec::new(),
-        linked_issue_ids: Vec::new(),
+        inherited_meta,
+        linked_issue_ids,
         linked_pr_ids: Vec::new(),
         existing_review_id: None,
     })
+}
+
+/// The board card for a PR, if it's tracked — including discarded/archived
+/// ones, so the review's Context tab can still show their metadata. Used by
+/// `review_board_card` for the review view's left-pane Context tab.
+pub fn board_card_for_pr_impl(
+    conn: &Connection,
+    owner: &str,
+    name: &str,
+    number: i64,
+) -> AppResult<Option<BoardCardWithExtras>> {
+    match find_card_id(conn, owner, name, number)? {
+        Some(id) => Ok(Some(board_show_impl(conn, &id)?)),
+        None => Ok(None),
+    }
+}
+
+#[tauri::command]
+pub fn board_card_for_pr(owner: String, name: String, number: i64, db: State<Db>) -> AppResult<Option<BoardCardWithExtras>> {
+    let conn = db.0.lock().unwrap();
+    board_card_for_pr_impl(&conn, &owner, &name, number)
 }
 
 // ---------------------------------------------------------------------------
@@ -711,4 +744,65 @@ pub fn board_meta_tags_impl(conn: &Connection) -> AppResult<Vec<String>> {
 pub fn board_meta_tags(db: State<Db>) -> AppResult<Vec<String>> {
     let conn = db.0.lock().unwrap();
     board_meta_tags_impl(&conn)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::open_memory;
+
+    fn seed_card(conn: &Connection, id: &str, repo: &str, number: i64, typ: &str) {
+        conn.execute(
+            "INSERT INTO board_card (id, type, repo, number, url, title, updated_at, tracked_at)
+             VALUES (?1, ?2, ?3, ?4, 'https://example.com', 'title', 'now', 'now')",
+            params![id, typ, repo, number],
+        )
+        .unwrap();
+    }
+
+    fn seed_meta(conn: &Connection, card_id: &str, value: &str) {
+        conn.execute(
+            "INSERT INTO board_meta (card_id, kind, value, created_at) VALUES (?1, 'note', ?2, 'now')",
+            params![card_id, value],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn board_card_for_pr_returns_none_when_untracked() {
+        let conn = open_memory();
+        assert!(board_card_for_pr_impl(&conn, "owner", "repo", 1).unwrap().is_none());
+    }
+
+    #[test]
+    fn board_card_for_pr_finds_tracked_card_by_coords() {
+        let conn = open_memory();
+        seed_card(&conn, "pr1", "owner/repo", 42, "pr");
+        seed_meta(&conn, "pr1", "a note");
+
+        let found = board_card_for_pr_impl(&conn, "owner", "repo", 42).unwrap().unwrap();
+        assert_eq!(found.card.id, "pr1");
+        assert_eq!(found.meta.len(), 1);
+    }
+
+    #[test]
+    fn board_card_for_pr_includes_discarded_cards_with_inherited_meta() {
+        let conn = open_memory();
+        seed_card(&conn, "issue1", "owner/repo", 1, "issue");
+        seed_card(&conn, "pr1", "owner/repo", 2, "pr");
+        seed_meta(&conn, "issue1", "from issue");
+        conn.execute(
+            "INSERT INTO board_link (issue_id, pr_id, source) VALUES ('issue1', 'pr1', 'auto')",
+            [],
+        )
+        .unwrap();
+        conn.execute("UPDATE board_card SET discarded_at = 'now' WHERE id = 'pr1'", [])
+            .unwrap();
+
+        let found = board_card_for_pr_impl(&conn, "owner", "repo", 2).unwrap().unwrap();
+        assert_eq!(found.card.id, "pr1");
+        assert!(found.card.discarded_at.is_some());
+        assert_eq!(found.inherited_meta.len(), 1);
+        assert_eq!(found.inherited_meta[0].value, "from issue");
+    }
 }

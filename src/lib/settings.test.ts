@@ -78,6 +78,7 @@ describe("useSettingsStore", () => {
         "fileConfigPatterns",
         "fileTestPatterns",
         "inboxPollMs",
+        "leftPaneTab",
         "markEdits",
         "mode",
         "prListPollMs",
@@ -102,7 +103,7 @@ describe("exportSettings / importSettings", () => {
     s.setFileTestPatterns("");
     const applied = importSettings(json);
     const n = useSettingsStore.getState();
-    expect(applied).toBe(16);
+    expect(applied).toBe(17);
     expect(n.mode).toBe("light");
     expect(n.diffFontSize).toBe(15);
     expect(n.fileTestPatterns).toBe("*.spec.rb");

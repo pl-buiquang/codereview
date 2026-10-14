@@ -790,27 +790,8 @@ pub fn file_source(
     }
 }
 
-/// All reviews (optionally filtered to one repo), newest first, for the Reviews list.
-pub fn list_reviews_impl(conn: &Connection, repo_id: Option<i64>) -> AppResult<Vec<ReviewSummary>> {
-    let reviews: Vec<Review> = {
-        if let Some(rid) = repo_id {
-            let mut stmt = conn.prepare(
-                "SELECT rv.* FROM review rv JOIN target t ON rv.target_id = t.id
-                 WHERE t.repo_id = ?1 ORDER BY rv.updated_at DESC",
-            )?;
-            let rows = stmt
-                .query_map(params![rid], Review::from_row)?
-                .collect::<rusqlite::Result<_>>()?;
-            rows
-        } else {
-            let mut stmt = conn.prepare("SELECT * FROM review ORDER BY updated_at DESC")?;
-            let rows = stmt
-                .query_map([], Review::from_row)?
-                .collect::<rusqlite::Result<_>>()?;
-            rows
-        }
-    };
-
+/// Enriches raw `review` rows with their target, repo label and comment count.
+fn summarize_reviews(conn: &Connection, reviews: Vec<Review>) -> AppResult<Vec<ReviewSummary>> {
     let mut out = Vec::with_capacity(reviews.len());
     for review in reviews {
         let target = get_target(conn, review.target_id)?;
@@ -835,10 +816,72 @@ pub fn list_reviews_impl(conn: &Connection, repo_id: Option<i64>) -> AppResult<V
     Ok(out)
 }
 
+/// All reviews (optionally filtered to one repo), newest first, for the Reviews list.
+pub fn list_reviews_impl(conn: &Connection, repo_id: Option<i64>) -> AppResult<Vec<ReviewSummary>> {
+    let reviews: Vec<Review> = {
+        if let Some(rid) = repo_id {
+            let mut stmt = conn.prepare(
+                "SELECT rv.* FROM review rv JOIN target t ON rv.target_id = t.id
+                 WHERE t.repo_id = ?1 ORDER BY rv.updated_at DESC",
+            )?;
+            let rows = stmt
+                .query_map(params![rid], Review::from_row)?
+                .collect::<rusqlite::Result<_>>()?;
+            rows
+        } else {
+            let mut stmt = conn.prepare("SELECT * FROM review ORDER BY updated_at DESC")?;
+            let rows = stmt
+                .query_map([], Review::from_row)?
+                .collect::<rusqlite::Result<_>>()?;
+            rows
+        }
+    };
+    summarize_reviews(conn, reviews)
+}
+
 #[tauri::command]
 pub fn list_reviews(repo_id: Option<i64>, db: State<Db>) -> AppResult<Vec<ReviewSummary>> {
     let conn = db.0.lock().unwrap();
     list_reviews_impl(&conn, repo_id)
+}
+
+/// All reviews on a single target, newest first — for the review header's
+/// same-target switcher.
+pub fn list_target_reviews_impl(conn: &Connection, target_id: i64) -> AppResult<Vec<ReviewSummary>> {
+    let mut stmt = conn.prepare("SELECT * FROM review WHERE target_id = ?1 ORDER BY updated_at DESC")?;
+    let reviews = stmt
+        .query_map(params![target_id], Review::from_row)?
+        .collect::<rusqlite::Result<_>>()?;
+    summarize_reviews(conn, reviews)
+}
+
+#[tauri::command]
+pub fn list_target_reviews(target_id: i64, db: State<Db>) -> AppResult<Vec<ReviewSummary>> {
+    let conn = db.0.lock().unwrap();
+    list_target_reviews_impl(&conn, target_id)
+}
+
+/// Start a brand-new review on a target that already has at least one
+/// review — e.g. starting a second round after publishing. Errors if a
+/// draft already exists on the target, since the UI assumes at most one
+/// open draft per target (`review_for_target`'s reuse logic, and the
+/// board's `existing_review_id` resume behavior).
+pub fn new_review_on_target_impl(conn: &Connection, target_id: i64) -> AppResult<Review> {
+    let has_draft: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM review WHERE target_id = ?1 AND status = 'draft')",
+        params![target_id],
+        |r| r.get(0),
+    )?;
+    if has_draft {
+        return Err(AppError::Other("a draft review already exists on this target".into()));
+    }
+    new_review_for_target(conn, target_id)
+}
+
+#[tauri::command]
+pub fn new_review_on_target(target_id: i64, db: State<Db>) -> AppResult<Review> {
+    let conn = db.0.lock().unwrap();
+    new_review_on_target_impl(&conn, target_id)
 }
 
 /// Human-friendly repo label: the user-set friendly name if any, else
@@ -2382,6 +2425,54 @@ mod tests {
         conn.execute("UPDATE review SET status = 'published' WHERE id = ?1", params![second.id])
             .unwrap();
         assert_eq!(review_for_target(&conn, target.id, true).unwrap().id, fresh.id);
+    }
+
+    #[test]
+    fn list_target_reviews_returns_all_newest_first() {
+        let conn = open_memory();
+        let repo = seed_repo(&conn, None, None);
+        let target =
+            get_or_create_local_target(&conn, repo, "/nope", "main", "feature", true).unwrap();
+
+        let first = new_review_for_target(&conn, target.id).unwrap();
+        conn.execute(
+            "UPDATE review SET status = 'published', updated_at = '2020-01-01T00:00:00Z' WHERE id = ?1",
+            params![first.id],
+        )
+        .unwrap();
+        let second = new_review_for_target(&conn, target.id).unwrap();
+        conn.execute(
+            "UPDATE review SET updated_at = '2024-01-01T00:00:00Z' WHERE id = ?1",
+            params![second.id],
+        )
+        .unwrap();
+
+        let summaries = list_target_reviews_impl(&conn, target.id).unwrap();
+        assert_eq!(summaries.len(), 2);
+        assert_eq!(summaries[0].review.id, second.id);
+        assert_eq!(summaries[1].review.id, first.id);
+
+        let other_target =
+            get_or_create_local_target(&conn, repo, "/nope", "main", "other", true).unwrap();
+        assert!(list_target_reviews_impl(&conn, other_target.id).unwrap().is_empty());
+    }
+
+    #[test]
+    fn new_review_on_target_requires_no_existing_draft() {
+        let conn = open_memory();
+        let repo = seed_repo(&conn, None, None);
+        let target =
+            get_or_create_local_target(&conn, repo, "/nope", "main", "feature", true).unwrap();
+
+        let first = new_review_for_target(&conn, target.id).unwrap();
+        let err = new_review_on_target_impl(&conn, target.id).unwrap_err();
+        assert!(matches!(err, AppError::Other(_)));
+
+        conn.execute("UPDATE review SET status = 'published' WHERE id = ?1", params![first.id])
+            .unwrap();
+        let second = new_review_on_target_impl(&conn, target.id).unwrap();
+        assert_ne!(second.id, first.id);
+        assert_eq!(second.status, "draft");
     }
 
     #[test]

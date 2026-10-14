@@ -54,7 +54,7 @@ const STATUS_BORDER_COLOR: Record<string, string> = {
   changes_requested: "var(--danger)",
 };
 
-function MetaRow({
+export function MetaRow({
   meta,
   inherited,
   onDelete,
@@ -117,7 +117,7 @@ function MetaRow({
   );
 }
 
-function AddMetaForm({
+export function AddMetaForm({
   tags,
   onAdd,
   onClose,

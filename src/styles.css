@@ -1129,6 +1129,11 @@ td.diff-code {
 .review-header-top .view-toggle {
   margin-left: auto;
 }
+.review-pr-chips {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
 .head-moved {
   display: flex;
   align-items: center;
@@ -3365,6 +3370,48 @@ tr.search-current {
   border-top: 1px solid var(--border);
   margin: 4px 0;
 }
+.review-switcher {
+  position: relative;
+}
+.review-switcher-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  min-width: 260px;
+  padding: 4px;
+  box-shadow: var(--shadow-pop);
+}
+.review-switcher-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: auto;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  border-radius: var(--radius-s);
+  padding: 6px 8px;
+  text-align: left;
+  font: inherit;
+  font-weight: 500;
+  white-space: nowrap;
+  color: var(--text);
+}
+.review-switcher-item:hover {
+  background: var(--surface-2);
+}
+.review-switcher-item.active {
+  background: var(--surface-2);
+  font-weight: 600;
+}
+.review-switcher-item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 .repo-row {
   display: flex;
   align-items: center;
@@ -4689,6 +4736,35 @@ input[type="range"] {
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
+}
+
+/* Review left pane: Context tab */
+.context-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  min-width: 0;
+}
+.context-pane-empty {
+  align-items: flex-start;
+}
+.context-pane-note {
+  font-size: 11.5px;
+}
+.context-pane-note button {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--accent);
+  cursor: pointer;
+}
+.context-pane-add-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  align-self: flex-start;
 }
 
 /* Settings: Logs */

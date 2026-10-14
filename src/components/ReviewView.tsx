@@ -65,7 +65,9 @@ import { ShortcutHelp } from "./ShortcutHelp";
 import { Markdown } from "./Markdown";
 import { ChatPanel } from "./ChatPanel";
 import { PublishButton } from "./PublishButton";
-import { PrMetaPanel } from "./PrMetaPanel";
+import { PrMetaPanel, usePrMeta } from "./PrMetaPanel";
+import { ReviewSwitcher } from "./ReviewSwitcher";
+import { CiBadge, StatusPill } from "./InboxBadges";
 import { Icon } from "./icons";
 import { githubPrUrl } from "../lib/githubUrl";
 import { useDebouncedCallback } from "../lib/useDebouncedCallback";
@@ -81,7 +83,6 @@ import {
 import { groupThreads, isDraftReply, type CommentThread } from "../lib/threads";
 import { anchorPin, isCommentOutdated } from "../lib/staleness";
 import { summaryLine } from "../lib/text";
-import { statusLabel, statusBadgeClass } from "../lib/status";
 import type {
   Comment,
   FocusView,
@@ -583,6 +584,7 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
           hiddenPaths={focusHiddenPaths}
           typeFilter={typeFilter}
           onTypeFilterChange={setTypeFilter}
+          prContext={target?.kind === "github_pr" && owner && name && prNumber != null ? { owner, name, number: prNumber } : null}
         />
         {!sidebarCollapsed && <div className="resize-handle" onMouseDown={startResize("left")} />}
         <div className="diff-area" ref={diffAreaRef}>
@@ -934,12 +936,14 @@ function ReviewHeader({
   const owner = detail.remote_owner ?? null;
   const name = detail.remote_name ?? null;
   const prNumber = target.github_pr_number ?? null;
+  const prMetaQuery = usePrMeta(owner, name, prNumber);
 
   const refreshReview = useMutation({
     mutationFn: () => api.refreshReview(review.id),
     onSuccess: (r) => {
       queryClient.invalidateQueries({ queryKey: ["review", review.id] });
       queryClient.invalidateQueries({ queryKey: ["pr-threads", owner, name, prNumber] });
+      queryClient.invalidateQueries({ queryKey: ["pr-meta", owner, name, prNumber] });
       if (r.headMoved) toast.success("Head moved — re-anchor to update comments.");
     },
     onError: (e) => toast.error(`Refresh failed:\n${String(e)}`),
@@ -1038,9 +1042,16 @@ function ReviewHeader({
             </span>
           )}
         </div>
-        <span className={`badge ${statusBadgeClass(review.status)}`}>
-          {statusLabel(review.status)}
-        </span>
+        <ReviewSwitcher targetId={target.id} currentReviewId={review.id} />
+        {isPr && (
+          <span className="review-pr-chips">
+            <StatusPill
+              state={prMetaQuery.data ? prMetaQuery.data.state.toLowerCase() : null}
+              isDraft={prMetaQuery.data?.isDraft ?? false}
+            />
+            <CiBadge state={prMetaQuery.data?.ciState ? prMetaQuery.data.ciState.toLowerCase() : null} />
+          </span>
+        )}
         <span className="save-state">{saveState === "saving" ? "Saving…" : "Saved"}</span>
         <div className="view-toggle">
           <button
@@ -1122,11 +1133,12 @@ function ReviewHeader({
               : `Publish ${draftReplyCount} draft repl${draftReplyCount === 1 ? "y" : "ies"}`}
           </button>
         )}
-        {isPr && isDraft && (
+        {isPr && (isDraft || published) && (
           <PublishButton
             published={published}
             pending={publishReview.isPending}
             draftPending={publishPending.isPending}
+            verdictLabel={verdictLabel}
             onPublish={(event) => publishReview.mutate(event)}
             onPublishDraft={(event) => publishPending.mutate(event)}
           />

@@ -8,6 +8,8 @@ export type ThemeBase = "dark" | "light";
 export type DiffViewType = "split" | "unified";
 /** Which edge of a board card shows the PR-status color. */
 export type BoardBorderSide = "left" | "right" | "top" | "bottom";
+/** Which tab the review's left pane shows: the file list or the board card's context. */
+export type LeftPaneTab = "files" | "context";
 
 export const DEFAULT_DIFF_FONT_SIZE = 12.5;
 
@@ -50,6 +52,7 @@ type PersistedSettings = Pick<
   | "markEdits"
   | "fileTestPatterns"
   | "fileConfigPatterns"
+  | "leftPaneTab"
 >;
 
 const DEFAULTS: PersistedSettings = {
@@ -69,6 +72,7 @@ const DEFAULTS: PersistedSettings = {
   markEdits: false,
   fileTestPatterns: DEFAULT_TEST_PATTERNS,
   fileConfigPatterns: DEFAULT_CONFIG_PATTERNS,
+  leftPaneTab: "files",
 };
 
 const PERSISTED_KEYS = Object.keys(DEFAULTS) as (keyof PersistedSettings)[];
@@ -103,6 +107,8 @@ interface SettingsState {
   fileTestPatterns: string;
   /** Newline-separated globs classifying changed files as config/docs. */
   fileConfigPatterns: string;
+  /** Last left-pane tab shown in the review view; remembered globally. */
+  leftPaneTab: LeftPaneTab;
   setDirection: (d: Direction) => void;
   setMode: (m: ThemeMode) => void;
   setDiffFontSize: (n: number) => void;
@@ -119,6 +125,7 @@ interface SettingsState {
   setMarkEdits: (b: boolean) => void;
   setFileTestPatterns: (s: string) => void;
   setFileConfigPatterns: (s: string) => void;
+  setLeftPaneTab: (tab: LeftPaneTab) => void;
 }
 
 export const useSettingsStore = create<SettingsState>()(
@@ -141,10 +148,11 @@ export const useSettingsStore = create<SettingsState>()(
       setMarkEdits: (markEdits) => set({ markEdits }),
       setFileTestPatterns: (fileTestPatterns) => set({ fileTestPatterns }),
       setFileConfigPatterns: (fileConfigPatterns) => set({ fileConfigPatterns }),
+      setLeftPaneTab: (leftPaneTab) => set({ leftPaneTab }),
     }),
     {
       name: "codereview-settings",
-      version: 7,
+      version: 8,
       partialize: (s) => pickPersisted(s),
       // v0 (flat: `theme`) and v1 (`themeMode` + theme slots) collapse the same
       // way: direction resets to "a", the old mode maps over (custom themes,
@@ -169,6 +177,7 @@ export const useSettingsStore = create<SettingsState>()(
           markEdits: (p.markEdits as boolean) ?? false,
           fileTestPatterns: (p.fileTestPatterns as string) ?? DEFAULT_TEST_PATTERNS,
           fileConfigPatterns: (p.fileConfigPatterns as string) ?? DEFAULT_CONFIG_PATTERNS,
+          leftPaneTab: (p.leftPaneTab as LeftPaneTab) ?? "files",
         } satisfies PersistedSettings;
       },
     },
@@ -184,6 +193,7 @@ const ENUMS: Partial<Record<keyof PersistedSettings, readonly string[]>> = {
   mode: ["dark", "light", "system"],
   defaultViewType: ["split", "unified"],
   boardStatusBorderSide: ["left", "right", "top", "bottom"],
+  leftPaneTab: ["files", "context"],
 };
 
 /** Serialize the persisted settings to a portable JSON document. */

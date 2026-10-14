@@ -23,6 +23,7 @@ import { summaryLine } from "../lib/text";
 import { timeAgo } from "../lib/timeAgo";
 import type { JumpListHandle } from "../lib/keyboard";
 import type { PrThread } from "../lib/types";
+import { ContextPane } from "./ContextPane";
 import { Icon } from "./icons";
 
 interface Row {
@@ -144,6 +145,7 @@ export function FileJumpList({
   hiddenPaths,
   typeFilter,
   onTypeFilterChange,
+  prContext,
 }: {
   reviewId: number;
   scrollRootRef: RefObject<HTMLElement | null>;
@@ -155,6 +157,8 @@ export function FileJumpList({
   hiddenPaths?: Set<string>;
   typeFilter: "all" | FileCategory;
   onTypeFilterChange: (filter: "all" | FileCategory) => void;
+  /** GitHub PR coordinates for the Context tab; null hides that tab (local reviews). */
+  prContext?: { owner: string; name: string; number: number } | null;
 }) {
   const detailQuery = useQuery({
     queryKey: ["review", reviewId],
@@ -374,7 +378,11 @@ export function FileJumpList({
     });
 
   // ── Comments tab ──────────────────────────────────────────────
-  const [activeTab, setActiveTab] = useState<"files" | "comments">("files");
+  const leftPaneTab = useSettingsStore((s) => s.leftPaneTab);
+  const setLeftPaneTab = useSettingsStore((s) => s.setLeftPaneTab);
+  const [activeTab, setActiveTab] = useState<"files" | "comments" | "context">(
+    leftPaneTab === "context" && prContext ? "context" : "files",
+  );
   const [resolutionFilter, setResolutionFilter] = useState<ResolutionFilter>("all");
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
   const [sortMode, setSortMode] = useState<SortMode>("file");
@@ -603,7 +611,10 @@ export function FileJumpList({
             <button
               type="button"
               className={`sidebar-tab${activeTab === "files" ? " active" : ""}`}
-              onClick={() => setActiveTab("files")}
+              onClick={() => {
+                setActiveTab("files");
+                setLeftPaneTab("files");
+              }}
             >
               Files ({rows.length})
             </button>
@@ -614,6 +625,18 @@ export function FileJumpList({
             >
               Comments ({displayItems.length})
             </button>
+            {prContext && (
+              <button
+                type="button"
+                className={`sidebar-tab${activeTab === "context" ? " active" : ""}`}
+                onClick={() => {
+                  setActiveTab("context");
+                  setLeftPaneTab("context");
+                }}
+              >
+                Context
+              </button>
+            )}
             {onToggle && (
               <button
                 className="btn btn-sm btn-ghost sidebar-toggle"
@@ -625,7 +648,13 @@ export function FileJumpList({
             )}
           </div>
 
-          {activeTab === "files" ? (
+          {activeTab === "context" ? (
+            prContext && (
+              <div className="jump-list-content">
+                <ContextPane owner={prContext.owner} name={prContext.name} number={prContext.number} />
+              </div>
+            )
+          ) : activeTab === "files" ? (
             <>
               <div className="comment-filters">
                 <div className="comment-filter-group">

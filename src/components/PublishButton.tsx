@@ -16,12 +16,14 @@ export function PublishButton({
   published,
   pending,
   draftPending,
+  verdictLabel,
   onPublish,
   onPublishDraft,
 }: {
   published: boolean;
   pending: boolean;
   draftPending: boolean;
+  verdictLabel?: string | null;
   onPublish: (event: ReviewEvent) => void;
   onPublishDraft: (event: ReviewEvent) => void;
 }) {
@@ -42,7 +44,11 @@ export function PublishButton({
       <button
         className="btn btn-primary"
         disabled
-        title="Already published — cannot publish again"
+        title={
+          verdictLabel
+            ? `Published · ${verdictLabel} — cannot publish again`
+            : "Already published — cannot publish again"
+        }
       >
         Published
       </button>
