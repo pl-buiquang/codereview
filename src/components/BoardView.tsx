@@ -231,6 +231,9 @@ export function BoardView() {
         <div className="cr-spacer" />
         <div className="inbox-head-actions">
           <div className="inbox-head-buttons">
+            <button className="btn" onClick={() => setShowTrackDialog(true)}>
+              <Icon name="plus" size={13} /> Track
+            </button>
             <label className="sort-control" title="Automatically refresh the board on this interval">
               auto
               <select className="sort-select" value={boardPollMs} onChange={(e) => setBoardPollMs(Number(e.target.value))}>
@@ -241,9 +244,6 @@ export function BoardView() {
                 ))}
               </select>
             </label>
-            <button className="btn" onClick={() => setShowTrackDialog(true)}>
-              <Icon name="plus" size={13} /> Track
-            </button>
             <button className="btn btn-primary" onClick={() => refresh.mutate({})} disabled={refresh.isPending}>
               {refresh.isPending ? (
                 <>

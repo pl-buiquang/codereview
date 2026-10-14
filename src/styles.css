@@ -2097,6 +2097,14 @@ tr.kb-focus {
 .track-pr-modal {
   width: min(480px, 90vw);
 }
+.track-pr-modal form {
+  margin-top: 16px;
+}
+.track-pr-modal .input {
+  width: 100%;
+  box-sizing: border-box;
+  height: 36px;
+}
 .form-warning {
   margin: 8px 0 0;
   padding: 6px 10px;
