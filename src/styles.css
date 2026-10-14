@@ -4824,9 +4824,13 @@ input[type="range"] {
   font-size: 11px;
 }
 .tag-chip .btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 14px;
   height: 14px;
   min-width: 14px;
+  padding: 0;
   color: var(--accent);
 }
 
