@@ -4450,7 +4450,9 @@ mod tests {
     fn refresh_target_shas_keeps_pinned_sha_when_local_branch_is_deleted() {
         let dir = TempDir::new().unwrap();
         let path = dir.path();
-        git_in(path, &["init", "-q"]);
+        // Pin the initial branch name explicitly — CI runners' git doesn't all
+        // default `init.defaultBranch` to "main" the way local dev setups do.
+        git_in(path, &["init", "-q", "-b", "main"]);
         git_in(path, &["config", "user.email", "t@t.com"]);
         git_in(path, &["config", "user.name", "t"]);
         fs::write(path.join("a.txt"), "1").unwrap();
