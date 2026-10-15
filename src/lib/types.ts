@@ -454,6 +454,48 @@ export interface BoardCard {
   existing_review_id: number | null;
 }
 
+// Claude Code sessions
+
+export type SessionFocusState = "ready" | "detached" | "background" | "no_terminal" | "not_live";
+
+/** A running `claude agents` view. */
+export interface AgentView {
+  pid: number;
+  cwd: string | null;
+  filter_cwd: string | null;
+  tmux: { session: string; window: string; pane: string; label: string | null } | null;
+  tty: string;
+  focus: SessionFocusState;
+}
+
+export interface ClaudeSession {
+  session_id: string;
+  pid: number | null;
+  live: boolean;
+  status: string | null; // busy | idle
+  kind: string | null; // interactive | bg
+  attached: boolean; // bg session viewed through `claude attach`
+  job_id: string | null; // background job id for `claude attach|stop|logs`
+  waiting_for: string | null; // e.g. "input needed", "dialog open"
+  agent_view: AgentView | null; // agent view to open an unattached background session from
+  name: string | null;
+  cwd: string;
+  git_branch: string | null;
+  repo: string | null; // "owner/name" of the cwd's origin (live only)
+  tmux: { session: string; window: string; pane: string; label: string | null } | null;
+  tty: string | null;
+  updated_at: number; // epoch ms
+  focus: SessionFocusState;
+}
+
+/** A live session matched to a PR card (via claude_session meta or head-branch checkout). */
+export interface CardSession {
+  card_id: string;
+  repo: string;
+  number: number;
+  session_id: string;
+}
+
 export interface BoardRefreshResult {
   cardCount: number;
   autoTracked: number;

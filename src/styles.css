@@ -4607,6 +4607,11 @@ input[type="range"] {
   cursor: default;
   background: transparent;
 }
+.board-card-menu .btn-split-menu button.board-card-menu-session {
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .board-card-menu .btn-split-menu button.danger:not(:disabled) {
   color: var(--danger);
 }
@@ -4958,4 +4963,77 @@ input[type="range"] {
   word-break: break-all;
   max-height: 420px;
   overflow-y: auto;
+}
+
+/* Sessions view */
+.sessions-list {
+  gap: 8px;
+}
+.sessions-group-head {
+  margin: 8px 0 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.sessions-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+}
+.sessions-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-3);
+}
+.sessions-dot-busy {
+  background: var(--warning);
+}
+.sessions-dot-idle {
+  background: var(--success);
+}
+.sessions-dot-waiting {
+  background: var(--danger);
+}
+.sessions-dot-ended {
+  background: transparent;
+  border: 1px solid var(--text-3);
+}
+.sessions-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.sessions-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.sessions-name {
+  font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sessions-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+.sessions-actions {
+  flex: none;
+  display: flex;
+  gap: 6px;
+}
+.board-card-highlight {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }

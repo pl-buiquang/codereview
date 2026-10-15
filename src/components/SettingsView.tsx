@@ -6,8 +6,10 @@ import {
   exportSettings,
   importSettings,
   parseRepoBasePaths,
+  TERMINAL_HOST_OPTIONS,
   useSettingsStore,
   type BoardBorderSide,
+  type TerminalHost,
   type ThemeMode,
 } from "../lib/settings";
 import { DEFAULT_CONFIG_PATTERNS, DEFAULT_TEST_PATTERNS } from "../lib/fileCategory";
@@ -218,6 +220,10 @@ function GeneralSection() {
   const setBoardStatusBorderSide = useSettingsStore((s) => s.setBoardStatusBorderSide);
   const fileTestPatterns = useSettingsStore((s) => s.fileTestPatterns);
   const fileConfigPatterns = useSettingsStore((s) => s.fileConfigPatterns);
+  const defaultTerminal = useSettingsStore((s) => s.defaultTerminal);
+  const setDefaultTerminal = useSettingsStore((s) => s.setDefaultTerminal);
+  const sessionHistoryDays = useSettingsStore((s) => s.sessionHistoryDays);
+  const setSessionHistoryDays = useSettingsStore((s) => s.setSessionHistoryDays);
   const setFileTestPatterns = useSettingsStore((s) => s.setFileTestPatterns);
   const setFileConfigPatterns = useSettingsStore((s) => s.setFileConfigPatterns);
 
@@ -342,6 +348,38 @@ function GeneralSection() {
             <option value="bottom">Bottom</option>
             <option value="left">Left</option>
           </select>
+        </label>
+      </section>
+
+      <section className="settings-group">
+        <h3>Sessions</h3>
+        <label className="settings-row">
+          <span>Default terminal</span>
+          <select
+            className="select"
+            value={defaultTerminal}
+            onChange={(e) => setDefaultTerminal(e.target.value as TerminalHost)}
+          >
+            {TERMINAL_HOST_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="settings-row">
+          <span>History (days)</span>
+          <input
+            type="number"
+            className="input"
+            min={0}
+            max={30}
+            value={sessionHistoryDays}
+            onChange={(e) => {
+              const n = Number(e.target.value);
+              if (Number.isFinite(n)) setSessionHistoryDays(Math.max(0, Math.min(30, Math.round(n))));
+            }}
+          />
         </label>
       </section>
 

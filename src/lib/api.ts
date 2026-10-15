@@ -6,8 +6,10 @@ import type {
   BoardMetaKind,
   BoardRefreshResult,
   Branch,
+  CardSession,
   ChatMessage,
   ChatTurnResult,
+  ClaudeSession,
   Comment,
   CommitDetail,
   DeleteGoneOutcome,
@@ -37,6 +39,7 @@ import type {
   WipStatus,
   WorktreeInfo,
 } from "./types";
+import type { TerminalHost } from "./settings";
 
 export const api = {
   listRepositories: () => invoke<Repository[]>("list_repositories"),
@@ -201,6 +204,13 @@ export const api = {
     invoke<Review>("board_open_review", { cardId, basePaths }),
   boardOpenVscode: (cardId: string, basePaths: string[] = []) =>
     invoke<void>("board_open_vscode", { cardId, basePaths }),
+  boardOpenTerminal: (cardId: string, host: TerminalHost, basePaths: string[] = []) =>
+    invoke<void>("board_open_terminal", { cardId, basePaths, host }),
+  boardCardSessions: () => invoke<CardSession[]>("board_card_sessions"),
+  listClaudeSessions: (historyDays: number) =>
+    invoke<ClaudeSession[]>("list_claude_sessions", { historyDays }),
+  focusClaudeSession: (sessionId: string) => invoke<void>("focus_claude_session", { sessionId }),
+  stopClaudeSession: (sessionId: string) => invoke<void>("stop_claude_session", { sessionId }),
   boardMetaAdd: (args: {
     cardId: string;
     kind: BoardMetaKind;

@@ -1,6 +1,7 @@
 mod anchor;
 mod avatar;
 pub mod board;
+pub mod claude_sessions;
 pub mod commands;
 mod cr_install;
 pub mod db;
@@ -15,6 +16,7 @@ pub mod inbox;
 pub mod logging;
 mod path_env;
 pub mod provider;
+pub mod terminal;
 pub mod tools;
 pub mod worktree;
 
@@ -250,6 +252,11 @@ pub fn run() {
             commands::board::board_archive_done,
             commands::board::board_open_review,
             commands::board::board_open_vscode,
+            commands::board::board_open_terminal,
+            commands::sessions::list_claude_sessions,
+            commands::sessions::focus_claude_session,
+            commands::sessions::stop_claude_session,
+            commands::sessions::board_card_sessions,
             commands::board::board_meta_add,
             commands::board::board_meta_update,
             commands::board::board_meta_delete,

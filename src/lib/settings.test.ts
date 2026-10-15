@@ -71,6 +71,7 @@ describe("useSettingsStore", () => {
         "boardStatusBorderSide",
         "botLogins",
         "chatModel",
+        "defaultTerminal",
         "defaultThreeDot",
         "defaultViewType",
         "diffFontSize",
@@ -84,6 +85,7 @@ describe("useSettingsStore", () => {
         "prListPollMs",
         "repoBasePaths",
         "repoStripPrefixes",
+        "sessionHistoryDays",
       ].sort(),
     );
   });
@@ -103,7 +105,7 @@ describe("exportSettings / importSettings", () => {
     s.setFileTestPatterns("");
     const applied = importSettings(json);
     const n = useSettingsStore.getState();
-    expect(applied).toBe(17);
+    expect(applied).toBe(19);
     expect(n.mode).toBe("light");
     expect(n.diffFontSize).toBe(15);
     expect(n.fileTestPatterns).toBe("*.spec.rb");

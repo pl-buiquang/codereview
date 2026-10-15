@@ -713,6 +713,31 @@ pub async fn board_open_vscode(card_id: String, base_paths: Vec<String>, db: Sta
     crate::commands::worktree::open_in_vscode(worktree_path, None)
 }
 
+/// Ensure the PR card's chat worktree exists, then open a new terminal window there running
+/// Claude — resuming the card's latest recorded session when it isn't already live.
+#[tauri::command]
+pub async fn board_open_terminal(
+    card_id: String,
+    base_paths: Vec<String>,
+    host: crate::terminal::TerminalHost,
+    db: State<'_, Db>,
+) -> AppResult<()> {
+    let (owner, name, number) = pr_card_coords(&db, &card_id)?;
+    let review = crate::commands::review::create_review_for_pr_impl(&db, &owner, &name, number, &base_paths, true)?;
+    let worktree_path = crate::commands::chat::ensure_chat_worktree(review.id, db.clone()).await?;
+    let live: std::collections::HashSet<String> =
+        crate::claude_sessions::live_sessions().into_iter().map(|s| s.session_id).collect();
+    let resume = {
+        let conn = db.0.lock().unwrap();
+        crate::commands::sessions::resumable_card_session(&conn, &card_id, &live)?
+    };
+    let mut argv = vec!["claude".to_string()];
+    if let Some(id) = resume {
+        argv.extend(["--resume".to_string(), id]);
+    }
+    crate::terminal::open_window(host, &worktree_path, &argv)
+}
+
 // ---------------------------------------------------------------------------
 // Metadata
 // ---------------------------------------------------------------------------

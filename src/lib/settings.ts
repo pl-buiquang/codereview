@@ -10,6 +10,15 @@ export type DiffViewType = "split" | "unified";
 export type BoardBorderSide = "left" | "right" | "top" | "bottom";
 /** Which tab the review's left pane shows: the file list or the board card's context. */
 export type LeftPaneTab = "files" | "context";
+/** Terminal application used to open new terminals (backend `TerminalHost`). */
+export type TerminalHost = "iterm2" | "ghostty" | "terminal" | "terminator";
+
+export const TERMINAL_HOST_OPTIONS: { label: string; value: TerminalHost }[] = [
+  { label: "iTerm2", value: "iterm2" },
+  { label: "Ghostty", value: "ghostty" },
+  { label: "Terminal.app", value: "terminal" },
+  { label: "Terminator (Linux)", value: "terminator" },
+];
 
 export const DEFAULT_DIFF_FONT_SIZE = 12.5;
 
@@ -53,6 +62,8 @@ type PersistedSettings = Pick<
   | "fileTestPatterns"
   | "fileConfigPatterns"
   | "leftPaneTab"
+  | "defaultTerminal"
+  | "sessionHistoryDays"
 >;
 
 const DEFAULTS: PersistedSettings = {
@@ -73,6 +84,8 @@ const DEFAULTS: PersistedSettings = {
   fileTestPatterns: DEFAULT_TEST_PATTERNS,
   fileConfigPatterns: DEFAULT_CONFIG_PATTERNS,
   leftPaneTab: "files",
+  defaultTerminal: "iterm2",
+  sessionHistoryDays: 3,
 };
 
 const PERSISTED_KEYS = Object.keys(DEFAULTS) as (keyof PersistedSettings)[];
@@ -109,6 +122,10 @@ interface SettingsState {
   fileConfigPatterns: string;
   /** Last left-pane tab shown in the review view; remembered globally. */
   leftPaneTab: LeftPaneTab;
+  /** Terminal application new terminals open in. */
+  defaultTerminal: TerminalHost;
+  /** How many days of past Claude sessions the Sessions view lists. */
+  sessionHistoryDays: number;
   setDirection: (d: Direction) => void;
   setMode: (m: ThemeMode) => void;
   setDiffFontSize: (n: number) => void;
@@ -126,6 +143,8 @@ interface SettingsState {
   setFileTestPatterns: (s: string) => void;
   setFileConfigPatterns: (s: string) => void;
   setLeftPaneTab: (tab: LeftPaneTab) => void;
+  setDefaultTerminal: (host: TerminalHost) => void;
+  setSessionHistoryDays: (days: number) => void;
 }
 
 export const useSettingsStore = create<SettingsState>()(
@@ -149,6 +168,8 @@ export const useSettingsStore = create<SettingsState>()(
       setFileTestPatterns: (fileTestPatterns) => set({ fileTestPatterns }),
       setFileConfigPatterns: (fileConfigPatterns) => set({ fileConfigPatterns }),
       setLeftPaneTab: (leftPaneTab) => set({ leftPaneTab }),
+      setDefaultTerminal: (defaultTerminal) => set({ defaultTerminal }),
+      setSessionHistoryDays: (sessionHistoryDays) => set({ sessionHistoryDays }),
     }),
     {
       name: "codereview-settings",
@@ -178,6 +199,8 @@ export const useSettingsStore = create<SettingsState>()(
           fileTestPatterns: (p.fileTestPatterns as string) ?? DEFAULT_TEST_PATTERNS,
           fileConfigPatterns: (p.fileConfigPatterns as string) ?? DEFAULT_CONFIG_PATTERNS,
           leftPaneTab: (p.leftPaneTab as LeftPaneTab) ?? "files",
+          defaultTerminal: (p.defaultTerminal as TerminalHost) ?? "iterm2",
+          sessionHistoryDays: (p.sessionHistoryDays as number) ?? 3,
         } satisfies PersistedSettings;
       },
     },
@@ -194,6 +217,7 @@ const ENUMS: Partial<Record<keyof PersistedSettings, readonly string[]>> = {
   defaultViewType: ["split", "unified"],
   boardStatusBorderSide: ["left", "right", "top", "bottom"],
   leftPaneTab: ["files", "context"],
+  defaultTerminal: TERMINAL_HOST_OPTIONS.map((o) => o.value),
 };
 
 /** Serialize the persisted settings to a portable JSON document. */

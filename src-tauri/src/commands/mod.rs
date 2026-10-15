@@ -8,4 +8,5 @@ pub mod graph;
 pub mod inbox;
 pub mod repo;
 pub mod review;
+pub mod sessions;
 pub mod worktree;

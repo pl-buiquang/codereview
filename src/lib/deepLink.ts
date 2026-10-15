@@ -12,7 +12,7 @@ type DeepLinkAction =
   | { kind: "openDiff"; repo_id: number; base_ref: string; head_ref: string; three_dot: boolean }
   | { kind: "navigateHome"; section: string | null };
 
-const VALID_SECTIONS = new Set<HomeSection>(["inbox", "reviews", "archive", "repositories"]);
+const VALID_SECTIONS = new Set<HomeSection>(["sessions", "inbox", "reviews", "archive", "repositories"]);
 
 export async function handleDeepLinkAction(action: DeepLinkAction): Promise<void> {
   const { openReview, setActiveTab, setHomeSection } = useUIStore.getState();

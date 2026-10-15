@@ -7,7 +7,7 @@ import { confirmDialog } from "../lib/confirm";
 import { BOARD_POLL_OPTIONS, parseRepoBasePaths, useSettingsStore } from "../lib/settings";
 import { findRepoByFullName } from "../lib/repoLabel";
 import { useUIStore } from "../store";
-import type { BoardCard as BoardCardT, BoardLane, BoardMetaKind } from "../lib/types";
+import type { BoardCard as BoardCardT, BoardLane, BoardMetaKind, ClaudeSession } from "../lib/types";
 import { BoardCard, cardTags, ciStatus, prStatus, prStatusLabel } from "./BoardCard";
 import { RepoName } from "./RepoName";
 import { TagFilter } from "./TagFilter";
@@ -51,6 +51,7 @@ export function BoardView() {
   const toggleLane = useUIStore((s) => s.toggleLane);
   const repoBasePaths = useSettingsStore((s) => s.repoBasePaths);
   const boardPollMs = useSettingsStore((s) => s.boardPollMs);
+  const defaultTerminal = useSettingsStore((s) => s.defaultTerminal);
   const setBoardPollMs = useSettingsStore((s) => s.setBoardPollMs);
   const [repoFilter, setRepoFilter] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
@@ -66,6 +67,26 @@ export function BoardView() {
   const repositoriesQuery = useQuery({ queryKey: ["repositories"], queryFn: api.listRepositories });
   const lastRefreshQuery = useQuery({ queryKey: ["board-last-refresh"], queryFn: api.boardLastRefreshAt });
   const lastRefresh = lastRefreshQuery.data;
+  const liveSessionsQuery = useQuery({
+    queryKey: ["claude-sessions", 0],
+    queryFn: () => api.listClaudeSessions(0),
+    refetchInterval: 15_000,
+  });
+  const cardSessionsQuery = useQuery({
+    queryKey: ["board-card-sessions"],
+    queryFn: api.boardCardSessions,
+    refetchInterval: 15_000,
+  });
+  const focusableByCard = useMemo(() => {
+    const byId = new Map((liveSessionsQuery.data ?? []).map((s) => [s.session_id, s]));
+    const out = new Map<string, ClaudeSession[]>();
+    for (const link of cardSessionsQuery.data ?? []) {
+      const s = byId.get(link.session_id);
+      if (!s || (s.focus !== "ready" && s.agent_view?.focus !== "ready")) continue;
+      out.set(link.card_id, [...(out.get(link.card_id) ?? []), s]);
+    }
+    return out;
+  }, [liveSessionsQuery.data, cardSessionsQuery.data]);
 
   const openCardRepo = (repo: string) => {
     const match = findRepoByFullName(repositoriesQuery.data ?? [], repo);
@@ -166,6 +187,19 @@ export function BoardView() {
     mutationFn: (cardId: string) => api.boardOpenVscode(cardId, parseRepoBasePaths(repoBasePaths)),
     onSuccess: invalidate,
     onError: (e) => toast.error(`Could not open VSCode:\n${String(e)}`),
+  });
+  const focusSession = useMutation({
+    mutationFn: api.focusClaudeSession,
+    onError: (e) => toast.error(`Could not focus terminal:\n${String(e)}`),
+  });
+  const openTerminal = useMutation({
+    mutationFn: (cardId: string) => api.boardOpenTerminal(cardId, defaultTerminal, parseRepoBasePaths(repoBasePaths)),
+    onSuccess: () => {
+      invalidate();
+      queryClient.invalidateQueries({ queryKey: ["claude-sessions"] });
+      queryClient.invalidateQueries({ queryKey: ["board-card-sessions"] });
+    },
+    onError: (e) => toast.error(`Could not open terminal:\n${String(e)}`),
   });
   const metaAdd = useMutation({
     mutationFn: (args: { cardId: string; kind: BoardMetaKind; value: string; tag: string | null; label: string | null }) =>
@@ -400,6 +434,16 @@ export function BoardView() {
                       onUnlink={card.type === "issue" ? (prId) => unlink.mutate({ issueId: card.id, prId }) : null}
                       onOpenReview={card.type === "pr" && lane.key !== "backlog" ? () => openReview.mutate(card.id) : null}
                       onOpenVscode={card.type === "pr" && lane.key !== "backlog" ? () => openVscode.mutate(card.id) : null}
+                      terminal={
+                        card.type === "pr" && lane.key !== "backlog"
+                          ? {
+                              sessions: focusableByCard.get(card.id) ?? [],
+                              busy: openTerminal.isPending || focusSession.isPending,
+                              onFocus: (id) => focusSession.mutate(id),
+                              onOpenNew: () => openTerminal.mutate(card.id),
+                            }
+                          : null
+                      }
                       onAddMeta={(args) => metaAdd.mutate({ cardId: card.id, ...args })}
                       onDeleteMeta={(id) => metaDelete.mutate(id)}
                       prActions={

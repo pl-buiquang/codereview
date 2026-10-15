@@ -1,13 +1,15 @@
 import { useEffect, useRef, useState } from "react";
-import type { BoardCard as BoardCardT, BoardMeta, BoardMetaKind } from "../lib/types";
+import type { BoardCard as BoardCardT, BoardMeta, BoardMetaKind, ClaudeSession } from "../lib/types";
 import { api, pickFile } from "../lib/api";
 import { toast } from "../lib/toast";
 import { confirmDialog } from "../lib/confirm";
 import { timeAgo } from "../lib/timeAgo";
 import { useSettingsStore, type BoardBorderSide } from "../lib/settings";
+import { useUIStore } from "../store";
 import { RepoName } from "./RepoName";
 import { CiBadge, CommentsBadge, MergeableBadge, MergeStateBadge } from "./InboxBadges";
 import { Icon } from "./icons";
+import { isWaiting } from "./SessionsView";
 
 const BORDER_STYLE_KEY: Record<BoardBorderSide, "borderTopColor" | "borderRightColor" | "borderBottomColor" | "borderLeftColor"> = {
   top: "borderTopColor",
@@ -217,7 +219,30 @@ export interface PrActions {
   onUpdateBranch: (rebase: boolean) => void;
 }
 
-function PrActionsMenu({ card, actions, onOpenGh }: { card: BoardCardT; actions: PrActions; onOpenGh: () => void }) {
+export interface TerminalAction {
+  /** Focusable live sessions of this card, most recently active first. */
+  sessions: ClaudeSession[];
+  busy: boolean;
+  onFocus: (sessionId: string) => void;
+  onOpenNew: () => void;
+}
+
+function sessionLabel(s: ClaudeSession): string {
+  const status = isWaiting(s) ? `waiting: ${s.waiting_for ?? "input"}` : s.status;
+  return `${s.name ?? s.session_id.slice(0, 8)}${status ? ` · ${status}` : ""}`;
+}
+
+function PrActionsMenu({
+  card,
+  actions,
+  terminal,
+  onOpenGh,
+}: {
+  card: BoardCardT;
+  actions: PrActions;
+  terminal: TerminalAction | null;
+  onOpenGh: () => void;
+}) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -288,6 +313,31 @@ function PrActionsMenu({ card, actions, onOpenGh }: { card: BoardCardT; actions:
           >
             {card.is_draft ? "Mark ready for review" : "Convert to draft"}
           </button>
+          {terminal && (
+            <>
+              <hr className="btn-split-menu-separator" />
+              {terminal.sessions.map((s) => (
+                <button
+                  key={s.session_id}
+                  role="menuitem"
+                  disabled={terminal.busy}
+                  className="board-card-menu-session"
+                  title={`Focus terminal: ${sessionLabel(s)}\n${s.cwd}`}
+                  onClick={run(() => terminal.onFocus(s.session_id))}
+                >
+                  {isWaiting(s) ? "Waiting" : "Focus"}: {s.name ?? s.session_id.slice(0, 8)}
+                </button>
+              ))}
+              <button
+                role="menuitem"
+                disabled={terminal.busy}
+                title="Open a new terminal running Claude in the chat worktree"
+                onClick={run(terminal.onOpenNew)}
+              >
+                New terminal
+              </button>
+            </>
+          )}
           <hr className="btn-split-menu-separator" />
           <button
             role="menuitem"
@@ -332,6 +382,7 @@ export function BoardCard({
   onUnlink,
   onOpenReview,
   onOpenVscode,
+  terminal,
   onAddMeta,
   onDeleteMeta,
   prActions,
@@ -348,6 +399,7 @@ export function BoardCard({
   onUnlink: ((prId: string) => void) | null;
   onOpenReview: (() => void) | null;
   onOpenVscode: (() => void) | null;
+  terminal: TerminalAction | null;
   onAddMeta: (args: { kind: BoardMetaKind; value: string; tag: string | null; label: string | null }) => void;
   onDeleteMeta: (id: number) => void;
   prActions: PrActions | null;
@@ -357,6 +409,16 @@ export function BoardCard({
   const [linkInput, setLinkInput] = useState("");
   const [titleMenuOpen, setTitleMenuOpen] = useState(false);
   const titleMenuRef = useRef<HTMLSpanElement>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
+  const highlighted = useUIStore((s) => s.boardHighlightCardId === card.id);
+  const clearBoardHighlight = useUIStore((s) => s.clearBoardHighlight);
+
+  useEffect(() => {
+    if (!highlighted) return;
+    cardRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+    const id = setTimeout(clearBoardHighlight, 2000);
+    return () => clearTimeout(id);
+  }, [highlighted, clearBoardHighlight]);
 
   useEffect(() => {
     if (!titleMenuOpen) return;
@@ -402,8 +464,8 @@ export function BoardCard({
   };
 
   return (
-    <div className="card board-card" style={borderStyle}>
-      {card.type === "pr" && prActions && <PrActionsMenu card={card} actions={prActions} onOpenGh={onOpenGh} />}
+    <div ref={cardRef} className={`card board-card${highlighted ? " board-card-highlight" : ""}`} style={borderStyle}>
+      {card.type === "pr" && prActions && <PrActionsMenu card={card} actions={prActions} terminal={terminal} onOpenGh={onOpenGh} />}
 
       <span ref={titleMenuRef} className="board-card-title-wrap">
         <button

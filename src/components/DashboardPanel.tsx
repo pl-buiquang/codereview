@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { useUIStore } from "../store";
 import { BoardView } from "./BoardView";
+import { SessionsView } from "./SessionsView";
 import { InboxView } from "./InboxView";
 import { ReviewsView } from "./ReviewsView";
 import { ArchiveView } from "./ArchiveView";
@@ -24,6 +25,7 @@ export function DashboardPanel() {
         ))}
         {homeRepoId == null && (
           <>
+            {section === "sessions" && <SessionsView />}
             {section === "board" && <BoardView />}
             {section === "inbox" && <InboxView />}
             {section === "reviews" && <ReviewsView />}

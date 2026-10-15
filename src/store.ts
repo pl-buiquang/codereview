@@ -4,7 +4,7 @@ import { persist } from "zustand/middleware";
 export type TabKind = "home" | "settings" | "review";
 
 /** Which section the home tab's sidebar shows. */
-export type HomeSection = "board" | "inbox" | "reviews" | "archive" | "repositories";
+export type HomeSection = "sessions" | "board" | "inbox" | "reviews" | "archive" | "repositories";
 
 export interface Tab {
   id: string;
@@ -27,6 +27,10 @@ interface UIState {
   sidebarCollapsed: boolean;
   /** Board lanes collapsed to a slim column, by lane key. */
   collapsedLanes: string[];
+  /** Board card to scroll to and flash once the Board renders (not persisted). */
+  boardHighlightCardId: string | null;
+  showBoardCard: (cardId: string) => void;
+  clearBoardHighlight: () => void;
   openRepo: (repoId: number) => void;
   openSettingsTab: () => void;
   openReview: (reviewId: number, repoId?: number) => void;
@@ -67,6 +71,7 @@ export const useUIStore = create<UIState>()(
       openRepoIds: [],
       sidebarCollapsed: false,
       collapsedLanes: [],
+      boardHighlightCardId: null,
 
       openRepo: (repoId) =>
         set((s) => ({
@@ -125,6 +130,11 @@ export const useUIStore = create<UIState>()(
 
       setHomeSection: (homeSection) =>
         set({ homeSection, homeRepoId: null, activeTabId: HOME_TAB.id }),
+
+      showBoardCard: (cardId) =>
+        set({ homeSection: "board", homeRepoId: null, activeTabId: HOME_TAB.id, boardHighlightCardId: cardId }),
+
+      clearBoardHighlight: () => set({ boardHighlightCardId: null }),
 
       closeRepo: (repoId) => set((s) => closeRepoReducer(s, repoId)),
 

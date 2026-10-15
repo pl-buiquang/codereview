@@ -11,6 +11,7 @@ static GIT: OnceLock<Option<String>> = OnceLock::new();
 static GH: OnceLock<Option<String>> = OnceLock::new();
 static CURL: OnceLock<Option<String>> = OnceLock::new();
 static CLAUDE: OnceLock<Option<String>> = OnceLock::new();
+static TMUX: OnceLock<Option<String>> = OnceLock::new();
 
 fn resolve(name: &str) -> Option<String> {
     which::which(name)
@@ -25,6 +26,7 @@ pub fn init() {
     let _ = GH.set(resolve("gh"));
     let _ = CURL.set(resolve("curl"));
     let _ = CLAUDE.set(resolve("claude"));
+    let _ = TMUX.set(resolve("tmux"));
 }
 
 /// The resolved absolute path to `git`, or `None` if it wasn't found / `init`
@@ -62,6 +64,10 @@ pub fn claude_path() -> Option<String> {
 
 pub fn claude_bin() -> String {
     claude_path().unwrap_or_else(|| "claude".to_string())
+}
+
+pub fn tmux_bin() -> String {
+    TMUX.get().cloned().flatten().unwrap_or_else(|| "tmux".to_string())
 }
 
 #[cfg(test)]
