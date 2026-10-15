@@ -2586,6 +2586,17 @@ tr.search-current {
   font-family: var(--font-mono);
 }
 
+.chat-main-checkout {
+  padding: 4px 10px;
+  font-size: 11px;
+  color: var(--text-2);
+  background: var(--bg-sunken, var(--surface));
+  border-bottom: 1px solid var(--border);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Thinking indicator: three pulsing dots */
 .thinking-indicator {
   display: flex;

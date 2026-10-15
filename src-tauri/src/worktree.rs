@@ -36,7 +36,7 @@ fn ensure_branch_worktree_in(repo: &Path, target: &Target, base: &Path) -> AppRe
     let worktree_path = base.join(repo_name).join(branch.replace('/', "-"));
 
     if worktree_path.exists() {
-        return Ok(worktree_path);
+        return switch_existing_to_branch(&worktree_path, target);
     }
 
     std::fs::create_dir_all(base.join(repo_name))
@@ -47,30 +47,26 @@ fn ensure_branch_worktree_in(repo: &Path, target: &Target, base: &Path) -> AppRe
             .head_sha
             .as_deref()
             .ok_or_else(|| AppError::Git("PR head SHA is not resolved yet".into()))?;
-
-        ensure_commit(repo, head_sha)?;
-
-        run_git(
-            repo,
-            &[
-                "worktree",
-                "add",
-                "--detach",
-                worktree_path.to_str().unwrap_or_default(),
-                head_sha,
-            ],
-        )?;
-
-        // `gh pr checkout` turns the detached worktree into a real branch
-        // checkout tracking the PR (handles fork PRs' remote naming too).
         let number = target
             .github_pr_number
             .ok_or_else(|| AppError::Git("github_pr target is missing a PR number".into()))?;
-        run_gh(
+
+        ensure_commit(repo, head_sha)?;
+
+        let wt = worktree_path.to_str().unwrap_or_default();
+        run_git(repo, &["worktree", "add", "--detach", wt, head_sha])?;
+
+        // `gh pr checkout` turns the detached worktree into a real branch
+        // checkout tracking the PR (handles fork PRs' remote naming too). If it
+        // fails, drop the detached worktree so it isn't reused as if it were
+        // on the branch.
+        if let Err(e) = run_gh(
             &GhRepo::Local(worktree_path.clone()),
             &["pr", "checkout", &number.to_string()],
-        )
-        .map_err(|e| AppError::Git(format!("gh pr checkout failed: {e}")))?;
+        ) {
+            let _ = run_git(repo, &["worktree", "remove", "--force", wt]);
+            return Err(AppError::Git(format!("gh pr checkout failed: {e}")));
+        }
     } else {
         if run_git(repo, &["rev-parse", "--verify", &format!("refs/heads/{branch}")]).is_err() {
             return Err(AppError::Git(format!(
@@ -91,46 +87,75 @@ fn ensure_branch_worktree_in(repo: &Path, target: &Target, base: &Path) -> AppRe
     Ok(worktree_path)
 }
 
-/// Removes a worktree created by `ensure_branch_worktree`, but only if it has
-/// no uncommitted changes and lives under the codereview worktrees dir — it
-/// never touches a worktree the user set up themselves, and never deletes
-/// the branch (it belongs to the PR, not to the chat).
-pub fn cleanup_chat_worktree(repo: &Path, worktree_path: &Path) -> AppResult<()> {
-    cleanup_chat_worktree_in(repo, worktree_path, &worktrees_base())
-}
-
-fn cleanup_chat_worktree_in(repo: &Path, worktree_path: &Path, base: &Path) -> AppResult<()> {
-    if worktree_path == repo || !worktree_path.exists() || !worktree_path.starts_with(base) {
-        return Ok(());
+/// The slot path for `target.head_ref` already exists but isn't on that
+/// branch (e.g. left detached by an earlier failure): move it onto the branch
+/// if it's clean, otherwise refuse rather than hand back the wrong checkout.
+fn switch_existing_to_branch(path: &Path, target: &Target) -> AppResult<PathBuf> {
+    if is_on_branch(path, &target.head_ref) {
+        return Ok(path.to_path_buf());
     }
-
-    let status = run_git(worktree_path, &["status", "--porcelain"]).unwrap_or_default();
+    let status = run_git(path, &["status", "--porcelain"])?;
     if !status.trim().is_empty() {
-        return Ok(());
+        return Err(AppError::Git(format!(
+            "{} is not on `{}` and has uncommitted changes",
+            path.display(),
+            target.head_ref
+        )));
     }
-
-    let _ = run_git(
-        repo,
-        &["worktree", "remove", worktree_path.to_str().unwrap_or_default()],
-    );
-    Ok(())
+    let switched = match (target.kind.as_str(), target.github_pr_number) {
+        ("github_pr", Some(number)) => run_gh(
+            &GhRepo::Local(path.to_path_buf()),
+            &["pr", "checkout", &number.to_string()],
+        )
+        .map(|_| ())
+        .map_err(|e| e.to_string()),
+        _ => run_git(path, &["switch", &target.head_ref])
+            .map(|_| ())
+            .map_err(|e| e.to_string()),
+    };
+    switched.map_err(|e| {
+        AppError::Git(format!(
+            "could not switch {} to `{}`: {e}",
+            path.display(),
+            target.head_ref
+        ))
+    })?;
+    Ok(path.to_path_buf())
 }
 
-/// Removes a worktree created by `ensure_worktree`. No-op if the path doesn't
-/// exist or is the repo itself (meaning no worktree was created).
-pub fn cleanup_worktree(repo: &Path, worktree_path: &Path) -> AppResult<()> {
+/// Current branch of the checkout at `path`, `None` when detached.
+pub fn current_branch(path: &Path) -> Option<String> {
+    run_git(path, &["symbolic-ref", "--short", "-q", "HEAD"])
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// Whether `path` is checked out on `branch`. Also accepts the names
+/// `gh pr checkout` gives fork PR branches (`<owner>/<branch>`, `<owner>-<branch>`).
+pub fn is_on_branch(path: &Path, branch: &str) -> bool {
+    current_branch(path).is_some_and(|b| {
+        b == branch || b.ends_with(&format!("/{branch}")) || b.ends_with(&format!("-{branch}"))
+    })
+}
+
+/// Whether `path` is a repo's main checkout rather than a linked worktree.
+pub fn is_main_checkout(path: &Path) -> bool {
+    let dir = run_git(path, &["rev-parse", "--absolute-git-dir"]);
+    let common = run_git(path, &["rev-parse", "--path-format=absolute", "--git-common-dir"]);
+    matches!((dir, common), (Ok(d), Ok(c)) if d.trim() == c.trim())
+}
+
+/// Removes a linked worktree. Never forces: git refuses when the worktree has
+/// modified or untracked files, and that refusal is surfaced to the caller.
+pub fn remove_worktree(repo: &Path, worktree_path: &Path) -> AppResult<()> {
     if worktree_path == repo || !worktree_path.exists() {
         return Ok(());
     }
-    let _ = run_git(
+    run_git(
         repo,
-        &[
-            "worktree",
-            "remove",
-            "--force",
-            worktree_path.to_str().unwrap_or_default(),
-        ],
-    );
+        &["worktree", "remove", worktree_path.to_str().unwrap_or_default()],
+    )?;
     Ok(())
 }
 
@@ -346,41 +371,52 @@ mod tests {
     }
 
     #[test]
-    fn cleanup_removes_clean_worktree_under_base() {
+    fn existing_detached_slot_is_switched_onto_branch() {
+        let repo = fixture_repo();
+        let base = TempDir::new().unwrap();
+        let slot = base.path().join(repo.path().file_name().unwrap()).join("feature");
+        git(repo.path(), &["worktree", "add", "--detach", slot.to_str().unwrap(), "main"]);
+
+        let wt = ensure_branch_worktree_in(repo.path(), &local_target("feature"), base.path())
+            .unwrap();
+
+        assert_eq!(current_branch(&wt).as_deref(), Some("feature"));
+    }
+
+    #[test]
+    fn existing_dirty_slot_on_wrong_ref_is_refused() {
+        let repo = fixture_repo();
+        let base = TempDir::new().unwrap();
+        let slot = base.path().join(repo.path().file_name().unwrap()).join("feature");
+        git(repo.path(), &["worktree", "add", "--detach", slot.to_str().unwrap(), "main"]);
+        fs::write(slot.join("wip.txt"), "wip").unwrap();
+
+        let err = ensure_branch_worktree_in(repo.path(), &local_target("feature"), base.path())
+            .unwrap_err();
+        assert!(err.to_string().contains("uncommitted"));
+    }
+
+    #[test]
+    fn detects_main_checkout_vs_linked_worktree() {
         let repo = fixture_repo();
         let base = TempDir::new().unwrap();
         let wt = ensure_branch_worktree_in(repo.path(), &local_target("feature"), base.path())
             .unwrap();
 
-        cleanup_chat_worktree_in(repo.path(), &wt, base.path()).unwrap();
-
-        assert!(!wt.exists());
+        assert!(is_main_checkout(repo.path()));
+        assert!(!is_main_checkout(&wt));
+        assert!(is_on_branch(&wt, "feature"));
     }
 
     #[test]
-    fn cleanup_keeps_dirty_worktree() {
+    fn remove_refuses_dirty_worktree() {
         let repo = fixture_repo();
         let base = TempDir::new().unwrap();
         let wt = ensure_branch_worktree_in(repo.path(), &local_target("feature"), base.path())
             .unwrap();
         fs::write(wt.join("untracked.txt"), "wip").unwrap();
 
-        cleanup_chat_worktree_in(repo.path(), &wt, base.path()).unwrap();
-
-        assert!(wt.exists());
-    }
-
-    #[test]
-    fn cleanup_keeps_worktree_outside_base() {
-        let repo = fixture_repo();
-        let base = TempDir::new().unwrap();
-        let outside = TempDir::new().unwrap();
-        let wt = ensure_branch_worktree_in(repo.path(), &local_target("feature"), outside.path())
-            .unwrap();
-
-        // `base` here is unrelated to where `wt` was created.
-        cleanup_chat_worktree_in(repo.path(), &wt, base.path()).unwrap();
-
+        assert!(remove_worktree(repo.path(), &wt).is_err());
         assert!(wt.exists());
     }
 }

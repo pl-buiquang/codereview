@@ -43,9 +43,9 @@ export function ChatPanel({
     refetchOnWindowFocus: false,
   });
 
-  const branchQuery = useQuery({
+  const worktreeQuery = useQuery({
     queryKey: ["chat-branch", reviewId],
-    queryFn: () => api.chatBranch(reviewId),
+    queryFn: () => api.chatWorktree(reviewId),
     refetchOnWindowFocus: false,
   });
 
@@ -145,7 +145,9 @@ export function ChatPanel({
         <span className="chat-title">
           <Icon name="bot" size={13} />
           Chat
-          {branchQuery.data && <span className="chat-branch">{branchQuery.data}</span>}
+          {worktreeQuery.data?.branch && (
+            <span className="chat-branch">{worktreeQuery.data.branch}</span>
+          )}
         </span>
         <div className="chat-header-actions">
           {messages.length > 0 && (
@@ -175,6 +177,12 @@ export function ChatPanel({
           </button>
         </div>
       </div>
+
+      {worktreeQuery.data?.is_main && (
+        <div className="chat-main-checkout" title={worktreeQuery.data.path}>
+          Editing the main checkout ({worktreeQuery.data.path}), not a separate worktree
+        </div>
+      )}
 
       <div className="chat-messages">
         {messages.length === 0 && !busy && (

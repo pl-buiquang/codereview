@@ -501,3 +501,9 @@ export interface BoardRefreshResult {
   autoTracked: number;
   durationMs: number;
 }
+
+export interface ChatWorktree {
+  path: string;
+  branch: string | null;
+  is_main: boolean;
+}

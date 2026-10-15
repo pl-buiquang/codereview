@@ -1609,14 +1609,7 @@ pub fn delete_review_impl(conn: &Connection, review_id: i64) -> AppResult<()> {
 #[tauri::command]
 pub fn delete_review(review_id: i64, db: State<Db>) -> AppResult<()> {
     let conn = db.0.lock().unwrap();
-    let paths = crate::commands::chat::chat_worktree_and_repo_paths(&conn, review_id)?;
-    delete_review_impl(&conn, review_id)?;
-    drop(conn);
-
-    if let Some((worktree_path, repo_path)) = paths {
-        crate::commands::chat::cleanup_chat_worktree_paths(worktree_path, repo_path);
-    }
-    Ok(())
+    delete_review_impl(&conn, review_id)
 }
 
 /// GitHub-PR review candidates for the "clean up merged PRs" action: reviews
@@ -1684,24 +1677,11 @@ pub async fn find_closed_pr_reviews(db: State<'_, Db>) -> AppResult<Vec<i64>> {
 /// how many were actually removed.
 #[tauri::command]
 pub fn delete_reviews(review_ids: Vec<i64>, db: State<Db>) -> AppResult<usize> {
-    let mut cleanup_paths = Vec::new();
-    let mut deleted = 0usize;
-    {
-        let conn = db.0.lock().unwrap();
-        for id in review_ids {
-            let paths = crate::commands::chat::chat_worktree_and_repo_paths(&conn, id)?;
-            if delete_review_impl(&conn, id).is_ok() {
-                deleted += 1;
-                if let Some(p) = paths {
-                    cleanup_paths.push(p);
-                }
-            }
-        }
-    }
-    for (worktree_path, repo_path) in cleanup_paths {
-        crate::commands::chat::cleanup_chat_worktree_paths(worktree_path, repo_path);
-    }
-    Ok(deleted)
+    let conn = db.0.lock().unwrap();
+    Ok(review_ids
+        .into_iter()
+        .filter(|&id| delete_review_impl(&conn, id).is_ok())
+        .count())
 }
 
 /// Validate a reply target: the parent must exist, belong to `review_id`, and be

@@ -53,7 +53,7 @@ pub fn list_worktrees(repo_id: i64, db: State<Db>) -> AppResult<Vec<WorktreeInfo
 #[tauri::command]
 pub fn remove_worktree(repo_id: i64, worktree_path: String, db: State<Db>) -> AppResult<()> {
     let repo_path = repo_local_path(&db, repo_id)?;
-    worktree::cleanup_worktree(Path::new(&repo_path), Path::new(&worktree_path))
+    worktree::remove_worktree(Path::new(&repo_path), Path::new(&worktree_path))
 }
 
 #[tauri::command]

@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import type {
+  ChatWorktree,
   BoardCard,
   BoardMeta,
   BoardMetaKind,
@@ -100,8 +101,8 @@ export const api = {
     invoke<ChatMessage[]>("chat_messages", { reviewId }),
   chatClear: (reviewId: number) =>
     invoke<void>("chat_clear", { reviewId }),
-  chatBranch: (reviewId: number) =>
-    invoke<string | null>("chat_branch", { reviewId }),
+  chatWorktree: (reviewId: number) =>
+    invoke<ChatWorktree | null>("chat_worktree", { reviewId }),
   ensureChatWorktree: (reviewId: number) =>
     invoke<string>("ensure_chat_worktree", { reviewId }),
   reviewDiff: (reviewId: number) => invoke<string>("review_diff", { reviewId }),

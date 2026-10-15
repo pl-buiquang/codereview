@@ -1,5 +1,5 @@
 use std::io::Write as _;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -8,7 +8,7 @@ use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
-use crate::db::models::{Chat, ChatMessage};
+use crate::db::models::{Chat, ChatMessage, Target};
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
 use crate::worktree;
@@ -440,29 +440,20 @@ pub async fn chat_send(
     })?;
     let repo_path = Path::new(local_path_str);
 
-    // Reuse the chat's existing worktree if it's still there — keeps the
-    // working directory stable so `claude --resume` can find the session,
-    // and keeps using the same branch checkout across turns even if the
-    // PR's head ref moves on.
-    let worktree_path = match existing_chat
-        .as_ref()
-        .and_then(|c| c.worktree_path.as_deref())
-        .map(Path::new)
-        .filter(|p| p.exists())
-    {
-        Some(p) => p.to_path_buf(),
-        None => worktree::ensure_branch_worktree(repo_path, &detail.target)?,
-    };
+    let stored_path = existing_chat.as_ref().and_then(|c| c.worktree_path.clone());
+    let worktree_path = resolve_chat_worktree(repo_path, &detail.target, stored_path.as_deref())?;
 
-    let is_first_turn = existing_chat
-        .as_ref()
-        .and_then(|c| c.session_id.as_deref())
-        .is_none();
-
-    let session_id = existing_chat
+    // `claude --resume` looks sessions up by cwd, so a chat that moved to a
+    // different checkout starts a fresh session there.
+    let moved = stored_path
+        .as_deref()
+        .is_some_and(|p| Path::new(p) != worktree_path);
+    let existing_session = existing_chat
         .as_ref()
         .and_then(|c| c.session_id.clone())
-        .unwrap_or_else(new_session_id);
+        .filter(|_| !moved);
+    let is_first_turn = existing_session.is_none();
+    let session_id = existing_session.unwrap_or_else(new_session_id);
 
     let model = resolve_model(model);
 
@@ -522,11 +513,11 @@ pub async fn chat_send(
             Some(existing) => {
                 conn.execute(
                     "UPDATE chat SET
-                        session_id = COALESCE(session_id, ?1),
+                        session_id = ?1,
                         total_input_tokens = total_input_tokens + ?2,
                         total_output_tokens = total_output_tokens + ?3,
                         total_cost_usd = total_cost_usd + ?4,
-                        worktree_path = COALESCE(worktree_path, ?5),
+                        worktree_path = ?5,
                         updated_at = ?6
                      WHERE id = ?7",
                     params![
@@ -594,65 +585,39 @@ pub fn chat_messages(review_id: i64, db: State<Db>) -> AppResult<Vec<ChatMessage
     Ok(messages)
 }
 
-/// Looks up the chat's worktree path and the review's repo clone path, for
-/// cleanup callers (`chat_clear`, `delete_review`).
-pub fn chat_worktree_and_repo_paths(
-    conn: &rusqlite::Connection,
-    review_id: i64,
-) -> AppResult<Option<(Option<String>, Option<String>)>> {
-    Ok(conn
-        .query_row(
-            "SELECT c.worktree_path, r.local_path
-             FROM chat c
-             JOIN review rv ON rv.id = c.review_id
-             JOIN target t ON t.id = rv.target_id
-             JOIN repository r ON r.id = t.repo_id
-             WHERE c.review_id = ?1",
-            params![review_id],
-            |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, Option<String>>(1)?)),
-        )
-        .optional()?)
-}
-
-/// Best-effort removal of a chat's edit worktree. Errors are silently
-/// ignored — cleanup is advisory, never blocking.
-pub fn cleanup_chat_worktree_paths(worktree_path: Option<String>, repo_path: Option<String>) {
-    if let (Some(worktree_path), Some(repo_path)) = (worktree_path, repo_path) {
-        let repo = Path::new(&repo_path);
-        let wt = Path::new(&worktree_path);
-        if wt != repo {
-            let _ = worktree::cleanup_chat_worktree(repo, wt);
+/// The checkout a review's chat edits, re-checked on every call: the stored
+/// path if it still exists and is on the review's branch, otherwise whatever
+/// checkout holds the branch now (the main checkout included), creating a
+/// worktree only when none does.
+fn resolve_chat_worktree(repo: &Path, target: &Target, stored: Option<&str>) -> AppResult<PathBuf> {
+    if let Some(p) = stored.map(Path::new).filter(|p| p.exists()) {
+        if worktree::is_on_branch(p, &target.head_ref) {
+            return Ok(p.to_path_buf());
         }
     }
+    worktree::ensure_branch_worktree(repo, target)
 }
 
-/// Delete the chat (and all its messages) for a review.
+/// Delete the chat (and all its messages) for a review. Its worktree is left
+/// alone — it may be shared with a Claude session; the worktree janitor
+/// decides when it can go.
 #[tauri::command]
 pub fn chat_clear(review_id: i64, db: State<Db>) -> AppResult<()> {
     let conn = db.0.lock().unwrap();
-
-    // Grab worktree + repo paths before deleting so we can clean up.
-    let paths = chat_worktree_and_repo_paths(&conn, review_id)?;
-
     conn.execute("DELETE FROM chat WHERE review_id = ?1", params![review_id])?;
-    drop(conn);
-
-    if let Some((worktree_path, repo_path)) = paths {
-        cleanup_chat_worktree_paths(worktree_path, repo_path);
-    }
-
     Ok(())
 }
 
 /// Resolves (creating if needed) the worktree `chat_send` would use for this
-/// review, without starting a chat turn. Lets other UI (the "open in VSCode"
-/// buttons) point at the same checkout Claude edits.
+/// review, without starting a chat turn, and records it on the chat so the
+/// janitor knows it's in use. Lets other UI (the "open in VSCode" buttons,
+/// board terminals) point at the same checkout Claude edits.
 #[tauri::command]
 pub async fn ensure_chat_worktree(review_id: i64, db: State<'_, Db>) -> AppResult<String> {
-    let (detail, existing_worktree_path) = {
+    let (detail, stored) = {
         let conn = db.0.lock().unwrap();
         let detail = crate::commands::review::load_detail(&conn, review_id)?;
-        let existing_worktree_path: Option<String> = conn
+        let stored: Option<String> = conn
             .query_row(
                 "SELECT worktree_path FROM chat WHERE review_id = ?1",
                 params![review_id],
@@ -660,27 +625,42 @@ pub async fn ensure_chat_worktree(review_id: i64, db: State<'_, Db>) -> AppResul
             )
             .optional()?
             .flatten();
-        (detail, existing_worktree_path)
+        (detail, stored)
     };
 
     let local_path_str = detail.local_path.as_deref().ok_or_else(|| {
         AppError::Chat("Chat requires a local clone. Link one in the Repositories section.".into())
     })?;
-    let repo_path = Path::new(local_path_str);
+    let path = resolve_chat_worktree(Path::new(local_path_str), &detail.target, stored.as_deref())?;
+    let path_str = path.to_string_lossy().into_owned();
 
-    if let Some(p) = existing_worktree_path.as_deref().map(Path::new) {
-        if p.exists() {
-            return Ok(p.to_string_lossy().into_owned());
-        }
+    if stored.as_deref() != Some(path_str.as_str()) {
+        let conn = db.0.lock().unwrap();
+        let ts = now();
+        conn.execute(
+            "INSERT INTO chat (review_id, model, worktree_path, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?4)
+             ON CONFLICT(review_id) DO UPDATE SET
+               worktree_path = excluded.worktree_path,
+               session_id = CASE WHEN chat.worktree_path IS NULL THEN chat.session_id END,
+               updated_at = excluded.updated_at",
+            params![review_id, resolve_model(None), path_str, ts],
+        )?;
     }
-
-    let worktree_path = worktree::ensure_branch_worktree(repo_path, &detail.target)?;
-    Ok(worktree_path.to_string_lossy().into_owned())
+    Ok(path_str)
 }
 
-/// Returns the branch currently checked out in the chat's worktree, if any.
+#[derive(Debug, Serialize)]
+pub struct ChatWorktree {
+    pub path: String,
+    pub branch: Option<String>,
+    /// The chat edits the repo's main checkout, not a linked worktree.
+    pub is_main: bool,
+}
+
+/// The checkout recorded for the review's chat, if it still exists.
 #[tauri::command]
-pub fn chat_branch(review_id: i64, db: State<Db>) -> AppResult<Option<String>> {
+pub fn chat_worktree(review_id: i64, db: State<Db>) -> AppResult<Option<ChatWorktree>> {
     let conn = db.0.lock().unwrap();
     let worktree_path: Option<String> = conn
         .query_row(
@@ -699,12 +679,11 @@ pub fn chat_branch(review_id: i64, db: State<Db>) -> AppResult<Option<String>> {
     if !path.exists() {
         return Ok(None);
     }
-
-    let branch = crate::git::run_git(path, &["rev-parse", "--abbrev-ref", "HEAD"])
-        .map(|s| s.trim().to_string())
-        .ok()
-        .filter(|b| b != "HEAD");
-    Ok(branch)
+    Ok(Some(ChatWorktree {
+        branch: worktree::current_branch(path),
+        is_main: worktree::is_main_checkout(path),
+        path: worktree_path,
+    }))
 }
 
 /// Persist the chat panel collapsed/expanded state. UI state — allowed on all reviews.
