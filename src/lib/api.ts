@@ -217,6 +217,14 @@ export const api = {
   listClaudeSessions: (historyDays: number) =>
     invoke<ClaudeSession[]>("list_claude_sessions", { historyDays }),
   focusClaudeSession: (sessionId: string) => invoke<void>("focus_claude_session", { sessionId }),
+  resumeClaudeSession: (
+    sessionId: string,
+    cwd: string,
+    repo: string | null,
+    host: TerminalHost,
+    tmuxTarget: TmuxTarget,
+    tmuxSession: string,
+  ) => invoke<void>("resume_claude_session", { sessionId, cwd, repo, host, tmuxTarget, tmuxSession }),
   stopClaudeSession: (sessionId: string) => invoke<void>("stop_claude_session", { sessionId }),
   boardMetaAdd: (args: {
     cardId: string;

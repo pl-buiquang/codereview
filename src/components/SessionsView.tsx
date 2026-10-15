@@ -38,6 +38,9 @@ export function resumeCommand(s: Pick<ClaudeSession, "cwd" | "session_id">): str
 
 export function SessionsView() {
   const historyDays = useSettingsStore((s) => s.sessionHistoryDays);
+  const defaultTerminal = useSettingsStore((s) => s.defaultTerminal);
+  const tmuxTarget = useSettingsStore((s) => s.tmuxTarget);
+  const tmuxSessionName = useSettingsStore((s) => s.tmuxSessionName);
   const showBoardCard = useUIStore((s) => s.showBoardCard);
   const queryClient = useQueryClient();
 
@@ -55,6 +58,12 @@ export function SessionsView() {
   const focus = useMutation({
     mutationFn: api.focusClaudeSession,
     onError: (e) => toast.error(`Could not focus terminal:\n${String(e)}`),
+  });
+  const resume = useMutation({
+    mutationFn: (s: ClaudeSession) =>
+      api.resumeClaudeSession(s.session_id, s.cwd, s.repo ?? null, defaultTerminal, tmuxTarget, tmuxSessionName),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["claude-sessions"] }),
+    onError: (e) => toast.error(`Could not resume session:\n${String(e)}`),
   });
   const stop = useMutation({
     mutationFn: api.stopClaudeSession,
@@ -162,9 +171,24 @@ export function SessionsView() {
                 cards={[]}
                 onShowCard={showBoardCard}
                 action={
-                  <button className="btn btn-sm" title={resumeCommand(s)} onClick={() => copyCommand(resumeCommand(s), "Resume")}>
-                    <Icon name="copy" size={13} /> Copy resume
-                  </button>
+                  <div className="btn-split">
+                    <button
+                      className="btn btn-sm"
+                      disabled={resume.isPending}
+                      title={`Open a new terminal running: ${resumeCommand(s)}`}
+                      onClick={() => resume.mutate(s)}
+                    >
+                      <Icon name="terminal" size={13} /> Resume
+                    </button>
+                    <button
+                      className="btn btn-sm"
+                      title={`Copy: ${resumeCommand(s)}`}
+                      aria-label="Copy resume command"
+                      onClick={() => copyCommand(resumeCommand(s), "Resume")}
+                    >
+                      <Icon name="copy" size={12} />
+                    </button>
+                  </div>
                 }
               />
             ))}

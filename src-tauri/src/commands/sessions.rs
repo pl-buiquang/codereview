@@ -27,6 +27,28 @@ pub async fn focus_claude_session(session_id: String) -> AppResult<()> {
     terminal::focus_session(&session)
 }
 
+/// Open an ended session in a new tmux window running `claude --resume`.
+#[tauri::command]
+pub async fn resume_claude_session(
+    session_id: String,
+    cwd: String,
+    repo: Option<String>,
+    host: terminal::TerminalHost,
+    tmux_target: terminal::TmuxTarget,
+    tmux_session: String,
+) -> AppResult<()> {
+    if claude_sessions::live_sessions().iter().any(|s| s.session_id == session_id) {
+        return Err(AppError::Other("this session is already running — focus it instead".into()));
+    }
+    if !std::path::Path::new(&cwd).is_dir() {
+        return Err(AppError::Other(format!("{cwd} no longer exists")));
+    }
+    let repo = repo.unwrap_or_else(|| cwd.trim_end_matches('/').rsplit('/').next().unwrap_or(&cwd).to_string());
+    let window_name: String = session_id.chars().take(8).collect();
+    let argv = ["claude".to_string(), "--resume".to_string(), session_id];
+    terminal::open_session(host, tmux_target, &tmux_session, &repo, &window_name, &cwd, &argv)
+}
+
 /// Stop a background session via `claude stop <job id>`; its conversation is kept.
 #[tauri::command]
 pub async fn stop_claude_session(session_id: String) -> AppResult<()> {

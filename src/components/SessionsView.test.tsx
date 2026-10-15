@@ -7,11 +7,13 @@ import type { ClaudeSession } from "../lib/types";
 const listClaudeSessions = vi.fn();
 const boardCardSessions = vi.fn();
 const focusClaudeSession = vi.fn();
+const resumeClaudeSession = vi.fn();
 vi.mock("../lib/api", () => ({
   api: {
     listClaudeSessions: (d: number) => listClaudeSessions(d),
     boardCardSessions: () => boardCardSessions(),
     focusClaudeSession: (id: string) => focusClaudeSession(id),
+    resumeClaudeSession: (...args: unknown[]) => resumeClaudeSession(...args),
   },
 }));
 
@@ -52,6 +54,7 @@ describe("SessionsView", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     focusClaudeSession.mockResolvedValue(undefined);
+    resumeClaudeSession.mockResolvedValue(undefined);
     boardCardSessions.mockResolvedValue([{ card_id: "c1", repo: "org/app", number: 42, session_id: "s1" }]);
     listClaudeSessions.mockResolvedValue([
       session(),
@@ -82,7 +85,7 @@ describe("SessionsView", () => {
     expect(focusButtons[1]).toBeDisabled();
     await userEvent.click(focusButtons[0]);
     await waitFor(() => expect(focusClaudeSession).toHaveBeenCalledWith("s1"));
-    expect(screen.getByRole("button", { name: /Copy resume/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy resume command" })).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: /Copy attach/ })[0]).toHaveAttribute(
       "title",
       expect.stringContaining("claude attach job12345"),
@@ -92,6 +95,14 @@ describe("SessionsView", () => {
     await userEvent.click(screen.getByRole("button", { name: /Agent view/ }));
     await waitFor(() => expect(focusClaudeSession).toHaveBeenCalledWith("av1"));
     expect(screen.getAllByRole("button", { name: "Stop" })[0]).toHaveAttribute("title", "claude stop job12345");
+  });
+
+  it("resumes a history session in a new terminal", async () => {
+    renderView();
+    await userEvent.click(await screen.findByRole("button", { name: /Resume/ }));
+    await waitFor(() =>
+      expect(resumeClaudeSession).toHaveBeenCalledWith("s3", "/Users/me/projects/app", "org/app", "iterm2", "current", "codereview"),
+    );
   });
 
   it("card chip jumps to the board card", async () => {
