@@ -37,6 +37,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("migrations/0018_board.sql"),
     include_str!("migrations/0019_repo_friendly_name.sql"),
     include_str!("migrations/0020_board_ci_mergeable.sql"),
+    include_str!("migrations/0021_board_merge_state.sql"),
 ];
 
 pub fn open(path: &Path) -> AppResult<Connection> {

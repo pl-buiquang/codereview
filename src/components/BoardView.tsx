@@ -106,6 +106,35 @@ export function BoardView() {
 
   const track = useMutation({ mutationFn: (reference: string) => api.boardTrack(reference), onSuccess: invalidate, onError: onErr });
   const discard = useMutation({ mutationFn: (cardId: string) => api.boardDiscard(cardId), onSuccess: invalidate, onError: onErr });
+  const prMerge = useMutation({
+    mutationFn: (cardId: string) => api.boardPrMerge(cardId),
+    onSuccess: () => {
+      invalidate();
+      toast.success("PR squash-merged");
+    },
+    onError: (e) => toast.error(`Merge failed:\n${String(e)}`),
+  });
+  const prSetDraft = useMutation({
+    mutationFn: ({ cardId, draft }: { cardId: string; draft: boolean }) => api.boardPrSetDraft(cardId, draft),
+    onSuccess: (_, { draft }) => {
+      invalidate();
+      toast.success(draft ? "Converted to draft" : "Marked ready for review");
+    },
+    onError: onErr,
+  });
+  const prUpdateBranch = useMutation({
+    mutationFn: ({ cardId, rebase }: { cardId: string; rebase: boolean }) => api.boardPrUpdateBranch(cardId, rebase),
+    onSuccess: (_, { rebase }) => {
+      invalidate();
+      toast.success(rebase ? "Branch rebased" : "Branch updated");
+    },
+    onError: (e) => toast.error(`Update branch failed:\n${String(e)}`),
+  });
+  const prActionCardId =
+    (prMerge.isPending && prMerge.variables) ||
+    (prSetDraft.isPending && prSetDraft.variables?.cardId) ||
+    (prUpdateBranch.isPending && prUpdateBranch.variables?.cardId) ||
+    null;
   const linkPr = useMutation({
     mutationFn: ({ issueId, reference }: { issueId: string; reference: string }) => api.boardLinkPr(issueId, reference),
     onSuccess: invalidate,
@@ -373,6 +402,16 @@ export function BoardView() {
                       onOpenVscode={card.type === "pr" && lane.key !== "backlog" ? () => openVscode.mutate(card.id) : null}
                       onAddMeta={(args) => metaAdd.mutate({ cardId: card.id, ...args })}
                       onDeleteMeta={(id) => metaDelete.mutate(id)}
+                      prActions={
+                        card.type === "pr"
+                          ? {
+                              busy: prActionCardId === card.id,
+                              onMerge: () => prMerge.mutate(card.id),
+                              onSetDraft: (draft) => prSetDraft.mutate({ cardId: card.id, draft }),
+                              onUpdateBranch: (rebase) => prUpdateBranch.mutate({ cardId: card.id, rebase }),
+                            }
+                          : null
+                      }
                     />
                   ))}
                 </div>

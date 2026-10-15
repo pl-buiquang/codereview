@@ -41,8 +41,9 @@ fn upsert_card(conn: &Connection, node: &BoardNode, viewer_login: &str, ts: &str
         "INSERT INTO board_card (
             id, type, repo, number, url, title, author_login, state, is_draft,
             review_decision, has_reviews, head_ref, is_mine, updated_at, closed_at,
-            tracked_at, last_refreshed, ci_status, mergeable
-         ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?16,?17,?18)
+            tracked_at, last_refreshed, ci_status, mergeable,
+            merge_state_status, stack_number, stack_position, viewer_can_update_branch
+         ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?16,?17,?18,?19,?20,?21,?22)
          ON CONFLICT(id) DO UPDATE SET
             type = excluded.type, repo = excluded.repo, number = excluded.number,
             url = excluded.url, title = excluded.title, author_login = excluded.author_login,
@@ -51,7 +52,10 @@ fn upsert_card(conn: &Connection, node: &BoardNode, viewer_login: &str, ts: &str
             head_ref = excluded.head_ref, is_mine = excluded.is_mine,
             updated_at = excluded.updated_at, closed_at = excluded.closed_at,
             last_refreshed = excluded.last_refreshed,
-            ci_status = excluded.ci_status, mergeable = excluded.mergeable{extra}"
+            ci_status = excluded.ci_status, mergeable = excluded.mergeable,
+            merge_state_status = excluded.merge_state_status,
+            stack_number = excluded.stack_number, stack_position = excluded.stack_position,
+            viewer_can_update_branch = excluded.viewer_can_update_branch{extra}"
     );
     conn.execute(
         &sql,
@@ -74,6 +78,10 @@ fn upsert_card(conn: &Connection, node: &BoardNode, viewer_login: &str, ts: &str
             ts,
             ci_status,
             node.mergeable,
+            node.merge_state_status,
+            node.stack.as_ref().map(|s| s.number),
+            node.stack_entry.as_ref().map(|s| s.position),
+            node.viewer_can_update_branch as i64,
         ],
     )?;
     Ok(())
@@ -499,6 +507,47 @@ pub fn board_track_impl(db: &Db, reference: &str) -> AppResult<String> {
 #[tauri::command]
 pub async fn board_track(reference: String, db: State<'_, Db>) -> AppResult<String> {
     board_track_impl(&db, &reference)
+}
+
+// ---------------------------------------------------------------------------
+// GitHub PR actions (squash merge, draft toggle, update branch)
+// ---------------------------------------------------------------------------
+
+/// Run `gh pr <args> <number> --repo owner/name` for a PR card, then refetch
+/// that one card so the board reflects the new state.
+fn run_pr_action(db: &Db, card_id: &str, args: &[&str]) -> AppResult<()> {
+    let (owner, name, number) = pr_card_coords(db, card_id)?;
+    let ctx = crate::gh::GhRepo::Remote {
+        owner: owner.clone(),
+        name: name.clone(),
+    };
+    let number_s = number.to_string();
+    let repo = format!("{owner}/{name}");
+    let mut full = vec!["pr", args[0], number_s.as_str(), "--repo", repo.as_str()];
+    full.extend_from_slice(&args[1..]);
+    crate::gh::run_gh(&ctx, &full)?;
+
+    let node = board::resolve_node(&owner, &name, number)?;
+    let viewer = crate::commands::inbox::cached_or_fetch_viewer(db)?;
+    let conn = db.0.lock().unwrap();
+    upsert_card(&conn, &node, &viewer.login, &now(), false)
+}
+
+#[tauri::command]
+pub async fn board_pr_merge(card_id: String, db: State<'_, Db>) -> AppResult<()> {
+    run_pr_action(&db, &card_id, &["merge", "--squash", "--delete-branch"])
+}
+
+#[tauri::command]
+pub async fn board_pr_set_draft(card_id: String, draft: bool, db: State<'_, Db>) -> AppResult<()> {
+    let args: &[&str] = if draft { &["ready", "--undo"] } else { &["ready"] };
+    run_pr_action(&db, &card_id, args)
+}
+
+#[tauri::command]
+pub async fn board_pr_update_branch(card_id: String, rebase: bool, db: State<'_, Db>) -> AppResult<()> {
+    let args: &[&str] = if rebase { &["update-branch", "--rebase"] } else { &["update-branch"] };
+    run_pr_action(&db, &card_id, args)
 }
 
 /// A card's id for `owner/repo#number`, but only if it's currently visible on

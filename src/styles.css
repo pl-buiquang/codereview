@@ -243,6 +243,12 @@ button:hover {
 .chip.bad {
   color: var(--danger);
 }
+.chip.warn {
+  color: var(--warning);
+}
+.chip.accent {
+  color: var(--accent);
+}
 .delta-add {
   color: var(--success);
   font-family: var(--font-mono);
@@ -4587,22 +4593,38 @@ input[type="range"] {
 .board-card:hover {
   border-color: var(--border-strong);
 }
-.board-card-comment-badge {
+.board-card-menu {
   position: absolute;
-  top: 7px;
-  right: 10px;
-  min-width: 18px;
-  height: 18px;
-  padding: 0 5px;
-  border-radius: 999px;
-  background: var(--accent);
-  color: var(--on-accent);
-  font-size: 10.5px;
-  font-weight: 700;
-  line-height: 1;
+  top: 5px;
+  right: 6px;
+  z-index: 5;
+}
+.board-card-menu .btn-split-menu {
+  min-width: 200px;
+}
+.board-card-menu .btn-split-menu button:disabled {
+  color: var(--text-3);
+  cursor: default;
+  background: transparent;
+}
+.board-card-menu .btn-split-menu button.danger:not(:disabled) {
+  color: var(--danger);
+}
+.board-card-badge-row {
   display: flex;
   align-items: center;
-  justify-content: center;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+.board-card-badge-row:empty {
+  display: none;
+}
+.board-card-badge-row .chip {
+  font-size: 13px;
+}
+.board-card-badge-row .chip svg {
+  width: 13px;
+  height: 13px;
 }
 .board-card-title-wrap {
   position: relative;

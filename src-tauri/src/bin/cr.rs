@@ -1064,6 +1064,10 @@ fn run_board(action: BoardAction, json: bool, db: &Db) -> AppResult<()> {
                 if card.card.typ == "pr" {
                     println!("CI:    {}", card.card.ci_status.as_deref().unwrap_or("-"));
                     println!("Merge: {}", card.card.mergeable.as_deref().unwrap_or("-"));
+                    println!("Head:  {}", card.card.merge_state_status.as_deref().unwrap_or("-"));
+                    if let Some(stack) = card.card.stack_number {
+                        println!("Stack: #{stack} (position {})", card.card.stack_position.unwrap_or(0));
+                    }
                 }
                 println!("URL:   {}", card.card.url);
                 if !card.meta.is_empty() {

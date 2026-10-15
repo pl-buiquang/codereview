@@ -56,3 +56,26 @@ export function MergeableBadge({ mergeable }: { mergeable: string | null }) {
     </span>
   );
 }
+
+/** Flags a head ref that's behind its base (`mergeStateStatus = BEHIND`):
+ *  GitHub's "Update branch", or "Rebase stack" for a native stacked PR. */
+export function MergeStateBadge({ state, stacked }: { state: string | null; stacked: boolean }) {
+  if (state !== "BEHIND") return null;
+  return (
+    <span
+      className="chip warn"
+      title={stacked ? "Out of date with its base — rebase the stack" : "Out of date with its base — update the branch"}
+    >
+      <Icon name="branch" size={11} /> {stacked ? "rebase stack" : "update branch"}
+    </span>
+  );
+}
+
+export function CommentsBadge({ count }: { count: number | null }) {
+  if (!count) return null;
+  return (
+    <span className="chip accent" title={`${count} unresolved thread(s)`}>
+      <Icon name="comment" size={11} /> {count}
+    </span>
+  );
+}

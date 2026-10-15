@@ -213,7 +213,9 @@ const BOARD_FRAGMENT: &str = r#"
       reviewDecision
       reviews(first: 1) { totalCount }
       repository { nameWithOwner }
-      mergeable
+      mergeable mergeStateStatus viewerCanUpdateBranch
+      stack { number }
+      stackEntry { position }
       commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
       closingIssuesReferences(first: 20) {
         nodes { id number url title state repository { nameWithOwner } }
@@ -336,6 +338,24 @@ pub struct BoardNode {
     pub mergeable: Option<String>,
     #[serde(default)]
     pub commits: Option<CommitsConn>,
+    #[serde(default)]
+    pub merge_state_status: Option<String>,
+    #[serde(default)]
+    pub viewer_can_update_branch: bool,
+    #[serde(default)]
+    pub stack: Option<StackRef>,
+    #[serde(default)]
+    pub stack_entry: Option<StackEntryRef>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct StackRef {
+    pub number: i64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct StackEntryRef {
+    pub position: i64,
 }
 
 impl BoardNode {
@@ -459,6 +479,10 @@ mod tests {
       "reviews": { "totalCount": 2 },
       "repository": { "nameWithOwner": "acme/widget" },
       "mergeable": "MERGEABLE",
+      "mergeStateStatus": "BEHIND",
+      "viewerCanUpdateBranch": true,
+      "stack": { "number": 40 },
+      "stackEntry": { "position": 2 },
       "commits": { "nodes": [ { "commit": { "statusCheckRollup": { "state": "SUCCESS" } } } ] },
       "closingIssuesReferences": { "nodes": [] }
     }"#;
@@ -472,6 +496,10 @@ mod tests {
         assert_eq!(node.mergeable.as_deref(), Some("MERGEABLE"));
         assert_eq!(node.ci_status().as_deref(), Some("SUCCESS"));
         assert_eq!(node.reviews.map(|r| r.total_count), Some(2));
+        assert_eq!(node.merge_state_status.as_deref(), Some("BEHIND"));
+        assert!(node.viewer_can_update_branch);
+        assert_eq!(node.stack.map(|s| s.number), Some(40));
+        assert_eq!(node.stack_entry.map(|s| s.position), Some(2));
     }
 
     fn card(typ: &str, state: Option<&str>, is_draft: bool, is_mine: bool) -> BoardCardRow {
@@ -498,6 +526,10 @@ mod tests {
             last_refreshed: None,
             ci_status: None,
             mergeable: None,
+            merge_state_status: None,
+            stack_number: None,
+            stack_position: None,
+            viewer_can_update_branch: false,
         }
     }
 

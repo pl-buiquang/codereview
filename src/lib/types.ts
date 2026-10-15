@@ -441,6 +441,10 @@ export interface BoardCard {
   last_refreshed: string | null;
   ci_status: string | null; // SUCCESS | FAILURE | PENDING | ERROR | EXPECTED, from the head commit's statusCheckRollup
   mergeable: string | null; // MERGEABLE | CONFLICTING | UNKNOWN
+  merge_state_status: string | null; // CLEAN | BEHIND | BLOCKED | DIRTY | UNSTABLE | HAS_HOOKS | UNKNOWN
+  stack_number: number | null; // GitHub native stack id, null when not stacked
+  stack_position: number | null;
+  viewer_can_update_branch: boolean;
   // Computed/enriched by board_list, flattened alongside the row above.
   lane: BoardLane | null;
   meta: BoardMeta[];

@@ -6,7 +6,7 @@ import { confirmDialog } from "../lib/confirm";
 import { timeAgo } from "../lib/timeAgo";
 import { useSettingsStore, type BoardBorderSide } from "../lib/settings";
 import { RepoName } from "./RepoName";
-import { CiBadge, MergeableBadge } from "./InboxBadges";
+import { CiBadge, CommentsBadge, MergeableBadge, MergeStateBadge } from "./InboxBadges";
 import { Icon } from "./icons";
 
 const BORDER_STYLE_KEY: Record<BoardBorderSide, "borderTopColor" | "borderRightColor" | "borderBottomColor" | "borderLeftColor"> = {
@@ -210,6 +210,115 @@ export function AddMetaForm({
   );
 }
 
+export interface PrActions {
+  busy: boolean;
+  onMerge: () => void;
+  onSetDraft: (draft: boolean) => void;
+  onUpdateBranch: (rebase: boolean) => void;
+}
+
+function PrActionsMenu({ card, actions, onOpenGh }: { card: BoardCardT; actions: PrActions; onOpenGh: () => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [open]);
+
+  const isOpen = card.state === "open";
+  const behind = card.merge_state_status === "BEHIND";
+  const stacked = card.stack_number != null;
+  const updateDisabledReason = !isOpen
+    ? "PR is not open"
+    : stacked
+      ? "Stacked PR — rebase the stack instead"
+      : !behind
+        ? "Branch is up to date"
+        : !card.viewer_can_update_branch
+          ? "You can't update this branch"
+          : null;
+  const stackDisabledReason = !stacked ? "Not part of a stack" : !behind ? "Stack is up to date" : null;
+  const disabled = actions.busy;
+
+  const run = (fn: () => void) => () => {
+    setOpen(false);
+    fn();
+  };
+
+  const merge = async () => {
+    setOpen(false);
+    if (
+      await confirmDialog({
+        title: "Squash and merge",
+        message: `Squash-merge ${card.repo}#${card.number} "${card.title}" and delete its branch?`,
+        confirmLabel: "Squash and merge",
+        danger: true,
+      })
+    ) {
+      actions.onMerge();
+    }
+  };
+
+  return (
+    <div ref={ref} className="board-card-menu">
+      <button className="btn-icon" title="PR actions" disabled={disabled} onClick={() => setOpen((v) => !v)}>
+        <Icon name="kebab" size={14} />
+      </button>
+      {open && (
+        <div className="btn-split-menu card" role="menu">
+          <button
+            role="menuitem"
+            className="danger"
+            disabled={!isOpen || card.is_draft}
+            title={!isOpen ? "PR is not open" : card.is_draft ? "Draft PRs can't be merged" : undefined}
+            onClick={merge}
+          >
+            Squash and merge
+          </button>
+          <button
+            role="menuitem"
+            disabled={!isOpen}
+            title={!isOpen ? "PR is not open" : undefined}
+            onClick={run(() => actions.onSetDraft(!card.is_draft))}
+          >
+            {card.is_draft ? "Mark ready for review" : "Convert to draft"}
+          </button>
+          <hr className="btn-split-menu-separator" />
+          <button
+            role="menuitem"
+            disabled={updateDisabledReason != null}
+            title={updateDisabledReason ?? undefined}
+            onClick={run(() => actions.onUpdateBranch(false))}
+          >
+            Update branch (merge)
+          </button>
+          <button
+            role="menuitem"
+            disabled={updateDisabledReason != null}
+            title={updateDisabledReason ?? undefined}
+            onClick={run(() => actions.onUpdateBranch(true))}
+          >
+            Update branch (rebase)
+          </button>
+          <button
+            role="menuitem"
+            disabled={stackDisabledReason != null}
+            title={stackDisabledReason ?? "Opens the PR on GitHub"}
+            onClick={run(onOpenGh)}
+          >
+            Rebase stack on GitHub…
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function BoardCard({
   card,
   tags,
@@ -225,6 +334,7 @@ export function BoardCard({
   onOpenVscode,
   onAddMeta,
   onDeleteMeta,
+  prActions,
 }: {
   card: BoardCardT;
   tags: string[];
@@ -240,6 +350,7 @@ export function BoardCard({
   onOpenVscode: (() => void) | null;
   onAddMeta: (args: { kind: BoardMetaKind; value: string; tag: string | null; label: string | null }) => void;
   onDeleteMeta: (id: number) => void;
+  prActions: PrActions | null;
 }) {
   const [metaExpanded, setMetaExpanded] = useState(false);
   const [adding, setAdding] = useState(false);
@@ -292,11 +403,7 @@ export function BoardCard({
 
   return (
     <div className="card board-card" style={borderStyle}>
-      {card.pending_threads != null && card.pending_threads > 0 && (
-        <span className="board-card-comment-badge" title={`${card.pending_threads} unresolved thread(s)`}>
-          {card.pending_threads}
-        </span>
-      )}
+      {card.type === "pr" && prActions && <PrActionsMenu card={card} actions={prActions} onOpenGh={onOpenGh} />}
 
       <span ref={titleMenuRef} className="board-card-title-wrap">
         <button
@@ -332,13 +439,16 @@ export function BoardCard({
         <button className="board-card-link board-card-repo" onClick={onOpenRepo} title="Open repository">
           <RepoName name={card.repo} />
         </button>
-        {card.type === "pr" && (
-          <>
-            <CiBadge state={card.ci_status ? card.ci_status.toLowerCase() : null} />
-            <MergeableBadge mergeable={card.mergeable} />
-          </>
-        )}
       </div>
+
+      {card.type === "pr" && (
+        <div className="board-card-badge-row">
+          <CiBadge state={card.ci_status ? card.ci_status.toLowerCase() : null} />
+          <MergeableBadge mergeable={card.mergeable} />
+          <MergeStateBadge state={card.merge_state_status} stacked={card.stack_number != null} />
+          <CommentsBadge count={card.pending_threads} />
+        </div>
+      )}
 
       <div className="board-card-actions">
         {onOpenReview && (

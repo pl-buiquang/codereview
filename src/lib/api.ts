@@ -188,6 +188,10 @@ export const api = {
   boardTrack: (reference: string) => invoke<string>("board_track", { reference }),
   boardTrackPr: (reference: string) => invoke<string>("board_track_pr", { reference }),
   boardDiscard: (cardId: string) => invoke<void>("board_discard", { cardId }),
+  boardPrMerge: (cardId: string) => invoke<void>("board_pr_merge", { cardId }),
+  boardPrSetDraft: (cardId: string, draft: boolean) => invoke<void>("board_pr_set_draft", { cardId, draft }),
+  boardPrUpdateBranch: (cardId: string, rebase: boolean) =>
+    invoke<void>("board_pr_update_branch", { cardId, rebase }),
   boardLinkPr: (issueId: string, prReference: string) =>
     invoke<void>("board_link_pr", { issueId, prReference }),
   boardUnlink: (issueId: string, prId: string) => invoke<void>("board_unlink", { issueId, prId }),

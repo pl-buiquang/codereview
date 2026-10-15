@@ -42,9 +42,10 @@ export type IconName =
   | "code"
   | "trash"
   | "edit"
-  | "dot";
+  | "dot"
+  | "kebab";
 
-const STROKE: Record<Exclude<IconName, "dot">, ReactNode> = {
+const STROKE: Record<Exclude<IconName, "dot" | "kebab">, ReactNode> = {
   menu: <path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11" />,
   sidebar: (
     <>
@@ -218,6 +219,15 @@ export function Icon({
     return (
       <svg {...common} fill="currentColor">
         <circle cx="8" cy="8" r="3" />
+      </svg>
+    );
+  }
+  if (name === "kebab") {
+    return (
+      <svg {...common} fill="currentColor">
+        <circle cx="8" cy="3.5" r="1.4" />
+        <circle cx="8" cy="8" r="1.4" />
+        <circle cx="8" cy="12.5" r="1.4" />
       </svg>
     );
   }

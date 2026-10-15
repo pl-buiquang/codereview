@@ -354,6 +354,10 @@ pub struct BoardCardRow {
     pub last_refreshed: Option<String>,
     pub ci_status: Option<String>,
     pub mergeable: Option<String>,
+    pub merge_state_status: Option<String>,
+    pub stack_number: Option<i64>,
+    pub stack_position: Option<i64>,
+    pub viewer_can_update_branch: bool,
 }
 
 impl BoardCardRow {
@@ -381,6 +385,10 @@ impl BoardCardRow {
             last_refreshed: row.get("last_refreshed")?,
             ci_status: row.get("ci_status")?,
             mergeable: row.get("mergeable")?,
+            merge_state_status: row.get("merge_state_status")?,
+            stack_number: row.get("stack_number")?,
+            stack_position: row.get("stack_position")?,
+            viewer_can_update_branch: row.get::<_, i64>("viewer_can_update_branch")? != 0,
         })
     }
 }
