@@ -20,6 +20,15 @@ export const TERMINAL_HOST_OPTIONS: { label: string; value: TerminalHost }[] = [
   { label: "Terminator (Linux)", value: "terminator" },
 ];
 
+/** Which tmux session new terminals open in as a window (backend `TmuxTarget`). */
+export type TmuxTarget = "current" | "shared" | "per_repo";
+
+export const TMUX_TARGET_OPTIONS: { label: string; value: TmuxTarget }[] = [
+  { label: "Current tmux session", value: "current" },
+  { label: "Shared session", value: "shared" },
+  { label: "Session per repository", value: "per_repo" },
+];
+
 export const DEFAULT_DIFF_FONT_SIZE = 12.5;
 
 /** PR-list auto-refresh choices; value is the refetchInterval in ms, 0 = off. */
@@ -63,6 +72,8 @@ type PersistedSettings = Pick<
   | "fileConfigPatterns"
   | "leftPaneTab"
   | "defaultTerminal"
+  | "tmuxTarget"
+  | "tmuxSessionName"
   | "sessionHistoryDays"
 >;
 
@@ -85,6 +96,8 @@ const DEFAULTS: PersistedSettings = {
   fileConfigPatterns: DEFAULT_CONFIG_PATTERNS,
   leftPaneTab: "files",
   defaultTerminal: "iterm2",
+  tmuxTarget: "current",
+  tmuxSessionName: "codereview",
   sessionHistoryDays: 3,
 };
 
@@ -122,8 +135,12 @@ interface SettingsState {
   fileConfigPatterns: string;
   /** Last left-pane tab shown in the review view; remembered globally. */
   leftPaneTab: LeftPaneTab;
-  /** Terminal application new terminals open in. */
+  /** Terminal application that attaches tmux (or opens windows when tmux is missing). */
   defaultTerminal: TerminalHost;
+  /** Which tmux session new terminals are added to. */
+  tmuxTarget: TmuxTarget;
+  /** Shared tmux session name; also the fallback for "current" when nothing is attached. */
+  tmuxSessionName: string;
   /** How many days of past Claude sessions the Sessions view lists. */
   sessionHistoryDays: number;
   setDirection: (d: Direction) => void;
@@ -144,6 +161,8 @@ interface SettingsState {
   setFileConfigPatterns: (s: string) => void;
   setLeftPaneTab: (tab: LeftPaneTab) => void;
   setDefaultTerminal: (host: TerminalHost) => void;
+  setTmuxTarget: (t: TmuxTarget) => void;
+  setTmuxSessionName: (s: string) => void;
   setSessionHistoryDays: (days: number) => void;
 }
 
@@ -169,6 +188,8 @@ export const useSettingsStore = create<SettingsState>()(
       setFileConfigPatterns: (fileConfigPatterns) => set({ fileConfigPatterns }),
       setLeftPaneTab: (leftPaneTab) => set({ leftPaneTab }),
       setDefaultTerminal: (defaultTerminal) => set({ defaultTerminal }),
+      setTmuxTarget: (tmuxTarget) => set({ tmuxTarget }),
+      setTmuxSessionName: (tmuxSessionName) => set({ tmuxSessionName }),
       setSessionHistoryDays: (sessionHistoryDays) => set({ sessionHistoryDays }),
     }),
     {
@@ -200,6 +221,8 @@ export const useSettingsStore = create<SettingsState>()(
           fileConfigPatterns: (p.fileConfigPatterns as string) ?? DEFAULT_CONFIG_PATTERNS,
           leftPaneTab: (p.leftPaneTab as LeftPaneTab) ?? "files",
           defaultTerminal: (p.defaultTerminal as TerminalHost) ?? "iterm2",
+          tmuxTarget: (p.tmuxTarget as TmuxTarget) ?? "current",
+          tmuxSessionName: (p.tmuxSessionName as string) ?? "codereview",
           sessionHistoryDays: (p.sessionHistoryDays as number) ?? 3,
         } satisfies PersistedSettings;
       },
@@ -218,6 +241,7 @@ const ENUMS: Partial<Record<keyof PersistedSettings, readonly string[]>> = {
   boardStatusBorderSide: ["left", "right", "top", "bottom"],
   leftPaneTab: ["files", "context"],
   defaultTerminal: TERMINAL_HOST_OPTIONS.map((o) => o.value),
+  tmuxTarget: TMUX_TARGET_OPTIONS.map((o) => o.value),
 };
 
 /** Serialize the persisted settings to a portable JSON document. */

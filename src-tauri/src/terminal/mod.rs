@@ -2,10 +2,11 @@
 
 mod linux;
 mod macos;
-
-use std::process::Command;
+mod tmux;
 
 use serde::Deserialize;
+
+pub use tmux::TmuxTarget;
 
 use crate::claude_sessions::{self, ClaudeSession, FocusState};
 use crate::error::{AppError, AppResult};
@@ -21,7 +22,8 @@ pub enum TerminalHost {
 }
 
 pub fn shell_quote(s: &str) -> String {
-    if !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || "-_./=:@%+".contains(c)) {
+    // A leading `=` is zsh's command-path expansion.
+    if !s.is_empty() && !s.starts_with('=') && s.chars().all(|c| c.is_ascii_alphanumeric() || "-_./=:@%+".contains(c)) {
         return s.to_string();
     }
     format!("'{}'", s.replace('\'', r"'\''"))
@@ -35,11 +37,34 @@ fn user_shell() -> String {
     std::env::var("SHELL").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| "/bin/zsh".into())
 }
 
+/// `argv` followed by an interactive login shell, so the terminal stays open after it exits.
+fn with_shell_after(argv: &[String]) -> String {
+    format!("{}; exec {} -l", command_line(argv), shell_quote(&user_shell()))
+}
+
+/// Opens `argv` in `cwd` as a new window of a tmux session (see [`TmuxTarget`]), or as a new
+/// `host` window when tmux isn't installed.
+pub fn open_session(
+    host: TerminalHost,
+    target: TmuxTarget,
+    shared_session: &str,
+    repo: &str,
+    window_name: &str,
+    cwd: &str,
+    argv: &[String],
+) -> AppResult<()> {
+    if !tmux::available() {
+        return open_window(host, cwd, argv);
+    }
+    let command = with_shell_after(argv);
+    tmux::open(host, &tmux::NewWindow { target, shared_session, repo, window_name, cwd, command: &command })
+}
+
 /// Opens a new terminal window in `cwd` running `argv`, leaving an interactive shell behind.
-pub fn open_window(host: TerminalHost, cwd: &str, argv: &[String]) -> AppResult<()> {
+fn open_window(host: TerminalHost, cwd: &str, argv: &[String]) -> AppResult<()> {
     let typed = format!("cd {} && {}", shell_quote(cwd), command_line(argv));
     let shell = user_shell();
-    let wrapped = format!("{}; exec {} -l", command_line(argv), shell_quote(&shell));
+    let wrapped = with_shell_after(argv);
     match host {
         TerminalHost::Iterm2 if cfg!(target_os = "macos") => macos::iterm2_open(&typed),
         TerminalHost::TerminalApp if cfg!(target_os = "macos") => macos::terminal_app_open(&typed),
@@ -57,17 +82,6 @@ fn focus_tty(tty: &str, cwd_hint: Option<&str>) -> AppResult<()> {
     } else {
         Err(AppError::Other("focusing terminals is not supported on this platform".into()))
     }
-}
-
-fn tmux(args: &[&str]) -> AppResult<()> {
-    let out = Command::new(crate::tools::tmux_bin())
-        .args(args)
-        .output()
-        .map_err(|e| AppError::Other(format!("failed to run tmux: {e}")))?;
-    if !out.status.success() {
-        return Err(AppError::Other(format!("tmux {}: {}", args[0], String::from_utf8_lossy(&out.stderr).trim())));
-    }
-    Ok(())
 }
 
 /// Focus the session's own terminal, or — for a background session nobody is attached to — the
@@ -90,16 +104,7 @@ pub fn focus_session(session: &ClaudeSession) -> AppResult<()> {
 
 fn focus_target(tmux_loc: Option<&claude_sessions::TmuxLoc>, tty: Option<&str>, cwd: Option<&str>) -> AppResult<()> {
     match (tmux_loc, tty) {
-        (Some(loc), _) => {
-            let client = claude_sessions::attached_client_tty(loc)
-                .ok_or_else(|| AppError::Other("no terminal is attached to this tmux session".into()))?;
-            tmux(&["switch-client", "-c", &client, "-t", &loc.pane])?;
-            tmux(&["select-window", "-t", &loc.pane])?;
-            tmux(&["select-pane", "-t", &loc.pane])?;
-            // After a programmatic switch the outer terminal can keep showing the previous frame.
-            tmux(&["refresh-client", "-t", &client])?;
-            focus_tty(&client, None)
-        }
+        (Some(loc), _) => tmux::focus_pane(loc),
         (None, Some(tty)) => focus_tty(tty, cwd),
         (None, None) => Err(AppError::Other("this session has no terminal".into())),
     }
@@ -117,6 +122,8 @@ mod tests {
         assert_eq!(shell_quote("it's"), r"'it'\''s'");
         assert_eq!(shell_quote(""), "''");
         assert_eq!(shell_quote("$(rm -rf x)"), "'$(rm -rf x)'");
+        assert_eq!(shell_quote("=codereview"), "'=codereview'");
+        assert_eq!(shell_quote("a=b"), "a=b");
     }
 
     #[test]

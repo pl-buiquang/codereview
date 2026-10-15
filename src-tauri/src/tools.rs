@@ -66,8 +66,12 @@ pub fn claude_bin() -> String {
     claude_path().unwrap_or_else(|| "claude".to_string())
 }
 
+pub fn tmux_path() -> Option<String> {
+    TMUX.get().cloned().flatten()
+}
+
 pub fn tmux_bin() -> String {
-    TMUX.get().cloned().flatten().unwrap_or_else(|| "tmux".to_string())
+    tmux_path().unwrap_or_else(|| "tmux".to_string())
 }
 
 #[cfg(test)]

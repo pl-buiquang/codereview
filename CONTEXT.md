@@ -16,6 +16,9 @@ Glossary of domain terms used in this app.
   Only possible when a terminal host is attached to the session's terminal.
 - **Detached** — a live session whose tmux session has no attached terminal host; it can't be
   focused.
+- **Tmux target** — the tmux session a new terminal is added to as a window: the currently
+  attached one, a shared named session, or one session per repository. The terminal host only
+  attaches tmux when nothing shows that session yet.
 
 ## Board
 

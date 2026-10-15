@@ -303,7 +303,7 @@ fn transcript_continued_in(path: &Path) -> Option<String> {
     String::from_utf8_lossy(&buf).lines().rev().find_map(continued_in_from_line)
 }
 
-fn process_cwd(pid: i64) -> Option<String> {
+pub(crate) fn process_cwd(pid: i64) -> Option<String> {
     if let Ok(p) = fs::read_link(format!("/proc/{pid}/cwd")) {
         return Some(p.to_string_lossy().into_owned());
     }
@@ -342,11 +342,6 @@ pub fn pick_agent_view(views: &[AgentView], session_cwd: &str) -> Option<AgentVi
             (v.focus == FocusState::Ready, depth)
         })
         .cloned()
-}
-
-/// The tmux client tty a live session's pane is shown on, if any.
-pub fn attached_client_tty(loc: &TmuxLoc) -> Option<String> {
-    tmux_state().clients.remove(&loc.session).and_then(|v| v.into_iter().next())
 }
 
 /// All live sessions, most recently active first.

@@ -52,6 +52,8 @@ export function BoardView() {
   const repoBasePaths = useSettingsStore((s) => s.repoBasePaths);
   const boardPollMs = useSettingsStore((s) => s.boardPollMs);
   const defaultTerminal = useSettingsStore((s) => s.defaultTerminal);
+  const tmuxTarget = useSettingsStore((s) => s.tmuxTarget);
+  const tmuxSessionName = useSettingsStore((s) => s.tmuxSessionName);
   const setBoardPollMs = useSettingsStore((s) => s.setBoardPollMs);
   const [repoFilter, setRepoFilter] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
@@ -193,7 +195,7 @@ export function BoardView() {
     onError: (e) => toast.error(`Could not focus terminal:\n${String(e)}`),
   });
   const openTerminal = useMutation({
-    mutationFn: (cardId: string) => api.boardOpenTerminal(cardId, defaultTerminal, parseRepoBasePaths(repoBasePaths)),
+    mutationFn: (cardId: string) => api.boardOpenTerminal(cardId, defaultTerminal, tmuxTarget, tmuxSessionName, parseRepoBasePaths(repoBasePaths)),
     onSuccess: () => {
       invalidate();
       queryClient.invalidateQueries({ queryKey: ["claude-sessions"] });

@@ -39,7 +39,7 @@ import type {
   WipStatus,
   WorktreeInfo,
 } from "./types";
-import type { TerminalHost } from "./settings";
+import type { TerminalHost, TmuxTarget } from "./settings";
 
 export const api = {
   listRepositories: () => invoke<Repository[]>("list_repositories"),
@@ -204,8 +204,13 @@ export const api = {
     invoke<Review>("board_open_review", { cardId, basePaths }),
   boardOpenVscode: (cardId: string, basePaths: string[] = []) =>
     invoke<void>("board_open_vscode", { cardId, basePaths }),
-  boardOpenTerminal: (cardId: string, host: TerminalHost, basePaths: string[] = []) =>
-    invoke<void>("board_open_terminal", { cardId, basePaths, host }),
+  boardOpenTerminal: (
+    cardId: string,
+    host: TerminalHost,
+    tmuxTarget: TmuxTarget,
+    tmuxSession: string,
+    basePaths: string[] = [],
+  ) => invoke<void>("board_open_terminal", { cardId, basePaths, host, tmuxTarget, tmuxSession }),
   boardCardSessions: () => invoke<CardSession[]>("board_card_sessions"),
   listClaudeSessions: (historyDays: number) =>
     invoke<ClaudeSession[]>("list_claude_sessions", { historyDays }),

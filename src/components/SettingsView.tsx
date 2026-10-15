@@ -7,9 +7,11 @@ import {
   importSettings,
   parseRepoBasePaths,
   TERMINAL_HOST_OPTIONS,
+  TMUX_TARGET_OPTIONS,
   useSettingsStore,
   type BoardBorderSide,
   type TerminalHost,
+  type TmuxTarget,
   type ThemeMode,
 } from "../lib/settings";
 import { DEFAULT_CONFIG_PATTERNS, DEFAULT_TEST_PATTERNS } from "../lib/fileCategory";
@@ -222,6 +224,10 @@ function GeneralSection() {
   const fileConfigPatterns = useSettingsStore((s) => s.fileConfigPatterns);
   const defaultTerminal = useSettingsStore((s) => s.defaultTerminal);
   const setDefaultTerminal = useSettingsStore((s) => s.setDefaultTerminal);
+  const tmuxTarget = useSettingsStore((s) => s.tmuxTarget);
+  const setTmuxTarget = useSettingsStore((s) => s.setTmuxTarget);
+  const tmuxSessionName = useSettingsStore((s) => s.tmuxSessionName);
+  const setTmuxSessionName = useSettingsStore((s) => s.setTmuxSessionName);
   const sessionHistoryDays = useSettingsStore((s) => s.sessionHistoryDays);
   const setSessionHistoryDays = useSettingsStore((s) => s.setSessionHistoryDays);
   const setFileTestPatterns = useSettingsStore((s) => s.setFileTestPatterns);
@@ -366,6 +372,29 @@ function GeneralSection() {
               </option>
             ))}
           </select>
+        </label>
+        <label className="settings-row" title="New terminals open as a tmux window; the terminal app only attaches tmux">
+          <span>Open new terminals in</span>
+          <select
+            className="select"
+            value={tmuxTarget}
+            onChange={(e) => setTmuxTarget(e.target.value as TmuxTarget)}
+          >
+            {TMUX_TARGET_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="settings-row" title="Used by 'Shared session', and by 'Current' when no tmux client is attached">
+          <span>Shared tmux session</span>
+          <input
+            className="input"
+            value={tmuxSessionName}
+            placeholder="codereview"
+            onChange={(e) => setTmuxSessionName(e.target.value)}
+          />
         </label>
         <label className="settings-row">
           <span>History (days)</span>
