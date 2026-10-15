@@ -249,14 +249,31 @@ export function BoardView() {
   const effTags = tagFilter.filter((t) => availableTags.has(t));
   const effExcludeTags = tagExclude.filter((t) => availableTags.has(t));
 
-  const filtered = allCards.filter((c) => {
-    if (effRepo && c.repo !== effRepo) return false;
-    if (effStatus && c.type === "pr" && prStatus(c) !== effStatus) return false;
-    if (effCi && ciStatus(c) !== effCi) return false;
-    if (effTags.length > 0 && !cardTags(c).some((t) => effTags.includes(t))) return false;
+  const matches = (c: BoardCardT, skip?: "repo" | "status" | "ci" | "tags") => {
+    if (skip !== "repo" && effRepo && c.repo !== effRepo) return false;
+    if (skip !== "status" && effStatus && c.type === "pr" && prStatus(c) !== effStatus) return false;
+    if (skip !== "ci" && effCi && ciStatus(c) !== effCi) return false;
+    if (skip !== "tags" && effTags.length > 0 && !cardTags(c).some((t) => effTags.includes(t))) return false;
     if (effExcludeTags.length > 0 && cardTags(c).some((t) => effExcludeTags.includes(t))) return false;
     return true;
-  });
+  };
+  const filtered = allCards.filter((c) => matches(c));
+
+  // Each facet counts cards matching every other active filter, so its own options stay comparable.
+  const facetCounts = (skip: "repo" | "status" | "ci" | "tags", keysOf: (c: BoardCardT) => (string | null | undefined)[]) => {
+    const m = new Map<string, number>();
+    for (const c of allCards) {
+      if (!matches(c, skip)) continue;
+      for (const k of keysOf(c)) if (k) m.set(k, (m.get(k) ?? 0) + 1);
+    }
+    return m;
+  };
+  const withCounts = (entries: [string, number][], counts: Map<string, number>): [string, number][] =>
+    entries.map(([k]) => [k, counts.get(k) ?? 0]);
+  const repoShown = withCounts(repoEntries, facetCounts("repo", (c) => [c.repo]));
+  const statusShown = withCounts(statusEntries, facetCounts("status", (c) => [prStatus(c)]));
+  const ciShown = withCounts(ciEntries, facetCounts("ci", (c) => [ciStatus(c)]));
+  const tagsShown = withCounts(tagEntries, facetCounts("tags", cardTags));
 
   const byLane = useMemo(() => {
     const m = new Map<BoardLane, BoardCardT[]>();
@@ -333,28 +350,28 @@ export function BoardView() {
         <aside className="cr-rail">
           <FilterList
             title="Status"
-            entries={statusEntries}
+            entries={statusShown}
             selected={effStatus}
             onSelect={setStatusFilter}
             renderLabel={(k) => <span className="lbl">{prStatusLabel(k)}</span>}
           />
           <FilterList
             title="CI"
-            entries={ciEntries}
+            entries={ciShown}
             selected={effCi}
             onSelect={setCiFilter}
             renderLabel={(k) => <span className="lbl">{prStatusLabel(k)}</span>}
           />
           <FilterList
             title="Repositories"
-            entries={repoEntries}
+            entries={repoShown}
             selected={effRepo}
             onSelect={setRepoFilter}
             renderLabel={(k) => <RepoName className="lbl mono" name={k} />}
           />
-          <TagFilter tags={tagEntries} selected={effTags} onChange={setTagFilter} unavailable={effExcludeTags} />
+          <TagFilter tags={tagsShown} selected={effTags} onChange={setTagFilter} unavailable={effExcludeTags} />
           <TagFilter
-            tags={tagEntries}
+            tags={tagsShown}
             selected={effExcludeTags}
             onChange={setTagExclude}
             unavailable={effTags}
