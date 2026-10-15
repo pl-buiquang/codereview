@@ -62,6 +62,7 @@ const worktrees: WorktreeInfo[] = [
     is_main: true,
     is_prunable: false,
     prunable_reason: null,
+    is_locked: false,
     source: "manual",
   },
   {
@@ -72,6 +73,7 @@ const worktrees: WorktreeInfo[] = [
     is_main: false,
     is_prunable: true,
     prunable_reason: "gone",
+    is_locked: false,
     source: "claude",
   },
 ];

@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import type {
   ChatWorktree,
+  WorktreeGcReport,
   BoardCard,
   BoardMeta,
   BoardMetaKind,
@@ -240,6 +241,11 @@ export const api = {
   // Worktrees
   listWorktrees: (repoId: number) =>
     invoke<WorktreeInfo[]>("list_worktrees", { repoId }),
+  worktreeGcRun: (autoRemove: boolean, autoSync: boolean, force: boolean) =>
+    invoke<WorktreeGcReport | null>("worktree_gc_run", { autoRemove, autoSync, force }),
+  worktreeGcLast: () => invoke<WorktreeGcReport | null>("worktree_gc_last"),
+  worktreeSync: (repoId: number, worktreePath: string) =>
+    invoke<string>("worktree_sync", { repoId, worktreePath }),
   removeWorktree: (repoId: number, worktreePath: string) =>
     invoke<void>("remove_worktree", { repoId, worktreePath }),
   pruneWorktrees: (repoId: number) =>

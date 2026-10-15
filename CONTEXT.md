@@ -25,4 +25,25 @@ Glossary of domain terms used in this app.
 - **Card session** — a live session that belongs to a PR card: either recorded on the card as a
   `claude_session` metadata item, or running in a checkout of the card's head branch.
 - **Chat worktree** — the checkout of a PR's head branch the app uses for chat and editing
-  (an existing worktree on that branch, or one it creates).
+  (an existing worktree on that branch, or one it creates). Looked up again on every chat turn:
+  whichever checkout holds the branch now wins, including the main checkout (the chat shows a
+  banner then). Moving to a different checkout starts a fresh Claude session. Deleting a review
+  or clearing a chat never removes its worktree, since it may be shared with a Claude session.
+
+## Worktrees
+
+- **Worktree janitor** — scans every linked worktree of every repo with a local clone, at
+  startup and every 5 minutes (Settings → Worktrees). It removes a worktree only when it is
+  provably safe:
+  - it is not the main checkout, not locked, and not used by a live Claude session, a tmux pane,
+    or a local-diff chat;
+  - `git status` is clean;
+  - its commits exist elsewhere: the PR is merged or closed and HEAD is in the PR's final head
+    (same commit, an ancestor, or patch-equal), or HEAD is already in trunk, or a detached HEAD
+    is on a remote branch.
+
+  Removal never uses `--force`. The local branch is deleted only in the PR case. Clean
+  worktrees that are only behind origin get fast-forwarded. When origin was rewritten (for
+  example GitHub rebased a stack) and the local tip had been pushed before (it appears in the
+  remote-tracking reflog), the janitor runs `git reset --keep @{u}`. Everything else is flagged
+  in the Worktrees view.

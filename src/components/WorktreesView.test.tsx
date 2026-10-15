@@ -1,0 +1,113 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { WorktreeGcReport, WorktreeRow } from "../lib/types";
+
+const worktreeGcLast = vi.fn();
+const worktreeGcRun = vi.fn();
+const worktreeSync = vi.fn();
+const removeWorktree = vi.fn();
+vi.mock("../lib/api", () => ({
+  api: {
+    worktreeGcLast: () => worktreeGcLast(),
+    worktreeGcRun: (...a: unknown[]) => worktreeGcRun(...a),
+    worktreeSync: (...a: unknown[]) => worktreeSync(...a),
+    removeWorktree: (...a: unknown[]) => removeWorktree(...a),
+    openInVscode: vi.fn(),
+  },
+}));
+vi.mock("../lib/confirm", () => ({ confirmDialog: () => Promise.resolve(true) }));
+
+import { WorktreesView } from "./WorktreesView";
+
+const row = (over: Partial<WorktreeRow>): WorktreeRow => ({
+  path: "/wt/a",
+  display_path: "~/wt/a",
+  branch: "pbq/a",
+  head_sha: "abcdef1234",
+  source: "claude",
+  is_main: false,
+  pr: null,
+  upstream: { kind: "tracking", ahead: 0, behind: 0, head_was_pushed: false },
+  last_commit_at: null,
+  verdict: { kind: "keep", reason: "PR #1 open" },
+  ...over,
+});
+
+const report: WorktreeGcReport = {
+  ran_at: new Date().toISOString(),
+  actions: [],
+  repos: [
+    {
+      repo_id: 3,
+      path: "/repo",
+      slug: "org/app",
+      error: null,
+      worktrees: [
+        row({ path: "/repo", display_path: "~/repo", is_main: true }),
+        row({
+          path: "/wt/merged",
+          display_path: "~/wt/merged",
+          pr: { number: 9, state: "MERGED", headRefOid: "x", headRefName: "pbq/a" },
+          verdict: { kind: "remove", reason: "PR #9 merged", delete_branch: true },
+        }),
+        row({
+          path: "/wt/behind",
+          display_path: "~/wt/behind",
+          upstream: { kind: "tracking", ahead: 0, behind: 3, head_was_pushed: false },
+          verdict: { kind: "fast_forward", reason: "3 behind origin/pbq/a" },
+        }),
+        row({ path: "/wt/dirty", display_path: "~/wt/dirty", verdict: { kind: "flag", reason: "uncommitted or untracked changes" } }),
+      ],
+    },
+  ],
+};
+
+function renderView() {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={qc}>
+      <WorktreesView />
+    </QueryClientProvider>,
+  );
+}
+
+describe("WorktreesView", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    worktreeGcLast.mockResolvedValue(report);
+    worktreeGcRun.mockResolvedValue(report);
+    worktreeSync.mockResolvedValue("fast-forwarded");
+  });
+
+  it("lists linked worktrees with verdicts, hiding the main checkout", async () => {
+    renderView();
+    expect(await screen.findByText("~/wt/merged")).toBeInTheDocument();
+    expect(screen.getByText("safe to remove")).toBeInTheDocument();
+    expect(screen.getByText("needs a look")).toBeInTheDocument();
+    expect(screen.getByText("#9 merged")).toBeInTheDocument();
+    expect(screen.getByText("↓3")).toBeInTheDocument();
+    expect(screen.queryByText("~/repo")).not.toBeInTheDocument();
+    expect(screen.getByText(/3 worktrees · 1 need a look · 2 actionable/)).toBeInTheDocument();
+  });
+
+  it("scans when there is no report yet", async () => {
+    worktreeGcLast.mockResolvedValue(null);
+    renderView();
+    await waitFor(() => expect(worktreeGcRun).toHaveBeenCalledWith(false, false, true));
+    expect(await screen.findByText("~/wt/behind")).toBeInTheDocument();
+  });
+
+  it("runs a forced cleanup that applies removals and syncs", async () => {
+    renderView();
+    await userEvent.click(await screen.findByRole("button", { name: /Clean up/ }));
+    await waitFor(() => expect(worktreeGcRun).toHaveBeenCalledWith(true, true, true));
+  });
+
+  it("syncs a behind worktree", async () => {
+    renderView();
+    await userEvent.click(await screen.findByRole("button", { name: "Sync" }));
+    await waitFor(() => expect(worktreeSync).toHaveBeenCalledWith(3, "/wt/behind"));
+  });
+});

@@ -8,6 +8,7 @@ import { InboxView } from "./InboxView";
 import { ReviewsView } from "./ReviewsView";
 import { ArchiveView } from "./ArchiveView";
 import { RepositoriesView } from "./RepositoriesView";
+import { WorktreesView } from "./WorktreesView";
 import { RepoView } from "./RepoView";
 
 export function DashboardPanel() {
@@ -30,6 +31,7 @@ export function DashboardPanel() {
             {section === "inbox" && <InboxView />}
             {section === "reviews" && <ReviewsView />}
             {section === "archive" && <ArchiveView />}
+            {section === "worktrees" && <WorktreesView />}
             {section === "repositories" && <RepositoriesView />}
           </>
         )}

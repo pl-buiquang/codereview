@@ -17,6 +17,7 @@ import { isCloseTabShortcut, isCommandPaletteShortcut } from "./lib/keyboard";
 import { toggleCommandPalette } from "./lib/commandPalette";
 import { useApplySettings } from "./lib/useApplySettings";
 import { useDeepLinkListener } from "./lib/deepLink";
+import { useWorktreeJanitor } from "./lib/useWorktreeJanitor";
 import { dismissSplash } from "./lib/splash";
 import { useUIStore, type Tab } from "./store";
 
@@ -117,6 +118,8 @@ function App() {
     if (!reposFetched) return;
     document.fonts.ready.then(() => requestAnimationFrame(dismissSplash));
   }, [reposFetched]);
+
+  useWorktreeJanitor();
 
   // Show a one-time toast when the app installs/updates the bundled cr CLI.
   useEffect(() => {

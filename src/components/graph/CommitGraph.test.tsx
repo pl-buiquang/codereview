@@ -143,6 +143,7 @@ describe("CommitGraph", () => {
       is_main: false,
       is_prunable: false,
       prunable_reason: null,
+      is_locked: false,
       source: "manual",
     };
     const { props } = setup({ refs: [main, tag], worktrees: [wt] });

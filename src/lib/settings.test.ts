@@ -88,6 +88,8 @@ describe("useSettingsStore", () => {
         "sessionHistoryDays",
         "tmuxSessionName",
         "tmuxTarget",
+        "worktreeAutoRemove",
+        "worktreeAutoSync",
       ].sort(),
     );
   });
@@ -107,7 +109,7 @@ describe("exportSettings / importSettings", () => {
     s.setFileTestPatterns("");
     const applied = importSettings(json);
     const n = useSettingsStore.getState();
-    expect(applied).toBe(21);
+    expect(applied).toBe(23);
     expect(n.mode).toBe("light");
     expect(n.diffFontSize).toBe(15);
     expect(n.fileTestPatterns).toBe("*.spec.rb");

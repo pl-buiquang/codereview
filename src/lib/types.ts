@@ -291,6 +291,7 @@ export interface WorktreeInfo {
   is_main: boolean;
   is_prunable: boolean;
   prunable_reason: string | null;
+  is_locked: boolean;
   source: WorktreeSource;
 }
 
@@ -506,4 +507,59 @@ export interface ChatWorktree {
   path: string;
   branch: string | null;
   is_main: boolean;
+}
+
+export interface WorktreePr {
+  number: number;
+  state: "OPEN" | "MERGED" | "CLOSED";
+  headRefOid: string;
+  headRefName: string;
+}
+
+export type WorktreeUpstream =
+  | { kind: "none" }
+  | { kind: "gone" }
+  | { kind: "tracking"; ahead: number; behind: number; head_was_pushed: boolean };
+
+export type WorktreeVerdict =
+  | { kind: "remove"; reason: string; delete_branch: boolean }
+  | { kind: "prune"; reason: string }
+  | { kind: "fast_forward"; reason: string }
+  | { kind: "resync"; reason: string }
+  | { kind: "flag"; reason: string }
+  | { kind: "keep"; reason: string };
+
+export interface WorktreeRow {
+  path: string;
+  display_path: string;
+  branch: string | null;
+  head_sha: string;
+  source: WorktreeSource;
+  is_main: boolean;
+  pr: WorktreePr | null;
+  upstream: WorktreeUpstream;
+  last_commit_at: string | null;
+  verdict: WorktreeVerdict;
+}
+
+export interface WorktreeRepoReport {
+  repo_id: number;
+  path: string;
+  slug: string | null;
+  error: string | null;
+  worktrees: WorktreeRow[];
+}
+
+export interface WorktreeGcAction {
+  repo_id: number;
+  path: string;
+  action: string;
+  ok: boolean;
+  message: string | null;
+}
+
+export interface WorktreeGcReport {
+  ran_at: string;
+  repos: WorktreeRepoReport[];
+  actions: WorktreeGcAction[];
 }
