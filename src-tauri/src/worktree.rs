@@ -159,7 +159,7 @@ pub fn remove_worktree(repo: &Path, worktree_path: &Path) -> AppResult<()> {
     Ok(())
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WorktreeSource {
     Claude,
@@ -179,6 +179,7 @@ pub struct WorktreeInfo {
     pub is_main: bool,
     pub is_prunable: bool,
     pub prunable_reason: Option<String>,
+    pub is_locked: bool,
     pub source: WorktreeSource,
 }
 
@@ -201,6 +202,7 @@ pub fn list_worktrees(repo: &Path) -> AppResult<Vec<WorktreeInfo>> {
         let mut branch: Option<String> = None;
         let mut is_prunable = false;
         let mut prunable_reason: Option<String> = None;
+        let mut is_locked = false;
 
         for line in block.lines() {
             if let Some(v) = line.strip_prefix("worktree ") {
@@ -218,8 +220,10 @@ pub fn list_worktrees(repo: &Path) -> AppResult<Vec<WorktreeInfo>> {
                 prunable_reason = Some(v.to_string());
             } else if line == "prunable" {
                 is_prunable = true;
+            } else if line == "locked" || line.starts_with("locked ") {
+                is_locked = true;
             }
-            // "detached", "locked", "bare" and unknown keys are ignored
+            // "detached", "bare" and unknown keys are ignored
         }
 
         let Some(path) = path else { continue };
@@ -248,6 +252,7 @@ pub fn list_worktrees(repo: &Path) -> AppResult<Vec<WorktreeInfo>> {
             is_main,
             is_prunable,
             prunable_reason,
+            is_locked,
             source,
         });
     }
@@ -260,7 +265,7 @@ pub fn prune_worktrees(repo: &Path) -> AppResult<String> {
     run_git(repo, &["worktree", "prune"])
 }
 
-fn detect_source(path: &str) -> WorktreeSource {
+pub fn detect_source(path: &str) -> WorktreeSource {
     if path.contains("/.claude/worktrees/") || path.contains("\\.claude\\worktrees\\") {
         WorktreeSource::Claude
     } else if path.contains("/.codex/worktrees/") || path.contains("\\.codex\\worktrees\\") {

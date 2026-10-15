@@ -6,6 +6,7 @@ use tauri::State;
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
 use crate::worktree::{self, WorktreeInfo};
+use crate::worktree_gc::{self, GcOptions, GcReport, RepoCtx};
 
 pub(crate) fn repo_local_path(db: &Db, repo_id: i64) -> AppResult<String> {
     let conn = db.0.lock().unwrap();
@@ -62,6 +63,61 @@ pub fn prune_worktrees(repo_id: i64, db: State<Db>) -> AppResult<String> {
     worktree::prune_worktrees(Path::new(&path))
 }
 
+/// Runs the worktree janitor over every repo with a local clone. Throttled
+/// (see `worktree_gc::run`) unless `force`; the git/gh work runs off the IPC thread.
+#[tauri::command]
+pub async fn worktree_gc_run(
+    auto_remove: bool,
+    auto_sync: bool,
+    force: bool,
+    db: State<'_, Db>,
+) -> AppResult<Option<GcReport>> {
+    let (repos, chat_paths) = {
+        let conn = db.0.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, local_path, remote_owner, remote_name, default_branch
+             FROM repository WHERE local_path IS NOT NULL ORDER BY local_path",
+        )?;
+        let repos = stmt
+            .query_map([], |r| {
+                Ok(RepoCtx {
+                    repo_id: r.get(0)?,
+                    path: PathBuf::from(r.get::<_, String>(1)?),
+                    owner: r.get(2)?,
+                    name: r.get(3)?,
+                    default_branch: r.get(4)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let mut stmt = conn.prepare(
+            "SELECT c.worktree_path FROM chat c
+             JOIN review rv ON rv.id = c.review_id
+             JOIN target t ON t.id = rv.target_id
+             WHERE c.worktree_path IS NOT NULL AND t.kind = 'local'",
+        )?;
+        let chat_paths = stmt
+            .query_map([], |r| r.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        (repos, chat_paths)
+    };
+    let opts = GcOptions { auto_remove, auto_sync, force };
+    tauri::async_runtime::spawn_blocking(move || worktree_gc::run(&repos, chat_paths, opts))
+        .await
+        .map_err(|e| AppError::Other(format!("worktree gc task failed: {e}")))
+}
+
+#[tauri::command]
+pub fn worktree_gc_last() -> Option<GcReport> {
+    worktree_gc::last_report()
+}
+
+/// Fast-forwards (or resyncs after an upstream rewrite) one registered worktree.
+#[tauri::command]
+pub fn worktree_sync(repo_id: i64, worktree_path: String, db: State<Db>) -> AppResult<String> {
+    let path = resolve_checkout(&db, repo_id, Some(worktree_path))?;
+    worktree_gc::sync_one(&path)
+}
+
 #[tauri::command]
 pub fn open_in_vscode(path: String, file: Option<String>) -> AppResult<()> {
     let mut cmd = Command::new("code");
@@ -88,6 +144,7 @@ mod tests {
             is_main: false,
             is_prunable: false,
             prunable_reason: None,
+            is_locked: false,
             source: WorktreeSource::Manual,
         }
     }

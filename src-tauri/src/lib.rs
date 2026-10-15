@@ -19,6 +19,7 @@ pub mod provider;
 pub mod terminal;
 pub mod tools;
 pub mod worktree;
+pub mod worktree_gc;
 
 use std::sync::Mutex;
 
@@ -266,6 +267,9 @@ pub fn run() {
             commands::chat::chat_messages,
             commands::chat::chat_clear,
             commands::chat::chat_worktree,
+            commands::worktree::worktree_gc_run,
+            commands::worktree::worktree_gc_last,
+            commands::worktree::worktree_sync,
             commands::chat::ensure_chat_worktree,
             commands::chat::set_chat_collapsed,
             commands::worktree::list_worktrees,
