@@ -236,12 +236,10 @@ function PrActionsMenu({
   card,
   actions,
   terminal,
-  onOpenGh,
 }: {
   card: BoardCardT;
   actions: PrActions;
   terminal: TerminalAction | null;
-  onOpenGh: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -267,7 +265,6 @@ function PrActionsMenu({
         : !card.viewer_can_update_branch
           ? "You can't update this branch"
           : null;
-  const stackDisabledReason = !stacked ? "Not part of a stack" : !behind ? "Stack is up to date" : null;
   const disabled = actions.busy;
 
   const run = (fn: () => void) => () => {
@@ -354,14 +351,6 @@ function PrActionsMenu({
             onClick={run(() => actions.onUpdateBranch(true))}
           >
             Update branch (rebase)
-          </button>
-          <button
-            role="menuitem"
-            disabled={stackDisabledReason != null}
-            title={stackDisabledReason ?? "Opens the PR on GitHub"}
-            onClick={run(onOpenGh)}
-          >
-            Rebase stack on GitHub…
           </button>
         </div>
       )}
@@ -465,37 +454,38 @@ export function BoardCard({
 
   return (
     <div ref={cardRef} className={`card board-card${highlighted ? " board-card-highlight" : ""}`} style={borderStyle}>
-      {card.type === "pr" && prActions && <PrActionsMenu card={card} actions={prActions} terminal={terminal} onOpenGh={onOpenGh} />}
-
-      <span ref={titleMenuRef} className="board-card-title-wrap">
-        <button
-          className="board-card-title-link"
-          onClick={onOpenGh}
-          onContextMenu={(e) => {
-            e.preventDefault();
-            setTitleMenuOpen(true);
-          }}
-          title={`Open ${card.repo}#${card.number} on GitHub`}
-        >
-          {card.title} <span className="board-card-number">#{card.number}</span>
-        </button>
-        {titleMenuOpen && (
-          <div className="btn-split-menu card" role="menu">
-            <button
-              role="menuitem"
-              onClick={() => {
-                setTitleMenuOpen(false);
-                navigator.clipboard.writeText(card.url).then(
-                  () => toast.success("GitHub link copied to clipboard"),
-                  (e) => toast.error(`Could not copy link: ${String(e)}`),
-                );
-              }}
-            >
-              Copy GitHub link
-            </button>
-          </div>
-        )}
-      </span>
+      <div className="board-card-head">
+        <span ref={titleMenuRef} className="board-card-title-wrap">
+          <button
+            className="board-card-title-link"
+            onClick={onOpenGh}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setTitleMenuOpen(true);
+            }}
+            title={`Open ${card.repo}#${card.number} on GitHub`}
+          >
+            {card.title} <span className="board-card-number">#{card.number}</span>
+          </button>
+          {titleMenuOpen && (
+            <div className="btn-split-menu card" role="menu">
+              <button
+                role="menuitem"
+                onClick={() => {
+                  setTitleMenuOpen(false);
+                  navigator.clipboard.writeText(card.url).then(
+                    () => toast.success("GitHub link copied to clipboard"),
+                    (e) => toast.error(`Could not copy link: ${String(e)}`),
+                  );
+                }}
+              >
+                Copy GitHub link
+              </button>
+            </div>
+          )}
+        </span>
+        {card.type === "pr" && prActions && <PrActionsMenu card={card} actions={prActions} terminal={terminal} />}
+      </div>
 
       <div className="board-card-subtitle-row">
         <button className="board-card-link board-card-repo" onClick={onOpenRepo} title="Open repository">
