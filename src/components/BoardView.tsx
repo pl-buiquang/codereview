@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { toast } from "../lib/toast";
+import { timeAgo } from "../lib/timeAgo";
 import { confirmDialog } from "../lib/confirm";
 import { BOARD_POLL_OPTIONS, parseRepoBasePaths, useSettingsStore } from "../lib/settings";
 import { findRepoByFullName } from "../lib/repoLabel";
@@ -63,6 +64,8 @@ export function BoardView() {
   const boardQuery = useQuery({ queryKey: ["board"], queryFn: api.boardList });
   const tagsQuery = useQuery({ queryKey: ["board-meta-tags"], queryFn: api.boardMetaTags });
   const repositoriesQuery = useQuery({ queryKey: ["repositories"], queryFn: api.listRepositories });
+  const lastRefreshQuery = useQuery({ queryKey: ["board-last-refresh"], queryFn: api.boardLastRefreshAt });
+  const lastRefresh = lastRefreshQuery.data;
 
   const openCardRepo = (repo: string) => {
     const match = findRepoByFullName(repositoriesQuery.data ?? [], repo);
@@ -80,6 +83,7 @@ export function BoardView() {
     mutationFn: (_opts?: { silent?: boolean }) => api.boardRefresh(),
     onSuccess: (r, opts) => {
       invalidate();
+      queryClient.invalidateQueries({ queryKey: ["board-last-refresh"] });
       if (!opts?.silent)
         toast.success(`Refreshed board: ${r.cardCount} cards, ${r.autoTracked} newly tracked (${r.durationMs}ms)`);
     },
@@ -256,6 +260,7 @@ export function BoardView() {
               )}
             </button>
           </div>
+          {lastRefresh && <span className="cr-sub">updated {timeAgo(lastRefresh)}</span>}
         </div>
       </header>
 

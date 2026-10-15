@@ -182,6 +182,7 @@ export const api = {
 
   // Kanban board
   boardRefresh: () => invoke<BoardRefreshResult>("board_refresh"),
+  boardLastRefreshAt: () => invoke<string | null>("board_last_refresh_at"),
   boardList: () => invoke<BoardCard[]>("board_list"),
   boardTrackedIds: () => invoke<string[]>("board_tracked_ids"),
   boardTrack: (reference: string) => invoke<string>("board_track", { reference }),

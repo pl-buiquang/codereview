@@ -236,6 +236,7 @@ pub fn run() {
             commands::inbox::open_pr_review,
             commands::inbox::inbox_meta,
             commands::board::board_refresh,
+            commands::board::board_last_refresh_at,
             commands::board::board_list,
             commands::board::board_tracked_ids,
             commands::board::board_track,

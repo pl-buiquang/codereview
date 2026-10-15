@@ -187,6 +187,12 @@ pub async fn board_refresh(db: State<'_, Db>) -> AppResult<BoardRefreshResult> {
     board_refresh_impl(&db)
 }
 
+#[tauri::command]
+pub fn board_last_refresh_at(db: State<Db>) -> AppResult<Option<String>> {
+    let conn = db.0.lock().unwrap();
+    Ok(crate::commands::inbox::get_meta(&conn, "board_last_refresh_at"))
+}
+
 /// Rebuild every auto-detected issue<->PR link from this refresh's PR nodes:
 /// GitHub's own `closingIssuesReferences`, plus the `issue-<n>` branch-name
 /// convention within the same repo. Only links against issue cards that are
