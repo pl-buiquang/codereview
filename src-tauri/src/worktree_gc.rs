@@ -2,18 +2,15 @@
 //! removes / syncs the ones where that is provably safe. Facts are gathered
 //! from git + gh, then `classify` (pure) decides; nothing is ever forced.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
 use crate::git::run_git;
 use crate::worktree::{self, WorktreeInfo, WorktreeSource};
 
-const FETCH_EVERY: Duration = Duration::from_secs(5 * 60);
-const RUN_EVERY: Duration = Duration::from_secs(5 * 60);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PrFact {
@@ -375,43 +372,27 @@ pub struct GcReport {
 
 #[derive(Debug, Clone, Copy)]
 pub struct GcOptions {
-    pub auto_remove: bool,
-    pub auto_sync: bool,
-    pub force: bool,
+    pub remove: bool,
+    pub sync: bool,
 }
 
 struct State {
-    last_run: Option<Instant>,
     last_report: Option<GcReport>,
-    fetched: BTreeMap<PathBuf, Instant>,
 }
 
-static STATE: Mutex<State> = Mutex::new(State { last_run: None, last_report: None, fetched: BTreeMap::new() });
+static STATE: Mutex<State> = Mutex::new(State { last_report: None });
 static RUNNING: Mutex<()> = Mutex::new(());
 
 pub fn last_report() -> Option<GcReport> {
     STATE.lock().unwrap().last_report.clone()
 }
 
-fn should_fetch(path: &Path) -> bool {
-    let mut st = STATE.lock().unwrap();
-    let due = st.fetched.get(path).is_none_or(|t| t.elapsed() >= FETCH_EVERY);
-    if due {
-        st.fetched.insert(path.to_path_buf(), Instant::now());
-    }
-    due
-}
-
-/// Scans every repo, and applies the actions `opts` allows. Throttled to one
-/// run per `RUN_EVERY` unless `force`; concurrent calls return the last report.
-pub fn run(repos: &[RepoCtx], chat_paths: Vec<String>, opts: GcOptions) -> Option<GcReport> {
-    let Ok(_guard) = RUNNING.try_lock() else { return last_report() };
-    if !opts.force {
-        let st = STATE.lock().unwrap();
-        if st.last_run.is_some_and(|t| t.elapsed() < RUN_EVERY) {
-            return st.last_report.clone();
-        }
-    }
+/// Scans every repo and applies the actions `opts` allows. Only run on demand
+/// from the Worktrees view; a second call while one is running is refused.
+pub fn run(repos: &[RepoCtx], chat_paths: Vec<String>, opts: GcOptions) -> crate::error::AppResult<GcReport> {
+    let Ok(_guard) = RUNNING.try_lock() else {
+        return Err(crate::error::AppError::Other("a worktree scan is already running".into()));
+    };
 
     let in_use = InUse::collect(chat_paths);
     let mut reports = Vec::new();
@@ -437,10 +418,8 @@ pub fn run(repos: &[RepoCtx], chat_paths: Vec<String>, opts: GcOptions) -> Optio
         if wts.len() <= 1 {
             continue;
         }
-        if should_fetch(&repo.path) {
-            if let Err(e) = run_git(&repo.path, &["fetch", "--quiet", "--prune", "origin"]) {
-                report.error = Some(format!("fetch failed: {e}"));
-            }
+        if let Err(e) = run_git(&repo.path, &["fetch", "--quiet", "--prune", "origin"]) {
+            report.error = Some(format!("fetch failed: {e}"));
         }
         let trunk = trunk_of(repo);
         let branches: Vec<String> = wts.iter().filter(|w| !w.is_main).filter_map(|w| w.branch.clone()).collect();
@@ -473,23 +452,21 @@ pub fn run(repos: &[RepoCtx], chat_paths: Vec<String>, opts: GcOptions) -> Optio
     }
 
     let report = GcReport { ran_at: chrono::Utc::now().to_rfc3339(), repos: reports, actions };
-    let mut st = STATE.lock().unwrap();
-    st.last_run = Some(Instant::now());
-    st.last_report = Some(report.clone());
-    Some(report)
+    STATE.lock().unwrap().last_report = Some(report.clone());
+    Ok(report)
 }
 
 fn apply(repo: &RepoCtx, wt: &WorktreeInfo, v: &Verdict, opts: GcOptions, pruned: &mut bool) -> Option<GcAction> {
     let path = Path::new(&wt.path);
     let (action, result): (&str, Result<(), String>) = match v {
-        Verdict::Prune { .. } if opts.auto_remove => {
+        Verdict::Prune { .. } if opts.remove => {
             if *pruned {
                 return None;
             }
             *pruned = true;
             ("prune", worktree::prune_worktrees(&repo.path).map(|_| ()).map_err(|e| e.to_string()))
         }
-        Verdict::Remove { delete_branch, .. } if opts.auto_remove => {
+        Verdict::Remove { delete_branch, .. } if opts.remove => {
             let r = worktree::remove_worktree(&repo.path, path).map_err(|e| e.to_string());
             let r = match (r, delete_branch, &wt.branch) {
                 (Ok(()), true, Some(b)) => run_git(&repo.path, &["branch", "-D", b])
@@ -499,10 +476,10 @@ fn apply(repo: &RepoCtx, wt: &WorktreeInfo, v: &Verdict, opts: GcOptions, pruned
             };
             (if *delete_branch { "remove + delete branch" } else { "remove" }, r)
         }
-        Verdict::FastForward { .. } if opts.auto_sync => {
+        Verdict::FastForward { .. } if opts.sync => {
             ("fast-forward", run_git(path, &["merge", "--ff-only", "--quiet", "@{u}"]).map(|_| ()).map_err(|e| e.to_string()))
         }
-        Verdict::Resync { .. } if opts.auto_sync => {
+        Verdict::Resync { .. } if opts.sync => {
             ("resync", run_git(path, &["reset", "--keep", "--quiet", "@{u}"]).map(|_| ()).map_err(|e| e.to_string()))
         }
         _ => return None,

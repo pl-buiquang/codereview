@@ -63,15 +63,14 @@ pub fn prune_worktrees(repo_id: i64, db: State<Db>) -> AppResult<String> {
     worktree::prune_worktrees(Path::new(&path))
 }
 
-/// Runs the worktree janitor over every repo with a local clone. Throttled
-/// (see `worktree_gc::run`) unless `force`; the git/gh work runs off the IPC thread.
+/// Scans every repo with a local clone (`remove`/`sync` = also apply those
+/// actions). Manual only; the git/gh work runs off the UI thread.
 #[tauri::command]
 pub async fn worktree_gc_run(
-    auto_remove: bool,
-    auto_sync: bool,
-    force: bool,
+    remove: bool,
+    sync: bool,
     db: State<'_, Db>,
-) -> AppResult<Option<GcReport>> {
+) -> AppResult<GcReport> {
     let (repos, chat_paths) = {
         let conn = db.0.lock().unwrap();
         let mut stmt = conn.prepare(
@@ -100,10 +99,10 @@ pub async fn worktree_gc_run(
             .collect::<rusqlite::Result<Vec<_>>>()?;
         (repos, chat_paths)
     };
-    let opts = GcOptions { auto_remove, auto_sync, force };
+    let opts = GcOptions { remove, sync };
     tauri::async_runtime::spawn_blocking(move || worktree_gc::run(&repos, chat_paths, opts))
         .await
-        .map_err(|e| AppError::Other(format!("worktree gc task failed: {e}")))
+        .map_err(|e| AppError::Other(format!("worktree gc task failed: {e}")))?
 }
 
 #[tauri::command]
@@ -116,6 +115,43 @@ pub fn worktree_gc_last() -> Option<GcReport> {
 pub fn worktree_sync(repo_id: i64, worktree_path: String, db: State<Db>) -> AppResult<String> {
     let path = resolve_checkout(&db, repo_id, Some(worktree_path))?;
     worktree_gc::sync_one(&path)
+}
+
+/// Opens a terminal (tmux window when available, like the board's Claude
+/// terminals) with a plain shell in one of the repo's registered worktrees.
+#[tauri::command]
+pub fn worktree_open_terminal(
+    repo_id: i64,
+    worktree_path: String,
+    host: crate::terminal::TerminalHost,
+    tmux_target: crate::terminal::TmuxTarget,
+    tmux_session: String,
+    db: State<Db>,
+) -> AppResult<()> {
+    let path = resolve_checkout(&db, repo_id, Some(worktree_path))?;
+    let repo_label = {
+        let conn = db.0.lock().unwrap();
+        conn.query_row(
+            "SELECT remote_owner, remote_name FROM repository WHERE id = ?1",
+            rusqlite::params![repo_id],
+            |r| Ok((r.get::<_, Option<String>>(0)?, r.get::<_, Option<String>>(1)?)),
+        )?
+    };
+    let repo = match repo_label {
+        (Some(o), Some(n)) => format!("{o}/{n}"),
+        _ => repo_local_path(&db, repo_id)?,
+    };
+    let window_name = worktree::current_branch(&path).unwrap_or_else(|| {
+        path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
+    });
+    crate::terminal::open_shell(
+        host,
+        tmux_target,
+        &tmux_session,
+        &repo,
+        &window_name,
+        &path.to_string_lossy(),
+    )
 }
 
 #[tauri::command]

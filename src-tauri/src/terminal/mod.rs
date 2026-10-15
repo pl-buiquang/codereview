@@ -60,6 +60,23 @@ pub fn open_session(
     tmux::open(host, &tmux::NewWindow { target, shared_session, repo, window_name, cwd, command: &command })
 }
 
+/// Like [`open_session`] but with just the user's login shell in `cwd`.
+pub fn open_shell(
+    host: TerminalHost,
+    target: TmuxTarget,
+    shared_session: &str,
+    repo: &str,
+    window_name: &str,
+    cwd: &str,
+) -> AppResult<()> {
+    let shell = user_shell();
+    if !tmux::available() {
+        return open_window(host, cwd, &[shell, "-l".into()]);
+    }
+    let command = format!("exec {} -l", shell_quote(&shell));
+    tmux::open(host, &tmux::NewWindow { target, shared_session, repo, window_name, cwd, command: &command })
+}
+
 /// Opens a new terminal window in `cwd` running `argv`, leaving an interactive shell behind.
 fn open_window(host: TerminalHost, cwd: &str, argv: &[String]) -> AppResult<()> {
     let typed = format!("cd {} && {}", shell_quote(cwd), command_line(argv));

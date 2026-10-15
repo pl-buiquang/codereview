@@ -32,9 +32,9 @@ Glossary of domain terms used in this app.
 
 ## Worktrees
 
-- **Worktree janitor** — scans every linked worktree of every repo with a local clone, at
-  startup and every 5 minutes (Settings → Worktrees). It removes a worktree only when it is
-  provably safe:
+- **Worktree janitor** — scans every linked worktree of every repo with a local clone, only
+  on demand from the Worktrees view. Scan is a dry run (it only fetches); Clean up applies the
+  actions. It removes a worktree only when it is provably safe:
   - it is not the main checkout, not locked, and not used by a live Claude session, a tmux pane,
     or a local-diff chat;
   - `git status` is clean;
@@ -42,8 +42,9 @@ Glossary of domain terms used in this app.
     (same commit, an ancestor, or patch-equal), or HEAD is already in trunk, or a detached HEAD
     is on a remote branch.
 
-  Removal never uses `--force`. The local branch is deleted only in the PR case. Clean
-  worktrees that are only behind origin get fast-forwarded. When origin was rewritten (for
+  Removal never uses `--force`. The local branch is deleted only in the PR case. Clean up
+  fast-forwards clean worktrees that are only behind origin. When origin was rewritten (for
   example GitHub rebased a stack) and the local tip had been pushed before (it appears in the
-  remote-tracking reflog), the janitor runs `git reset --keep @{u}`. Everything else is flagged
-  in the Worktrees view.
+  remote-tracking reflog), Clean up runs `git reset --keep @{u}`. Everything else is flagged
+  in the Worktrees view, where each row can also open a terminal (tmux window), VSCode, or be
+  removed.

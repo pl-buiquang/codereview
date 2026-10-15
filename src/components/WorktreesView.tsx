@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { toast } from "../lib/toast";
 import { confirmDialog } from "../lib/confirm";
 import { timeAgo } from "../lib/timeAgo";
-import { publishReport, summarizeActions, WORKTREE_GC_KEY } from "../lib/useWorktreeJanitor";
-import type { WorktreeGcReport, WorktreeRow, WorktreeVerdict } from "../lib/types";
+import { useSettingsStore } from "../lib/settings";
+import type { WorktreeGcAction, WorktreeGcReport, WorktreeRow, WorktreeVerdict } from "../lib/types";
 import { Icon } from "./icons";
 
 const VERDICT_LABEL: Record<WorktreeVerdict["kind"], string> = {
@@ -18,6 +18,32 @@ const VERDICT_LABEL: Record<WorktreeVerdict["kind"], string> = {
 };
 
 const VERDICT_ORDER: WorktreeVerdict["kind"][] = ["flag", "remove", "prune", "fast_forward", "resync", "keep"];
+
+const WORKTREE_GC_KEY = ["worktree-gc"] as const;
+
+function summarizeActions(actions: WorktreeGcAction[]): string {
+  const ok = actions.filter((a) => a.ok);
+  const failed = actions.length - ok.length;
+  const removed = ok.filter((a) => a.action.startsWith("remove") || a.action === "prune").length;
+  const synced = ok.length - removed;
+  const parts = [removed && `removed ${removed}`, synced && `synced ${synced}`, failed && `${failed} failed`].filter(Boolean);
+  return parts.length ? `Worktrees: ${parts.join(", ")}` : "Nothing to clean up";
+}
+
+function updateRow(
+  report: WorktreeGcReport | undefined,
+  path: string,
+  f: (row: WorktreeRow) => WorktreeRow | null,
+): WorktreeGcReport | undefined {
+  if (!report) return report;
+  return {
+    ...report,
+    repos: report.repos.map((r) => ({
+      ...r,
+      worktrees: r.worktrees.flatMap((w) => (w.path === path ? (f(w) ?? []) : [w])),
+    })),
+  };
+}
 
 function aheadBehind(row: WorktreeRow): string | null {
   const u = row.upstream;
@@ -36,38 +62,43 @@ export function WorktreesView() {
   });
 
   const scan = useMutation({
-    mutationFn: (apply: boolean) => api.worktreeGcRun(apply, apply, true),
+    mutationFn: (apply: boolean) => api.worktreeGcRun(apply, apply),
     onSuccess: (report, apply) => {
-      publishReport(queryClient, report, false);
-      if (apply) toast.success(summarizeActions(report?.actions ?? []) ?? "Nothing to clean up");
+      queryClient.setQueryData(WORKTREE_GC_KEY, report);
+      if (apply) toast.success(summarizeActions(report.actions));
     },
     onError: (e) => toast.error(`Worktree scan failed:\n${String(e)}`),
   });
 
   const report = reportQuery.data ?? null;
-  const loaded = reportQuery.isFetched;
-  useEffect(() => {
-    if (loaded && !report && !scan.isPending) scan.mutate(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loaded, report]);
-
   const rescan = () => scan.mutate(false);
+  const patchRow = (path: string, f: (row: WorktreeRow) => WorktreeRow | null) =>
+    queryClient.setQueryData<WorktreeGcReport>(WORKTREE_GC_KEY, (r) => updateRow(r, path, f));
 
   const remove = useMutation({
     mutationFn: ({ repoId, path }: { repoId: number; path: string }) => api.removeWorktree(repoId, path),
-    onSuccess: () => {
+    onSuccess: (_d, { path }) => {
       toast.success("Worktree removed");
-      rescan();
+      patchRow(path, () => null);
     },
     onError: (e) => toast.error(`Remove failed:\n${String(e)}`),
   });
   const sync = useMutation({
     mutationFn: ({ repoId, path }: { repoId: number; path: string }) => api.worktreeSync(repoId, path),
-    onSuccess: (msg) => {
+    onSuccess: (msg, { path }) => {
       toast.success(msg);
-      rescan();
+      patchRow(path, (w) => ({ ...w, verdict: { kind: "keep", reason: msg } }));
     },
     onError: (e) => toast.error(`Sync failed:\n${String(e)}`),
+  });
+
+  const defaultTerminal = useSettingsStore((s) => s.defaultTerminal);
+  const tmuxTarget = useSettingsStore((s) => s.tmuxTarget);
+  const tmuxSessionName = useSettingsStore((s) => s.tmuxSessionName);
+  const openTerminal = useMutation({
+    mutationFn: ({ repoId, path }: { repoId: number; path: string }) =>
+      api.worktreeOpenTerminal(repoId, path, defaultTerminal, tmuxTarget, tmuxSessionName),
+    onError: (e) => toast.error(`Could not open terminal:\n${String(e)}`),
   });
 
   const counts = useMemo(() => countVerdicts(report), [report]);
@@ -109,7 +140,9 @@ export function WorktreesView() {
           <p className="cr-sub">
             {report
               ? `${counts.total} worktrees · ${counts.flag} need a look · ${actionable} actionable · scanned ${timeAgo(report.ran_at)}`
-              : "Scanning…"}
+              : scan.isPending
+                ? "Scanning all repositories…"
+                : "Not scanned yet — press Scan to check every repository's worktrees"}
           </p>
         </div>
         <div className="worktrees-head-actions">
@@ -175,6 +208,16 @@ export function WorktreesView() {
                       onClick={() => sync.mutate({ repoId: repo.repo_id, path: w.path })}
                     >
                       Sync
+                    </button>
+                  )}
+                  {w.verdict.kind !== "prune" && (
+                    <button
+                      className="btn btn-sm btn-ghost"
+                      title="Open a terminal here"
+                      disabled={openTerminal.isPending}
+                      onClick={() => openTerminal.mutate({ repoId: repo.repo_id, path: w.path })}
+                    >
+                      <Icon name="terminal" size={13} />
                     </button>
                   )}
                   {w.verdict.kind !== "prune" && (

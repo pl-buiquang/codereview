@@ -241,11 +241,18 @@ export const api = {
   // Worktrees
   listWorktrees: (repoId: number) =>
     invoke<WorktreeInfo[]>("list_worktrees", { repoId }),
-  worktreeGcRun: (autoRemove: boolean, autoSync: boolean, force: boolean) =>
-    invoke<WorktreeGcReport | null>("worktree_gc_run", { autoRemove, autoSync, force }),
+  worktreeGcRun: (remove: boolean, sync: boolean) =>
+    invoke<WorktreeGcReport>("worktree_gc_run", { remove, sync }),
   worktreeGcLast: () => invoke<WorktreeGcReport | null>("worktree_gc_last"),
   worktreeSync: (repoId: number, worktreePath: string) =>
     invoke<string>("worktree_sync", { repoId, worktreePath }),
+  worktreeOpenTerminal: (
+    repoId: number,
+    worktreePath: string,
+    host: TerminalHost,
+    tmuxTarget: TmuxTarget,
+    tmuxSession: string,
+  ) => invoke<void>("worktree_open_terminal", { repoId, worktreePath, host, tmuxTarget, tmuxSession }),
   removeWorktree: (repoId: number, worktreePath: string) =>
     invoke<void>("remove_worktree", { repoId, worktreePath }),
   pruneWorktrees: (repoId: number) =>

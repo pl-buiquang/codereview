@@ -75,8 +75,6 @@ type PersistedSettings = Pick<
   | "tmuxTarget"
   | "tmuxSessionName"
   | "sessionHistoryDays"
-  | "worktreeAutoRemove"
-  | "worktreeAutoSync"
 >;
 
 const DEFAULTS: PersistedSettings = {
@@ -101,8 +99,6 @@ const DEFAULTS: PersistedSettings = {
   tmuxTarget: "current",
   tmuxSessionName: "codereview",
   sessionHistoryDays: 3,
-  worktreeAutoRemove: true,
-  worktreeAutoSync: true,
 };
 
 const PERSISTED_KEYS = Object.keys(DEFAULTS) as (keyof PersistedSettings)[];
@@ -147,10 +143,6 @@ interface SettingsState {
   tmuxSessionName: string;
   /** How many days of past Claude sessions the Sessions view lists. */
   sessionHistoryDays: number;
-  /** Let the worktree janitor remove provably-safe worktrees on its own. */
-  worktreeAutoRemove: boolean;
-  /** Let the worktree janitor fast-forward / resync clean worktrees behind origin. */
-  worktreeAutoSync: boolean;
   setDirection: (d: Direction) => void;
   setMode: (m: ThemeMode) => void;
   setDiffFontSize: (n: number) => void;
@@ -172,8 +164,6 @@ interface SettingsState {
   setTmuxTarget: (t: TmuxTarget) => void;
   setTmuxSessionName: (s: string) => void;
   setSessionHistoryDays: (days: number) => void;
-  setWorktreeAutoRemove: (b: boolean) => void;
-  setWorktreeAutoSync: (b: boolean) => void;
 }
 
 export const useSettingsStore = create<SettingsState>()(
@@ -201,12 +191,10 @@ export const useSettingsStore = create<SettingsState>()(
       setTmuxTarget: (tmuxTarget) => set({ tmuxTarget }),
       setTmuxSessionName: (tmuxSessionName) => set({ tmuxSessionName }),
       setSessionHistoryDays: (sessionHistoryDays) => set({ sessionHistoryDays }),
-      setWorktreeAutoRemove: (worktreeAutoRemove) => set({ worktreeAutoRemove }),
-      setWorktreeAutoSync: (worktreeAutoSync) => set({ worktreeAutoSync }),
     }),
     {
       name: "codereview-settings",
-      version: 9,
+      version: 10,
       partialize: (s) => pickPersisted(s),
       // v0 (flat: `theme`) and v1 (`themeMode` + theme slots) collapse the same
       // way: direction resets to "a", the old mode maps over (custom themes,
@@ -236,8 +224,6 @@ export const useSettingsStore = create<SettingsState>()(
           tmuxTarget: (p.tmuxTarget as TmuxTarget) ?? "current",
           tmuxSessionName: (p.tmuxSessionName as string) ?? "codereview",
           sessionHistoryDays: (p.sessionHistoryDays as number) ?? 3,
-          worktreeAutoRemove: (p.worktreeAutoRemove as boolean) ?? true,
-          worktreeAutoSync: (p.worktreeAutoSync as boolean) ?? true,
         } satisfies PersistedSettings;
       },
     },

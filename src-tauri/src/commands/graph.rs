@@ -98,14 +98,17 @@ pub fn commit_file_diff(
     graph::commit_file_diff(&checkout, &sha, &path, old_path.as_deref())
 }
 
+/// Async so `git status` on a large or busy checkout can't block the UI thread.
 #[tauri::command]
-pub fn worktree_status(
+pub async fn worktree_status(
     repo_id: i64,
     worktree_path: Option<String>,
-    db: State<Db>,
+    db: State<'_, Db>,
 ) -> AppResult<WipStatus> {
     let checkout = resolve_checkout(&db, repo_id, worktree_path)?;
-    graph::worktree_status(&checkout)
+    tauri::async_runtime::spawn_blocking(move || graph::worktree_status(&checkout))
+        .await
+        .map_err(|e| crate::error::AppError::Other(format!("worktree status task failed: {e}")))?
 }
 
 #[tauri::command]

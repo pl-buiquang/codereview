@@ -8,12 +8,14 @@ const worktreeGcLast = vi.fn();
 const worktreeGcRun = vi.fn();
 const worktreeSync = vi.fn();
 const removeWorktree = vi.fn();
+const worktreeOpenTerminal = vi.fn();
 vi.mock("../lib/api", () => ({
   api: {
     worktreeGcLast: () => worktreeGcLast(),
     worktreeGcRun: (...a: unknown[]) => worktreeGcRun(...a),
     worktreeSync: (...a: unknown[]) => worktreeSync(...a),
     removeWorktree: (...a: unknown[]) => removeWorktree(...a),
+    worktreeOpenTerminal: (...a: unknown[]) => worktreeOpenTerminal(...a),
     openInVscode: vi.fn(),
   },
 }));
@@ -92,22 +94,47 @@ describe("WorktreesView", () => {
     expect(screen.getByText(/3 worktrees · 1 need a look · 2 actionable/)).toBeInTheDocument();
   });
 
-  it("scans when there is no report yet", async () => {
+  it("does not scan on its own; Scan runs a dry run", async () => {
     worktreeGcLast.mockResolvedValue(null);
     renderView();
-    await waitFor(() => expect(worktreeGcRun).toHaveBeenCalledWith(false, false, true));
+    expect(await screen.findByText(/press Scan/)).toBeInTheDocument();
+    expect(worktreeGcRun).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: /Scan/ }));
+    await waitFor(() => expect(worktreeGcRun).toHaveBeenCalledWith(false, false));
     expect(await screen.findByText("~/wt/behind")).toBeInTheDocument();
+  });
+
+  it("drops a removed worktree without rescanning", async () => {
+    removeWorktree.mockResolvedValue(undefined);
+    renderView();
+    await screen.findByText("~/wt/dirty");
+    const row = screen.getByText("~/wt/dirty").closest(".worktrees-row") as HTMLElement;
+    await userEvent.click(row.querySelector('button[title="Remove worktree"]') as HTMLElement);
+    await waitFor(() => expect(screen.queryByText("~/wt/dirty")).not.toBeInTheDocument());
+    expect(removeWorktree).toHaveBeenCalledWith(3, "/wt/dirty");
+    expect(worktreeGcRun).not.toHaveBeenCalled();
   });
 
   it("runs a forced cleanup that applies removals and syncs", async () => {
     renderView();
     await userEvent.click(await screen.findByRole("button", { name: /Clean up/ }));
-    await waitFor(() => expect(worktreeGcRun).toHaveBeenCalledWith(true, true, true));
+    await waitFor(() => expect(worktreeGcRun).toHaveBeenCalledWith(true, true));
   });
 
   it("syncs a behind worktree", async () => {
     renderView();
     await userEvent.click(await screen.findByRole("button", { name: "Sync" }));
     await waitFor(() => expect(worktreeSync).toHaveBeenCalledWith(3, "/wt/behind"));
+  });
+
+  it("opens a terminal in the worktree with the configured host", async () => {
+    worktreeOpenTerminal.mockResolvedValue(undefined);
+    renderView();
+    await screen.findByText("~/wt/dirty");
+    const row = screen.getByText("~/wt/dirty").closest(".worktrees-row") as HTMLElement;
+    await userEvent.click(row.querySelector('button[title="Open a terminal here"]') as HTMLElement);
+    await waitFor(() =>
+      expect(worktreeOpenTerminal).toHaveBeenCalledWith(3, "/wt/dirty", "iterm2", "current", "codereview"),
+    );
   });
 });

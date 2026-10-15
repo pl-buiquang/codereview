@@ -230,10 +230,6 @@ function GeneralSection() {
   const setTmuxSessionName = useSettingsStore((s) => s.setTmuxSessionName);
   const sessionHistoryDays = useSettingsStore((s) => s.sessionHistoryDays);
   const setSessionHistoryDays = useSettingsStore((s) => s.setSessionHistoryDays);
-  const worktreeAutoRemove = useSettingsStore((s) => s.worktreeAutoRemove);
-  const setWorktreeAutoRemove = useSettingsStore((s) => s.setWorktreeAutoRemove);
-  const worktreeAutoSync = useSettingsStore((s) => s.worktreeAutoSync);
-  const setWorktreeAutoSync = useSettingsStore((s) => s.setWorktreeAutoSync);
   const setFileTestPatterns = useSettingsStore((s) => s.setFileTestPatterns);
   const setFileConfigPatterns = useSettingsStore((s) => s.setFileConfigPatterns);
 
@@ -412,26 +408,6 @@ function GeneralSection() {
               const n = Number(e.target.value);
               if (Number.isFinite(n)) setSessionHistoryDays(Math.max(0, Math.min(30, Math.round(n))));
             }}
-          />
-        </label>
-      </section>
-
-      <section className="settings-group">
-        <h3>Worktrees</h3>
-        <label className="settings-row">
-          <span>Automatically remove provably-safe worktrees</span>
-          <input
-            type="checkbox"
-            checked={worktreeAutoRemove}
-            onChange={(e) => setWorktreeAutoRemove(e.target.checked)}
-          />
-        </label>
-        <label className="settings-row">
-          <span>Automatically sync clean worktrees with origin</span>
-          <input
-            type="checkbox"
-            checked={worktreeAutoSync}
-            onChange={(e) => setWorktreeAutoSync(e.target.checked)}
           />
         </label>
       </section>
