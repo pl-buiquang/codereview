@@ -1259,28 +1259,6 @@ function ReviewHeader({
             </button>
           </>
         )}
-        <button
-          className="btn btn-danger"
-          disabled={pending}
-          title={
-            pending
-              ? "Discard the pending GitHub review before deleting this review"
-              : "Delete this review and all its comments"
-          }
-          onClick={async () => {
-            if (
-              await confirmDialog({
-                title: "Delete review",
-                message: "Delete this review and all its comments?",
-                confirmLabel: "Delete",
-                danger: true,
-              })
-            )
-              deleteReview.mutate();
-          }}
-        >
-          Delete
-        </button>
         <KebabMenu title="Review actions">
           {(close) => {
             const run = (fn: () => void) => () => {
@@ -1299,37 +1277,8 @@ function ReviewHeader({
                     : null;
             return (
               <>
-                <button role="menuitem" onClick={run(() => setShowExport(true))}>
-                  Export…
-                </button>
-                <hr className="btn-split-menu-separator" />
-                <button
-                  role="menuitem"
-                  disabled={noCloneReason != null || openingWorktree}
-                  title={noCloneReason ?? "Open the chat worktree in VSCode"}
-                  onClick={run(openChatWorktreeInVscode)}
-                >
-                  Open in VSCode
-                </button>
-                <button
-                  role="menuitem"
-                  disabled={noCloneReason != null || openShell.isPending}
-                  title={noCloneReason ?? "Open a shell in the chat worktree"}
-                  onClick={run(() => openShell.mutate())}
-                >
-                  Open in terminal
-                </button>
-                <AgentSessionItems
-                  sessions={agentSessionsQuery.data ?? []}
-                  busy={openAgent.isPending || focusSession.isPending}
-                  disabledReason={noCloneReason ?? (claudeAvailable ? null : "Claude CLI not found")}
-                  close={close}
-                  onFocus={(id) => focusSession.mutate(id)}
-                  onOpenNew={() => openAgent.mutate()}
-                />
                 {isPr && (
                   <>
-                    <hr className="btn-split-menu-separator" />
                     <button
                       role="menuitem"
                       disabled={!prOpen || togglePrDraft.isPending}
@@ -1354,8 +1303,62 @@ function ReviewHeader({
                     >
                       Update branch (rebase)
                     </button>
+                    <hr className="btn-split-menu-separator" />
                   </>
                 )}
+                <button
+                  role="menuitem"
+                  disabled={noCloneReason != null || openingWorktree}
+                  title={noCloneReason ?? "Open the chat worktree in VSCode"}
+                  onClick={run(openChatWorktreeInVscode)}
+                >
+                  Open in VSCode
+                </button>
+                <button
+                  role="menuitem"
+                  disabled={noCloneReason != null || openShell.isPending}
+                  title={noCloneReason ?? "Open a shell in the chat worktree"}
+                  onClick={run(() => openShell.mutate())}
+                >
+                  Open in terminal
+                </button>
+                <AgentSessionItems
+                  sessions={agentSessionsQuery.data ?? []}
+                  busy={openAgent.isPending || focusSession.isPending}
+                  disabledReason={noCloneReason ?? (claudeAvailable ? null : "Claude CLI not found")}
+                  close={close}
+                  onFocus={(id) => focusSession.mutate(id)}
+                  onOpenNew={() => openAgent.mutate()}
+                />
+                <hr className="btn-split-menu-separator" />
+                <button role="menuitem" onClick={run(() => setShowExport(true))}>
+                  Export…
+                </button>
+                <hr className="btn-split-menu-separator" />
+                <button
+                  role="menuitem"
+                  className="danger"
+                  disabled={pending}
+                  title={
+                    pending
+                      ? "Discard the pending GitHub review before deleting this review"
+                      : "Delete this review and all its comments"
+                  }
+                  onClick={async () => {
+                    close();
+                    if (
+                      await confirmDialog({
+                        title: "Delete review",
+                        message: "Delete this review and all its comments?",
+                        confirmLabel: "Delete",
+                        danger: true,
+                      })
+                    )
+                      deleteReview.mutate();
+                  }}
+                >
+                  Delete review
+                </button>
               </>
             );
           }}

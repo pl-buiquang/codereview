@@ -4636,6 +4636,11 @@ input[type="range"] {
   right: auto;
   min-width: 160px;
 }
+.board-card-title-link,
+.review-pr-link {
+  -webkit-user-select: none;
+  user-select: none;
+}
 .board-card-title-link {
   display: -webkit-box;
   -webkit-line-clamp: 2;
