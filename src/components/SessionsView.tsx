@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
+import { useRefetchOnActivate } from "../lib/useRefetchOnActivate";
 import { toast } from "../lib/toast";
 import { confirmDialog } from "../lib/confirm";
 import { timeAgo } from "../lib/timeAgo";
@@ -51,16 +52,10 @@ export function SessionsView() {
     queryKey: ["claude-sessions", historyDays, summaryDir],
     queryFn: () => api.listClaudeSessions(historyDays, summaryDir),
     // The home tab stays mounted (hidden) behind review tabs.
-    refetchInterval: homeActive ? 2_000 : false,
+    refetchInterval: homeActive ? 3_000 : false,
     refetchOnWindowFocus: true,
   });
-  // Coming back from another tab doesn't remount this view, so refetch then.
-  const refetchSessions = sessionsQuery.refetch;
-  const wasActive = useRef(homeActive);
-  useEffect(() => {
-    if (homeActive && !wasActive.current) void refetchSessions();
-    wasActive.current = homeActive;
-  }, [homeActive, refetchSessions]);
+  useRefetchOnActivate(homeActive, sessionsQuery.refetch);
   const cardSessions = sessionsQuery.data?.card_sessions;
 
   const focus = useMutation({

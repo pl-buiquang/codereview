@@ -8,6 +8,7 @@ import { parseRepoBasePaths, useSettingsStore } from "../lib/settings";
 import { useSyncNow, useSyncScope } from "../lib/sync";
 import { findRepoByFullName } from "../lib/repoLabel";
 import { useUIStore } from "../store";
+import { useRefetchOnActivate } from "../lib/useRefetchOnActivate";
 import type { BoardCard as BoardCardT, BoardLane, BoardMetaKind, ClaudeSession } from "../lib/types";
 import { BoardCard, cardTags, ciStatus, MERGE_FACET_LABEL, mergeFacets, prStatus, prStatusLabel } from "./BoardCard";
 import { RepoName } from "./RepoName";
@@ -79,7 +80,9 @@ export function BoardView() {
     queryKey: ["claude-sessions", 0],
     queryFn: () => api.listClaudeSessions(0, ""),
     refetchInterval: homeActive ? 15_000 : false,
+    refetchOnWindowFocus: true,
   });
+  useRefetchOnActivate(homeActive, liveSessionsQuery.refetch);
   const focusableByCard = useMemo(() => {
     const byId = new Map((liveSessionsQuery.data?.sessions ?? []).map((s) => [s.session_id, s]));
     const out = new Map<string, ClaudeSession[]>();
