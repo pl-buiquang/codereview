@@ -49,7 +49,7 @@ export function SessionsView() {
   const sessionsQuery = useQuery({
     queryKey: ["claude-sessions", historyDays, summaryDir],
     queryFn: () => api.listClaudeSessions(historyDays, summaryDir),
-    refetchInterval: 5_000,
+    refetchInterval: 3_000,
   });
   const cardSessions = sessionsQuery.data?.card_sessions;
 
