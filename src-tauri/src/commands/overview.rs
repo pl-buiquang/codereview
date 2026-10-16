@@ -204,7 +204,7 @@ pub async fn board_overview_generate(model: Option<String>, db: State<'_, Db>) -
             extra_dirs: &[],
             session: None,
             env: Vec::new(),
-            extra_args: &["--bare", "--tools", "", "--effort", "low"],
+            extra_args: &["--tools", "", "--effort", "low"],
             replace_system_prompt: true,
             prompt: &snapshot,
         })
