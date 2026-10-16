@@ -10,6 +10,7 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { parseDiff } from "react-diff-view";
 import { api } from "../lib/api";
+import { reviewDiffQuery } from "../lib/reviewQueries";
 import { countChanges, fileDisplayPath } from "../lib/diff";
 import {
   FILE_CATEGORIES,
@@ -167,11 +168,7 @@ export function FileJumpList({
   });
   const detail = detailQuery.data;
 
-  const diffQuery = useQuery({
-    queryKey: ["review-diff", reviewId, detail?.target.id, detail?.target.head_sha],
-    enabled: detail != null,
-    queryFn: () => api.reviewDiff(reviewId),
-  });
+  const diffQuery = useQuery(reviewDiffQuery(reviewId, detail?.target));
   const diff = diffQuery.data;
 
   const files = useMemo(() => (diff ? parseDiff(diff) : []), [diff]);

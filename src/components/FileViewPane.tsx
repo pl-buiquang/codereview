@@ -8,6 +8,7 @@ import {
   type ViewType,
 } from "react-diff-view";
 import { api } from "../lib/api";
+import { headFileSourceQuery, reviewDiffQuery } from "../lib/reviewQueries";
 import {
   buildFullFileFile,
   changeKeyOf,
@@ -60,17 +61,11 @@ export function FileViewPane({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  const sourceQuery = useQuery({
-    queryKey: ["file-source", reviewId, filePath, "RIGHT"],
-    queryFn: () => api.fileSource(reviewId, filePath, "RIGHT"),
-  });
+  const sourceQuery = useQuery(headFileSourceQuery(reviewId, filePath, detail.target.head_sha));
 
-  // The diff is already cached from the main view; re-running the query just
-  // returns it. We only need it to know which head lines are added/modified.
-  const diffQuery = useQuery({
-    queryKey: ["review-diff", reviewId, detail.target.id, detail.target.head_sha],
-    queryFn: () => api.reviewDiff(reviewId),
-  });
+  // The diff is already cached from the main view. We only need it to know
+  // which head lines are added/modified.
+  const diffQuery = useQuery(reviewDiffQuery(reviewId, detail.target));
 
   const diffFile = useMemo(() => {
     if (diffQuery.data == null) return null;

@@ -21,6 +21,7 @@ import {
   type ViewType,
 } from "react-diff-view";
 import { api, pickSavePath } from "../lib/api";
+import { reviewDiffQuery } from "../lib/reviewQueries";
 import { toast } from "../lib/toast";
 import { confirmDialog } from "../lib/confirm";
 import {
@@ -163,16 +164,7 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
     queryFn: () => api.getReview(reviewId),
   });
 
-  const diffQuery = useQuery({
-    queryKey: [
-      "review-diff",
-      reviewId,
-      detailQuery.data?.target.id,
-      detailQuery.data?.target.head_sha,
-    ],
-    enabled: detailQuery.data != null,
-    queryFn: () => api.reviewDiff(reviewId),
-  });
+  const diffQuery = useQuery(reviewDiffQuery(reviewId, detailQuery.data?.target));
 
   useEffect(() => {
     if (detailQuery.data) {
