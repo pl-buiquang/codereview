@@ -59,8 +59,9 @@ pub(crate) fn migrate(conn: &Connection) -> AppResult<()> {
     while version < MIGRATIONS.len() {
         conn.execute_batch(MIGRATIONS[version])?;
         version += 1;
+        // Per script, so a later failure can't leave applied scripts unrecorded.
+        conn.pragma_update(None, "user_version", version as i64)?;
     }
-    conn.pragma_update(None, "user_version", version as i64)?;
     Ok(())
 }
 
