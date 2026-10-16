@@ -1259,6 +1259,28 @@ function ReviewHeader({
             </button>
           </>
         )}
+        <button
+          className="btn btn-danger"
+          disabled={pending}
+          title={
+            pending
+              ? "Discard the pending GitHub review before deleting this review"
+              : "Delete this review and all its comments"
+          }
+          onClick={async () => {
+            if (
+              await confirmDialog({
+                title: "Delete review",
+                message: "Delete this review and all its comments?",
+                confirmLabel: "Delete",
+                danger: true,
+              })
+            )
+              deleteReview.mutate();
+          }}
+        >
+          Delete
+        </button>
         <KebabMenu title="Review actions">
           {(close) => {
             const run = (fn: () => void) => () => {
@@ -1338,28 +1360,6 @@ function ReviewHeader({
             );
           }}
         </KebabMenu>
-        <button
-          className="btn btn-danger"
-          disabled={pending}
-          title={
-            pending
-              ? "Discard the pending GitHub review before deleting this review"
-              : "Delete this review and all its comments"
-          }
-          onClick={async () => {
-            if (
-              await confirmDialog({
-                title: "Delete review",
-                message: "Delete this review and all its comments?",
-                confirmLabel: "Delete",
-                danger: true,
-              })
-            )
-              deleteReview.mutate();
-          }}
-        >
-          Delete
-        </button>
       </div>
 
       {showExport && (
