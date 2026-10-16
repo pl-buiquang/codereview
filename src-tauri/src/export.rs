@@ -265,6 +265,7 @@ mod tests {
             repo_id: 1,
             kind: "github_pr".into(),
             github_pr_number: Some(42),
+            gh_pr_id: None,
             title: "Improve thing".into(),
             base_ref: "main".into(),
             head_ref: "feature".into(),

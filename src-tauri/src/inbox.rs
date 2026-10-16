@@ -1,7 +1,7 @@
-//! GitHub "inbox" fetch pipeline, ported from the gh-dashboard app. Pure-ish
-//! helpers (no DB, no Tauri): they fan out `gh api graphql` / `gh api` searches,
-//! merge the results by node id, and shape them into rows for the `items` table.
-//! The DB orchestration lives in `commands/inbox.rs`.
+//! GitHub "inbox" discovery pipeline, ported from the gh-dashboard app. Pure-ish
+//! helpers (no DB, no Tauri): they fan out the attention searches, merge the
+//! results by node id, and fetch the files facet. Results land in the mirror;
+//! the DB orchestration lives in `commands/inbox.rs`.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -11,65 +11,19 @@ use serde::Deserialize;
 use serde_json::json;
 
 use crate::error::AppResult;
-use crate::gh;
+use crate::gh::{self, ChangedFile};
+use crate::mirror::{self, Node};
 
 const PER_SEARCH_LIMIT: i64 = 50;
 const TEAM_LIMIT: usize = 20;
 const ENRICH_CONCURRENCY: usize = 8;
 const SEARCH_CONCURRENCY: usize = 8;
-const REFETCH_BATCH_SIZE: usize = 50;
 /// Cached viewer (login + teams) is considered fresh for 24h.
 pub const VIEWER_TTL_MS: i64 = 24 * 60 * 60 * 1000;
 
 // ---------------------------------------------------------------------------
-// GraphQL queries (ported verbatim from gh-dashboard)
+// GraphQL queries (viewer + teams; searches use the mirror fragment)
 // ---------------------------------------------------------------------------
-
-const SEARCH_QUERY: &str = r#"
-query Search($q: String!, $first: Int!) {
-  search(query: $q, type: ISSUE, first: $first) {
-    nodes {
-      __typename
-      ... on Issue {
-        id number title url bodyText state updatedAt
-        author { login avatarUrl }
-        repository { nameWithOwner }
-        comments(last: 1) { nodes { bodyText author { login } } }
-      }
-      ... on PullRequest {
-        id number title url bodyText state isDraft merged updatedAt
-        author { login avatarUrl }
-        repository { nameWithOwner }
-        changedFiles additions deletions reviewDecision
-        comments(last: 1) { nodes { bodyText author { login } } }
-        commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
-      }
-    }
-  }
-}
-"#;
-
-const REFETCH_NODES_QUERY: &str = r#"
-query RefetchNodes($ids: [ID!]!) {
-  nodes(ids: $ids) {
-    __typename
-    ... on Issue {
-      id number title url bodyText state updatedAt
-      author { login avatarUrl }
-      repository { nameWithOwner }
-      comments(last: 1) { nodes { bodyText author { login } } }
-    }
-    ... on PullRequest {
-      id number title url bodyText state isDraft merged updatedAt
-      author { login avatarUrl }
-      repository { nameWithOwner }
-      changedFiles additions deletions reviewDecision
-      comments(last: 1) { nodes { bodyText author { login } } }
-      commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
-    }
-  }
-}
-"#;
 
 const VIEWER_QUERY: &str = r#"
 query Viewer {
@@ -94,112 +48,6 @@ query OrgTeams($org: String!, $login: String!, $cursor: String) {
 // ---------------------------------------------------------------------------
 // GraphQL response shapes
 // ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SearchNode {
-    #[serde(rename = "__typename")]
-    pub typename: String,
-    pub id: String,
-    pub number: i64,
-    pub title: String,
-    pub url: String,
-    #[serde(default)]
-    pub body_text: Option<String>,
-    #[serde(default)]
-    pub state: Option<String>,
-    #[serde(default)]
-    pub is_draft: bool,
-    #[serde(default)]
-    pub merged: bool,
-    pub updated_at: String,
-    #[serde(default)]
-    pub author: Option<Author>,
-    pub repository: RepoRef,
-    #[serde(default)]
-    pub changed_files: Option<i64>,
-    #[serde(default)]
-    pub additions: Option<i64>,
-    #[serde(default)]
-    pub deletions: Option<i64>,
-    #[serde(default)]
-    pub review_decision: Option<String>,
-    #[serde(default)]
-    pub comments: CommentConn,
-    #[serde(default)]
-    pub commits: Option<CommitConn>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Author {
-    pub login: Option<String>,
-    pub avatar_url: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RepoRef {
-    pub name_with_owner: String,
-}
-
-#[derive(Debug, Clone, Default, Deserialize)]
-pub struct CommentConn {
-    #[serde(default)]
-    pub nodes: Vec<CommentNode>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CommentNode {
-    #[serde(default)]
-    pub body_text: Option<String>,
-    #[serde(default)]
-    pub author: Option<AuthorLogin>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct AuthorLogin {
-    pub login: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct CommitConn {
-    #[serde(default)]
-    pub nodes: Vec<CommitNode>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct CommitNode {
-    pub commit: CommitInner,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CommitInner {
-    #[serde(default)]
-    pub status_check_rollup: Option<StatusRollup>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct StatusRollup {
-    pub state: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct SearchData {
-    search: SearchConn,
-}
-
-#[derive(Debug, Deserialize)]
-struct SearchConn {
-    nodes: Vec<SearchNode>,
-}
-
-#[derive(Debug, Deserialize)]
-struct RefetchData {
-    nodes: Vec<Option<SearchNode>>,
-}
 
 #[derive(Debug, Deserialize)]
 struct ViewerData {
@@ -263,7 +111,7 @@ pub struct Reason {
 
 #[derive(Debug, Clone)]
 pub struct ReasonedNode {
-    pub node: SearchNode,
+    pub node: Node,
     pub reasons: Vec<Reason>,
 }
 
@@ -273,36 +121,12 @@ pub struct ViewerInfo {
     pub team_slugs: Vec<String>,
 }
 
-/// Flattened row shape written to the `items` table (the upsert binds these).
-#[derive(Debug, Clone)]
-pub struct ItemInput {
-    pub id: String,
-    pub typ: String,
-    pub number: i64,
-    pub repo: String,
-    pub title: String,
-    pub url: String,
-    pub author_login: Option<String>,
-    pub author_avatar: Option<String>,
-    pub state: Option<String>,
-    pub is_draft: bool,
-    pub body: Option<String>,
-    pub latest_comment: Option<String>,
-    pub latest_actor: Option<String>,
-    pub updated_at: String,
-    pub files_changed: Option<i64>,
-    pub additions: Option<i64>,
-    pub deletions: Option<i64>,
-    pub top_files_json: Option<String>,
-    pub ci_state: Option<String>,
-    pub review_decision: Option<String>,
-}
-
-/// A PR queued for top-changed-files enrichment.
+/// A PR queued for the files facet, fetched at `head_sha`.
 pub struct EnrichTarget {
     pub id: String,
     pub repo: String,
     pub number: i64,
+    pub head_sha: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -346,72 +170,6 @@ where
 // ---------------------------------------------------------------------------
 // Pipeline steps
 // ---------------------------------------------------------------------------
-
-/// Collapse internal whitespace and truncate to `max` chars (matching the TS
-/// `snippet`). Returns `None` for empty/missing input.
-pub fn snippet(s: Option<&str>, max: usize) -> Option<String> {
-    let s = s?;
-    if s.is_empty() {
-        return None;
-    }
-    let collapsed: String = s.split_whitespace().collect::<Vec<_>>().join(" ");
-    if collapsed.is_empty() {
-        return None;
-    }
-    let chars: Vec<char> = collapsed.chars().collect();
-    if chars.len() > max {
-        let head: String = chars[..max.saturating_sub(1)].iter().collect();
-        Some(format!("{head}…"))
-    } else {
-        Some(collapsed)
-    }
-}
-
-/// Project a GraphQL node into the flat `items` row shape.
-pub fn node_to_input(node: &SearchNode, top_files_json: Option<String>) -> ItemInput {
-    let is_pr = node.typename == "PullRequest";
-    let typ = if is_pr { "pr" } else { "issue" };
-    let last_comment = node.comments.nodes.first();
-    let state = if is_pr && node.merged {
-        Some("merged".to_string())
-    } else {
-        node.state.as_ref().map(|s| s.to_lowercase())
-    };
-    let ci_state = if is_pr {
-        node.commits
-            .as_ref()
-            .and_then(|c| c.nodes.first())
-            .and_then(|n| n.commit.status_check_rollup.as_ref())
-            .and_then(|r| r.state.as_ref())
-            .map(|s| s.to_lowercase())
-    } else {
-        None
-    };
-    ItemInput {
-        id: node.id.clone(),
-        typ: typ.to_string(),
-        number: node.number,
-        repo: node.repository.name_with_owner.clone(),
-        title: node.title.clone(),
-        url: node.url.clone(),
-        author_login: node.author.as_ref().and_then(|a| a.login.clone()),
-        author_avatar: node.author.as_ref().and_then(|a| a.avatar_url.clone()),
-        state,
-        is_draft: node.is_draft,
-        body: snippet(node.body_text.as_deref(), 280),
-        latest_comment: snippet(last_comment.and_then(|c| c.body_text.as_deref()), 280),
-        latest_actor: last_comment
-            .and_then(|c| c.author.as_ref())
-            .and_then(|a| a.login.clone()),
-        updated_at: node.updated_at.clone(),
-        files_changed: node.changed_files,
-        additions: node.additions,
-        deletions: node.deletions,
-        top_files_json,
-        ci_state,
-        review_decision: node.review_decision.clone(),
-    }
-}
 
 /// Merge per-search buckets by node id, unioning reasons and keeping the most
 /// recently updated copy of each node. Output order follows first appearance.
@@ -488,13 +246,9 @@ fn build_search_tasks(viewer: &ViewerInfo, scope: Option<&str>) -> Vec<SearchTas
 }
 
 fn run_search(task: &SearchTask) -> Vec<ReasonedNode> {
-    let vars = json!({ "q": task.query, "first": PER_SEARCH_LIMIT });
-    match gh::graphql::<SearchData>(SEARCH_QUERY, vars) {
-        Ok(data) => data
-            .search
-            .nodes
+    match mirror::fetch::search(&task.query, PER_SEARCH_LIMIT) {
+        Ok(nodes) => nodes
             .into_iter()
-            .filter(|n| n.typename == "Issue" || n.typename == "PullRequest")
             .map(|node| ReasonedNode {
                 node,
                 reasons: vec![Reason {
@@ -553,59 +307,25 @@ pub fn fetch_viewer() -> AppResult<ViewerInfo> {
     Ok(ViewerInfo { login, team_slugs })
 }
 
-/// Top-5-by-change changed files for a PR, as a JSON array string. `None` on any
-/// failure (degrades gracefully under rate limits rather than aborting a refresh).
-pub fn enrich_top_files(repo: &str, number: i64) -> Option<String> {
+/// A PR's changed files (first 100). `None` on any failure, so a rate limit
+/// degrades the preview rather than aborting the sync.
+pub fn fetch_files(repo: &str, number: i64) -> Option<Vec<ChangedFile>> {
     let (owner, name) = repo.split_once('/')?;
     match gh::pr_files(owner, name, number) {
-        Ok(mut files) => {
-            files.sort_by(|a, b| b.changes.cmp(&a.changes));
-            files.truncate(5);
-            let top: Vec<_> = files
-                .iter()
-                .map(|f| {
-                    json!({
-                        "path": f.filename,
-                        "additions": f.additions,
-                        "deletions": f.deletions,
-                        "changes": f.changes,
-                    })
-                })
-                .collect();
-            Some(serde_json::Value::Array(top).to_string())
-        }
+        Ok(files) => Some(files),
         Err(e) => {
-            crate::logging::warn(&format!("[inbox.enrich] top-files failed for {repo}#{number}: {e}"));
+            crate::logging::warn(&format!("[inbox.enrich] files failed for {repo}#{number}: {e}"));
             None
         }
     }
 }
 
-/// Enrich many PRs concurrently. Returns `(node_id, top_files_json?)` per input.
-pub fn enrich_all(prs: Vec<EnrichTarget>) -> Vec<(String, Option<String>)> {
-    concurrent_map(prs, ENRICH_CONCURRENCY, |p| {
-        (p.id.clone(), enrich_top_files(&p.repo, p.number))
-    })
-}
-
-/// Refetch nodes by id (used to detect items that have closed/merged since they
-/// were last in the inbox). Batched; missing/inaccessible ids simply don't appear.
-pub fn refetch_nodes(ids: &[String]) -> HashMap<String, SearchNode> {
-    let mut result = HashMap::new();
-    for chunk in ids.chunks(REFETCH_BATCH_SIZE) {
-        let vars = json!({ "ids": chunk });
-        match gh::graphql::<RefetchData>(REFETCH_NODES_QUERY, vars) {
-            Ok(data) => {
-                for node in data.nodes.into_iter().flatten() {
-                    if node.typename == "Issue" || node.typename == "PullRequest" {
-                        result.insert(node.id.clone(), node);
-                    }
-                }
-            }
-            Err(e) => crate::logging::warn(&format!("[inbox.refetch] batch failed: {e}")),
-        }
-    }
-    result
+/// Fetch the files facet of many PRs concurrently.
+pub fn enrich_all(prs: Vec<EnrichTarget>) -> Vec<(EnrichTarget, Option<Vec<ChangedFile>>)> {
+    let files = concurrent_map(prs.iter().collect(), ENRICH_CONCURRENCY, |p: &&EnrichTarget| {
+        fetch_files(&p.repo, p.number)
+    });
+    prs.into_iter().zip(files).collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -616,29 +336,13 @@ pub fn refetch_nodes(ids: &[String]) -> HashMap<String, SearchNode> {
 mod tests {
     use super::*;
 
-    fn node(id: &str, typename: &str, updated_at: &str) -> SearchNode {
-        SearchNode {
-            typename: typename.to_string(),
-            id: id.to_string(),
-            number: 1,
-            title: "t".into(),
-            url: "u".into(),
-            body_text: None,
-            state: Some("OPEN".into()),
-            is_draft: false,
-            merged: false,
-            updated_at: updated_at.to_string(),
-            author: None,
-            repository: RepoRef {
-                name_with_owner: "acme/widget".into(),
-            },
-            changed_files: None,
-            additions: None,
-            deletions: None,
-            review_decision: None,
-            comments: CommentConn::default(),
-            commits: None,
-        }
+    fn node(id: &str, typename: &str, updated_at: &str) -> Node {
+        serde_json::from_value(json!({
+            "__typename": typename, "id": id, "number": 1, "title": "t", "url": "u",
+            "state": "OPEN", "updatedAt": updated_at,
+            "repository": { "nameWithOwner": "acme/widget" }
+        }))
+        .unwrap()
     }
 
     fn reasoned(id: &str, typename: &str, updated_at: &str, reason: &str) -> ReasonedNode {
@@ -649,16 +353,6 @@ mod tests {
                 detail: String::new(),
             }],
         }
-    }
-
-    #[test]
-    fn snippet_collapses_and_truncates() {
-        assert_eq!(snippet(None, 10), None);
-        assert_eq!(snippet(Some(""), 10), None);
-        assert_eq!(snippet(Some("  \n\t  "), 10), None);
-        assert_eq!(snippet(Some("a   b\n c"), 10).as_deref(), Some("a b c"));
-        // Truncation keeps max-1 chars + ellipsis.
-        assert_eq!(snippet(Some("abcdefghij"), 5).as_deref(), Some("abcd…"));
     }
 
     #[test]
@@ -682,36 +376,5 @@ mod tests {
         reasons.sort_unstable();
         assert_eq!(reasons, vec!["author", "mention"]);
         assert_eq!(merged[1].node.id, "Y");
-    }
-
-    #[test]
-    fn node_to_input_maps_pr_fields() {
-        let mut n = node("X", "PullRequest", "2024-02-01T00:00:00Z");
-        n.merged = true;
-        n.changed_files = Some(3);
-        n.commits = Some(CommitConn {
-            nodes: vec![CommitNode {
-                commit: CommitInner {
-                    status_check_rollup: Some(StatusRollup {
-                        state: Some("SUCCESS".into()),
-                    }),
-                },
-            }],
-        });
-        let input = node_to_input(&n, Some("[]".into()));
-        assert_eq!(input.typ, "pr");
-        assert_eq!(input.state.as_deref(), Some("merged"));
-        assert_eq!(input.ci_state.as_deref(), Some("success"));
-        assert_eq!(input.files_changed, Some(3));
-        assert_eq!(input.top_files_json.as_deref(), Some("[]"));
-    }
-
-    #[test]
-    fn node_to_input_issue_has_no_ci_or_merge() {
-        let n = node("Y", "Issue", "2024-02-01T00:00:00Z");
-        let input = node_to_input(&n, None);
-        assert_eq!(input.typ, "issue");
-        assert_eq!(input.state.as_deref(), Some("open"));
-        assert_eq!(input.ci_state, None);
     }
 }

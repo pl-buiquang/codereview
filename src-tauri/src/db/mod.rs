@@ -43,6 +43,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("migrations/0024_worktree_gc_report.sql"),
     include_str!("migrations/0025_repo_sync.sql"),
     include_str!("migrations/0026_review_pin.sql"),
+    include_str!("migrations/0027_gh_mirror.sql"),
 ];
 
 pub fn open(path: &Path) -> AppResult<Connection> {
@@ -243,6 +244,77 @@ mod tests {
             .unwrap();
         let both = (Some("base1".to_string()), Some("head1".to_string()));
         assert_eq!(pins, vec![both.clone(), both, (None, None)]);
+    }
+
+    #[test]
+    fn migration_0027_moves_facts_into_the_mirror_and_keeps_user_state() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        for script in &MIGRATIONS[..26] {
+            conn.execute_batch(script).unwrap();
+        }
+        conn.pragma_update(None, "user_version", 26_i64).unwrap();
+        conn.execute_batch(
+            "INSERT INTO repository (local_path, remote_owner, remote_name, added_at)
+                 VALUES ('/r', 'acme', 'widget', 'added');
+             INSERT INTO target (repo_id, kind, github_pr_number, title, base_ref, head_ref, base_sha, head_sha, created_at)
+                 VALUES (1, 'github_pr', 7, 'old title', 'main', 'feat', 'b', 'h', 'now');
+             INSERT INTO review (target_id, body, status, base_sha, head_sha, created_at, updated_at)
+                 VALUES (1, '', 'draft', 'b', 'h', 'now', 'now');
+             INSERT INTO items (id, type, number, repo, title, url, author_login, author_avatar, state,
+                                body, updated_at, files_changed, top_files_json, ci_state,
+                                untracked_at, engaged_at, first_seen_at, last_refreshed)
+                 VALUES ('PR_7', 'pr', 7, 'Acme/Widget', 'inbox title', 'u7', 'octo', 'https://a/o.png', 'open',
+                         'snippet', '2024-01-01', 3, '[{\"path\":\"a.rs\",\"additions\":2,\"deletions\":1,\"changes\":3}]',
+                         'failure', NULL, 'engaged', 'seen', 'r1'),
+                        ('I_9', 'issue', 9, 'other/repo', 'foreign issue', 'u9', NULL, NULL, 'open',
+                         NULL, '2024-01-01', NULL, NULL, NULL, 'archived', NULL, 'seen', 'r1');
+             INSERT INTO item_reasons (item_id, reason, detail) VALUES ('PR_7', 'direct_review', '');
+             INSERT INTO board_card (id, type, repo, number, url, title, author_login, state, head_ref,
+                                     has_reviews, pending_threads, updated_at, tracked_at, ci_status,
+                                     mergeable, auto_merge)
+                 VALUES ('PR_7', 'pr', 'acme/widget', 7, 'u7', 'board title', 'octo', 'open', 'feat',
+                         1, 2, '2024-02-01', 'tracked', 'SUCCESS', 'MERGEABLE', 'SQUASH');
+             INSERT INTO board_meta (card_id, kind, value, created_at) VALUES ('PR_7', 'note', 'n', 'now');",
+        )
+        .unwrap();
+
+        migrate(&conn).unwrap();
+
+        let q = |sql: &str| -> String {
+            conn.query_row(&format!("SELECT CAST(({sql}) AS TEXT)"), [], |r| r.get::<_, Option<String>>(0))
+                .unwrap()
+                .unwrap_or_default()
+        };
+        assert_eq!(q("SELECT title FROM gh_pr WHERE node_id = 'PR_7'"), "board title", "newer updated_at wins");
+        assert_eq!(q("SELECT body_snippet FROM gh_pr WHERE node_id = 'PR_7'"), "snippet");
+        assert_eq!(q("SELECT head_ref || ' ' || base_ref FROM gh_pr WHERE node_id = 'PR_7'"), "feat main");
+        assert_eq!(q("SELECT ci_state || ' ' || auto_merge_method FROM gh_pr_status WHERE pr_id = 'PR_7'"), "SUCCESS SQUASH");
+        assert_eq!(q("SELECT pending_count FROM gh_pr_threads WHERE pr_id = 'PR_7'"), "2");
+        assert_eq!(q("SELECT filename FROM gh_pr_file WHERE pr_id = 'PR_7'"), "a.rs");
+        assert_eq!(q("SELECT avatar_url FROM gh_user WHERE login = 'octo'"), "https://a/o.png");
+        assert_eq!(q("SELECT engaged_at FROM inbox_entry WHERE id = 'PR_7'"), "engaged");
+        assert_eq!(q("SELECT untracked_at FROM inbox_entry WHERE id = 'I_9'"), "archived");
+        assert_eq!(q("SELECT reason FROM item_reasons WHERE item_id = 'PR_7'"), "direct_review");
+        assert_eq!(q("SELECT tracked_at FROM board_card WHERE id = 'PR_7'"), "tracked");
+        assert_eq!(q("SELECT value FROM board_meta WHERE card_id = 'PR_7'"), "n");
+        assert_eq!(q("SELECT gh_pr_id FROM target WHERE id = 1"), "PR_7");
+        assert_eq!(q("SELECT head_sha FROM review WHERE id = 1"), "h", "pins untouched");
+        assert_eq!(q("SELECT registered_at FROM repository WHERE id = 1"), "added");
+        assert_eq!(
+            q("SELECT COALESCE(registered_at, 'auto') FROM repository WHERE remote_owner = 'other'"),
+            "auto",
+            "a repo only the inbox knew is auto-added"
+        );
+        assert_eq!(q("SELECT title FROM gh_issue WHERE node_id = 'I_9'"), "foreign issue");
+        assert_eq!(q("SELECT COUNT(*) FROM sqlite_master WHERE name = 'items'"), "0");
+        let violations: i64 = conn
+            .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(violations, 0);
+        conn.execute("DELETE FROM review", []).unwrap();
+        conn.execute("DELETE FROM board_card WHERE id = 'PR_7'", []).unwrap();
+        assert_eq!(q("SELECT COUNT(*) FROM board_meta"), "0", "board_meta still cascades from the rebuilt card");
     }
 
     #[test]

@@ -110,10 +110,11 @@ struct PrCard {
 }
 
 fn load_pr_cards(conn: &Connection) -> AppResult<(Vec<PrCard>, SessionIdsByCard)> {
-    let mut stmt = conn.prepare(
-        "SELECT id, repo, number, head_ref FROM board_card
+    let mut stmt = conn.prepare(&format!(
+        "SELECT id, repo, number, head_ref FROM {}
          WHERE type = 'pr' AND archived_at IS NULL AND discarded_at IS NULL",
-    )?;
+        crate::commands::board::CARD_VIEW
+    ))?;
     let cards = stmt
         .query_map([], |r| Ok(PrCard { id: r.get(0)?, repo: r.get(1)?, number: r.get(2)?, head_ref: r.get(3)? }))?
         .collect::<Result<Vec<_>, _>>()?;
@@ -215,7 +216,10 @@ fn review_session_ctx(conn: &Connection, review_id: i64) -> AppResult<ReviewSess
     let card = match (&detail.remote_owner, &detail.remote_name, detail.target.github_pr_number) {
         (Some(owner), Some(name), Some(number)) if detail.target.kind == "github_pr" => conn
             .query_row(
-                "SELECT id, repo, number, head_ref FROM board_card WHERE repo = ?1 AND number = ?2",
+                &format!(
+                    "SELECT id, repo, number, head_ref FROM {} WHERE repo = ?1 COLLATE NOCASE AND number = ?2",
+                    crate::commands::board::CARD_VIEW
+                ),
                 params![format!("{owner}/{name}"), number],
                 |r| Ok(PrCard { id: r.get(0)?, repo: r.get(1)?, number: r.get(2)?, head_ref: r.get(3)? }),
             )

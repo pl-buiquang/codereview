@@ -137,6 +137,9 @@ export const api = {
   listPrs: (repoId: number) => invoke<PrSummary[]>("list_prs", { repoId }),
   prMeta: (owner: string, name: string, number: number) =>
     invoke<PrMeta>("pr_meta", { owner, name, number }),
+  /** The PR header as last mirrored (instant, possibly stale). */
+  mirrorPrMeta: (owner: string, name: string, number: number) =>
+    invoke<PrMeta | null>("mirror_pr_meta", { owner, name, number }),
   setPrDraft: (owner: string, name: string, number: number, draft: boolean) =>
     invoke<void>("set_pr_draft", { owner, name, number, draft }),
   updatePrBranch: (owner: string, name: string, number: number, rebase: boolean) =>
@@ -145,6 +148,9 @@ export const api = {
     invoke<void>("set_pr_auto_merge", { owner, name, number, enable }),
   prReviewThreads: (owner: string, name: string, number: number) =>
     invoke<PrThread[]>("pr_review_threads", { owner, name, number }),
+  /** A PR's review threads as last mirrored (instant, possibly stale). */
+  mirrorPrThreads: (owner: string, name: string, number: number) =>
+    invoke<PrThread[] | null>("mirror_pr_threads", { owner, name, number }),
   replyToThread: (owner: string, name: string, number: number, commentId: number, body: string) =>
     invoke<number>("reply_to_thread", { owner, name, number, commentId, body }),
   setPrThreadResolved: (threadId: string, resolved: boolean) =>

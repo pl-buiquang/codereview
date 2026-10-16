@@ -1,22 +1,23 @@
 //! Tauri commands for the kanban board. Owns the DB and orchestrates the
 //! pure pipeline in `crate::board`, following the same split-lock discipline
 //! as `commands/inbox.rs`: `gh` network I/O runs unlocked, writes happen in
-//! short locked sections.
+//! short locked sections. GitHub facts live in the mirror; `board_card` only
+//! records what is tracked.
 
-use std::collections::{HashMap, HashSet};
-use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::collections::HashMap;
+use std::time::Instant;
 
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
 use tauri::State;
 
-use crate::board::{self, BoardNode, ThreadMode};
+use crate::board;
 use crate::db::models::{BoardCardRow, BoardCardWithExtras, BoardMetaRow, Review};
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
 use crate::gh;
+use crate::mirror::{self, Node};
 
 fn now() -> String {
     Utc::now().to_rfc3339()
@@ -26,94 +27,81 @@ fn now() -> String {
 // card read/write helpers
 // ---------------------------------------------------------------------------
 
-/// Insert or refresh a card from a fetched GitHub node. `clear_discard` is set
-/// only by explicit tracking actions (Track / Link PR) — routine refreshes
-/// never resurrect a discarded card, since discarded cards are excluded from
-/// the refresh's refetch batch in the first place.
-fn upsert_card(conn: &Connection, node: &BoardNode, viewer_login: &str, ts: &str, clear_discard: bool) -> AppResult<()> {
+/// A board card joined with its mirrored facts, in the `BoardCardRow` shape.
+/// A card whose facts aren't mirrored yet renders as a placeholder until the
+/// next sync refetches it by id.
+pub(crate) const CARD_VIEW: &str = "(
+    SELECT b.id, b.type,
+        COALESCE(r.remote_owner || '/' || r.remote_name, '') AS repo,
+        COALESCE(p.number, i.number, 0) AS number,
+        COALESCE(p.url, i.url, '') AS url,
+        COALESCE(p.title, i.title, '(not synced yet)') AS title,
+        COALESCE(p.author_login, i.author_login) AS author_login,
+        COALESCE(p.state, i.state) AS state,
+        COALESCE(p.is_draft, 0) AS is_draft,
+        p.review_decision,
+        COALESCE(p.review_count, 0) > 0 AS has_reviews,
+        p.head_ref,
+        COALESCE(COALESCE(p.author_login, i.author_login)
+                 = (SELECT value FROM meta WHERE key = 'viewer_login'), 0) AS is_mine,
+        th.pending_count AS pending_threads,
+        COALESCE(p.gh_updated_at, i.gh_updated_at, b.tracked_at) AS updated_at,
+        COALESCE(p.closed_at, i.closed_at) AS closed_at,
+        b.tracked_at, b.discarded_at, b.archived_at,
+        COALESCE(p.fetched_at, i.fetched_at) AS last_refreshed,
+        s.ci_state AS ci_status, s.mergeable, s.merge_state_status,
+        s.stack_number, s.stack_position,
+        COALESCE(s.viewer_can_update_branch, 0) AS viewer_can_update_branch,
+        s.auto_merge_method AS auto_merge
+    FROM board_card b
+    LEFT JOIN gh_pr p ON p.node_id = b.id
+    LEFT JOIN gh_issue i ON i.node_id = b.id
+    LEFT JOIN repository r ON r.id = COALESCE(p.repo_id, i.repo_id)
+    LEFT JOIN gh_pr_status s ON s.pr_id = b.id
+    LEFT JOIN gh_pr_threads th ON th.pr_id = b.id
+)";
+
+/// Mirror a fetched node and track it as a card. `clear_discard` is set only
+/// by explicit tracking actions (Track / Link PR) — routine refreshes never
+/// resurrect a discarded card.
+fn track_node(conn: &Connection, node: &Node, ts: &str, clear_discard: bool) -> AppResult<()> {
+    mirror::store::upsert_node(conn, node, ts)?;
     let typ = if node.is_pr() { "pr" } else { "issue" };
-    let repo = node.repo().unwrap_or_default();
-    let author_login = node.author.as_ref().and_then(|a| a.login.clone());
-    let is_mine = author_login.as_deref() == Some(viewer_login);
-    let has_reviews = node.reviews.as_ref().map(|r| r.total_count > 0).unwrap_or(false);
-    let ci_status = node.ci_status();
-    let extra = if clear_discard { ", discarded_at = NULL" } else { "" };
-    let sql = format!(
-        "INSERT INTO board_card (
-            id, type, repo, number, url, title, author_login, state, is_draft,
-            review_decision, has_reviews, head_ref, is_mine, updated_at, closed_at,
-            tracked_at, last_refreshed, ci_status, mergeable,
-            merge_state_status, stack_number, stack_position, viewer_can_update_branch, auto_merge
-         ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?16,?17,?18,?19,?20,?21,?22,?23)
-         ON CONFLICT(id) DO UPDATE SET
-            type = excluded.type, repo = excluded.repo, number = excluded.number,
-            url = excluded.url, title = excluded.title, author_login = excluded.author_login,
-            state = excluded.state, is_draft = excluded.is_draft,
-            review_decision = excluded.review_decision, has_reviews = excluded.has_reviews,
-            head_ref = excluded.head_ref, is_mine = excluded.is_mine,
-            updated_at = excluded.updated_at, closed_at = excluded.closed_at,
-            last_refreshed = excluded.last_refreshed,
-            ci_status = excluded.ci_status, mergeable = excluded.mergeable,
-            merge_state_status = excluded.merge_state_status,
-            stack_number = excluded.stack_number, stack_position = excluded.stack_position,
-            viewer_can_update_branch = excluded.viewer_can_update_branch,
-            auto_merge = excluded.auto_merge{extra}"
-    );
+    let on_conflict = if clear_discard { "DO UPDATE SET discarded_at = NULL" } else { "DO NOTHING" };
     conn.execute(
-        &sql,
-        params![
-            node.id,
-            typ,
-            repo,
-            node.number,
-            node.url,
-            node.title,
-            author_login,
-            node.normalized_state(),
-            node.is_draft as i64,
-            node.review_decision,
-            has_reviews as i64,
-            node.head_ref_name,
-            is_mine as i64,
-            node.updated_at,
-            node.closed_at,
-            ts,
-            ci_status,
-            node.mergeable,
-            node.merge_state_status,
-            node.stack.as_ref().map(|s| s.number),
-            node.stack_entry.as_ref().map(|s| s.position),
-            node.viewer_can_update_branch as i64,
-            node.auto_merge(),
-        ],
+        &format!("INSERT INTO board_card (id, type, tracked_at) VALUES (?1, ?2, ?3) ON CONFLICT(id) {on_conflict}"),
+        params![node.id, typ, ts],
     )?;
     Ok(())
 }
 
 fn registered_repo(conn: &Connection, owner: &str, name: &str) -> AppResult<bool> {
     let count: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM repository WHERE remote_owner = ?1 AND remote_name = ?2",
+        "SELECT COUNT(*) FROM repository
+         WHERE remote_owner = ?1 COLLATE NOCASE AND remote_name = ?2 COLLATE NOCASE
+           AND registered_at IS NOT NULL",
         params![owner, name],
         |r| r.get(0),
     )?;
     Ok(count > 0)
 }
 
+fn card_row(conn: &Connection, card_id: &str) -> AppResult<BoardCardRow> {
+    conn.query_row(&format!("SELECT * FROM {CARD_VIEW} WHERE id = ?1"), params![card_id], BoardCardRow::from_row)
+        .map_err(AppError::from)
+}
+
 /// `(owner, name, number)` for a tracked PR card, erroring on an issue card.
 fn pr_card_coords(db: &Db, card_id: &str) -> AppResult<(String, String, i64)> {
-    let conn = db.0.lock().unwrap();
-    let (repo, number, typ): (String, i64, String) = conn.query_row(
-        "SELECT repo, number, type FROM board_card WHERE id = ?1",
-        params![card_id],
-        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-    )?;
-    if typ != "pr" {
+    let card = card_row(&db.0.lock().unwrap(), card_id)?;
+    if card.typ != "pr" {
         return Err(AppError::Other("only PR cards have a review".into()));
     }
-    let (owner, name) = repo
+    let (owner, name) = card
+        .repo
         .split_once('/')
-        .ok_or_else(|| AppError::Other(format!("malformed repo label: {repo}")))?;
-    Ok((owner.to_string(), name.to_string(), number))
+        .ok_or_else(|| AppError::Other("this card isn't synced yet — refresh the board".into()))?;
+    Ok((owner.to_string(), name.to_string(), card.number))
 }
 
 // ---------------------------------------------------------------------------
@@ -128,12 +116,14 @@ pub struct BoardRefreshResult {
     pub duration_ms: i64,
 }
 
+const AUTHORED_SEARCH_LIMIT: i64 = 50;
+
 /// Refresh the board: auto-track new open PRs of mine in registered repos,
 /// refetch every tracked card's state, reconcile issue<->PR auto-links, and
 /// recompute each open PR's pending-threads comment badge.
 pub fn board_refresh_impl(db: &Db) -> AppResult<BoardRefreshResult> {
     let start = Instant::now();
-    let viewer = crate::commands::inbox::cached_or_fetch_viewer(db)?;
+    crate::commands::inbox::cached_or_fetch_viewer(db)?;
 
     let tracked_ids: Vec<String> = {
         let conn = db.0.lock().unwrap();
@@ -142,55 +132,48 @@ pub fn board_refresh_impl(db: &Db) -> AppResult<BoardRefreshResult> {
         let rows = stmt.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
         rows
     };
-    let tracked_set: HashSet<&str> = tracked_ids.iter().map(String::as_str).collect();
-    let prev_updated_at: HashMap<String, String> = {
-        let conn = db.0.lock().unwrap();
-        let mut stmt = conn.prepare("SELECT id, updated_at FROM board_card WHERE type = 'pr'")?;
-        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<_>>()?;
-        rows
-    };
 
-    let authored = board::search_authored_open_prs().unwrap_or_else(|e| {
-        crate::logging::warn(&format!("[board.refresh] authored search failed: {e}"));
-        Vec::new()
-    });
+    let authored = mirror::fetch::search("is:pr is:open author:@me", AUTHORED_SEARCH_LIMIT)
+        .unwrap_or_else(|e| {
+            crate::logging::warn(&format!("[board.refresh] authored search failed: {e}"));
+            Vec::new()
+        });
     let mut auto_tracked = 0i64;
     let ts = now();
+    let untracked_authored: Vec<&Node> = authored.iter().filter(|n| !tracked_ids.contains(&n.id)).collect();
     {
         let conn = db.0.lock().unwrap();
         for node in &authored {
-            if tracked_set.contains(node.id.as_str()) {
-                continue;
-            }
-            let Some(repo) = node.repo() else { continue };
-            let Some((owner, name)) = repo.split_once('/') else { continue };
+            mirror::store::upsert_node(&conn, node, &ts)?;
+        }
+        for node in &untracked_authored {
+            let Some((owner, name)) = node.owner_name() else { continue };
             if registered_repo(&conn, owner, name)? {
-                upsert_card(&conn, node, &viewer.login, &ts, false)?;
+                track_node(&conn, node, &ts, false)?;
                 auto_tracked += 1;
             }
         }
     }
 
-    let refetched = board::refetch_nodes(&tracked_ids);
+    let refetched: HashMap<String, Node> = mirror::fetch::refetch(&tracked_ids)
+        .into_iter()
+        .filter_map(|(id, node)| Some((id, node?)))
+        .collect();
     let ts = now();
     {
         let conn = db.0.lock().unwrap();
         for node in refetched.values() {
-            upsert_card(&conn, node, &viewer.login, &ts, false)?;
+            mirror::store::upsert_node(&conn, node, &ts)?;
         }
     }
 
-    reconcile_links(db, refetched.values().chain(authored.iter().filter(|n| !tracked_set.contains(n.id.as_str()))))?;
-    refresh_pending_threads(db, &viewer.login, &prev_updated_at)?;
+    reconcile_links(db, refetched.values().chain(untracked_authored.iter().copied()))?;
+    refresh_pending_threads(db)?;
 
-    let card_count: i64 = {
-        let conn = db.0.lock().unwrap();
-        conn.query_row("SELECT COUNT(*) FROM board_card WHERE archived_at IS NULL", [], |r| r.get(0))?
-    };
-    {
-        let conn = db.0.lock().unwrap();
-        crate::commands::inbox::set_meta(&conn, "board_last_refresh_at", &now())?;
-    }
+    let conn = db.0.lock().unwrap();
+    mirror::store::gc(&conn)?;
+    let card_count: i64 = conn.query_row("SELECT COUNT(*) FROM board_card WHERE archived_at IS NULL", [], |r| r.get(0))?;
+    crate::commands::inbox::set_meta(&conn, "board_last_refresh_at", &now())?;
 
     Ok(BoardRefreshResult {
         card_count,
@@ -215,15 +198,15 @@ pub fn board_last_refresh_at(db: State<Db>) -> AppResult<Option<String>> {
 /// convention within the same repo. Only links against issue cards that are
 /// themselves tracked (not discarded/archived) — an untracked issue never
 /// gets a card just because a PR closes it.
-fn reconcile_links<'a>(db: &Db, prs: impl Iterator<Item = &'a BoardNode>) -> AppResult<()> {
+fn reconcile_links<'a>(db: &Db, prs: impl Iterator<Item = &'a Node>) -> AppResult<()> {
     let conn = db.0.lock().unwrap();
     conn.execute("DELETE FROM board_link WHERE source = 'auto'", [])?;
 
     let issues: Vec<(String, String, i64)> = {
-        let mut stmt = conn.prepare(
-            "SELECT id, repo, number FROM board_card
-             WHERE type = 'issue' AND discarded_at IS NULL AND archived_at IS NULL",
-        )?;
+        let mut stmt = conn.prepare(&format!(
+            "SELECT id, repo, number FROM {CARD_VIEW}
+             WHERE type = 'issue' AND discarded_at IS NULL AND archived_at IS NULL"
+        ))?;
         let rows = stmt
             .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
             .collect::<rusqlite::Result<_>>()?;
@@ -231,8 +214,6 @@ fn reconcile_links<'a>(db: &Db, prs: impl Iterator<Item = &'a BoardNode>) -> App
     };
 
     for pr in prs.filter(|n| n.is_pr()) {
-        let pr_repo = pr.repo();
-
         if let Some(refs) = &pr.closing_issues_references {
             for closing in &refs.nodes {
                 if issues.iter().any(|(id, _, _)| id == &closing.id) {
@@ -244,9 +225,9 @@ fn reconcile_links<'a>(db: &Db, prs: impl Iterator<Item = &'a BoardNode>) -> App
             }
         }
 
-        if let (Some(head_ref), Some(pr_repo)) = (&pr.head_ref_name, &pr_repo) {
+        if let (Some(head_ref), Some(pr_repo)) = (&pr.head_ref_name, pr.repo()) {
             for (issue_id, issue_repo, issue_number) in &issues {
-                if issue_repo == pr_repo && board::branch_matches_issue(head_ref, *issue_number) {
+                if issue_repo.eq_ignore_ascii_case(pr_repo) && board::branch_matches_issue(head_ref, *issue_number) {
                     conn.execute(
                         "INSERT OR IGNORE INTO board_link (issue_id, pr_id, source) VALUES (?1, ?2, 'auto')",
                         params![issue_id, pr.id],
@@ -260,91 +241,70 @@ fn reconcile_links<'a>(db: &Db, prs: impl Iterator<Item = &'a BoardNode>) -> App
 
 /// Resolving or unresolving a thread does not bump the PR's `updatedAt`, so an
 /// unchanged PR still gets its threads refetched once this old.
-const THREADS_MAX_AGE: Duration = Duration::from_secs(15 * 60);
+const THREADS_MAX_AGE: chrono::Duration = chrono::Duration::minutes(15);
 
-/// When each card's threads were last fetched, by this process.
-static THREADS_FETCHED_AT: Mutex<Option<HashMap<String, Instant>>> = Mutex::new(None);
-
+/// Whether a PR's mirrored threads are stale: never counted, fetched before
+/// the PR's current `updatedAt`, or older than [`THREADS_MAX_AGE`].
 fn threads_need_fetch(
-    prev_updated_at: Option<&str>,
+    stored_updated_at: Option<&str>,
     updated_at: &str,
     has_count: bool,
-    fetched_at: Option<Instant>,
-    now: Instant,
+    fetched_at: Option<&str>,
+    now: DateTime<Utc>,
 ) -> bool {
+    let fetched = fetched_at.and_then(|t| DateTime::parse_from_rfc3339(t).ok());
     !has_count
-        || prev_updated_at != Some(updated_at)
-        || fetched_at.is_none_or(|t| now.duration_since(t) >= THREADS_MAX_AGE)
+        || stored_updated_at != Some(updated_at)
+        || fetched.is_none_or(|t| now.signed_duration_since(t) >= THREADS_MAX_AGE)
 }
 
 /// For every open, tracked PR card whose threads may have changed, fetch its
-/// review threads and recompute the pending-threads comment badge
-/// (concurrently, like the inbox's top-files enrichment).
-fn refresh_pending_threads(
-    db: &Db,
-    viewer_login: &str,
-    prev_updated_at: &HashMap<String, String>,
-) -> AppResult<()> {
+/// review threads into the mirror, which recomputes the pending-threads badge
+/// (concurrently, like the inbox's files facet).
+fn refresh_pending_threads(db: &Db) -> AppResult<()> {
     struct ThreadJob {
         id: String,
         owner: String,
         name: String,
         number: i64,
-        is_mine: bool,
     }
 
-    let started = Instant::now();
-    let fetched_at = THREADS_FETCHED_AT.lock().unwrap().clone().unwrap_or_default();
+    let started = Utc::now();
     let jobs: Vec<ThreadJob> = {
         let conn = db.0.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT id, repo, number, is_mine, updated_at, pending_threads IS NOT NULL FROM board_card
-             WHERE type = 'pr' AND archived_at IS NULL AND discarded_at IS NULL
-               AND state NOT IN ('merged', 'closed')",
-        )?;
-        let rows: Vec<(String, String, i64, i64, String, bool)> = stmt
-            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)))?
+        let mut stmt = conn.prepare(&format!(
+            "SELECT c.id, c.repo, c.number, c.updated_at, th.gh_updated_at,
+                    th.pending_count IS NOT NULL, th.fetched_at
+             FROM {CARD_VIEW} c LEFT JOIN gh_pr_threads th ON th.pr_id = c.id
+             WHERE c.type = 'pr' AND c.archived_at IS NULL AND c.discarded_at IS NULL
+               AND c.state NOT IN ('merged', 'closed')"
+        ))?;
+        type Row = (String, String, i64, String, Option<String>, bool, Option<String>);
+        let rows: Vec<Row> = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?)))?
             .collect::<rusqlite::Result<_>>()?;
         rows.into_iter()
-            .filter(|(id, _, _, _, updated_at, has_count)| {
-                threads_need_fetch(
-                    prev_updated_at.get(id).map(String::as_str),
-                    updated_at,
-                    *has_count,
-                    fetched_at.get(id).copied(),
-                    started,
-                )
+            .filter(|(_, _, _, updated_at, stored, has_count, fetched_at)| {
+                threads_need_fetch(stored.as_deref(), updated_at, *has_count, fetched_at.as_deref(), started)
             })
-            .filter_map(|(id, repo, number, is_mine, _, _)| {
+            .filter_map(|(id, repo, number, ..)| {
                 let (owner, name) = repo.split_once('/')?;
-                Some(ThreadJob {
-                    id,
-                    owner: owner.to_string(),
-                    name: name.to_string(),
-                    number,
-                    is_mine: is_mine != 0,
-                })
+                Some(ThreadJob { id, owner: owner.to_string(), name: name.to_string(), number })
             })
             .collect()
     };
 
     let results = crate::inbox::concurrent_map(jobs, 8, |job| {
-        let threads = gh::pr_review_threads(&job.owner, &job.name, job.number).ok();
-        let mode = if job.is_mine { ThreadMode::Mine } else { ThreadMode::Reviewing };
-        let count = threads.map(|t| board::pending_threads(&t, viewer_login, mode));
-        (job.id.clone(), count)
+        (job.id.clone(), gh::pr_review_threads(&job.owner, &job.name, job.number).ok())
     });
 
     let conn = db.0.lock().unwrap();
-    let mut fetched = THREADS_FETCHED_AT.lock().unwrap();
-    let fetched = fetched.get_or_insert_with(HashMap::new);
-    for (id, count) in results {
-        let Some(count) = count else { continue };
-        conn.execute(
-            "UPDATE board_card SET pending_threads = ?1 WHERE id = ?2",
-            params![count as i64, id],
-        )?;
-        fetched.insert(id, started);
+    let ts = started.to_rfc3339();
+    for (id, threads) in results {
+        // A failed fetch keeps the previous count rather than writing 0.
+        if let Some(threads) = threads {
+            mirror::store::upsert_threads(&conn, &id, &threads, &ts)?;
+        }
     }
     Ok(())
 }
@@ -355,11 +315,11 @@ fn refresh_pending_threads(
 
 pub fn board_list_impl(conn: &Connection) -> AppResult<Vec<BoardCardWithExtras>> {
     let cards: Vec<BoardCardRow> = {
-        let mut stmt = conn.prepare("SELECT * FROM board_card WHERE archived_at IS NULL ORDER BY updated_at DESC")?;
+        let mut stmt =
+            conn.prepare(&format!("SELECT * FROM {CARD_VIEW} WHERE archived_at IS NULL ORDER BY updated_at DESC"))?;
         let rows = stmt.query_map([], BoardCardRow::from_row)?.collect::<rusqlite::Result<_>>()?;
         rows
     };
-
     let mut links_by_issue: HashMap<String, Vec<String>> = HashMap::new();
     let mut links_by_pr: HashMap<String, Vec<String>> = HashMap::new();
     {
@@ -475,9 +435,7 @@ pub fn board_show_impl(conn: &Connection, card_id: &str) -> AppResult<BoardCardW
     if let Some(found) = board_list_impl(conn)?.into_iter().find(|c| c.card.id == card_id) {
         return Ok(found);
     }
-    let card = conn
-        .query_row("SELECT * FROM board_card WHERE id = ?1", params![card_id], BoardCardRow::from_row)
-        .map_err(AppError::from)?;
+    let card = card_row(conn, card_id)?;
     let meta = board_meta_list_impl(conn, card_id)?;
     let linked_issue_ids: Vec<String> = {
         let mut stmt = conn.prepare("SELECT issue_id FROM board_link WHERE pr_id = ?1")?;
@@ -531,7 +489,7 @@ pub fn board_card_for_pr(owner: String, name: String, number: i64, db: State<Db>
 pub fn find_card_id(conn: &Connection, owner: &str, name: &str, number: i64) -> AppResult<Option<String>> {
     let repo = format!("{owner}/{name}");
     conn.query_row(
-        "SELECT id FROM board_card WHERE repo = ?1 AND number = ?2",
+        &format!("SELECT id FROM {CARD_VIEW} WHERE repo = ?1 COLLATE NOCASE AND number = ?2"),
         params![repo, number],
         |r| r.get(0),
     )
@@ -544,11 +502,10 @@ pub fn find_card_id(conn: &Connection, owner: &str, name: &str, number: i64) -> 
 /// (and its metadata).
 pub fn board_track_impl(db: &Db, reference: &str) -> AppResult<String> {
     let (owner, name, number) = board::parse_ref(reference)?;
-    let node = board::resolve_node(&owner, &name, number)?;
-    let viewer = crate::commands::inbox::cached_or_fetch_viewer(db)?;
-    let ts = now();
+    let node = mirror::fetch::resolve(&owner, &name, number)?;
+    crate::commands::inbox::cached_or_fetch_viewer(db)?;
     let conn = db.0.lock().unwrap();
-    upsert_card(&conn, &node, &viewer.login, &ts, true)?;
+    track_node(&conn, &node, &now(), true)?;
     Ok(node.id)
 }
 
@@ -575,10 +532,9 @@ fn run_pr_action(db: &Db, card_id: &str, args: &[&str]) -> AppResult<()> {
     full.extend_from_slice(&args[1..]);
     crate::gh::run_gh(&ctx, &full)?;
 
-    let node = board::resolve_node(&owner, &name, number)?;
-    let viewer = crate::commands::inbox::cached_or_fetch_viewer(db)?;
+    let node = mirror::fetch::resolve_pr(&owner, &name, number)?;
     let conn = db.0.lock().unwrap();
-    upsert_card(&conn, &node, &viewer.login, &now(), false)
+    mirror::store::upsert_node(&conn, &node, &now())
 }
 
 #[tauri::command]
@@ -604,7 +560,10 @@ pub async fn board_pr_update_branch(card_id: String, rebase: bool, db: State<'_,
 fn tracked_card_id(conn: &Connection, owner: &str, name: &str, number: i64) -> AppResult<Option<String>> {
     let repo = format!("{owner}/{name}");
     conn.query_row(
-        "SELECT id FROM board_card WHERE repo = ?1 AND number = ?2 AND discarded_at IS NULL AND archived_at IS NULL",
+        &format!(
+            "SELECT id FROM {CARD_VIEW}
+             WHERE repo = ?1 COLLATE NOCASE AND number = ?2 AND discarded_at IS NULL AND archived_at IS NULL"
+        ),
         params![repo, number],
         |r| r.get(0),
     )
@@ -624,14 +583,10 @@ pub fn board_track_pr_impl(db: &Db, reference: &str) -> AppResult<String> {
             return Err(AppError::Other(format!("{owner}/{name}#{number} is already tracked on the board")));
         }
     }
-    let node = board::resolve_node(&owner, &name, number)?;
-    if !node.is_pr() {
-        return Err(AppError::Other(format!("{owner}/{name}#{number} is not a pull request")));
-    }
-    let viewer = crate::commands::inbox::cached_or_fetch_viewer(db)?;
-    let ts = now();
+    let node = mirror::fetch::resolve_pr(&owner, &name, number)?;
+    crate::commands::inbox::cached_or_fetch_viewer(db)?;
     let conn = db.0.lock().unwrap();
-    upsert_card(&conn, &node, &viewer.login, &ts, true)?;
+    track_node(&conn, &node, &now(), true)?;
     conn.execute("UPDATE board_card SET archived_at = NULL WHERE id = ?1", params![node.id])?;
     Ok(node.id)
 }
@@ -662,10 +617,7 @@ pub fn resolve_or_track_card_id(db: &Db, reference: &str, track: bool) -> AppRes
 /// Soft-discard a card: hidden from the board, metadata kept, re-trackable.
 /// Rejected for your own PRs, which are always on the board.
 pub fn board_discard_impl(conn: &Connection, card_id: &str) -> AppResult<()> {
-    let is_mine: i64 = conn
-        .query_row("SELECT is_mine FROM board_card WHERE id = ?1", params![card_id], |r| r.get(0))
-        .map_err(AppError::from)?;
-    if is_mine != 0 {
+    if card_row(conn, card_id)?.is_mine {
         return Err(AppError::Other("your own PRs can't be discarded".into()));
     }
     conn.execute("UPDATE board_card SET discarded_at = ?1 WHERE id = ?2", params![now(), card_id])?;
@@ -682,14 +634,13 @@ pub fn board_discard(card_id: String, db: State<Db>) -> AppResult<()> {
 /// the PR if it wasn't already.
 pub fn board_link_pr_impl(db: &Db, issue_id: &str, pr_reference: &str) -> AppResult<()> {
     let (owner, name, number) = board::parse_ref(pr_reference)?;
-    let node = board::resolve_node(&owner, &name, number)?;
+    let node = mirror::fetch::resolve(&owner, &name, number)?;
     if !node.is_pr() {
         return Err(AppError::Other("that reference is an issue, not a PR".into()));
     }
-    let viewer = crate::commands::inbox::cached_or_fetch_viewer(db)?;
-    let ts = now();
+    crate::commands::inbox::cached_or_fetch_viewer(db)?;
     let conn = db.0.lock().unwrap();
-    upsert_card(&conn, &node, &viewer.login, &ts, true)?;
+    track_node(&conn, &node, &now(), true)?;
     conn.execute(
         "INSERT OR IGNORE INTO board_link (issue_id, pr_id, source) VALUES (?1, ?2, 'manual')",
         params![issue_id, node.id],
@@ -726,9 +677,12 @@ pub fn board_unlink(issue_id: String, pr_id: String, db: State<Db>) -> AppResult
 pub fn board_archive_done_impl(conn: &Connection, older_than_days: i64) -> AppResult<usize> {
     let cutoff = (Utc::now() - chrono::Duration::days(older_than_days)).to_rfc3339();
     let n = conn.execute(
-        "UPDATE board_card SET archived_at = ?1
-         WHERE archived_at IS NULL AND type = 'pr' AND state IN ('merged', 'closed')
-           AND closed_at IS NOT NULL AND closed_at < ?2",
+        &format!(
+            "UPDATE board_card SET archived_at = ?1 WHERE id IN (
+                SELECT id FROM {CARD_VIEW}
+                WHERE archived_at IS NULL AND type = 'pr' AND state IN ('merged', 'closed')
+                  AND closed_at IS NOT NULL AND closed_at < ?2)"
+        ),
         params![now(), cutoff],
     )?;
     Ok(n)
@@ -963,24 +917,57 @@ mod tests {
 
     #[test]
     fn threads_skipped_only_when_unchanged_counted_and_recent() {
-        let now = Instant::now();
-        let recent = Some(now);
+        let now = Utc::now();
+        let recent = now.to_rfc3339();
+        let recent = Some(recent.as_str());
         assert!(!threads_need_fetch(Some("t1"), "t1", true, recent, now));
         assert!(threads_need_fetch(Some("t0"), "t1", true, recent, now), "PR updated");
         assert!(threads_need_fetch(None, "t1", true, recent, now), "newly tracked");
         assert!(threads_need_fetch(Some("t1"), "t1", false, recent, now), "never counted");
-        assert!(threads_need_fetch(Some("t1"), "t1", true, None, now), "not fetched by this process");
+        assert!(threads_need_fetch(Some("t1"), "t1", true, None, now), "never fetched");
         let later = now + THREADS_MAX_AGE;
         assert!(threads_need_fetch(Some("t1"), "t1", true, recent, later), "resolutions don't bump updatedAt");
     }
 
     fn seed_card(conn: &Connection, id: &str, repo: &str, number: i64, typ: &str) {
+        let (owner, name) = repo.split_once('/').unwrap();
+        let repo_id = mirror::store::ensure_repo(conn, owner, name, "now").unwrap();
+        let table = if typ == "pr" { "gh_pr" } else { "gh_issue" };
         conn.execute(
-            "INSERT INTO board_card (id, type, repo, number, url, title, updated_at, tracked_at)
-             VALUES (?1, ?2, ?3, ?4, 'https://example.com', 'title', 'now', 'now')",
-            params![id, typ, repo, number],
+            &format!(
+                "INSERT INTO {table} (node_id, repo_id, number, title, url, gh_updated_at, fetched_at)
+                 VALUES (?1, ?2, ?3, 'title', 'https://example.com', 'now', 'now')"
+            ),
+            params![id, repo_id, number],
         )
         .unwrap();
+        conn.execute(
+            "INSERT INTO board_card (id, type, tracked_at) VALUES (?1, ?2, 'now')",
+            params![id, typ],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn unsynced_card_renders_as_a_placeholder() {
+        let conn = open_memory();
+        conn.execute("INSERT INTO board_card (id, type, tracked_at) VALUES ('PR_x', 'pr', 'now')", [])
+            .unwrap();
+        let cards = board_list_impl(&conn).unwrap();
+        assert_eq!(cards.len(), 1);
+        assert_eq!(cards[0].card.title, "(not synced yet)");
+        assert_eq!(cards[0].card.repo, "");
+    }
+
+    #[test]
+    fn is_mine_follows_the_cached_viewer() {
+        let conn = open_memory();
+        seed_card(&conn, "pr1", "owner/repo", 1, "pr");
+        conn.execute("UPDATE gh_pr SET author_login = 'me'", []).unwrap();
+        assert!(!card_row(&conn, "pr1").unwrap().is_mine);
+        crate::commands::inbox::set_meta(&conn, "viewer_login", "me").unwrap();
+        assert!(card_row(&conn, "pr1").unwrap().is_mine);
+        assert!(board_discard_impl(&conn, "pr1").is_err(), "own PRs can't be discarded");
     }
 
     fn seed_meta(conn: &Connection, card_id: &str, value: &str) {

@@ -4,7 +4,7 @@ use tauri::State;
 use crate::db::Db;
 use crate::error::AppResult;
 use crate::provider::provider_for;
-use crate::{gh, tools};
+use crate::{gh, mirror, tools};
 
 #[tauri::command]
 pub fn gh_auth_status() -> bool {
@@ -18,13 +18,26 @@ pub fn list_prs(repo_id: i64, db: State<Db>) -> AppResult<Vec<gh::PrSummary>> {
     provider_for().list_prs(&ctx)
 }
 
+fn now() -> String {
+    chrono::Utc::now().to_rfc3339()
+}
+
+/// Sync a PR's header metadata into the mirror and return it.
+///
 /// `async` so Tauri runs the slow `gh` GraphQL call off the main (UI) thread,
 /// letting it overlap the diff/threads fetches instead of freezing the webview
-/// (same rationale as the inbox commands). The body is synchronous; it holds no
-/// DB lock.
+/// (same rationale as the inbox commands). The DB lock is only taken to write.
 #[tauri::command]
-pub async fn pr_meta(owner: String, name: String, number: i64) -> AppResult<gh::PrMeta> {
-    provider_for().pr_meta(&owner, &name, number)
+pub async fn pr_meta(owner: String, name: String, number: i64, db: State<'_, Db>) -> AppResult<gh::PrMeta> {
+    let detail = provider_for().pr_detail(&owner, &name, number)?;
+    mirror::store::upsert_pr_detail(&db.0.lock().unwrap(), &detail, &now())?;
+    Ok(detail.meta)
+}
+
+/// The PR header metadata as last mirrored, shown while `pr_meta` syncs.
+#[tauri::command]
+pub fn mirror_pr_meta(owner: String, name: String, number: i64, db: State<Db>) -> AppResult<Option<gh::PrMeta>> {
+    mirror::store::read_pr_meta(&db.0.lock().unwrap(), &owner, &name, number)
 }
 
 /// `async` for the same reason as `pr_meta`.
@@ -50,8 +63,25 @@ pub async fn pr_review_threads(
     owner: String,
     name: String,
     number: i64,
+    db: State<'_, Db>,
 ) -> AppResult<Vec<gh::PrThread>> {
-    provider_for().pr_review_threads(&owner, &name, number)
+    let threads = provider_for().pr_review_threads(&owner, &name, number)?;
+    let conn = db.0.lock().unwrap();
+    if let Some(id) = mirror::store::pr_node_id(&conn, &owner, &name, number)? {
+        mirror::store::upsert_threads(&conn, &id, &threads, &now())?;
+    }
+    Ok(threads)
+}
+
+/// A PR's review threads as last mirrored, shown while `pr_review_threads` syncs.
+#[tauri::command]
+pub fn mirror_pr_threads(
+    owner: String,
+    name: String,
+    number: i64,
+    db: State<Db>,
+) -> AppResult<Option<Vec<gh::PrThread>>> {
+    mirror::store::read_threads(&db.0.lock().unwrap(), &owner, &name, number)
 }
 
 /// Reply to an existing GitHub review thread. `comment_id` is the databaseId of

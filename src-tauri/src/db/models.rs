@@ -11,6 +11,8 @@ pub struct Repository {
     pub added_at: String,
     /// User-set display name, shown instead of owner/name wherever the repo is listed.
     pub friendly_name: Option<String>,
+    /// When the user added or linked it; NULL for a repo the mirror auto-added.
+    pub registered_at: Option<String>,
 }
 
 impl Repository {
@@ -23,6 +25,7 @@ impl Repository {
             default_branch: row.get("default_branch")?,
             added_at: row.get("added_at")?,
             friendly_name: row.get("friendly_name")?,
+            registered_at: row.get("registered_at")?,
         })
     }
 
@@ -37,6 +40,8 @@ pub struct Target {
     pub repo_id: i64,
     pub kind: String,
     pub github_pr_number: Option<i64>,
+    /// The mirrored PR's node id (soft ref to `gh_pr`).
+    pub gh_pr_id: Option<String>,
     pub title: String,
     pub base_ref: String,
     pub head_ref: String,
@@ -51,6 +56,7 @@ impl Target {
             repo_id: row.get("repo_id")?,
             kind: row.get("kind")?,
             github_pr_number: row.get("github_pr_number")?,
+            gh_pr_id: row.get("gh_pr_id")?,
             title: row.get("title")?,
             base_ref: row.get("base_ref")?,
             head_ref: row.get("head_ref")?,
@@ -247,8 +253,8 @@ pub struct ReviewSummary {
     pub comment_count: i64,
 }
 
-/// A GitHub inbox item (PR or issue needing attention). Mirrors the `items`
-/// table; serialized to the frontend with the DB column names.
+/// A GitHub inbox item (PR or issue needing attention): an `inbox_entry`
+/// joined with its mirrored facts, serialized with the historical column names.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ItemRow {
     pub id: String,

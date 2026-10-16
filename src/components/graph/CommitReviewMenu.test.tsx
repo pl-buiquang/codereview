@@ -29,6 +29,7 @@ const repo: Repository = {
   default_branch: "main",
   added_at: "",
   friendly_name: null,
+  registered_at: "2026-01-01",
 };
 const SHA = "f".repeat(40);
 const PARENT = "e".repeat(40);

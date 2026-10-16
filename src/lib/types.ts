@@ -6,6 +6,8 @@ export interface Repository {
   default_branch: string | null;
   added_at: string;
   friendly_name: string | null;
+  /** NULL for a repo the GitHub mirror auto-added (never listed). */
+  registered_at: string | null;
 }
 
 export interface Branch {
@@ -22,6 +24,8 @@ export interface Target {
   repo_id: number;
   kind: "github_pr" | "local";
   github_pr_number: number | null;
+  /** Node id of the mirrored PR, when the mirror has it. */
+  gh_pr_id: string | null;
   title: string;
   base_ref: string;
   head_ref: string;

@@ -249,12 +249,20 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
   const name = detailQuery.data?.remote_name ?? null;
   const prNumber = target?.github_pr_number ?? null;
   // Kept separate from ["review", id] so comment-autosave invalidations don't
-  // refetch GitHub threads (and vice-versa). Ephemeral; never persisted.
+  // refetch GitHub threads (and vice-versa). The mirrored copy shows until the
+  // live fetch lands.
+  const threadsEnabled = target?.kind === "github_pr" && !!owner && !!name && prNumber != null;
+  const mirroredThreads = useQuery({
+    queryKey: ["pr-threads-mirror", owner, name, prNumber],
+    enabled: threadsEnabled,
+    queryFn: () => api.mirrorPrThreads(owner!, name!, prNumber!),
+    staleTime: Infinity,
+  });
   const threadsQuery = useQuery({
     queryKey: ["pr-threads", owner, name, prNumber],
-    enabled:
-      target?.kind === "github_pr" && !!owner && !!name && prNumber != null,
+    enabled: threadsEnabled,
     queryFn: () => api.prReviewThreads(owner!, name!, prNumber!),
+    placeholderData: mirroredThreads.data ?? undefined,
   });
 
   // n/p: stateless, DOM-query based. Collect rendered thread blocks inside the

@@ -15,6 +15,7 @@ use crate::db::models::{ItemReason, ItemRow, ItemWithReasons, Review};
 use crate::db::Db;
 use crate::error::AppResult;
 use crate::inbox::{self, ViewerInfo};
+use crate::mirror::{self, Node};
 
 fn now() -> String {
     Utc::now().to_rfc3339()
@@ -41,68 +42,51 @@ pub(crate) fn set_meta(conn: &Connection, key: &str, value: &str) -> AppResult<(
 }
 
 // ---------------------------------------------------------------------------
-// items read/write helpers
+// inbox_entry read/write helpers
 // ---------------------------------------------------------------------------
 
-fn upsert_item(conn: &Connection, it: &inbox::ItemInput, ts: &str) -> AppResult<()> {
+/// An inbox entry joined with its mirrored facts, in the `ItemRow` shape. An
+/// entry whose facts aren't mirrored yet renders as a placeholder until the
+/// next sync fetches it.
+const ITEM_VIEW: &str = "(
+    SELECT e.id, e.type,
+        COALESCE(p.number, i.number, 0) AS number,
+        COALESCE(r.remote_owner || '/' || r.remote_name, '') AS repo,
+        COALESCE(p.title, i.title, '(not synced yet)') AS title,
+        COALESCE(p.url, i.url, '') AS url,
+        COALESCE(p.author_login, i.author_login) AS author_login,
+        u.avatar_url AS author_avatar,
+        COALESCE(p.state, i.state) AS state,
+        COALESCE(p.is_draft, 0) AS is_draft,
+        COALESCE(p.body_snippet, i.body_snippet) AS body,
+        COALESCE(p.latest_comment, i.latest_comment) AS latest_comment,
+        COALESCE(p.latest_actor, i.latest_actor) AS latest_actor,
+        COALESCE(p.gh_updated_at, i.gh_updated_at, e.first_seen_at) AS updated_at,
+        p.changed_files AS files_changed, p.additions, p.deletions,
+        CASE WHEN EXISTS (SELECT 1 FROM gh_pr_file f WHERE f.pr_id = e.id) THEN (
+            SELECT json_group_array(json_object('path', f.filename, 'additions', f.additions,
+                                                'deletions', f.deletions, 'changes', f.changes))
+            FROM (SELECT * FROM gh_pr_file WHERE pr_id = e.id ORDER BY changes DESC, filename LIMIT 5) f
+        ) END AS top_files_json,
+        LOWER(s.ci_state) AS ci_state,
+        p.review_decision,
+        e.untracked_at, e.closed_at, e.engaged_at, e.first_seen_at,
+        COALESCE(p.fetched_at, i.fetched_at, e.first_seen_at) AS last_refreshed
+    FROM inbox_entry e
+    LEFT JOIN gh_pr p ON p.node_id = e.id
+    LEFT JOIN gh_issue i ON i.node_id = e.id
+    LEFT JOIN repository r ON r.id = COALESCE(p.repo_id, i.repo_id)
+    LEFT JOIN gh_user u ON u.login = COALESCE(p.author_login, i.author_login)
+    LEFT JOIN gh_pr_status s ON s.pr_id = e.id
+)";
+
+/// Track a surfaced item, reopening it if the inbox had seen it close.
+fn upsert_entry(conn: &Connection, node: &Node, ts: &str) -> AppResult<()> {
+    let typ = if node.is_pr() { "pr" } else { "issue" };
     conn.execute(
-        "INSERT INTO items (
-            id, type, number, repo, title, url,
-            author_login, author_avatar, state, is_draft, body,
-            latest_comment, latest_actor, updated_at,
-            files_changed, additions, deletions, top_files_json, ci_state, review_decision,
-            first_seen_at, last_refreshed
-         ) VALUES (
-            ?1, ?2, ?3, ?4, ?5, ?6,
-            ?7, ?8, ?9, ?10, ?11,
-            ?12, ?13, ?14,
-            ?15, ?16, ?17, ?18, ?19, ?20,
-            ?21, ?21
-         )
-         ON CONFLICT(id) DO UPDATE SET
-            type            = excluded.type,
-            number          = excluded.number,
-            repo            = excluded.repo,
-            title           = excluded.title,
-            url             = excluded.url,
-            author_login    = excluded.author_login,
-            author_avatar   = excluded.author_avatar,
-            state           = excluded.state,
-            is_draft        = excluded.is_draft,
-            body            = excluded.body,
-            latest_comment  = excluded.latest_comment,
-            latest_actor    = excluded.latest_actor,
-            updated_at      = excluded.updated_at,
-            files_changed   = excluded.files_changed,
-            additions       = excluded.additions,
-            deletions       = excluded.deletions,
-            top_files_json  = COALESCE(excluded.top_files_json, items.top_files_json),
-            ci_state        = excluded.ci_state,
-            review_decision = excluded.review_decision,
-            last_refreshed  = excluded.last_refreshed",
-        params![
-            it.id,
-            it.typ,
-            it.number,
-            it.repo,
-            it.title,
-            it.url,
-            it.author_login,
-            it.author_avatar,
-            it.state,
-            it.is_draft as i64,
-            it.body,
-            it.latest_comment,
-            it.latest_actor,
-            it.updated_at,
-            it.files_changed,
-            it.additions,
-            it.deletions,
-            it.top_files_json,
-            it.ci_state,
-            it.review_decision,
-            ts,
-        ],
+        "INSERT INTO inbox_entry (id, type, first_seen_at) VALUES (?1, ?2, ?3)
+         ON CONFLICT(id) DO UPDATE SET type = excluded.type, closed_at = NULL",
+        params![node.id, typ, ts],
     )?;
     Ok(())
 }
@@ -118,50 +102,53 @@ fn replace_reasons(conn: &Connection, item_id: &str, reasons: &[inbox::Reason]) 
     Ok(())
 }
 
-fn reopen_item(conn: &Connection, id: &str) -> AppResult<()> {
-    conn.execute("UPDATE items SET closed_at = NULL WHERE id = ?1", params![id])?;
-    Ok(())
-}
-
 fn mark_item_closed(conn: &Connection, id: &str, ts: &str) -> AppResult<()> {
     conn.execute(
-        "UPDATE items SET closed_at = ?1 WHERE id = ?2 AND closed_at IS NULL",
+        "UPDATE inbox_entry SET closed_at = ?1 WHERE id = ?2 AND closed_at IS NULL",
         params![ts, id],
     )?;
     Ok(())
 }
 
-/// `(updated_at, has_top_files)` for the given ids — used to skip re-enriching
-/// PRs that haven't changed since last refresh.
-fn existing_item_stats(conn: &Connection, ids: &[String]) -> AppResult<HashMap<String, (String, bool)>> {
+/// What the mirror knows of each PR's files facet: `(gh_updated_at, files
+/// head_sha)`, the latter `Some(None)` for files without a head key.
+type FilesKey = (Option<String>, Option<Option<String>>);
+
+fn existing_files_keys(conn: &Connection, ids: &[String]) -> AppResult<HashMap<String, FilesKey>> {
     if ids.is_empty() {
         return Ok(HashMap::new());
     }
     let placeholders = vec!["?"; ids.len()].join(",");
-    let sql = format!("SELECT id, updated_at, top_files_json FROM items WHERE id IN ({placeholders})");
+    let sql = format!(
+        "SELECT p.node_id, p.gh_updated_at,
+                EXISTS (SELECT 1 FROM gh_pr_file f WHERE f.pr_id = p.node_id),
+                (SELECT MAX(f.head_sha) FROM gh_pr_file f WHERE f.pr_id = p.node_id)
+         FROM gh_pr p WHERE p.node_id IN ({placeholders})"
+    );
     let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map(params_from_iter(ids.iter()), |r| {
-        let id: String = r.get(0)?;
-        let updated: String = r.get(1)?;
-        let top: Option<String> = r.get(2)?;
-        Ok((id, (updated, top.is_some())))
+        let has_files: bool = r.get(2)?;
+        let head: Option<String> = r.get(3)?;
+        Ok((r.get::<_, String>(0)?, (r.get(1)?, has_files.then_some(head))))
     })?;
-    let mut map = HashMap::new();
-    for row in rows {
-        let (id, v) = row?;
-        map.insert(id, v);
+    rows.collect::<rusqlite::Result<_>>().map_err(Into::into)
+}
+
+/// The files facet is fresh when fetched at the node's head; rows backfilled
+/// without a head key stay fresh until the PR changes.
+fn files_need_fetch(node: &Node, key: Option<&FilesKey>) -> bool {
+    match key {
+        Some((_, Some(Some(head)))) => node.head_ref_oid.as_deref() != Some(head.as_str()),
+        Some((updated_at, Some(None))) => updated_at.as_deref() != Some(node.updated_at.as_str()),
+        _ => true,
     }
-    Ok(map)
 }
 
 /// Ids currently in the inbox (tracked, not closed, with reasons) that were NOT
 /// returned by this refresh — candidates for closed/merged detection.
 fn stale_inbox_ids(conn: &Connection, current: &[String]) -> AppResult<Vec<String>> {
-    if current.is_empty() {
-        return Ok(Vec::new());
-    }
     let mut stmt = conn.prepare(
-        "SELECT id FROM items
+        "SELECT id FROM inbox_entry
          WHERE untracked_at IS NULL
            AND closed_at IS NULL
            AND id IN (SELECT item_id FROM item_reasons)",
@@ -205,9 +192,10 @@ fn attach_reasons(conn: &Connection, items: Vec<ItemRow>) -> AppResult<Vec<ItemW
         .collect())
 }
 
-fn query_items(conn: &Connection, sql: &str, params: &[&dyn rusqlite::ToSql]) -> AppResult<Vec<ItemWithReasons>> {
+/// `where_order` filters and orders the `ITEM_VIEW` columns.
+fn query_items(conn: &Connection, where_order: &str, params: &[&dyn rusqlite::ToSql]) -> AppResult<Vec<ItemWithReasons>> {
     let items: Vec<ItemRow> = {
-        let mut stmt = conn.prepare(sql)?;
+        let mut stmt = conn.prepare(&format!("SELECT * FROM {ITEM_VIEW} {where_order}"))?;
         let rows = stmt
             .query_map(params, ItemRow::from_row)?
             .collect::<rusqlite::Result<_>>()?;
@@ -281,64 +269,59 @@ pub fn refresh_inbox_impl(db: &Db) -> AppResult<RefreshResult> {
     let merged = inbox::run_all_searches(&viewer, scope.as_deref());
     let merged_ids: Vec<String> = merged.iter().map(|r| r.node.id.clone()).collect();
 
-    let existing = {
+    let (files_keys, stale_ids) = {
         let conn = db.0.lock().unwrap();
-        existing_item_stats(&conn, &merged_ids)?
+        (existing_files_keys(&conn, &merged_ids)?, stale_inbox_ids(&conn, &merged_ids)?)
     };
     let to_enrich: Vec<inbox::EnrichTarget> = merged
         .iter()
-        .filter(|r| r.node.typename == "PullRequest")
-        .filter(|r| {
-            !existing
-                .get(&r.node.id)
-                .map(|(updated, has)| updated == &r.node.updated_at && *has)
-                .unwrap_or(false)
-        })
-        .map(|r| inbox::EnrichTarget {
-            id: r.node.id.clone(),
-            repo: r.node.repository.name_with_owner.clone(),
-            number: r.node.number,
+        .filter(|r| r.node.is_pr() && files_need_fetch(&r.node, files_keys.get(&r.node.id)))
+        .filter_map(|r| {
+            Some(inbox::EnrichTarget {
+                id: r.node.id.clone(),
+                repo: r.node.repo()?.to_string(),
+                number: r.node.number,
+                head_sha: r.node.head_ref_oid.clone(),
+            })
         })
         .collect();
-
-    let top_files: HashMap<String, Option<String>> = inbox::enrich_all(to_enrich).into_iter().collect();
-
-    let stale_ids = {
-        let conn = db.0.lock().unwrap();
-        stale_inbox_ids(&conn, &merged_ids)?
-    };
+    let files = inbox::enrich_all(to_enrich);
     let refetched = if stale_ids.is_empty() {
         HashMap::new()
     } else {
-        inbox::refetch_nodes(&stale_ids)
+        mirror::fetch::refetch(&stale_ids)
     };
 
     let ts = now();
     let mut conn = db.0.lock().unwrap();
     let tx = conn.transaction()?;
     for r in &merged {
-        let top = top_files.get(&r.node.id).cloned().flatten();
-        upsert_item(&tx, &inbox::node_to_input(&r.node, top), &ts)?;
+        mirror::store::upsert_node(&tx, &r.node, &ts)?;
+        upsert_entry(&tx, &r.node, &ts)?;
         replace_reasons(&tx, &r.node.id, &r.reasons)?;
-        reopen_item(&tx, &r.node.id)?;
+    }
+    for (target, files) in &files {
+        if let Some(files) = files {
+            mirror::store::upsert_files(&tx, &target.id, target.head_sha.as_deref(), files)?;
+        }
     }
     let mut closed_count = 0i64;
     for id in &stale_ids {
-        match refetched.get(id) {
-            Some(node) => {
-                upsert_item(&tx, &inbox::node_to_input(node, None), &ts)?;
-                let closed = matches!(node.state.as_deref(), Some("CLOSED") | Some("MERGED")) || node.merged;
-                if closed {
-                    mark_item_closed(&tx, id, &ts)?;
-                    closed_count += 1;
-                }
+        let closed = match refetched.get(id) {
+            Some(Some(node)) => {
+                mirror::store::upsert_node(&tx, node, &ts)?;
+                node.is_closed()
             }
-            None => {
-                mark_item_closed(&tx, id, &ts)?;
-                closed_count += 1;
-            }
+            Some(None) => true,
+            // Its batch failed: state unknown, try again next sync.
+            None => false,
+        };
+        if closed {
+            mark_item_closed(&tx, id, &ts)?;
+            closed_count += 1;
         }
     }
+    mirror::store::gc(&tx)?;
     set_meta(&tx, "last_refresh_at", &ts)?;
     tx.commit()?;
 
@@ -358,8 +341,7 @@ pub async fn refresh_inbox(db: State<'_, Db>) -> AppResult<RefreshResult> {
 pub fn list_inbox_impl(conn: &Connection) -> AppResult<Vec<ItemWithReasons>> {
     query_items(
         conn,
-        "SELECT * FROM items
-         WHERE untracked_at IS NULL
+        "WHERE untracked_at IS NULL
            AND closed_at IS NULL
            AND id IN (SELECT item_id FROM item_reasons)
          ORDER BY updated_at DESC",
@@ -381,8 +363,7 @@ pub fn list_archive(search: Option<String>, db: State<Db>) -> AppResult<Vec<Item
             let like = format!("%{}%", q.to_lowercase());
             query_items(
                 &conn,
-                "SELECT * FROM items
-                 WHERE untracked_at IS NOT NULL
+                "WHERE untracked_at IS NOT NULL
                    AND (LOWER(title) LIKE ?1
                         OR LOWER(repo) LIKE ?1
                         OR LOWER(COALESCE(author_login, '')) LIKE ?1)
@@ -393,8 +374,7 @@ pub fn list_archive(search: Option<String>, db: State<Db>) -> AppResult<Vec<Item
         }
         None => query_items(
             &conn,
-            "SELECT * FROM items
-             WHERE untracked_at IS NOT NULL
+            "WHERE untracked_at IS NOT NULL
              ORDER BY untracked_at DESC
              LIMIT 200",
             &[],
@@ -407,8 +387,7 @@ pub fn list_closed(db: State<Db>) -> AppResult<Vec<ItemWithReasons>> {
     let conn = db.0.lock().unwrap();
     query_items(
         &conn,
-        "SELECT * FROM items
-         WHERE closed_at IS NOT NULL
+        "WHERE closed_at IS NOT NULL
            AND untracked_at IS NULL
          ORDER BY closed_at DESC
          LIMIT 200",
@@ -419,7 +398,7 @@ pub fn list_closed(db: State<Db>) -> AppResult<Vec<ItemWithReasons>> {
 fn set_item_timestamp(db: &State<Db>, id: &str, column: &str, value: Option<&str>) -> AppResult<()> {
     let conn = db.0.lock().unwrap();
     // `column` is from a fixed internal set, never user input.
-    let sql = format!("UPDATE items SET {column} = ?1 WHERE id = ?2");
+    let sql = format!("UPDATE inbox_entry SET {column} = ?1 WHERE id = ?2");
     conn.execute(&sql, params![value, id])?;
     Ok(())
 }
@@ -460,7 +439,7 @@ pub async fn open_pr_review(
     {
         let conn = db.0.lock().unwrap();
         conn.execute(
-            "UPDATE items SET engaged_at = ?1 WHERE id = ?2",
+            "UPDATE inbox_entry SET engaged_at = ?1 WHERE id = ?2",
             params![now(), item_id],
         )?;
     }

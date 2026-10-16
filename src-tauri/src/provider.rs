@@ -5,7 +5,8 @@
 use std::collections::HashMap;
 
 use crate::error::AppResult;
-use crate::gh::{self, ComparedFile, GhRepo, PrInfo, PrMeta, PrSummary, PrThread, ReviewComment};
+use crate::gh::{self, ComparedFile, GhRepo, PrDetail, PrSummary, PrThread, ReviewComment};
+use crate::mirror;
 
 /// Everything the app asks of a code-review forge. Object-safe and fully
 /// synchronous: implementations shell out to a CLI; `async` lives only at the
@@ -26,9 +27,11 @@ pub trait ReviewProvider: Send + Sync {
 
     // --- PR reads -----------------------------------------------------------
     fn list_prs(&self, ctx: &GhRepo) -> AppResult<Vec<PrSummary>>;
-    fn pr_view(&self, ctx: &GhRepo, number: i64) -> AppResult<PrInfo>;
+    /// A PR as a mirror node (core + status facets).
+    fn pr_node(&self, owner: &str, name: &str, number: i64) -> AppResult<mirror::Node>;
     fn pr_diff(&self, ctx: &GhRepo, number: i64) -> AppResult<String>;
-    fn pr_meta(&self, owner: &str, name: &str, number: i64) -> AppResult<PrMeta>;
+    /// The review header's metadata, plus the mirror node of the same fetch.
+    fn pr_detail(&self, owner: &str, name: &str, number: i64) -> AppResult<PrDetail>;
     /// Flip a PR between draft and ready-for-review.
     fn set_pr_draft(&self, owner: &str, name: &str, number: i64, draft: bool) -> AppResult<()>;
     /// Update a PR's head branch from its base (merge, or rebase when `rebase`).
@@ -126,16 +129,16 @@ impl ReviewProvider for GithubProvider {
         gh::list_prs(ctx)
     }
 
-    fn pr_view(&self, ctx: &GhRepo, number: i64) -> AppResult<PrInfo> {
-        gh::pr_view(ctx, number)
+    fn pr_node(&self, owner: &str, name: &str, number: i64) -> AppResult<mirror::Node> {
+        mirror::fetch::resolve_pr(owner, name, number)
     }
 
     fn pr_diff(&self, ctx: &GhRepo, number: i64) -> AppResult<String> {
         gh::pr_diff(ctx, number)
     }
 
-    fn pr_meta(&self, owner: &str, name: &str, number: i64) -> AppResult<PrMeta> {
-        gh::pr_meta(owner, name, number)
+    fn pr_detail(&self, owner: &str, name: &str, number: i64) -> AppResult<PrDetail> {
+        gh::pr_detail(owner, name, number)
     }
 
     fn set_pr_draft(&self, owner: &str, name: &str, number: i64, draft: bool) -> AppResult<()> {

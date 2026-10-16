@@ -45,6 +45,7 @@ const repo: Repository = {
   default_branch: "main",
   added_at: "2026-01-01",
   friendly_name: null,
+  registered_at: "2026-01-01",
 };
 
 const sha = (i: number) => `c${String(i).padStart(39, "0")}`;

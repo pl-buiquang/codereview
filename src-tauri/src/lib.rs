@@ -15,6 +15,7 @@ pub mod git;
 pub mod graph;
 pub mod inbox;
 pub mod logging;
+pub mod mirror;
 mod path_env;
 pub mod provider;
 pub mod prompts;
@@ -231,10 +232,12 @@ pub fn run() {
             commands::gh::gh_auth_status,
             commands::gh::list_prs,
             commands::gh::pr_meta,
+            commands::gh::mirror_pr_meta,
             commands::gh::set_pr_draft,
             commands::gh::update_pr_branch,
             commands::gh::set_pr_auto_merge,
             commands::gh::pr_review_threads,
+            commands::gh::mirror_pr_threads,
             commands::gh::reply_to_thread,
             commands::gh::set_pr_thread_resolved,
             commands::gh::check_environment,

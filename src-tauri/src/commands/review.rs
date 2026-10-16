@@ -24,9 +24,21 @@ fn now() -> String {
     Utc::now().to_rfc3339()
 }
 
+/// A target with a PR's title and refs read from the mirror; the target's own
+/// columns are the label shown until the mirror has the PR.
 fn get_target(conn: &Connection, id: i64) -> AppResult<Target> {
-    conn.query_row("SELECT * FROM target WHERE id = ?1", params![id], Target::from_row)
-        .map_err(Into::into)
+    conn.query_row(
+        "SELECT t.id, t.repo_id, t.kind, t.github_pr_number, t.gh_pr_id,
+                COALESCE(p.title, t.title) AS title,
+                COALESCE(p.base_ref, t.base_ref) AS base_ref,
+                COALESCE(p.head_ref, t.head_ref) AS head_ref,
+                t.three_dot, t.created_at
+         FROM target t LEFT JOIN gh_pr p ON p.node_id = t.gh_pr_id AND t.kind = 'github_pr'
+         WHERE t.id = ?1",
+        params![id],
+        Target::from_row,
+    )
+    .map_err(Into::into)
 }
 
 fn get_repository(conn: &Connection, id: i64) -> AppResult<Repository> {
@@ -39,9 +51,9 @@ fn get_repository(conn: &Connection, id: i64) -> AppResult<Repository> {
 }
 
 /// Find a repository row for a GitHub `owner/name`, creating a remote-only row
-/// when neither exists. The partial unique index on (remote_owner, remote_name)
-/// guarantees at most one row per remote. Attempts auto-link from base_paths
-/// before inserting, so new rows may already have a local_path set.
+/// when neither exists. Reviewing a repo registers it, including one the
+/// mirror auto-added. Attempts auto-link from base_paths before inserting, so
+/// new rows may already have a local_path set.
 pub fn get_or_create_remote_repository(
     conn: &Connection,
     owner: &str,
@@ -50,12 +62,18 @@ pub fn get_or_create_remote_repository(
 ) -> AppResult<Repository> {
     let existing: Option<i64> = conn
         .query_row(
-            "SELECT id FROM repository WHERE remote_owner = ?1 AND remote_name = ?2",
+            "SELECT id FROM repository
+             WHERE remote_owner = ?1 COLLATE NOCASE AND remote_name = ?2 COLLATE NOCASE
+             ORDER BY id LIMIT 1",
             params![owner, name],
             |r| r.get(0),
         )
         .optional()?;
     if let Some(id) = existing {
+        conn.execute(
+            "UPDATE repository SET registered_at = ?1 WHERE id = ?2 AND registered_at IS NULL",
+            params![now(), id],
+        )?;
         return get_repository(conn, id);
     }
     // Auto-link: try to discover a local clone under configured base paths.
@@ -64,8 +82,8 @@ pub fn get_or_create_remote_repository(
         .as_deref()
         .and_then(|p| git::default_branch(std::path::Path::new(p)));
     conn.execute(
-        "INSERT INTO repository (local_path, remote_owner, remote_name, default_branch, added_at)
-         VALUES (?1, ?2, ?3, ?4, ?5)",
+        "INSERT INTO repository (local_path, remote_owner, remote_name, default_branch, added_at, registered_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?5)",
         params![auto_path, owner, name, default_branch, now()],
     )?;
     get_repository(conn, conn.last_insert_rowid())
@@ -213,12 +231,14 @@ fn get_or_create_local_target(
     Ok((get_target(conn, conn.last_insert_rowid())?, live))
 }
 
-/// Reuse one `target` per GitHub PR number, refreshing its title and refs.
+/// Reuse one `target` per GitHub PR number, refreshing its label and its
+/// mirror reference.
 pub(crate) fn get_or_create_pr_target(
     conn: &Connection,
     repo_id: i64,
     pr_number: i64,
     info: &PrInfo,
+    gh_pr_id: Option<&str>,
 ) -> AppResult<Target> {
     let existing: Option<i64> = conn
         .query_row(
@@ -229,24 +249,33 @@ pub(crate) fn get_or_create_pr_target(
         .optional()?;
 
     if let Some(id) = existing {
-        update_pr_target_info(conn, id, info)?;
+        update_pr_target_info(conn, id, info, gh_pr_id)?;
         return get_target(conn, id);
     }
 
     conn.execute(
-        "INSERT INTO target (repo_id, kind, github_pr_number, title, base_ref, head_ref, three_dot, created_at)
-         VALUES (?1, 'github_pr', ?2, ?3, ?4, ?5, 1, ?6)",
-        params![repo_id, pr_number, info.title, info.base_ref, info.head_ref, now()],
+        "INSERT INTO target (repo_id, kind, github_pr_number, gh_pr_id, title, base_ref, head_ref, three_dot, created_at)
+         VALUES (?1, 'github_pr', ?2, ?3, ?4, ?5, ?6, 1, ?7)",
+        params![repo_id, pr_number, gh_pr_id, info.title, info.base_ref, info.head_ref, now()],
     )?;
     get_target(conn, conn.last_insert_rowid())
 }
 
-fn update_pr_target_info(conn: &Connection, target_id: i64, info: &PrInfo) -> AppResult<()> {
+fn update_pr_target_info(conn: &Connection, target_id: i64, info: &PrInfo, gh_pr_id: Option<&str>) -> AppResult<()> {
     conn.execute(
-        "UPDATE target SET title = ?1, base_ref = ?2, head_ref = ?3 WHERE id = ?4",
-        params![info.title, info.base_ref, info.head_ref, target_id],
+        "UPDATE target SET title = ?1, base_ref = ?2, head_ref = ?3, gh_pr_id = COALESCE(?4, gh_pr_id)
+         WHERE id = ?5",
+        params![info.title, info.base_ref, info.head_ref, gh_pr_id, target_id],
     )?;
     Ok(())
+}
+
+/// Fetch a PR into the mirror and return what a target needs from it.
+fn sync_pr(db: &Db, owner: &str, name: &str, number: i64) -> AppResult<(PrInfo, String)> {
+    let node = provider_for().pr_node(owner, name, number)?;
+    let info = PrInfo::from_node(&node)?;
+    crate::mirror::store::upsert_node(&db.0.lock().unwrap(), &node, &now())?;
+    Ok((info, node.id))
 }
 
 /// A review's pin compared with its target's live head.
@@ -277,7 +306,7 @@ fn repo_local_path_of(db: &Db, repo_id: i64) -> AppResult<Option<String>> {
 }
 
 /// Resolve a target's live head and LEFT side from `git` / `gh`. Never touches
-/// any pin; a PR target's title and refs are refreshed on the way.
+/// any pin; a PR is synced into the mirror on the way.
 ///
 /// Split-lock: repo/`gh` context under the lock, subprocesses without it.
 fn resolve_live(db: &Db, target: &Target) -> AppResult<LiveShas> {
@@ -286,17 +315,13 @@ fn resolve_live(db: &Db, target: &Target) -> AppResult<LiveShas> {
             let number = target
                 .github_pr_number
                 .ok_or_else(|| AppError::Other("PR target missing number".into()))?;
-            let (ctx, owner_name) = {
-                let conn = db.0.lock().unwrap();
-                (gh_ctx_for_repo(&conn, target.repo_id)?, repo_owner_name(&conn, target.repo_id)?)
-            };
-            let info = provider_for().pr_view(&ctx, number)?;
+            let (owner, name) = repo_owner_name(&db.0.lock().unwrap(), target.repo_id)?
+                .ok_or_else(|| AppError::Other("PR target's repo has no GitHub remote".into()))?;
+            let (info, node_id) = sync_pr(db, &owner, &name, number)?;
             // PR diffs are three-dot: the LEFT side is the merge-base, not the
             // base-branch tip.
-            let base_sha = owner_name.and_then(|(o, n)| {
-                provider_for().merge_base_sha(&o, &n, &info.base_ref, &info.head_sha).ok()
-            });
-            update_pr_target_info(&db.0.lock().unwrap(), target.id, &info)?;
+            let base_sha = provider_for().merge_base_sha(&owner, &name, &info.base_ref, &info.head_sha).ok();
+            update_pr_target_info(&db.0.lock().unwrap(), target.id, &info, Some(&node_id))?;
             Ok(LiveShas { base_sha, head_sha: Some(info.head_sha) })
         }
         _ => {
@@ -707,18 +732,13 @@ pub fn create_review_for_pr_impl(
     base_paths: &[String],
     reuse_draft: bool,
 ) -> AppResult<Review> {
-    let (repo_id, ctx) = {
-        let conn = db.0.lock().unwrap();
-        let repo = get_or_create_remote_repository(&conn, owner, name, base_paths)?;
-        let ctx = gh_ctx_for_repo(&conn, repo.id)?;
-        (repo.id, ctx)
-    };
-    let info = provider_for().pr_view(&ctx, pr_number)?;
+    let repo_id = get_or_create_remote_repository(&db.0.lock().unwrap(), owner, name, base_paths)?.id;
+    let (info, node_id) = sync_pr(db, owner, name, pr_number)?;
     let merge_base = provider_for()
         .merge_base_sha(owner, name, &info.base_ref, &info.head_sha)
         .ok();
     let conn = db.0.lock().unwrap();
-    let target = get_or_create_pr_target(&conn, repo_id, pr_number, &info)?;
+    let target = get_or_create_pr_target(&conn, repo_id, pr_number, &info, Some(&node_id))?;
     let live = LiveShas { base_sha: merge_base, head_sha: Some(info.head_sha.clone()) };
     review_for_target(&conn, target.id, reuse_draft, &live)
 }
@@ -2446,16 +2466,41 @@ mod tests {
         let conn = open_memory();
         let repo = seed_repo(&conn, Some("owner"), Some("repo"));
 
-        let t1 = get_or_create_pr_target(&conn, repo, 7, &pr_info()).unwrap();
+        let t1 = get_or_create_pr_target(&conn, repo, 7, &pr_info(), None).unwrap();
         assert_eq!(t1.kind, "github_pr");
         assert_eq!(t1.github_pr_number, Some(7));
 
         let mut updated = pr_info();
         updated.title = "Renamed PR".into();
         updated.head_sha = "cafe".into();
-        let t2 = get_or_create_pr_target(&conn, repo, 7, &updated).unwrap();
+        let t2 = get_or_create_pr_target(&conn, repo, 7, &updated, None).unwrap();
         assert_eq!(t1.id, t2.id);
         assert_eq!(t2.title, "Renamed PR");
+    }
+
+    #[test]
+    fn pr_target_reads_title_and_refs_from_the_mirror() {
+        let conn = open_memory();
+        let repo = seed_repo(&conn, Some("owner"), Some("repo"));
+        let t = get_or_create_pr_target(&conn, repo, 7, &pr_info(), Some("PR_7")).unwrap();
+        assert_eq!(t.title, "My PR", "label until the mirror has the PR");
+        conn.execute(
+            "INSERT INTO gh_pr (node_id, repo_id, number, title, url, base_ref, head_ref, fetched_at)
+             VALUES ('PR_7', ?1, 7, 'Mirrored', 'u', 'develop', 'feat-2', 'now')",
+            params![repo],
+        )
+        .unwrap();
+        let t = get_target(&conn, t.id).unwrap();
+        assert_eq!((t.title.as_str(), t.base_ref.as_str(), t.head_ref.as_str()), ("Mirrored", "develop", "feat-2"));
+    }
+
+    #[test]
+    fn reviewing_registers_an_auto_added_repo() {
+        let conn = open_memory();
+        let id = crate::mirror::store::ensure_repo(&conn, "acme", "widget", "now").unwrap();
+        let repo = get_or_create_remote_repository(&conn, "Acme", "widget", &[]).unwrap();
+        assert_eq!(repo.id, id);
+        assert!(repo.registered_at.is_some());
     }
 
     fn pin(base: Option<&str>, head: Option<&str>) -> LiveShas {
@@ -2466,7 +2511,7 @@ mod tests {
     fn reopening_a_pr_target_never_moves_a_drafts_pin() {
         let conn = open_memory();
         let repo = seed_repo(&conn, Some("owner"), Some("repo"));
-        let target = get_or_create_pr_target(&conn, repo, 7, &pr_info()).unwrap();
+        let target = get_or_create_pr_target(&conn, repo, 7, &pr_info(), None).unwrap();
         let first = review_for_target(&conn, target.id, true, &pin(Some("mb1"), Some("deadbeef"))).unwrap();
         assert_eq!(first.head_sha.as_deref(), Some("deadbeef"));
         assert_eq!(first.base_sha.as_deref(), Some("mb1"));
@@ -2474,7 +2519,7 @@ mod tests {
         // The PR moved; reopening reuses the draft and leaves its pin alone.
         let mut moved = pr_info();
         moved.head_sha = "cafe".into();
-        let again = get_or_create_pr_target(&conn, repo, 7, &moved).unwrap();
+        let again = get_or_create_pr_target(&conn, repo, 7, &moved, None).unwrap();
         let reused = review_for_target(&conn, again.id, true, &pin(Some("mb2"), Some("cafe"))).unwrap();
         assert_eq!(reused.id, first.id);
         assert_eq!(reused.head_sha.as_deref(), Some("deadbeef"));
@@ -2646,7 +2691,7 @@ mod tests {
     fn pending_test_db() -> (Db, i64) {
         let conn = open_memory();
         let repo = seed_repo(&conn, Some("owner"), Some("name"));
-        let target = get_or_create_pr_target(&conn, repo, 7, &pr_info()).unwrap();
+        let target = get_or_create_pr_target(&conn, repo, 7, &pr_info(), None).unwrap();
         let review = new_review_for_target(&conn, target.id, &LiveShas::default()).unwrap();
         (Db(Mutex::new(conn)), review.id)
     }
@@ -2754,7 +2799,7 @@ mod tests {
     fn mark_submitted_transitions() {
         let conn = open_memory();
         let repo = seed_repo(&conn, Some("owner"), Some("name"));
-        let target = get_or_create_pr_target(&conn, repo, 7, &pr_info()).unwrap();
+        let target = get_or_create_pr_target(&conn, repo, 7, &pr_info(), None).unwrap();
         let review = new_review_for_target(&conn, target.id, &LiveShas::default()).unwrap();
         conn.execute(
             "UPDATE review SET status = 'published_pending', github_review_id = 99 WHERE id = ?1",
@@ -2774,7 +2819,7 @@ mod tests {
     fn mark_discarded_transitions() {
         let conn = open_memory();
         let repo = seed_repo(&conn, Some("owner"), Some("name"));
-        let target = get_or_create_pr_target(&conn, repo, 7, &pr_info()).unwrap();
+        let target = get_or_create_pr_target(&conn, repo, 7, &pr_info(), None).unwrap();
         let review = new_review_for_target(&conn, target.id, &LiveShas::default()).unwrap();
         conn.execute(
             "UPDATE review SET status = 'published_pending', github_review_id = 99 WHERE id = ?1",
@@ -2811,7 +2856,7 @@ mod tests {
     fn delete_review_blocked_while_pending() {
         let conn = open_memory();
         let repo = seed_repo(&conn, Some("owner"), Some("name"));
-        let target = get_or_create_pr_target(&conn, repo, 7, &pr_info()).unwrap();
+        let target = get_or_create_pr_target(&conn, repo, 7, &pr_info(), None).unwrap();
         let review = new_review_for_target(&conn, target.id, &LiveShas::default()).unwrap();
         conn.execute(
             "UPDATE review SET status = 'published_pending' WHERE id = ?1",
@@ -3348,6 +3393,7 @@ mod tests {
                 repo_id: 1,
                 kind: "github_pr".into(),
                 github_pr_number: Some(1),
+                gh_pr_id: None,
                 title: "t".into(),
                 base_ref: "main".into(),
                 head_ref: "feature".into(),

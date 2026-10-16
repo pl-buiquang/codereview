@@ -38,12 +38,13 @@ fn upsert_repository(
 ) -> AppResult<Repository> {
     let now = Utc::now().to_rfc3339();
     conn.execute(
-        "INSERT INTO repository (local_path, remote_owner, remote_name, default_branch, added_at)
-         VALUES (?1, ?2, ?3, ?4, ?5)
+        "INSERT INTO repository (local_path, remote_owner, remote_name, default_branch, added_at, registered_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?5)
          ON CONFLICT(local_path) DO UPDATE SET
              remote_owner   = excluded.remote_owner,
              remote_name    = excluded.remote_name,
-             default_branch = excluded.default_branch",
+             default_branch = excluded.default_branch,
+             registered_at  = COALESCE(repository.registered_at, excluded.registered_at)",
         params![local_path, remote_owner, remote_name, default_branch, now],
     )?;
     get_repository_by_local_path(conn, local_path)
@@ -59,18 +60,23 @@ pub fn add_repository_impl(conn: &Connection, path: &str) -> AppResult<Repositor
 
     // If a remote-only row (local_path IS NULL) exists for this remote, merge:
     // set its local_path so all existing targets/reviews gain the local clone.
+    // That also registers a repo the mirror auto-added.
     if let (Some(ref owner), Some(ref name)) = (&remote.owner, &remote.name) {
         let existing: Option<(i64, Option<String>)> = conn
             .query_row(
-                "SELECT id, local_path FROM repository WHERE remote_owner = ?1 AND remote_name = ?2",
+                "SELECT id, local_path FROM repository
+                 WHERE remote_owner = ?1 COLLATE NOCASE AND remote_name = ?2 COLLATE NOCASE
+                 ORDER BY local_path IS NULL, id LIMIT 1",
                 params![owner, name],
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .optional()?;
         if let Some((id, None)) = existing {
             conn.execute(
-                "UPDATE repository SET local_path = ?1, default_branch = ?2 WHERE id = ?3",
-                params![path, default_branch, id],
+                "UPDATE repository SET local_path = ?1, default_branch = ?2,
+                     registered_at = COALESCE(registered_at, ?3)
+                 WHERE id = ?4",
+                params![path, default_branch, Utc::now().to_rfc3339(), id],
             )?;
             return get_repository(conn, id);
         }
@@ -86,7 +92,8 @@ pub fn add_repository(path: String, db: State<Db>) -> AppResult<Repository> {
 }
 
 pub fn list_repositories_impl(conn: &Connection) -> AppResult<Vec<Repository>> {
-    let mut stmt = conn.prepare("SELECT * FROM repository ORDER BY added_at DESC")?;
+    let mut stmt =
+        conn.prepare("SELECT * FROM repository WHERE registered_at IS NOT NULL ORDER BY added_at DESC")?;
     let rows = stmt
         .query_map([], Repository::from_row)?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -180,8 +187,8 @@ pub fn link_local_path(repo_id: i64, path: String, db: State<Db>) -> AppResult<R
     }
     let conn = db.0.lock().unwrap();
     conn.execute(
-        "UPDATE repository SET local_path = ?1 WHERE id = ?2",
-        params![path, repo_id],
+        "UPDATE repository SET local_path = ?1, registered_at = COALESCE(registered_at, ?2) WHERE id = ?3",
+        params![path, Utc::now().to_rfc3339(), repo_id],
     )?;
     get_repository(&conn, repo_id)
 }
@@ -194,7 +201,8 @@ pub fn auto_link_repos(base_paths: Vec<String>, db: State<Db>) -> AppResult<i64>
         let conn = db.0.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, remote_owner, remote_name FROM repository
-             WHERE local_path IS NULL AND remote_owner IS NOT NULL AND remote_name IS NOT NULL",
+             WHERE local_path IS NULL AND remote_owner IS NOT NULL AND remote_name IS NOT NULL
+               AND registered_at IS NOT NULL",
         )?;
         let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
             .collect::<rusqlite::Result<_>>()?;

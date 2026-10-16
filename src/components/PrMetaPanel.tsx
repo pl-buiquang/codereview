@@ -6,7 +6,7 @@ import type { PrCheck, PrLabel, PrReviewer } from "../lib/types";
 
 /** Shared with the review header's status chips, which need the same PR
  *  metadata even while this panel is collapsed — same query key, so there's
- *  only one fetch. `owner`/`name`/`number` may be null for a non-PR target.
+ *  only one fetch. Shows the mirrored copy until the live fetch lands. `owner`/`name`/`number` may be null for a non-PR target.
  *  Hidden review tabs stay mounted, so only the active tab fetches: an
  *  inactive tab keeps its cached data and catches up when activated. */
 export function usePrMeta(
@@ -15,12 +15,21 @@ export function usePrMeta(
   number: number | null,
   active = true,
 ) {
+  const known = owner != null && name != null && number != null;
+  // The mirror's copy renders at once while the live fetch runs.
+  const mirrored = useQuery({
+    queryKey: ["pr-meta-mirror", owner, name, number],
+    queryFn: () => api.mirrorPrMeta(owner as string, name as string, number as number),
+    enabled: known,
+    staleTime: Infinity,
+  });
   return useQuery({
     queryKey: ["pr-meta", owner, name, number],
     queryFn: () => api.prMeta(owner as string, name as string, number as number),
-    enabled: active && owner != null && name != null && number != null,
+    enabled: active && known,
     staleTime: 30_000,
     refetchOnWindowFocus: true,
+    placeholderData: mirrored.data ?? undefined,
   });
 }
 

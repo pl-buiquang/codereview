@@ -326,6 +326,7 @@ mod tests {
             repo_id: 1,
             kind: "local".into(),
             github_pr_number: None,
+            gh_pr_id: None,
             title: "t".into(),
             base_ref: "main".into(),
             head_ref: head_ref.into(),

@@ -540,17 +540,7 @@ pub fn pr_diff(ctx: &GhRepo, number: i64) -> AppResult<String> {
     run_gh(ctx, &args)
 }
 
-#[derive(Debug, Deserialize)]
-struct PrViewRaw {
-    title: String,
-    #[serde(rename = "baseRefName")]
-    base_ref_name: String,
-    #[serde(rename = "headRefName")]
-    head_ref_name: String,
-    #[serde(rename = "headRefOid")]
-    head_ref_oid: String,
-}
-
+/// What a review target needs from its PR: label refs and the live head.
 #[derive(Debug)]
 pub struct PrInfo {
     pub title: String,
@@ -559,26 +549,16 @@ pub struct PrInfo {
     pub head_sha: String,
 }
 
-pub fn pr_view(ctx: &GhRepo, number: i64) -> AppResult<PrInfo> {
-    let num = number.to_string();
-    let mut args = vec![
-        "pr",
-        "view",
-        num.as_str(),
-        "--json",
-        "title,baseRefName,headRefName,headRefOid",
-    ];
-    let suffix = ctx.pr_args_suffix();
-    args.extend(suffix.iter().map(String::as_str));
-    let out = run_gh(ctx, &args)?;
-    let raw: PrViewRaw =
-        serde_json::from_str(&out).map_err(|e| AppError::Gh(format!("failed to parse pr view: {e}")))?;
-    Ok(PrInfo {
-        title: raw.title,
-        base_ref: raw.base_ref_name,
-        head_ref: raw.head_ref_name,
-        head_sha: raw.head_ref_oid,
-    })
+impl PrInfo {
+    pub fn from_node(node: &crate::mirror::Node) -> AppResult<Self> {
+        let missing = || AppError::Gh(format!("PR {} is missing its refs", node.url));
+        Ok(Self {
+            title: node.title.clone(),
+            base_ref: node.base_ref_name.clone().ok_or_else(missing)?,
+            head_ref: node.head_ref_name.clone().ok_or_else(missing)?,
+            head_sha: node.head_ref_oid.clone().ok_or_else(missing)?,
+        })
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -589,22 +569,9 @@ const PR_META_QUERY: &str = r#"
 query PrMeta($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
     pullRequest(number: $number) {
-      number
-      title
-      url
+      __typename
+      ...PrCore
       body
-      state
-      isDraft
-      headRefOid
-      mergeable
-      mergeStateStatus
-      viewerCanUpdateBranch
-      reviewDecision
-      autoMergeRequest { mergeMethod enabledBy { login } }
-      additions
-      deletions
-      changedFiles
-      author { login avatarUrl }
       labels(first: 50) { nodes { name color } }
       latestReviews(first: 20) { nodes { author { login avatarUrl } state } }
       commits(last: 1) {
@@ -628,7 +595,7 @@ query PrMeta($owner: String!, $name: String!, $number: Int!) {
 }
 "#;
 
-/// PR metadata returned to the frontend (review header). Read-only; never persisted.
+/// PR metadata for the review header, fetched live or rebuilt from the mirror.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PrMeta {
@@ -671,30 +638,32 @@ pub struct PrAutoMerge {
     pub enabled_by: Option<PrActor>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct PrLabel {
     pub name: String,
     pub color: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct PrReviewer {
     pub author: Option<PrActor>,
     pub state: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct PrCheck {
     pub name: String,
     pub state: Option<String>,
     pub url: Option<String>,
 }
 
+#[cfg(test)]
 #[derive(Debug, Deserialize)]
 struct PrMetaData {
     repository: Option<PrMetaRepo>,
 }
 
+#[cfg(test)]
 #[derive(Debug, Deserialize)]
 struct PrMetaRepo {
     #[serde(rename = "pullRequest")]
@@ -894,16 +863,25 @@ fn map_pr_meta(pr: PrMetaPr) -> PrMeta {
     }
 }
 
-/// Fetch a PR's metadata for the review header. Clone-less (owner/name/number),
-/// read-only, ephemeral — nothing is written to SQLite.
-pub fn pr_meta(owner: &str, name: &str, number: i64) -> AppResult<PrMeta> {
+/// A PR's header metadata plus the mirror node of the same response.
+pub struct PrDetail {
+    pub node: crate::mirror::Node,
+    pub meta: PrMeta,
+}
+
+/// Fetch a PR's metadata for the review header. Clone-less (owner/name/number).
+pub fn pr_detail(owner: &str, name: &str, number: i64) -> AppResult<PrDetail> {
     let vars = serde_json::json!({ "owner": owner, "name": name, "number": number });
-    let data: PrMetaData = graphql(PR_META_QUERY, vars)?;
+    let query = format!("{PR_META_QUERY}\n{}", crate::mirror::FRAGMENTS);
+    let data: serde_json::Value = graphql(&query, vars)?;
     let pr = data
-        .repository
-        .and_then(|r| r.pull_request)
+        .pointer("/repository/pullRequest")
+        .filter(|v| !v.is_null())
         .ok_or_else(|| AppError::Gh(format!("PR {owner}/{name}#{number} not found")))?;
-    Ok(map_pr_meta(pr))
+    let parse_err = |e: serde_json::Error| AppError::Gh(format!("failed to parse PR {owner}/{name}#{number}: {e}"));
+    let node: crate::mirror::Node = serde_json::from_value(pr.clone()).map_err(parse_err)?;
+    let raw: PrMetaPr = serde_json::from_value(pr.clone()).map_err(parse_err)?;
+    Ok(PrDetail { node, meta: map_pr_meta(raw) })
 }
 
 /// Flip a PR's draft status. Clone-less (owner/name/number), like `pr_meta`.
@@ -1046,8 +1024,8 @@ query PrThreads($owner: String!, $name: String!, $number: Int!, $cursor: String)
 }
 "#;
 
-/// An existing GitHub review thread on a PR's diff. Read-only; never persisted.
-#[derive(Debug, Serialize)]
+/// An existing GitHub review thread on a PR's diff, mirrored in `gh_pr_threads`.
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PrThread {
     pub id: String,
@@ -1064,7 +1042,7 @@ pub struct PrThread {
     pub comments: Vec<PrThreadComment>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PrThreadComment {
     pub id: String,
