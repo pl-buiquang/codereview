@@ -79,6 +79,9 @@ places and must stay consistent:
   Homebrew tools like `gh` (`/opt/homebrew/bin`) won't resolve. `path_env::ensure_login_path()` runs
   first in `run()` to recover the login-shell `PATH`. Keep new external-CLI calls working under this
   (they go through `git.rs`/`gh.rs`, which is why it's centralized there).
+- **Git reads must be lock-free:** `run_git` sets `GIT_OPTIONAL_LOCKS=0`. Repo watchers
+  (`watch.rs`) react to `.git` changes, so a `git status` that refreshes the index would retrigger
+  itself in a loop. Spawn git through `run_git` (or set the same env).
 
 ## Contributing
 
