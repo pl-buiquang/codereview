@@ -713,10 +713,33 @@ pub async fn board_open_vscode(card_id: String, base_paths: Vec<String>, db: Sta
     crate::commands::worktree::open_in_vscode(worktree_path, None)
 }
 
+/// Ensure the PR card's chat worktree exists, then open a plain shell there.
+#[tauri::command]
+pub async fn board_open_shell(
+    card_id: String,
+    base_paths: Vec<String>,
+    host: crate::terminal::TerminalHost,
+    tmux_target: crate::terminal::TmuxTarget,
+    tmux_session: String,
+    db: State<'_, Db>,
+) -> AppResult<()> {
+    let (owner, name, number) = pr_card_coords(&db, &card_id)?;
+    let review = crate::commands::review::create_review_for_pr_impl(&db, &owner, &name, number, &base_paths, true)?;
+    let worktree_path = crate::commands::chat::ensure_chat_worktree(review.id, db).await?;
+    crate::terminal::open_shell(
+        host,
+        tmux_target,
+        &tmux_session,
+        &format!("{owner}/{name}"),
+        &format!("#{number}"),
+        &worktree_path,
+    )
+}
+
 /// Ensure the PR card's chat worktree exists, then open a tmux window there running Claude —
 /// resuming the card's latest recorded session when it isn't already live.
 #[tauri::command]
-pub async fn board_open_terminal(
+pub async fn board_open_agent(
     card_id: String,
     base_paths: Vec<String>,
     host: crate::terminal::TerminalHost,

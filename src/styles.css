@@ -3622,31 +3622,6 @@ input[type="range"] {
   right: auto;
   min-width: 120px;
 }
-.review-worktree-vscode-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  vertical-align: middle;
-  margin-left: 6px;
-  padding: 1px 6px;
-  border: none;
-  border-radius: calc(var(--radius-m) - 2px);
-  background: transparent;
-  box-shadow: none;
-  color: var(--text-2);
-  font: inherit;
-  font-weight: 600;
-  cursor: pointer;
-}
-.review-worktree-vscode-btn:hover {
-  background: var(--surface-2);
-  color: var(--accent);
-}
-.review-worktree-vscode-btn:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
 .nav-list {
   list-style: none;
   margin: 0;
@@ -4610,25 +4585,27 @@ input[type="range"] {
   gap: 6px;
   min-width: 0;
 }
-.board-card-menu {
+.kebab-menu {
   position: relative;
   flex: none;
+}
+.board-card-menu {
   margin: -2px -5px 0 0;
 }
-.board-card-menu .btn-split-menu {
+.kebab-menu .btn-split-menu {
   min-width: 200px;
 }
-.board-card-menu .btn-split-menu button:disabled {
+.kebab-menu .btn-split-menu button:disabled {
   color: var(--text-3);
   cursor: default;
   background: transparent;
 }
-.board-card-menu .btn-split-menu button.board-card-menu-session {
+.kebab-menu .btn-split-menu button.kebab-menu-session {
   max-width: 240px;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.board-card-menu .btn-split-menu button.danger:not(:disabled) {
+.kebab-menu .btn-split-menu button.danger:not(:disabled) {
   color: var(--danger);
 }
 .board-card-badge-row {

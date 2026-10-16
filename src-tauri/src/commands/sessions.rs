@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
 use tauri::State;
 
@@ -155,6 +155,112 @@ pub(crate) fn resumable_card_session(conn: &Connection, card_id: &str, live: &Ha
     Ok(ids.into_iter().find(|id| !live.contains(id)))
 }
 
+fn is_focusable(s: &ClaudeSession) -> bool {
+    s.focus == claude_sessions::FocusState::Ready
+        || s.agent_view.as_ref().is_some_and(|v| v.focus == claude_sessions::FocusState::Ready)
+}
+
+fn in_dir(cwd: &str, dir: &str) -> bool {
+    let dir = dir.trim_end_matches('/');
+    let cwd = cwd.trim_end_matches('/');
+    cwd == dir || cwd.strip_prefix(dir).is_some_and(|rest| rest.starts_with('/'))
+}
+
+/// Focusable live sessions for a review: those running inside its chat worktree, or belonging
+/// to the review's PR board card.
+fn match_review_sessions(
+    worktree: Option<&str>,
+    card: Option<&PrCard>,
+    meta: &SessionIdsByCard,
+    sessions: Vec<ClaudeSession>,
+) -> Vec<ClaudeSession> {
+    let by_card: HashSet<String> = card
+        .map(|c| match_card_sessions(std::slice::from_ref(c), meta, &sessions))
+        .unwrap_or_default()
+        .into_iter()
+        .map(|c| c.session_id)
+        .collect();
+    sessions
+        .into_iter()
+        .filter(is_focusable)
+        .filter(|s| by_card.contains(&s.session_id) || worktree.is_some_and(|w| in_dir(&s.cwd, w)))
+        .collect()
+}
+
+struct ReviewSessionCtx {
+    detail: crate::db::models::ReviewDetail,
+    worktree: Option<String>,
+    card: Option<PrCard>,
+}
+
+fn review_session_ctx(conn: &Connection, review_id: i64) -> AppResult<ReviewSessionCtx> {
+    let detail = crate::commands::review::load_detail(conn, review_id)?;
+    let worktree: Option<String> = conn
+        .query_row("SELECT worktree_path FROM chat WHERE review_id = ?1", params![review_id], |r| r.get(0))
+        .optional()?
+        .flatten();
+    let card = match (&detail.remote_owner, &detail.remote_name, detail.target.github_pr_number) {
+        (Some(owner), Some(name), Some(number)) if detail.target.kind == "github_pr" => conn
+            .query_row(
+                "SELECT id, repo, number, head_ref FROM board_card WHERE repo = ?1 AND number = ?2",
+                params![format!("{owner}/{name}"), number],
+                |r| Ok(PrCard { id: r.get(0)?, repo: r.get(1)?, number: r.get(2)?, head_ref: r.get(3)? }),
+            )
+            .optional()?,
+        _ => None,
+    };
+    Ok(ReviewSessionCtx { detail, worktree, card })
+}
+
+#[tauri::command]
+pub async fn review_agent_sessions(review_id: i64, db: State<'_, Db>) -> AppResult<Vec<ClaudeSession>> {
+    let (ctx, meta) = {
+        let conn = db.0.lock().unwrap();
+        let ctx = review_session_ctx(&conn, review_id)?;
+        let (_, meta) = load_pr_cards(&conn)?;
+        (ctx, meta)
+    };
+    let sessions = claude_sessions::live_sessions();
+    Ok(match_review_sessions(ctx.worktree.as_deref(), ctx.card.as_ref(), &meta, sessions))
+}
+
+/// Ensure the review's chat worktree exists, then open a tmux window there running Claude —
+/// resuming the PR card's latest recorded session when it isn't already live.
+#[tauri::command]
+pub async fn review_open_agent(
+    review_id: i64,
+    host: terminal::TerminalHost,
+    tmux_target: terminal::TmuxTarget,
+    tmux_session: String,
+    db: State<'_, Db>,
+) -> AppResult<()> {
+    let worktree_path = crate::commands::chat::ensure_chat_worktree(review_id, db.clone()).await?;
+    let live: HashSet<String> = claude_sessions::live_sessions().into_iter().map(|s| s.session_id).collect();
+    let (ctx, resume) = {
+        let conn = db.0.lock().unwrap();
+        let ctx = review_session_ctx(&conn, review_id)?;
+        let resume = match &ctx.card {
+            Some(card) => resumable_card_session(&conn, &card.id, &live)?,
+            None => None,
+        };
+        (ctx, resume)
+    };
+    let target = &ctx.detail.target;
+    let repo = match (&ctx.detail.remote_owner, &ctx.detail.remote_name) {
+        (Some(o), Some(n)) => format!("{o}/{n}"),
+        _ => ctx.detail.local_path.clone().unwrap_or_default(),
+    };
+    let window_name = match target.github_pr_number {
+        Some(n) => format!("#{n}"),
+        None => target.head_ref.clone(),
+    };
+    let mut argv = vec!["claude".to_string()];
+    if let Some(id) = resume {
+        argv.extend(["--resume".to_string(), id]);
+    }
+    terminal::open_session(host, tmux_target, &tmux_session, &repo, &window_name, &worktree_path, &argv)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -225,5 +331,32 @@ mod tests {
         let live = HashSet::from(["new".to_string()]);
         assert_eq!(resumable_card_session(&conn, "c", &live).unwrap().as_deref(), Some("old"));
         assert_eq!(resumable_card_session(&conn, "other", &live).unwrap(), None);
+    }
+    #[test]
+    fn review_sessions_match_worktree_or_card() {
+        let mut in_wt = session("s1", None, None);
+        in_wt.cwd = "/wt/pr-1/sub".into();
+        let mut prefix_only = session("s2", None, None);
+        prefix_only.cwd = "/wt/pr-10".into();
+        let by_branch = session("s3", Some("org/repo"), Some("feat/x"));
+        let mut detached = session("s4", None, None);
+        detached.cwd = "/wt/pr-1".into();
+        detached.focus = FocusState::Detached;
+        let c = card("a", "org/repo", Some("feat/x"));
+        let got: Vec<_> = match_review_sessions(
+            Some("/wt/pr-1/"),
+            Some(&c),
+            &HashMap::new(),
+            vec![in_wt, prefix_only, by_branch, detached],
+        )
+        .into_iter()
+        .map(|s| s.session_id)
+        .collect();
+        assert_eq!(got, vec!["s1", "s3"]);
+    }
+
+    #[test]
+    fn review_sessions_without_worktree_or_card_is_empty() {
+        assert!(match_review_sessions(None, None, &HashMap::new(), vec![session("s1", None, None)]).is_empty());
     }
 }

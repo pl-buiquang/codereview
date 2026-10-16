@@ -164,6 +164,8 @@ export interface PrMeta {
   state: string; // OPEN | CLOSED | MERGED
   isDraft: boolean;
   mergeable: string | null; // MERGEABLE | CONFLICTING | UNKNOWN
+  mergeStateStatus: string | null; // BEHIND | CLEAN | DIRTY | BLOCKED | ...
+  viewerCanUpdateBranch: boolean;
   reviewDecision: string | null; // APPROVED | CHANGES_REQUESTED | REVIEW_REQUIRED | null
   additions: number;
   deletions: number;

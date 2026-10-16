@@ -585,6 +585,8 @@ query PrMeta($owner: String!, $name: String!, $number: Int!) {
       state
       isDraft
       mergeable
+      mergeStateStatus
+      viewerCanUpdateBranch
       reviewDecision
       additions
       deletions
@@ -624,6 +626,8 @@ pub struct PrMeta {
     pub state: String,
     pub is_draft: bool,
     pub mergeable: Option<String>,
+    pub merge_state_status: Option<String>,
+    pub viewer_can_update_branch: bool,
     pub review_decision: Option<String>,
     pub additions: i64,
     pub deletions: i64,
@@ -685,6 +689,10 @@ struct PrMetaPr {
     is_draft: bool,
     #[serde(default)]
     mergeable: Option<String>,
+    #[serde(default)]
+    merge_state_status: Option<String>,
+    #[serde(default)]
+    viewer_can_update_branch: bool,
     #[serde(default)]
     review_decision: Option<String>,
     additions: i64,
@@ -841,6 +849,8 @@ fn map_pr_meta(pr: PrMetaPr) -> PrMeta {
         state: pr.state,
         is_draft: pr.is_draft,
         mergeable: pr.mergeable,
+        merge_state_status: pr.merge_state_status,
+        viewer_can_update_branch: pr.viewer_can_update_branch,
         review_decision: pr.review_decision,
         additions: pr.additions,
         deletions: pr.deletions,
@@ -875,6 +885,23 @@ pub fn set_pr_draft(owner: &str, name: &str, number: i64, draft: bool) -> AppRes
     let mut args = vec!["pr", "ready", num.as_str()];
     if draft {
         args.push("--undo");
+    }
+    let suffix = ctx.pr_args_suffix();
+    args.extend(suffix.iter().map(String::as_str));
+    run_gh(&ctx, &args)?;
+    Ok(())
+}
+
+/// Bring a PR's head branch up to date with its base (merge, or rebase when `rebase`).
+pub fn update_pr_branch(owner: &str, name: &str, number: i64, rebase: bool) -> AppResult<()> {
+    let ctx = GhRepo::Remote {
+        owner: owner.to_string(),
+        name: name.to_string(),
+    };
+    let num = number.to_string();
+    let mut args = vec!["pr", "update-branch", num.as_str()];
+    if rebase {
+        args.push("--rebase");
     }
     let suffix = ctx.pr_args_suffix();
     args.extend(suffix.iter().map(String::as_str));

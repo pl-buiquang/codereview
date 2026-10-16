@@ -194,14 +194,19 @@ export function BoardView() {
     mutationFn: api.focusClaudeSession,
     onError: (e) => toast.error(`Could not focus terminal:\n${String(e)}`),
   });
-  const openTerminal = useMutation({
-    mutationFn: (cardId: string) => api.boardOpenTerminal(cardId, defaultTerminal, tmuxTarget, tmuxSessionName, parseRepoBasePaths(repoBasePaths)),
+  const openShell = useMutation({
+    mutationFn: (cardId: string) => api.boardOpenShell(cardId, defaultTerminal, tmuxTarget, tmuxSessionName, parseRepoBasePaths(repoBasePaths)),
+    onSuccess: invalidate,
+    onError: (e) => toast.error(`Could not open terminal:\n${String(e)}`),
+  });
+  const openAgent = useMutation({
+    mutationFn: (cardId: string) => api.boardOpenAgent(cardId, defaultTerminal, tmuxTarget, tmuxSessionName, parseRepoBasePaths(repoBasePaths)),
     onSuccess: () => {
       invalidate();
       queryClient.invalidateQueries({ queryKey: ["claude-sessions"] });
       queryClient.invalidateQueries({ queryKey: ["board-card-sessions"] });
     },
-    onError: (e) => toast.error(`Could not open terminal:\n${String(e)}`),
+    onError: (e) => toast.error(`Could not open agent session:\n${String(e)}`),
   });
   const metaAdd = useMutation({
     mutationFn: (args: { cardId: string; kind: BoardMetaKind; value: string; tag: string | null; label: string | null }) =>
@@ -457,9 +462,10 @@ export function BoardView() {
                         card.type === "pr" && lane.key !== "backlog"
                           ? {
                               sessions: focusableByCard.get(card.id) ?? [],
-                              busy: openTerminal.isPending || focusSession.isPending,
+                              busy: openShell.isPending || openAgent.isPending || focusSession.isPending,
                               onFocus: (id) => focusSession.mutate(id),
-                              onOpenNew: () => openTerminal.mutate(card.id),
+                              onOpenShell: () => openShell.mutate(card.id),
+                              onOpenAgent: () => openAgent.mutate(card.id),
                             }
                           : null
                       }

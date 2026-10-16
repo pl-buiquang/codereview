@@ -9,7 +9,7 @@ import { useUIStore } from "../store";
 import { RepoName } from "./RepoName";
 import { CiBadge, CommentsBadge, MergeableBadge, MergeStateBadge } from "./InboxBadges";
 import { Icon } from "./icons";
-import { isWaiting } from "./SessionsView";
+import { AgentSessionItems, KebabMenu } from "./KebabMenu";
 
 const BORDER_STYLE_KEY: Record<BoardBorderSide, "borderTopColor" | "borderRightColor" | "borderBottomColor" | "borderLeftColor"> = {
   top: "borderTopColor",
@@ -224,12 +224,8 @@ export interface TerminalAction {
   sessions: ClaudeSession[];
   busy: boolean;
   onFocus: (sessionId: string) => void;
-  onOpenNew: () => void;
-}
-
-function sessionLabel(s: ClaudeSession): string {
-  const status = isWaiting(s) ? `waiting: ${s.waiting_for ?? "input"}` : s.status;
-  return `${s.name ?? s.session_id.slice(0, 8)}${status ? ` · ${status}` : ""}`;
+  onOpenShell: () => void;
+  onOpenAgent: () => void;
 }
 
 function PrActionsMenu({
@@ -241,18 +237,6 @@ function PrActionsMenu({
   actions: PrActions;
   terminal: TerminalAction | null;
 }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
-  }, [open]);
-
   const isOpen = card.state === "open";
   const behind = card.merge_state_status === "BEHIND";
   const stacked = card.stack_number != null;
@@ -265,96 +249,87 @@ function PrActionsMenu({
         : !card.viewer_can_update_branch
           ? "You can't update this branch"
           : null;
-  const disabled = actions.busy;
-
-  const run = (fn: () => void) => () => {
-    setOpen(false);
-    fn();
-  };
-
-  const merge = async () => {
-    setOpen(false);
-    if (
-      await confirmDialog({
-        title: "Squash and merge",
-        message: `Squash-merge ${card.repo}#${card.number} "${card.title}" and delete its branch?`,
-        confirmLabel: "Squash and merge",
-        danger: true,
-      })
-    ) {
-      actions.onMerge();
-    }
-  };
 
   return (
-    <div ref={ref} className="board-card-menu">
-      <button className="btn-icon" title="PR actions" disabled={disabled} onClick={() => setOpen((v) => !v)}>
-        <Icon name="kebab" size={14} />
-      </button>
-      {open && (
-        <div className="btn-split-menu card" role="menu">
-          <button
-            role="menuitem"
-            className="danger"
-            disabled={!isOpen || card.is_draft}
-            title={!isOpen ? "PR is not open" : card.is_draft ? "Draft PRs can't be merged" : undefined}
-            onClick={merge}
-          >
-            Squash and merge
-          </button>
-          <button
-            role="menuitem"
-            disabled={!isOpen}
-            title={!isOpen ? "PR is not open" : undefined}
-            onClick={run(() => actions.onSetDraft(!card.is_draft))}
-          >
-            {card.is_draft ? "Mark ready for review" : "Convert to draft"}
-          </button>
-          {terminal && (
-            <>
-              <hr className="btn-split-menu-separator" />
-              {terminal.sessions.map((s) => (
+    <KebabMenu title="PR actions" disabled={actions.busy} className="board-card-menu">
+      {(close) => {
+        const run = (fn: () => void) => () => {
+          close();
+          fn();
+        };
+        const merge = async () => {
+          close();
+          if (
+            await confirmDialog({
+              title: "Squash and merge",
+              message: `Squash-merge ${card.repo}#${card.number} "${card.title}" and delete its branch?`,
+              confirmLabel: "Squash and merge",
+              danger: true,
+            })
+          ) {
+            actions.onMerge();
+          }
+        };
+        return (
+          <>
+            <button
+              role="menuitem"
+              className="danger"
+              disabled={!isOpen || card.is_draft}
+              title={!isOpen ? "PR is not open" : card.is_draft ? "Draft PRs can't be merged" : undefined}
+              onClick={merge}
+            >
+              Squash and merge
+            </button>
+            <button
+              role="menuitem"
+              disabled={!isOpen}
+              title={!isOpen ? "PR is not open" : undefined}
+              onClick={run(() => actions.onSetDraft(!card.is_draft))}
+            >
+              {card.is_draft ? "Mark ready for review" : "Convert to draft"}
+            </button>
+            {terminal && (
+              <>
+                <hr className="btn-split-menu-separator" />
                 <button
-                  key={s.session_id}
                   role="menuitem"
                   disabled={terminal.busy}
-                  className="board-card-menu-session"
-                  title={`Focus terminal: ${sessionLabel(s)}\n${s.cwd}`}
-                  onClick={run(() => terminal.onFocus(s.session_id))}
+                  title="Open a shell in the chat worktree"
+                  onClick={run(terminal.onOpenShell)}
                 >
-                  {isWaiting(s) ? "Waiting" : "Focus"}: {s.name ?? s.session_id.slice(0, 8)}
+                  Open in terminal
                 </button>
-              ))}
-              <button
-                role="menuitem"
-                disabled={terminal.busy}
-                title="Open a new terminal running Claude in the chat worktree"
-                onClick={run(terminal.onOpenNew)}
-              >
-                New terminal
-              </button>
-            </>
-          )}
-          <hr className="btn-split-menu-separator" />
-          <button
-            role="menuitem"
-            disabled={updateDisabledReason != null}
-            title={updateDisabledReason ?? undefined}
-            onClick={run(() => actions.onUpdateBranch(false))}
-          >
-            Update branch (merge)
-          </button>
-          <button
-            role="menuitem"
-            disabled={updateDisabledReason != null}
-            title={updateDisabledReason ?? undefined}
-            onClick={run(() => actions.onUpdateBranch(true))}
-          >
-            Update branch (rebase)
-          </button>
-        </div>
-      )}
-    </div>
+                <AgentSessionItems
+                  sessions={terminal.sessions}
+                  busy={terminal.busy}
+                  close={close}
+                  onFocus={terminal.onFocus}
+                  onOpenNew={terminal.onOpenAgent}
+                />
+              </>
+            )}
+            <hr className="btn-split-menu-separator" />
+            <button
+              role="menuitem"
+              disabled={updateDisabledReason != null}
+              title={updateDisabledReason ?? undefined}
+              onClick={run(() => actions.onUpdateBranch(false))}
+            >
+              Update branch (merge)
+            </button>
+            <button
+              role="menuitem"
+              disabled={updateDisabledReason != null}
+              title={updateDisabledReason ?? undefined}
+              onClick={run(() => actions.onUpdateBranch(true))}
+            >
+              Update branch (rebase)
+            </button>
+          </>
+        );
+      }}
+    </KebabMenu>
   );
 }
 

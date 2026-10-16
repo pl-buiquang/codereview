@@ -33,6 +33,11 @@ pub async fn set_pr_draft(owner: String, name: String, number: i64, draft: bool)
     provider_for().set_pr_draft(&owner, &name, number, draft)
 }
 
+#[tauri::command]
+pub async fn update_pr_branch(owner: String, name: String, number: i64, rebase: bool) -> AppResult<()> {
+    provider_for().update_pr_branch(&owner, &name, number, rebase)
+}
+
 /// `async` for the same reason as `pr_meta` — keeps the (paginated) review-thread
 /// fetch off the UI thread so it loads concurrently with the diff and metadata.
 #[tauri::command]

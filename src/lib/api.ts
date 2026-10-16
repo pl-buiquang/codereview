@@ -132,6 +132,8 @@ export const api = {
     invoke<PrMeta>("pr_meta", { owner, name, number }),
   setPrDraft: (owner: string, name: string, number: number, draft: boolean) =>
     invoke<void>("set_pr_draft", { owner, name, number, draft }),
+  updatePrBranch: (owner: string, name: string, number: number, rebase: boolean) =>
+    invoke<void>("update_pr_branch", { owner, name, number, rebase }),
   prReviewThreads: (owner: string, name: string, number: number) =>
     invoke<PrThread[]>("pr_review_threads", { owner, name, number }),
   replyToThread: (owner: string, name: string, number: number, commentId: number, body: string) =>
@@ -206,13 +208,23 @@ export const api = {
     invoke<Review>("board_open_review", { cardId, basePaths }),
   boardOpenVscode: (cardId: string, basePaths: string[] = []) =>
     invoke<void>("board_open_vscode", { cardId, basePaths }),
-  boardOpenTerminal: (
+  boardOpenShell: (
     cardId: string,
     host: TerminalHost,
     tmuxTarget: TmuxTarget,
     tmuxSession: string,
     basePaths: string[] = [],
-  ) => invoke<void>("board_open_terminal", { cardId, basePaths, host, tmuxTarget, tmuxSession }),
+  ) => invoke<void>("board_open_shell", { cardId, basePaths, host, tmuxTarget, tmuxSession }),
+  boardOpenAgent: (
+    cardId: string,
+    host: TerminalHost,
+    tmuxTarget: TmuxTarget,
+    tmuxSession: string,
+    basePaths: string[] = [],
+  ) => invoke<void>("board_open_agent", { cardId, basePaths, host, tmuxTarget, tmuxSession }),
+  reviewAgentSessions: (reviewId: number) => invoke<ClaudeSession[]>("review_agent_sessions", { reviewId }),
+  reviewOpenAgent: (reviewId: number, host: TerminalHost, tmuxTarget: TmuxTarget, tmuxSession: string) =>
+    invoke<void>("review_open_agent", { reviewId, host, tmuxTarget, tmuxSession }),
   boardCardSessions: () => invoke<CardSession[]>("board_card_sessions"),
   listClaudeSessions: (historyDays: number) =>
     invoke<ClaudeSession[]>("list_claude_sessions", { historyDays }),

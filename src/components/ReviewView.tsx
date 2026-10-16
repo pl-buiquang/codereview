@@ -69,6 +69,7 @@ import { PrMetaPanel, usePrMeta } from "./PrMetaPanel";
 import { ReviewSwitcher } from "./ReviewSwitcher";
 import { CiBadge, StatusPill } from "./InboxBadges";
 import { Icon } from "./icons";
+import { AgentSessionItems, KebabMenu } from "./KebabMenu";
 import { githubPrUrl } from "../lib/githubUrl";
 import { useDebouncedCallback } from "../lib/useDebouncedCallback";
 import { useSettingsStore } from "../lib/settings";
@@ -979,6 +980,58 @@ function ReviewHeader({
     },
   });
 
+  const updateBranch = useMutation({
+    mutationFn: (rebase: boolean) => {
+      if (owner == null || name == null || prNumber == null) {
+        throw new Error("missing PR identity");
+      }
+      return api.updatePrBranch(owner, name, prNumber, rebase);
+    },
+    onSuccess: (_, rebase) => {
+      toast.success(rebase ? "Branch rebased" : "Branch updated");
+      queryClient.invalidateQueries({ queryKey: ["pr-meta", owner, name, prNumber] });
+      queryClient.invalidateQueries({ queryKey: ["board"] });
+      refreshReview.mutate();
+    },
+    onError: (e) => toast.error(`Update branch failed:\n${String(e)}`),
+  });
+
+  const noCloneReason = detail.local_path ? null : "Link a local clone first";
+  const defaultTerminal = useSettingsStore((s) => s.defaultTerminal);
+  const tmuxTarget = useSettingsStore((s) => s.tmuxTarget);
+  const tmuxSessionName = useSettingsStore((s) => s.tmuxSessionName);
+  const agentSessionsQuery = useQuery({
+    queryKey: ["review-agent-sessions", review.id],
+    queryFn: () => api.reviewAgentSessions(review.id),
+    enabled: detail.local_path != null,
+    refetchInterval: 15_000,
+  });
+  const invalidateWorktree = () => {
+    queryClient.invalidateQueries({ queryKey: ["chat-branch", review.id] });
+    queryClient.invalidateQueries({ queryKey: ["worktrees", target.repo_id] });
+  };
+  const openShell = useMutation({
+    mutationFn: async () => {
+      const worktreePath = await api.ensureChatWorktree(review.id);
+      await api.worktreeOpenTerminal(target.repo_id, worktreePath, defaultTerminal, tmuxTarget, tmuxSessionName);
+    },
+    onSuccess: invalidateWorktree,
+    onError: (e) => toast.error(`Could not open terminal:\n${String(e)}`),
+  });
+  const openAgent = useMutation({
+    mutationFn: () => api.reviewOpenAgent(review.id, defaultTerminal, tmuxTarget, tmuxSessionName),
+    onSuccess: () => {
+      invalidateWorktree();
+      queryClient.invalidateQueries({ queryKey: ["review-agent-sessions", review.id] });
+      queryClient.invalidateQueries({ queryKey: ["claude-sessions"] });
+    },
+    onError: (e) => toast.error(`Could not open agent session:\n${String(e)}`),
+  });
+  const focusSession = useMutation({
+    mutationFn: api.focusClaudeSession,
+    onError: (e) => toast.error(`Could not focus agent session:\n${String(e)}`),
+  });
+
   const reanchorComments = useMutation({
     mutationFn: () => api.reanchorComments(review.id),
     onSuccess: (r) => {
@@ -1058,42 +1111,16 @@ function ReviewHeader({
               ) : prNumber != null ? (
                 <span> #{prNumber}</span>
               ) : null}
-              {detail.local_path && (
-                <button
-                  className="review-worktree-vscode-btn"
-                  title="Open chat worktree in VSCode"
-                  aria-label="Open chat worktree in VSCode"
-                  disabled={openingWorktree}
-                  onClick={openChatWorktreeInVscode}
-                >
-                  <Icon name="ext" size={11} /> VSCode
-                </button>
-              )}
             </span>
           )}
         </div>
         <ReviewSwitcher targetId={target.id} currentReviewId={review.id} />
         {isPr && (
           <span className="review-pr-chips">
-            {prMetaQuery.data?.state === "OPEN" ? (
-              <button
-                className={`badge badge-toggle ${prMetaQuery.data.isDraft ? "badge-draft" : "badge-open"}`}
-                title={
-                  prMetaQuery.data.isDraft
-                    ? "Mark ready for review"
-                    : "Convert to draft"
-                }
-                disabled={togglePrDraft.isPending}
-                onClick={() => togglePrDraft.mutate(!prMetaQuery.data!.isDraft)}
-              >
-                {prMetaQuery.data.isDraft ? "draft" : "open"}
-              </button>
-            ) : (
-              <StatusPill
-                state={prMetaQuery.data ? prMetaQuery.data.state.toLowerCase() : null}
-                isDraft={prMetaQuery.data?.isDraft ?? false}
-              />
-            )}
+            <StatusPill
+              state={prMetaQuery.data ? prMetaQuery.data.state.toLowerCase() : null}
+              isDraft={prMetaQuery.data?.isDraft ?? false}
+            />
             <CiBadge state={prMetaQuery.data?.ciState ? prMetaQuery.data.ciState.toLowerCase() : null} />
           </span>
         )}
@@ -1162,9 +1189,6 @@ function ReviewHeader({
               <Icon name="refresh" size={13} /> Refresh
             </>
           )}
-        </button>
-        <button className="btn" onClick={() => setShowExport(true)}>
-          Export
         </button>
         {isPr && draftReplyCount > 0 && (
           <button
@@ -1235,6 +1259,85 @@ function ReviewHeader({
             </button>
           </>
         )}
+        <KebabMenu title="Review actions">
+          {(close) => {
+            const run = (fn: () => void) => () => {
+              close();
+              fn();
+            };
+            const prOpen = prMetaQuery.data?.state === "OPEN";
+            const updateDisabledReason = !prMetaQuery.data
+              ? "Loading PR status…"
+              : !prOpen
+                ? "PR is not open"
+                : prMetaQuery.data.mergeStateStatus !== "BEHIND"
+                  ? "Branch is up to date"
+                  : !prMetaQuery.data.viewerCanUpdateBranch
+                    ? "You can't update this branch"
+                    : null;
+            return (
+              <>
+                <button role="menuitem" onClick={run(() => setShowExport(true))}>
+                  Export…
+                </button>
+                <hr className="btn-split-menu-separator" />
+                <button
+                  role="menuitem"
+                  disabled={noCloneReason != null || openingWorktree}
+                  title={noCloneReason ?? "Open the chat worktree in VSCode"}
+                  onClick={run(openChatWorktreeInVscode)}
+                >
+                  Open in VSCode
+                </button>
+                <button
+                  role="menuitem"
+                  disabled={noCloneReason != null || openShell.isPending}
+                  title={noCloneReason ?? "Open a shell in the chat worktree"}
+                  onClick={run(() => openShell.mutate())}
+                >
+                  Open in terminal
+                </button>
+                <AgentSessionItems
+                  sessions={agentSessionsQuery.data ?? []}
+                  busy={openAgent.isPending || focusSession.isPending}
+                  disabledReason={noCloneReason ?? (claudeAvailable ? null : "Claude CLI not found")}
+                  close={close}
+                  onFocus={(id) => focusSession.mutate(id)}
+                  onOpenNew={() => openAgent.mutate()}
+                />
+                {isPr && (
+                  <>
+                    <hr className="btn-split-menu-separator" />
+                    <button
+                      role="menuitem"
+                      disabled={!prOpen || togglePrDraft.isPending}
+                      title={prOpen ? undefined : "PR is not open"}
+                      onClick={run(() => togglePrDraft.mutate(!prMetaQuery.data!.isDraft))}
+                    >
+                      {prMetaQuery.data?.isDraft ? "Mark ready for review" : "Convert to draft"}
+                    </button>
+                    <button
+                      role="menuitem"
+                      disabled={updateDisabledReason != null || updateBranch.isPending}
+                      title={updateDisabledReason ?? undefined}
+                      onClick={run(() => updateBranch.mutate(false))}
+                    >
+                      Update branch (merge)
+                    </button>
+                    <button
+                      role="menuitem"
+                      disabled={updateDisabledReason != null || updateBranch.isPending}
+                      title={updateDisabledReason ?? undefined}
+                      onClick={run(() => updateBranch.mutate(true))}
+                    >
+                      Update branch (rebase)
+                    </button>
+                  </>
+                )}
+              </>
+            );
+          }}
+        </KebabMenu>
         <button
           className="btn btn-danger"
           disabled={pending}
