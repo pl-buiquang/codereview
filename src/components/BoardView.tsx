@@ -49,6 +49,7 @@ function invalidateBoard(queryClient: ReturnType<typeof useQueryClient>) {
 export function BoardView() {
   const queryClient = useQueryClient();
   const openReviewTab = useUIStore((s) => s.openReview);
+  const homeActive = useUIStore((s) => s.activeTabId === "home");
   const openRepo = useUIStore((s) => s.openRepo);
   const collapsedLanes = useUIStore((s) => s.collapsedLanes);
   const toggleLane = useUIStore((s) => s.toggleLane);
@@ -77,7 +78,7 @@ export function BoardView() {
   const liveSessionsQuery = useQuery({
     queryKey: ["claude-sessions", 0],
     queryFn: () => api.listClaudeSessions(0, ""),
-    refetchInterval: 15_000,
+    refetchInterval: homeActive ? 15_000 : false,
   });
   const focusableByCard = useMemo(() => {
     const byId = new Map((liveSessionsQuery.data?.sessions ?? []).map((s) => [s.session_id, s]));

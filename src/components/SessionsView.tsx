@@ -44,12 +44,14 @@ export function SessionsView() {
   const tmuxTarget = useSettingsStore((s) => s.tmuxTarget);
   const tmuxSessionName = useSettingsStore((s) => s.tmuxSessionName);
   const showBoardCard = useUIStore((s) => s.showBoardCard);
+  const homeActive = useUIStore((s) => s.activeTabId === "home");
   const queryClient = useQueryClient();
 
   const sessionsQuery = useQuery({
     queryKey: ["claude-sessions", historyDays, summaryDir],
     queryFn: () => api.listClaudeSessions(historyDays, summaryDir),
-    refetchInterval: 3_000,
+    // The home tab stays mounted (hidden) behind review tabs.
+    refetchInterval: homeActive ? 3_000 : false,
   });
   const cardSessions = sessionsQuery.data?.card_sessions;
 

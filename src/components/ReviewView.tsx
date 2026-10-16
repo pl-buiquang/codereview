@@ -1060,7 +1060,7 @@ function ReviewHeader({
     queryKey: ["review-agent-sessions", review.id],
     queryFn: () => api.reviewAgentSessions(review.id),
     enabled: detail.local_path != null,
-    refetchInterval: 15_000,
+    refetchInterval: isActiveTab ? 15_000 : false,
   });
   const invalidateWorktree = () => {
     queryClient.invalidateQueries({ queryKey: ["chat-branch", review.id] });
