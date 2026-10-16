@@ -280,6 +280,17 @@ describe("ReviewView focus overlay", () => {
     expect(handlers.generateFocus).toHaveBeenCalledWith(7, undefined);
   });
 
+  it("moves Regenerate into the review actions menu once a focus exists", async () => {
+    const user = userEvent.setup();
+    renderReview();
+    await user.click(await screen.findByRole("button", { name: "Review actions" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Regenerate AI focus" }));
+    expect(handlers.generateFocus).toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: /Regenerate focus/ })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Review actions" }));
+    expect(await screen.findByRole("menuitem", { name: "Re-anchor comments" })).toBeDisabled();
+  });
+
   it("disables Generate without the claude CLI", async () => {
     handlers.getFocus = vi.fn(() => Promise.resolve(null));
     handlers.checkEnvironment = vi.fn(() =>

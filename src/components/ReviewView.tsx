@@ -884,6 +884,9 @@ function ReviewHeader({
     staleTime: Infinity,
   });
   const claudeAvailable = envQuery.data ? envQuery.data.claude != null : true;
+  const chatModel = useSettingsStore((s) => s.chatModel);
+  const focusGenerating = focusView?.focus.status === "generating" || generateFocus.isPending;
+  const hasFocus = focusView?.focus.planned_at != null;
 
   const deleteReview = useMutation({
     mutationFn: () => api.deleteReview(review.id),
@@ -1208,12 +1211,14 @@ function ReviewHeader({
         {focusView?.focus.planned_at != null && (
           <FocusLevelSelect level={focusView.focus.level} onChange={focusActions.setLevel} />
         )}
-        <FocusGenerate
-          key={focusView?.focus.planned_at ?? "none"}
-          view={focusView}
-          claudeAvailable={claudeAvailable}
-          generate={generateFocus}
-        />
+        {(!hasFocus || focusGenerating) && (
+          <FocusGenerate
+            key={focusView?.focus.planned_at ?? "none"}
+            view={focusView}
+            claudeAvailable={claudeAvailable}
+            generate={generateFocus}
+          />
+        )}
         {pinMoved && (
           <span className="head-moved">
             <span
@@ -1242,22 +1247,10 @@ function ReviewHeader({
           <span className="head-moved">
             <span
               className="head-moved-badge"
-              title="Some comments were written against other commits than this review's — they may no longer line up with the code."
+              title="Some comments were written against other commits than this review's — they may no longer line up with the code. Re-anchor them from the review actions menu."
             >
-              ⚠ outdated comments
+              {reanchorComments.isPending ? "Re-anchoring…" : "⚠ outdated comments"}
             </span>
-            <button
-              className="btn btn-sm"
-              disabled={readOnly || reanchorComments.isPending}
-              title={
-                readOnly
-                  ? "Published reviews cannot be re-anchored"
-                  : "Move comments onto this review's commits and clear outdated badges"
-              }
-              onClick={() => reanchorComments.mutate()}
-            >
-              {reanchorComments.isPending ? "Re-anchoring…" : "Re-anchor comments"}
-            </button>
           </span>
         )}
         <button
@@ -1427,6 +1420,31 @@ function ReviewHeader({
                     <hr className="btn-split-menu-separator" />
                   </>
                 )}
+                {hasFocus && (
+                  <button
+                    role="menuitem"
+                    disabled={!claudeAvailable || focusGenerating}
+                    title={claudeAvailable ? "Tier every hunk again with AI (default chat model)" : "Claude CLI not found"}
+                    onClick={run(() => generateFocus.mutate({ model: chatModel || undefined }))}
+                  >
+                    Regenerate AI focus
+                  </button>
+                )}
+                <button
+                  role="menuitem"
+                  disabled={readOnly || !anchorsStale || reanchorComments.isPending}
+                  title={
+                    readOnly
+                      ? "Published reviews cannot be re-anchored"
+                      : !anchorsStale
+                        ? "All comments are on this review's commits"
+                        : "Move comments onto this review's commits and clear outdated badges"
+                  }
+                  onClick={run(() => reanchorComments.mutate())}
+                >
+                  Re-anchor comments
+                </button>
+                <hr className="btn-split-menu-separator" />
                 <button
                   role="menuitem"
                   disabled={noCloneReason != null || openingWorktree}
