@@ -190,8 +190,8 @@ pub fn link_local_path(repo_id: i64, path: String, db: State<Db>) -> AppResult<R
 /// base paths. Returns the count of repos that were newly linked.
 #[tauri::command]
 pub fn auto_link_repos(base_paths: Vec<String>, db: State<Db>) -> AppResult<i64> {
-    let conn = db.0.lock().unwrap();
     let remote_only: Vec<(i64, String, String)> = {
+        let conn = db.0.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, remote_owner, remote_name FROM repository
              WHERE local_path IS NULL AND remote_owner IS NOT NULL AND remote_name IS NOT NULL",
@@ -200,18 +200,22 @@ pub fn auto_link_repos(base_paths: Vec<String>, db: State<Db>) -> AppResult<i64>
             .collect::<rusqlite::Result<_>>()?;
         rows
     };
-    let mut count = 0i64;
-    for (id, owner, name) in remote_only {
-        if let Some(path) = resolve_local_path(&owner, &name, &base_paths) {
+    let found: Vec<(i64, String, Option<String>)> = remote_only
+        .into_iter()
+        .filter_map(|(id, owner, name)| {
+            let path = resolve_local_path(&owner, &name, &base_paths)?;
             let default_branch = git::default_branch(Path::new(&path));
-            conn.execute(
-                "UPDATE repository SET local_path = ?1, default_branch = COALESCE(default_branch, ?2) WHERE id = ?3",
-                params![path, default_branch, id],
-            )?;
-            count += 1;
-        }
+            Some((id, path, default_branch))
+        })
+        .collect();
+    let conn = db.0.lock().unwrap();
+    for (id, path, default_branch) in &found {
+        conn.execute(
+            "UPDATE repository SET local_path = ?1, default_branch = COALESCE(default_branch, ?2) WHERE id = ?3",
+            params![path, default_branch, id],
+        )?;
     }
-    Ok(count)
+    Ok(found.len() as i64)
 }
 
 /// Expand a leading `~/` to the real home directory.

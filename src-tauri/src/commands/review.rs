@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use chrono::Utc;
 use rusqlite::{params, Connection, OptionalExtension};
@@ -9,6 +10,7 @@ use tauri::State;
 use crate::anchor::{self, Remap};
 use crate::db::models::{Comment, Repository, Review, ReviewDetail, ReviewSummary, Target};
 use crate::db::Db;
+use crate::diff_cache;
 use crate::error::{AppError, AppResult};
 use crate::export;
 use crate::gh::ComparedFile;
@@ -694,19 +696,29 @@ pub fn create_review_for_pr(
     create_review_for_pr_impl(&db, &owner, &name, pr_number, &base_paths, false)
 }
 
-/// The diff for a review's target: GitHub PR diff via `gh`, or a local
-/// base...head git diff for virtual PRs.
-pub fn review_diff_impl(conn: &Connection, review_id: i64) -> AppResult<String> {
+enum DiffCommand {
+    Pr { ctx: GhRepo, number: i64 },
+    Local { path: PathBuf, base: String, head: String, three_dot: bool },
+}
+
+/// Everything needed to produce a review's diff, read from the DB so the
+/// `gh`/`git` call can run after the DB lock is released.
+pub struct DiffSource {
+    command: DiffCommand,
+    /// None when a SHA is unresolved: the diff then follows a moving ref.
+    key: Option<diff_cache::DiffKey>,
+}
+
+pub fn diff_source(conn: &Connection, review_id: i64) -> AppResult<DiffSource> {
     let detail = load_detail(conn, review_id)?;
-    match detail.target.kind.as_str() {
-        "github_pr" => {
-            let number = detail
-                .target
+    let t = &detail.target;
+    let command = match t.kind.as_str() {
+        "github_pr" => DiffCommand::Pr {
+            ctx: gh_ctx_for_repo(conn, t.repo_id)?,
+            number: t
                 .github_pr_number
-                .ok_or_else(|| AppError::Other("PR target missing number".into()))?;
-            let ctx = gh_ctx_for_repo(conn, detail.target.repo_id)?;
-            provider_for().pr_diff(&ctx, number)
-        }
+                .ok_or_else(|| AppError::Other("PR target missing number".into()))?,
+        },
         _ => {
             let local_path = detail.local_path.as_deref().ok_or_else(|| {
                 AppError::Other("local diff requires a local clone".into())
@@ -714,22 +726,53 @@ pub fn review_diff_impl(conn: &Connection, review_id: i64) -> AppResult<String> 
             // Prefer the pinned SHA over the branch name: a branch can be deleted
             // or moved out from under a review, but the SHA it was last resolved
             // to still diffs correctly as long as the commit itself survives.
-            let base = detail.target.base_sha.as_deref().unwrap_or(&detail.target.base_ref);
-            let head = detail.target.head_sha.as_deref().unwrap_or(&detail.target.head_ref);
-            git::diff(
-                std::path::Path::new(local_path),
-                base,
-                head,
-                detail.target.three_dot,
-            )
+            DiffCommand::Local {
+                path: PathBuf::from(local_path),
+                base: t.base_sha.clone().unwrap_or_else(|| t.base_ref.clone()),
+                head: t.head_sha.clone().unwrap_or_else(|| t.head_ref.clone()),
+                three_dot: t.three_dot,
+            }
+        }
+    };
+    let key = match (&t.base_sha, &t.head_sha) {
+        (Some(base), Some(head)) => Some(diff_cache::DiffKey {
+            repo_id: t.repo_id,
+            pr_number: t.github_pr_number.filter(|_| t.kind == "github_pr"),
+            base_sha: base.clone(),
+            head_sha: head.clone(),
+            three_dot: t.three_dot,
+        }),
+        _ => None,
+    };
+    Ok(DiffSource { command, key })
+}
+
+impl DiffSource {
+    pub fn load(&self) -> AppResult<Arc<String>> {
+        let run = || match &self.command {
+            DiffCommand::Pr { ctx, number } => provider_for().pr_diff(ctx, *number),
+            DiffCommand::Local { path, base, head, three_dot } => {
+                git::diff(path, base, head, *three_dot)
+            }
+        };
+        match &self.key {
+            Some(key) => diff_cache::get_or_load(key, run),
+            None => run().map(Arc::new),
         }
     }
 }
 
+/// The diff for a review's target: GitHub PR diff via `gh`, or a local
+/// base...head git diff for virtual PRs. Runs under `conn`'s lock; Tauri
+/// commands use [`diff_source`] + [`DiffSource::load`] instead.
+pub fn review_diff_impl(conn: &Connection, review_id: i64) -> AppResult<Arc<String>> {
+    diff_source(conn, review_id)?.load()
+}
+
 #[tauri::command]
 pub fn review_diff(review_id: i64, db: State<Db>) -> AppResult<String> {
-    let conn = db.0.lock().unwrap();
-    review_diff_impl(&conn, review_id)
+    let source = diff_source(&db.0.lock().unwrap(), review_id)?;
+    Ok(source.load()?.as_ref().clone())
 }
 
 /// Full source of one side of a file (LEFT→base, RIGHT→head), used to reveal
@@ -745,8 +788,12 @@ pub fn file_source(
     side: String,
     db: State<Db>,
 ) -> AppResult<String> {
-    let conn = db.0.lock().unwrap();
-    let detail = load_detail(&conn, review_id)?;
+    let (detail, owner_name) = {
+        let conn = db.0.lock().unwrap();
+        let detail = load_detail(&conn, review_id)?;
+        let owner_name = repo_owner_name(&conn, detail.target.repo_id)?;
+        (detail, owner_name)
+    };
     let sha: Option<String> = match side.as_str() {
         "LEFT" => detail.target.base_sha.clone(),
         "RIGHT" => detail.target.head_sha.clone(),
@@ -755,18 +802,17 @@ pub fn file_source(
 
     // Lazy backfill: github_pr targets created before base_sha was populated (or
     // whose resolution failed) store NULL. Resolve the merge-base now and persist
-    // it so the row heals without a manual refresh. file_source already runs gh
-    // under this lock (file_at_ref below), so this follows the same precedent.
+    // it so the row heals without a manual refresh.
     let sha = match (sha, side.as_str(), detail.target.kind.as_str()) {
         (None, "LEFT", "github_pr") => {
-            let resolved = repo_owner_name(&conn, detail.target.repo_id)?.and_then(|(o, n)| {
+            let resolved = owner_name.as_ref().and_then(|(o, n)| {
                 let head = detail.target.head_sha.as_deref().unwrap_or(&detail.target.head_ref);
                 provider_for()
-                    .merge_base_sha(&o, &n, &detail.target.base_ref, head)
+                    .merge_base_sha(o, n, &detail.target.base_ref, head)
                     .ok()
             });
             if let Some(mb) = &resolved {
-                conn.execute(
+                db.0.lock().unwrap().execute(
                     "UPDATE target SET base_sha = ?1 WHERE id = ?2",
                     params![mb, detail.target.id],
                 )?;
@@ -796,14 +842,9 @@ pub fn file_source(
         }
     }
 
-    let (owner, name): (Option<String>, Option<String>) = conn.query_row(
-        "SELECT remote_owner, remote_name FROM repository WHERE id = ?1",
-        params![detail.target.repo_id],
-        |r| Ok((r.get(0)?, r.get(1)?)),
-    )?;
-    match (owner, name) {
-        (Some(owner), Some(name)) => provider_for().file_at_ref(&owner, &name, &file_path, &sha),
-        _ => Err(AppError::Other(
+    match owner_name {
+        Some((owner, name)) => provider_for().file_at_ref(&owner, &name, &file_path, &sha),
+        None => Err(AppError::Other(
             "file source unavailable: no local clone and no GitHub remote".into(),
         )),
     }

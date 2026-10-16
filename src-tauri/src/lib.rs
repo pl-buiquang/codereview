@@ -7,6 +7,7 @@ mod cr_install;
 pub mod db;
 pub mod db_path;
 pub mod deep_link;
+mod diff_cache;
 pub mod error;
 pub mod export;
 pub mod gh;

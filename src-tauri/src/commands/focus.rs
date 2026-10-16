@@ -6,7 +6,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
-use crate::commands::review::{add_comment_impl, add_file_comment_impl, review_diff_impl};
+use crate::commands::review::{add_comment_impl, add_file_comment_impl, diff_source, DiffSource};
 use crate::db::models::Comment;
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
@@ -364,9 +364,22 @@ fn review_local_path(conn: &Connection, review_id: i64) -> AppResult<Option<Stri
 /// The review's current hunks, with `.gitattributes` `linguist-generated`
 /// applied when a local clone is linked.
 fn current_hunks(conn: &Connection, review_id: i64) -> AppResult<Vec<DiffHunk>> {
-    let diff = review_diff_impl(conn, review_id)?;
+    hunks_from(&diff_source(conn, review_id)?, review_local_path(conn, review_id)?)
+}
+
+/// [`current_hunks`] without holding the DB lock across `gh`/`git`.
+fn current_hunks_unlocked(db: &Db, review_id: i64) -> AppResult<Vec<DiffHunk>> {
+    let (source, local) = {
+        let conn = db.0.lock().unwrap();
+        (diff_source(&conn, review_id)?, review_local_path(&conn, review_id)?)
+    };
+    hunks_from(&source, local)
+}
+
+fn hunks_from(source: &DiffSource, local: Option<String>) -> AppResult<Vec<DiffHunk>> {
+    let diff = source.load()?;
     let mut hunks = parse_diff_hunks(&diff);
-    if let Some(local) = review_local_path(conn, review_id)? {
+    if let Some(local) = local {
         let mut paths: Vec<&str> = hunks
             .iter()
             .filter(|h| h.rule_tier.is_none())
@@ -1073,14 +1086,17 @@ pub fn generate_focus(
 
 #[tauri::command]
 pub fn focus_hunks(review_id: i64, db: State<Db>) -> AppResult<Vec<DiffHunk>> {
-    let conn = db.0.lock().unwrap();
-    focus_hunks_impl(&conn, review_id)
+    current_hunks_unlocked(&db, review_id)
 }
 
 #[tauri::command]
 pub fn get_focus(review_id: i64, db: State<Db>) -> AppResult<Option<FocusView>> {
+    if load_focus(&db.0.lock().unwrap(), review_id)?.is_none() {
+        return Ok(None);
+    }
+    let hunks = current_hunks_unlocked(&db, review_id)?;
     let conn = db.0.lock().unwrap();
-    get_focus_impl(&conn, review_id)
+    get_focus_from(&conn, review_id, &hunks)
 }
 
 #[tauri::command]
@@ -1090,8 +1106,9 @@ pub fn set_focus_plan(
     level: Option<String>,
     db: State<Db>,
 ) -> AppResult<FocusView> {
+    let hunks = current_hunks_unlocked(&db, review_id)?;
     let conn = db.0.lock().unwrap();
-    set_focus_plan_impl(&conn, review_id, plan, level.as_deref())
+    set_focus_plan_from(&conn, review_id, &hunks, plan, level.as_deref())
 }
 
 #[tauri::command]

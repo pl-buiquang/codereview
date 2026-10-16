@@ -395,7 +395,7 @@ pub async fn chat_send(
     db: State<'_, Db>,
 ) -> AppResult<ChatTurnResult> {
     // --- Phase 1: gather context under DB lock ---
-    let (detail, existing_chat, diff, chat_template) = {
+    let (detail, existing_chat, diff_source, chat_template) = {
         let conn = db.0.lock().unwrap();
         let chat_template = crate::prompts::resolve(&conn, crate::prompts::CHAT_SYSTEM)?;
 
@@ -409,11 +409,11 @@ pub async fn chat_send(
             )
             .optional()?;
 
-        let diff = crate::commands::review::review_diff_impl(&conn, review_id)
-            .unwrap_or_default();
+        let diff_source = crate::commands::review::diff_source(&conn, review_id).ok();
 
-        (detail, existing_chat, diff, chat_template)
+        (detail, existing_chat, diff_source, chat_template)
     };
+    let diff = diff_source.and_then(|s| s.load().ok()).unwrap_or_default();
 
     // --- Phase 2: worktree + system prompt (no DB lock) ---
     let local_path_str = detail.local_path.as_deref().ok_or_else(|| {
