@@ -30,7 +30,10 @@ pub enum ChangeKind {
     Fetch,
 }
 
-/// What a changed path under the git dir means, or None for noise (objects, logs, …).
+/// What a changed path under the git dir means, or None for noise (objects,
+/// logs, …). `*.lock` files are noise too: a real write renames the lock onto
+/// the final path (reported on its own), while a read-only `git status` may
+/// create and drop `index.lock` without changing anything.
 pub fn classify(git_dir: &Path, path: &Path) -> Option<ChangeKind> {
     let rel = path.strip_prefix(git_dir).ok()?;
     let parts: Vec<&str> = rel
@@ -40,9 +43,11 @@ pub fn classify(git_dir: &Path, path: &Path) -> Option<ChangeKind> {
             _ => None,
         })
         .collect();
-    let leaf = |name: &str| name.strip_suffix(".lock").unwrap_or(name).to_string();
+    if parts.last().is_some_and(|p| p.ends_with(".lock")) {
+        return None;
+    }
     match parts.as_slice() {
-        [name] => match leaf(name).as_str() {
+        [name] => match *name {
             "HEAD" => Some(ChangeKind::Head),
             "index" => Some(ChangeKind::Index),
             "FETCH_HEAD" => Some(ChangeKind::Fetch),
@@ -50,7 +55,7 @@ pub fn classify(git_dir: &Path, path: &Path) -> Option<ChangeKind> {
             _ => None,
         },
         ["refs", ..] => Some(ChangeKind::Refs),
-        ["worktrees", _, name] => match leaf(name).as_str() {
+        ["worktrees", _, name] => match *name {
             "HEAD" => Some(ChangeKind::Head),
             "index" => Some(ChangeKind::Index),
             _ => None,
@@ -165,11 +170,12 @@ mod tests {
         let g = Path::new("/r/.git");
         let k = |p: &str| classify(g, &g.join(p));
         assert_eq!(k("HEAD"), Some(ChangeKind::Head));
-        assert_eq!(k("index.lock"), Some(ChangeKind::Index));
+        assert_eq!(k("index"), Some(ChangeKind::Index));
+        assert_eq!(k("index.lock"), None);
         assert_eq!(k("FETCH_HEAD"), Some(ChangeKind::Fetch));
         assert_eq!(k("packed-refs"), Some(ChangeKind::Refs));
         assert_eq!(k("refs/heads/feat/x"), Some(ChangeKind::Refs));
-        assert_eq!(k("refs/remotes/origin/main.lock"), Some(ChangeKind::Refs));
+        assert_eq!(k("refs/remotes/origin/main.lock"), None);
         assert_eq!(k("worktrees/wt1/HEAD"), Some(ChangeKind::Head));
         assert_eq!(k("worktrees/wt1/index"), Some(ChangeKind::Index));
         assert_eq!(k("objects/ab/cdef"), None);

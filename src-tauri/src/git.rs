@@ -7,7 +7,10 @@ use crate::error::{AppError, AppResult};
 
 /// Run a git command inside `repo` and return stdout on success.
 pub fn run_git(repo: &Path, args: &[&str]) -> AppResult<String> {
+    // Reads must not write: `git status` would otherwise refresh the index,
+    // which the repo watcher sees as a change and reacts to with another status.
     let output = Command::new(crate::tools::git_bin())
+        .env("GIT_OPTIONAL_LOCKS", "0")
         .arg("-C")
         .arg(repo)
         .args(args)

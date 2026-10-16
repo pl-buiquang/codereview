@@ -62,6 +62,7 @@ fn ensure_inside_checkout(path: &str) -> AppResult<()> {
 /// Like `git::run_git`, but exit status 1 ("differences found") also counts as success.
 fn run_git_allow_diff_exit(repo: &Path, args: &[&str]) -> AppResult<String> {
     let output = Command::new(crate::tools::git_bin())
+        .env("GIT_OPTIONAL_LOCKS", "0")
         .arg("-C")
         .arg(repo)
         .args(args)
