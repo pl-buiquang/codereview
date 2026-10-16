@@ -6,12 +6,20 @@ import type { PrCheck, PrLabel, PrReviewer } from "../lib/types";
 
 /** Shared with the review header's status chips, which need the same PR
  *  metadata even while this panel is collapsed — same query key, so there's
- *  only one fetch. `owner`/`name`/`number` may be null for a non-PR target. */
-export function usePrMeta(owner: string | null, name: string | null, number: number | null) {
+ *  only one fetch. `owner`/`name`/`number` may be null for a non-PR target.
+ *  Hidden review tabs stay mounted, so only the active tab fetches: an
+ *  inactive tab keeps its cached data and catches up when activated. */
+export function usePrMeta(
+  owner: string | null,
+  name: string | null,
+  number: number | null,
+  active = true,
+) {
   return useQuery({
     queryKey: ["pr-meta", owner, name, number],
     queryFn: () => api.prMeta(owner as string, name as string, number as number),
-    enabled: owner != null && name != null && number != null,
+    enabled: active && owner != null && name != null && number != null,
+    staleTime: 30_000,
     refetchOnWindowFocus: true,
   });
 }
@@ -20,14 +28,16 @@ export function PrMetaPanel({
   owner,
   name,
   number,
+  active = true,
 }: {
   owner: string;
   name: string;
   number: number;
+  active?: boolean;
 }) {
-  const q = usePrMeta(owner, name, number);
+  const q = usePrMeta(owner, name, number, active);
 
-  if (q.isLoading) return <div className="pr-meta-panel muted">Loading PR details…</div>;
+  if (q.isPending) return <div className="pr-meta-panel muted">Loading PR details…</div>;
   if (q.isError || !q.data)
     return (
       <div className="pr-meta-panel muted pr-meta-error">

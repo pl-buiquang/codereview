@@ -39,12 +39,14 @@ const meta = (over: Partial<PrMeta> = {}): PrMeta => ({
   ...over,
 });
 
-function renderPanel() {
+function renderPanel(active = true) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}>{children}</QueryClientProvider>
   );
-  return render(<PrMetaPanel owner="acme" name="widget" number={42} />, { wrapper });
+  return render(<PrMetaPanel owner="acme" name="widget" number={42} active={active} />, {
+    wrapper,
+  });
 }
 
 beforeEach(() => {
@@ -94,5 +96,16 @@ describe("PrMetaPanel", () => {
     await user.click(screen.getByRole("link", { name: "build" }));
 
     await waitFor(() => expect(openUrl).toHaveBeenCalledWith("https://ci/build"));
+  });
+
+  it("does not fetch while its review tab is inactive, then fetches once active", async () => {
+    prMeta.mockResolvedValue(meta());
+    const { rerender } = renderPanel(false);
+
+    expect(screen.getByText(/Loading PR details/)).toBeInTheDocument();
+    expect(prMeta).not.toHaveBeenCalled();
+
+    rerender(<PrMetaPanel owner="acme" name="widget" number={42} active />);
+    await waitFor(() => expect(prMeta).toHaveBeenCalledTimes(1));
   });
 });

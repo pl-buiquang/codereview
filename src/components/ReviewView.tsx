@@ -842,6 +842,7 @@ function ReviewHeader({
   const closeReview = useUIStore((s) => s.closeReview);
   const openRepo = useUIStore((s) => s.openRepo);
   const { review, target } = detail;
+  const isActiveTab = useUIStore((s) => s.activeTabId === `review-${review.id}`);
   const [showExport, setShowExport] = useState(false);
   const [collapsed, setCollapsed] = useState(true);
   const [openingWorktree, setOpeningWorktree] = useState(false);
@@ -934,7 +935,7 @@ function ReviewHeader({
   const owner = detail.remote_owner ?? null;
   const name = detail.remote_name ?? null;
   const prNumber = target.github_pr_number ?? null;
-  const prMetaQuery = usePrMeta(owner, name, prNumber);
+  const prMetaQuery = usePrMeta(owner, name, prNumber, isActiveTab);
 
   const refreshReview = useMutation({
     mutationFn: () => api.refreshReview(review.id),
@@ -1426,7 +1427,12 @@ function ReviewHeader({
       )}
 
       {!collapsed && hasPrMeta && (
-        <PrMetaPanel owner={detail.remote_owner!} name={detail.remote_name!} number={target.github_pr_number!} />
+        <PrMetaPanel
+          owner={detail.remote_owner!}
+          name={detail.remote_name!}
+          number={target.github_pr_number!}
+          active={isActiveTab}
+        />
       )}
     </header>
   );
