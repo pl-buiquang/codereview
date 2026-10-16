@@ -42,8 +42,8 @@ fn upsert_card(conn: &Connection, node: &BoardNode, viewer_login: &str, ts: &str
             id, type, repo, number, url, title, author_login, state, is_draft,
             review_decision, has_reviews, head_ref, is_mine, updated_at, closed_at,
             tracked_at, last_refreshed, ci_status, mergeable,
-            merge_state_status, stack_number, stack_position, viewer_can_update_branch
-         ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?16,?17,?18,?19,?20,?21,?22)
+            merge_state_status, stack_number, stack_position, viewer_can_update_branch, auto_merge
+         ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?16,?17,?18,?19,?20,?21,?22,?23)
          ON CONFLICT(id) DO UPDATE SET
             type = excluded.type, repo = excluded.repo, number = excluded.number,
             url = excluded.url, title = excluded.title, author_login = excluded.author_login,
@@ -55,7 +55,8 @@ fn upsert_card(conn: &Connection, node: &BoardNode, viewer_login: &str, ts: &str
             ci_status = excluded.ci_status, mergeable = excluded.mergeable,
             merge_state_status = excluded.merge_state_status,
             stack_number = excluded.stack_number, stack_position = excluded.stack_position,
-            viewer_can_update_branch = excluded.viewer_can_update_branch{extra}"
+            viewer_can_update_branch = excluded.viewer_can_update_branch,
+            auto_merge = excluded.auto_merge{extra}"
     );
     conn.execute(
         &sql,
@@ -82,6 +83,7 @@ fn upsert_card(conn: &Connection, node: &BoardNode, viewer_login: &str, ts: &str
             node.stack.as_ref().map(|s| s.number),
             node.stack_entry.as_ref().map(|s| s.position),
             node.viewer_can_update_branch as i64,
+            node.auto_merge(),
         ],
     )?;
     Ok(())
@@ -534,8 +536,8 @@ fn run_pr_action(db: &Db, card_id: &str, args: &[&str]) -> AppResult<()> {
 }
 
 #[tauri::command]
-pub async fn board_pr_merge(card_id: String, db: State<'_, Db>) -> AppResult<()> {
-    run_pr_action(&db, &card_id, &["merge", "--squash", "--delete-branch"])
+pub async fn board_pr_set_auto_merge(card_id: String, enable: bool, db: State<'_, Db>) -> AppResult<()> {
+    run_pr_action(&db, &card_id, crate::gh::auto_merge_args(enable))
 }
 
 #[tauri::command]

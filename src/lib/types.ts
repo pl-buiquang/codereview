@@ -167,6 +167,7 @@ export interface PrMeta {
   mergeStateStatus: string | null; // BEHIND | CLEAN | DIRTY | BLOCKED | ...
   viewerCanUpdateBranch: boolean;
   reviewDecision: string | null; // APPROVED | CHANGES_REQUESTED | REVIEW_REQUIRED | null
+  autoMerge: { mergeMethod: string | null; enabledBy: PrActor | null } | null;
   additions: number;
   deletions: number;
   changedFiles: number;
@@ -448,6 +449,7 @@ export interface BoardCard {
   stack_number: number | null; // GitHub native stack id, null when not stacked
   stack_position: number | null;
   viewer_can_update_branch: boolean;
+  auto_merge: string | null; // SQUASH | MERGE | REBASE when auto-merge is enabled
   // Computed/enriched by board_list, flattened alongside the row above.
   lane: BoardLane | null;
   meta: BoardMeta[];

@@ -34,6 +34,11 @@ pub async fn set_pr_draft(owner: String, name: String, number: i64, draft: bool)
 }
 
 #[tauri::command]
+pub async fn set_pr_auto_merge(owner: String, name: String, number: i64, enable: bool) -> AppResult<()> {
+    provider_for().set_pr_auto_merge(&owner, &name, number, enable)
+}
+
+#[tauri::command]
 pub async fn update_pr_branch(owner: String, name: String, number: i64, rebase: bool) -> AppResult<()> {
     provider_for().update_pr_branch(&owner, &name, number, rebase)
 }

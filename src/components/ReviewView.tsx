@@ -69,7 +69,7 @@ import { PublishButton } from "./PublishButton";
 import { PrMetaPanel, usePrMeta } from "./PrMetaPanel";
 import { ReviewSummaryRow } from "./ReviewSummaryRow";
 import { ReviewSwitcher } from "./ReviewSwitcher";
-import { CiBadge, StatusPill } from "./InboxBadges";
+import { AutoMergeBadge, CiBadge, ReviewDecisionBadge, StatusPill } from "./InboxBadges";
 import { Icon } from "./icons";
 import { AgentSessionItems, KebabMenu } from "./KebabMenu";
 import { githubPrUrl } from "../lib/githubUrl";
@@ -989,6 +989,21 @@ function ReviewHeader({
     onError: (e) => toast.error(`Update branch failed:\n${String(e)}`),
   });
 
+  const setAutoMerge = useMutation({
+    mutationFn: (enable: boolean) => {
+      if (owner == null || name == null || prNumber == null) {
+        throw new Error("missing PR identity");
+      }
+      return api.setPrAutoMerge(owner, name, prNumber, enable);
+    },
+    onSuccess: (_, enable) => {
+      toast.success(enable ? "Auto-merge enabled" : "Auto-merge disabled");
+      queryClient.invalidateQueries({ queryKey: ["pr-meta", owner, name, prNumber] });
+      queryClient.invalidateQueries({ queryKey: ["board"] });
+    },
+    onError: (e) => toast.error(`Auto-merge failed:\n${String(e)}`),
+  });
+
   const noCloneReason = detail.local_path ? null : "Link a local clone first";
   const defaultTerminal = useSettingsStore((s) => s.defaultTerminal);
   const tmuxTarget = useSettingsStore((s) => s.tmuxTarget);
@@ -1118,6 +1133,11 @@ function ReviewHeader({
               isDraft={prMetaQuery.data?.isDraft ?? false}
             />
             <CiBadge state={prMetaQuery.data?.ciState ? prMetaQuery.data.ciState.toLowerCase() : null} />
+            <ReviewDecisionBadge decision={prMetaQuery.data?.reviewDecision} />
+            <AutoMergeBadge
+              method={prMetaQuery.data?.autoMerge?.mergeMethod ?? (prMetaQuery.data?.autoMerge ? "MERGE" : null)}
+              enabledBy={prMetaQuery.data?.autoMerge?.enabledBy?.login}
+            />
           </span>
         )}
         <span className="save-state">{saveState === "saving" ? "Saving…" : "Saved"}</span>
@@ -1271,10 +1291,41 @@ function ReviewHeader({
                   : !prMetaQuery.data.viewerCanUpdateBranch
                     ? "You can't update this branch"
                     : null;
+            const autoMergeOn = prMetaQuery.data?.autoMerge != null;
+            const autoMergeDisabledReason = !prMetaQuery.data
+              ? "Loading PR status…"
+              : !prOpen
+                ? "PR is not open"
+                : prMetaQuery.data.isDraft && !autoMergeOn
+                  ? "Draft PRs can't be merged"
+                  : null;
+            const toggleAutoMerge = async () => {
+              close();
+              if (autoMergeOn) {
+                setAutoMerge.mutate(false);
+                return;
+              }
+              if (
+                await confirmDialog({
+                  title: "Enable auto-merge",
+                  message: `Squash-merge #${prNumber} "${target.title}" and delete its branch once all requirements pass?`,
+                  confirmLabel: "Enable auto-merge",
+                })
+              )
+                setAutoMerge.mutate(true);
+            };
             return (
               <>
                 {isPr && (
                   <>
+                    <button
+                      role="menuitem"
+                      disabled={autoMergeDisabledReason != null || setAutoMerge.isPending}
+                      title={autoMergeDisabledReason ?? undefined}
+                      onClick={toggleAutoMerge}
+                    >
+                      {autoMergeOn ? "Disable auto-merge" : "Enable auto-merge (squash)"}
+                    </button>
                     <button
                       role="menuitem"
                       disabled={!prOpen || togglePrDraft.isPending}

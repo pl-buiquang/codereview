@@ -358,6 +358,7 @@ pub struct BoardCardRow {
     pub stack_number: Option<i64>,
     pub stack_position: Option<i64>,
     pub viewer_can_update_branch: bool,
+    pub auto_merge: Option<String>,
 }
 
 impl BoardCardRow {
@@ -389,6 +390,7 @@ impl BoardCardRow {
             stack_number: row.get("stack_number")?,
             stack_position: row.get("stack_position")?,
             viewer_can_update_branch: row.get::<_, i64>("viewer_can_update_branch")? != 0,
+            auto_merge: row.get("auto_merge")?,
         })
     }
 }

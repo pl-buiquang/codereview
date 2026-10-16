@@ -588,6 +588,7 @@ query PrMeta($owner: String!, $name: String!, $number: Int!) {
       mergeStateStatus
       viewerCanUpdateBranch
       reviewDecision
+      autoMergeRequest { mergeMethod enabledBy { login } }
       additions
       deletions
       changedFiles
@@ -629,6 +630,7 @@ pub struct PrMeta {
     pub merge_state_status: Option<String>,
     pub viewer_can_update_branch: bool,
     pub review_decision: Option<String>,
+    pub auto_merge: Option<PrAutoMerge>,
     pub additions: i64,
     pub deletions: i64,
     pub changed_files: i64,
@@ -644,6 +646,15 @@ pub struct PrMeta {
 pub struct PrActor {
     pub login: Option<String>,
     pub avatar_url: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrAutoMerge {
+    #[serde(default)]
+    pub merge_method: Option<String>,
+    #[serde(default)]
+    pub enabled_by: Option<PrActor>,
 }
 
 #[derive(Debug, Serialize)]
@@ -695,6 +706,8 @@ struct PrMetaPr {
     viewer_can_update_branch: bool,
     #[serde(default)]
     review_decision: Option<String>,
+    #[serde(default)]
+    auto_merge_request: Option<PrAutoMerge>,
     additions: i64,
     deletions: i64,
     changed_files: i64,
@@ -852,6 +865,7 @@ fn map_pr_meta(pr: PrMetaPr) -> PrMeta {
         merge_state_status: pr.merge_state_status,
         viewer_can_update_branch: pr.viewer_can_update_branch,
         review_decision: pr.review_decision,
+        auto_merge: pr.auto_merge_request,
         additions: pr.additions,
         deletions: pr.deletions,
         changed_files: pr.changed_files,
@@ -889,6 +903,30 @@ pub fn set_pr_draft(owner: &str, name: &str, number: i64, draft: bool) -> AppRes
     let suffix = ctx.pr_args_suffix();
     args.extend(suffix.iter().map(String::as_str));
     run_gh(&ctx, &args)?;
+    Ok(())
+}
+
+/// `gh pr merge` args to enable (squash, delete branch) or disable auto-merge.
+pub fn auto_merge_args(enable: bool) -> &'static [&'static str] {
+    if enable {
+        &["merge", "--auto", "--squash", "--delete-branch"]
+    } else {
+        &["merge", "--disable-auto"]
+    }
+}
+
+pub fn set_pr_auto_merge(owner: &str, name: &str, number: i64, enable: bool) -> AppResult<()> {
+    let ctx = GhRepo::Remote {
+        owner: owner.to_string(),
+        name: name.to_string(),
+    };
+    let args = auto_merge_args(enable);
+    let num = number.to_string();
+    let mut full = vec!["pr", args[0], num.as_str()];
+    full.extend_from_slice(&args[1..]);
+    let suffix = ctx.pr_args_suffix();
+    full.extend(suffix.iter().map(String::as_str));
+    run_gh(&ctx, &full)?;
     Ok(())
 }
 

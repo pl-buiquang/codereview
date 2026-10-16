@@ -7,7 +7,7 @@ import { timeAgo } from "../lib/timeAgo";
 import { useSettingsStore, type BoardBorderSide } from "../lib/settings";
 import { useUIStore } from "../store";
 import { RepoName } from "./RepoName";
-import { CiBadge, CommentsBadge, MergeableBadge, MergeStateBadge } from "./InboxBadges";
+import { AutoMergeBadge, CiBadge, CommentsBadge, MergeStateBadge, MergeableBadge } from "./InboxBadges";
 import { Icon } from "./icons";
 import { AgentSessionItems, KebabMenu } from "./KebabMenu";
 
@@ -214,7 +214,7 @@ export function AddMetaForm({
 
 export interface PrActions {
   busy: boolean;
-  onMerge: () => void;
+  onSetAutoMerge: (enable: boolean) => void;
   onSetDraft: (draft: boolean) => void;
   onUpdateBranch: (rebase: boolean) => void;
 }
@@ -257,29 +257,31 @@ function PrActionsMenu({
           close();
           fn();
         };
-        const merge = async () => {
+        const autoMerge = async () => {
           close();
+          if (card.auto_merge) {
+            actions.onSetAutoMerge(false);
+            return;
+          }
           if (
             await confirmDialog({
-              title: "Squash and merge",
-              message: `Squash-merge ${card.repo}#${card.number} "${card.title}" and delete its branch?`,
-              confirmLabel: "Squash and merge",
-              danger: true,
+              title: "Enable auto-merge",
+              message: `Squash-merge ${card.repo}#${card.number} "${card.title}" and delete its branch once all requirements pass?`,
+              confirmLabel: "Enable auto-merge",
             })
           ) {
-            actions.onMerge();
+            actions.onSetAutoMerge(true);
           }
         };
         return (
           <>
             <button
               role="menuitem"
-              className="danger"
-              disabled={!isOpen || card.is_draft}
-              title={!isOpen ? "PR is not open" : card.is_draft ? "Draft PRs can't be merged" : undefined}
-              onClick={merge}
+              disabled={!isOpen || (card.is_draft && !card.auto_merge)}
+              title={!isOpen ? "PR is not open" : card.is_draft && !card.auto_merge ? "Draft PRs can't be merged" : undefined}
+              onClick={autoMerge}
             >
-              Squash and merge
+              {card.auto_merge ? "Disable auto-merge" : "Enable auto-merge (squash)"}
             </button>
             <button
               role="menuitem"
@@ -473,6 +475,7 @@ export function BoardCard({
           <CiBadge state={card.ci_status ? card.ci_status.toLowerCase() : null} />
           <MergeableBadge mergeable={card.mergeable} />
           <MergeStateBadge state={card.merge_state_status} stacked={card.stack_number != null} />
+          <AutoMergeBadge method={card.auto_merge} />
           <CommentsBadge count={card.pending_threads} />
         </div>
       )}

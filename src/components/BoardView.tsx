@@ -132,13 +132,13 @@ export function BoardView() {
 
   const track = useMutation({ mutationFn: (reference: string) => api.boardTrack(reference), onSuccess: invalidate, onError: onErr });
   const discard = useMutation({ mutationFn: (cardId: string) => api.boardDiscard(cardId), onSuccess: invalidate, onError: onErr });
-  const prMerge = useMutation({
-    mutationFn: (cardId: string) => api.boardPrMerge(cardId),
-    onSuccess: () => {
+  const prSetAutoMerge = useMutation({
+    mutationFn: ({ cardId, enable }: { cardId: string; enable: boolean }) => api.boardPrSetAutoMerge(cardId, enable),
+    onSuccess: (_, { enable }) => {
       invalidate();
-      toast.success("PR squash-merged");
+      toast.success(enable ? "Auto-merge enabled" : "Auto-merge disabled");
     },
-    onError: (e) => toast.error(`Merge failed:\n${String(e)}`),
+    onError: (e) => toast.error(`Auto-merge failed:\n${String(e)}`),
   });
   const prSetDraft = useMutation({
     mutationFn: ({ cardId, draft }: { cardId: string; draft: boolean }) => api.boardPrSetDraft(cardId, draft),
@@ -157,7 +157,7 @@ export function BoardView() {
     onError: (e) => toast.error(`Update branch failed:\n${String(e)}`),
   });
   const prActionCardId =
-    (prMerge.isPending && prMerge.variables) ||
+    (prSetAutoMerge.isPending && prSetAutoMerge.variables?.cardId) ||
     (prSetDraft.isPending && prSetDraft.variables?.cardId) ||
     (prUpdateBranch.isPending && prUpdateBranch.variables?.cardId) ||
     null;
@@ -488,7 +488,7 @@ export function BoardView() {
                         card.type === "pr"
                           ? {
                               busy: prActionCardId === card.id,
-                              onMerge: () => prMerge.mutate(card.id),
+                              onSetAutoMerge: (enable) => prSetAutoMerge.mutate({ cardId: card.id, enable }),
                               onSetDraft: (draft) => prSetDraft.mutate({ cardId: card.id, draft }),
                               onUpdateBranch: (rebase) => prUpdateBranch.mutate({ cardId: card.id, rebase }),
                             }

@@ -214,6 +214,7 @@ const BOARD_FRAGMENT: &str = r#"
       reviews(first: 1) { totalCount }
       repository { nameWithOwner }
       mergeable mergeStateStatus viewerCanUpdateBranch
+      autoMergeRequest { mergeMethod }
       stack { number }
       stackEntry { position }
       commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
@@ -346,6 +347,14 @@ pub struct BoardNode {
     pub stack: Option<StackRef>,
     #[serde(default)]
     pub stack_entry: Option<StackEntryRef>,
+    #[serde(default)]
+    pub auto_merge_request: Option<AutoMergeRequestRef>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutoMergeRequestRef {
+    pub merge_method: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -381,6 +390,13 @@ impl BoardNode {
         } else {
             self.state.as_ref().map(|s| s.to_lowercase())
         }
+    }
+
+    /// Merge method of an enabled auto-merge (`SQUASH`/`MERGE`/`REBASE`).
+    pub fn auto_merge(&self) -> Option<String> {
+        self.auto_merge_request
+            .as_ref()
+            .map(|r| r.merge_method.clone().unwrap_or_else(|| "MERGE".into()))
     }
 
     pub fn repo(&self) -> Option<String> {
@@ -530,6 +546,7 @@ mod tests {
             stack_number: None,
             stack_position: None,
             viewer_can_update_branch: false,
+            auto_merge: None,
         }
     }
 

@@ -136,6 +136,8 @@ export const api = {
     invoke<void>("set_pr_draft", { owner, name, number, draft }),
   updatePrBranch: (owner: string, name: string, number: number, rebase: boolean) =>
     invoke<void>("update_pr_branch", { owner, name, number, rebase }),
+  setPrAutoMerge: (owner: string, name: string, number: number, enable: boolean) =>
+    invoke<void>("set_pr_auto_merge", { owner, name, number, enable }),
   prReviewThreads: (owner: string, name: string, number: number) =>
     invoke<PrThread[]>("pr_review_threads", { owner, name, number }),
   replyToThread: (owner: string, name: string, number: number, commentId: number, body: string) =>
@@ -205,7 +207,8 @@ export const api = {
   boardTrack: (reference: string) => invoke<string>("board_track", { reference }),
   boardTrackPr: (reference: string) => invoke<string>("board_track_pr", { reference }),
   boardDiscard: (cardId: string) => invoke<void>("board_discard", { cardId }),
-  boardPrMerge: (cardId: string) => invoke<void>("board_pr_merge", { cardId }),
+  boardPrSetAutoMerge: (cardId: string, enable: boolean) =>
+    invoke<void>("board_pr_set_auto_merge", { cardId, enable }),
   boardPrSetDraft: (cardId: string, draft: boolean) => invoke<void>("board_pr_set_draft", { cardId, draft }),
   boardPrUpdateBranch: (cardId: string, rebase: boolean) =>
     invoke<void>("board_pr_update_branch", { cardId, rebase }),

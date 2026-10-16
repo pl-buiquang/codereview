@@ -71,6 +71,42 @@ export function MergeStateBadge({ state, stacked }: { state: string | null; stac
   );
 }
 
+/** Only shown when GitHub auto-merge is enabled on the PR. */
+export function AutoMergeBadge({ method, enabledBy }: { method: string | null | undefined; enabledBy?: string | null }) {
+  if (!method) return null;
+  const how = method.toLowerCase();
+  return (
+    <span
+      className="chip accent"
+      title={`Auto-merge enabled (${how})${enabledBy ? ` by ${enabledBy}` : ""} — merges once requirements pass`}
+    >
+      <Icon name="check" size={11} /> auto-merge
+    </span>
+  );
+}
+
+export function ReviewDecisionBadge({ decision }: { decision: string | null | undefined }) {
+  if (decision === "APPROVED")
+    return (
+      <span className="chip ok" title="Approved">
+        <Icon name="check" size={11} /> approved
+      </span>
+    );
+  if (decision === "CHANGES_REQUESTED")
+    return (
+      <span className="chip bad" title="Changes requested">
+        <Icon name="x" size={11} /> changes requested
+      </span>
+    );
+  if (decision === "REVIEW_REQUIRED")
+    return (
+      <span className="chip" title="Review required">
+        <Icon name="eye" size={11} /> review required
+      </span>
+    );
+  return null;
+}
+
 export function CommentsBadge({ count }: { count: number | null }) {
   if (!count) return null;
   return (

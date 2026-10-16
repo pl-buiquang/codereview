@@ -27,6 +27,7 @@ const meta = (over: Partial<PrMeta> = {}): PrMeta => ({
   mergeStateStatus: "CLEAN",
   viewerCanUpdateBranch: false,
   reviewDecision: null,
+  autoMerge: null,
   additions: 120,
   deletions: 7,
   changedFiles: 5,
