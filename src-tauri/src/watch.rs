@@ -4,6 +4,7 @@
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Component, Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -73,7 +74,11 @@ pub fn git_common_dir(checkout: &Path) -> AppResult<PathBuf> {
 
 pub type OnChange = Arc<dyn Fn(i64, Vec<ChangeKind>) + Send + Sync>;
 
+static NEXT_EPOCH: AtomicU64 = AtomicU64::new(1);
+
 struct Entry {
+    /// Unique per watcher start: equal epochs mean no gap in watching.
+    epoch: u64,
     refs: usize,
     /// Bumped on every acquire, so a pending delayed stop can tell it's stale.
     generation: u64,
@@ -121,7 +126,8 @@ impl Watchers {
             .watch(&git_dir, RecursiveMode::Recursive)
             .map_err(|e| AppError::Other(format!("could not watch {}: {e}", git_dir.display())))?;
         log::info!("[watch] start repo {repo_id} ({})", git_dir.display());
-        entries.insert(repo_id, Entry { refs: 1, generation: 0, _debouncer: debouncer });
+        let epoch = NEXT_EPOCH.fetch_add(1, Ordering::Relaxed);
+        entries.insert(repo_id, Entry { epoch, refs: 1, generation: 0, _debouncer: debouncer });
         Ok(())
     }
 
@@ -150,6 +156,11 @@ impl Watchers {
 
     pub fn is_watching(&self, repo_id: i64) -> bool {
         self.entries.lock().unwrap().contains_key(&repo_id)
+    }
+
+    /// Identifies the running watcher of `repo_id`, if any.
+    pub fn epoch(&self, repo_id: i64) -> Option<u64> {
+        self.entries.lock().unwrap().get(&repo_id).map(|e| e.epoch)
     }
 }
 

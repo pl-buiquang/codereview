@@ -31,3 +31,38 @@ export function useRepoWatch(repoId: number | null): boolean {
 
   return watching;
 }
+
+/** Holds watchers for every repo in `repoIds` while mounted. Returns true once
+ *  every acquire has settled (some repos may still be unwatchable). */
+export function useRepoWatches(repoIds: number[] | null): boolean {
+  const [settled, setSettled] = useState(false);
+  const key = repoIds ? [...repoIds].sort((a, b) => a - b).join(",") : null;
+
+  useEffect(() => {
+    if (key == null) return;
+    const ids = key ? key.split(",").map(Number) : [];
+    let disposed = false;
+    const acquired: number[] = [];
+    void Promise.all(
+      ids.map((id) =>
+        api
+          .watchAcquire(id)
+          .then((ok) => {
+            if (!ok) return;
+            if (disposed) void api.watchRelease(id);
+            else acquired.push(id);
+          })
+          .catch(() => {}),
+      ),
+    ).then(() => {
+      if (!disposed) setSettled(true);
+    });
+    return () => {
+      disposed = true;
+      for (const id of acquired) void api.watchRelease(id);
+      setSettled(false);
+    };
+  }, [key]);
+
+  return settled;
+}

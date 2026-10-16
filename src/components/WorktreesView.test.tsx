@@ -9,9 +9,24 @@ const worktreeGcRun = vi.fn();
 const worktreeSync = vi.fn();
 const removeWorktree = vi.fn();
 const worktreeOpenTerminal = vi.fn();
+const worktreeGcReload = vi.fn();
+const listRepositories = vi.fn();
+const watchAcquire = vi.fn();
+const watchRelease = vi.fn();
+const gitChangedHandlers: (() => void)[] = [];
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: (_event: string, cb: () => void) => {
+    gitChangedHandlers.push(cb);
+    return Promise.resolve(() => {});
+  },
+}));
 vi.mock("../lib/api", () => ({
   api: {
     worktreeGcLast: () => worktreeGcLast(),
+    worktreeGcReload: () => worktreeGcReload(),
+    listRepositories: () => listRepositories(),
+    watchAcquire: (id: number) => watchAcquire(id),
+    watchRelease: (id: number) => watchRelease(id),
     worktreeGcRun: (...a: unknown[]) => worktreeGcRun(...a),
     worktreeSync: (...a: unknown[]) => worktreeSync(...a),
     removeWorktree: (...a: unknown[]) => removeWorktree(...a),
@@ -81,6 +96,32 @@ describe("WorktreesView", () => {
     worktreeGcLast.mockResolvedValue(report);
     worktreeGcRun.mockResolvedValue(report);
     worktreeSync.mockResolvedValue("fast-forwarded");
+    worktreeGcReload.mockResolvedValue(null);
+    listRepositories.mockResolvedValue([]);
+    watchAcquire.mockResolvedValue(true);
+    gitChangedHandlers.length = 0;
+  });
+
+  it("watches every clone and reloads changed repos on open and on git events", async () => {
+    worktreeGcLast.mockResolvedValue(null);
+    listRepositories.mockResolvedValue([
+      { id: 3, local_path: "/repo" },
+      { id: 4, local_path: null },
+    ]);
+    worktreeGcReload.mockResolvedValue(report);
+    const view = renderView();
+    expect(await screen.findByText("~/wt/merged")).toBeInTheDocument();
+    expect(watchAcquire).toHaveBeenCalledTimes(1);
+    expect(watchAcquire).toHaveBeenCalledWith(3);
+    expect(worktreeGcReload).toHaveBeenCalledTimes(1);
+    expect(worktreeGcRun).not.toHaveBeenCalled();
+
+    gitChangedHandlers.forEach((h) => h());
+    gitChangedHandlers.forEach((h) => h());
+    await waitFor(() => expect(worktreeGcReload).toHaveBeenCalledTimes(2), { timeout: 3000 });
+
+    view.unmount();
+    expect(watchRelease).toHaveBeenCalledWith(3);
   });
 
   it("lists linked worktrees with verdicts, hiding the main checkout", async () => {

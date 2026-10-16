@@ -291,6 +291,7 @@ pub fn run() {
             commands::chat::chat_worktree,
             commands::worktree::worktree_gc_run,
             commands::worktree::worktree_gc_last,
+            commands::worktree::worktree_gc_reload,
             commands::worktree::worktree_sync,
             commands::worktree::worktree_open_terminal,
             commands::chat::ensure_chat_worktree,

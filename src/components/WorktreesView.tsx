@@ -1,10 +1,13 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useIsMutating, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { listen } from "@tauri-apps/api/event";
 import { api } from "../lib/api";
 import { toast } from "../lib/toast";
 import { confirmDialog } from "../lib/confirm";
 import { timeAgo } from "../lib/timeAgo";
 import { useSettingsStore } from "../lib/settings";
+import { GIT_CHANGED_EVENT } from "../lib/gitChanged";
+import { useRepoWatches } from "../lib/useRepoWatch";
 import type { WorktreeGcAction, WorktreeGcReport, WorktreeRow, WorktreeVerdict } from "../lib/types";
 import { Icon } from "./icons";
 
@@ -21,6 +24,8 @@ const VERDICT_ORDER: WorktreeVerdict["kind"][] = ["flag", "remove", "prune", "fa
 
 const WORKTREE_GC_KEY = ["worktree-gc"] as const;
 const WORKTREE_SCAN_KEY = ["worktree-gc-run"] as const;
+/** Coalesces a burst of git events (a rebase, a fetch) into one reload. */
+const RELOAD_DEBOUNCE_MS = 1500;
 
 function summarizeActions(actions: WorktreeGcAction[]): string {
   const ok = actions.filter((a) => a.ok);
@@ -75,6 +80,42 @@ export function WorktreesView() {
   // The scan outlives this view (backend keeps running when the pane switches),
   // so read "running" from the mutation cache rather than this observer.
   const scanning = useIsMutating({ mutationKey: WORKTREE_SCAN_KEY }) > 0;
+
+  // While open, every clone is watched; the backend rescans (locally, no fetch)
+  // only the repos whose watcher saw a change or that weren't watched since.
+  const reposQuery = useQuery({ queryKey: ["repositories"], queryFn: api.listRepositories });
+  const cloneIds = useMemo(
+    () => reposQuery.data?.filter((r) => r.local_path != null).map((r) => r.id) ?? null,
+    [reposQuery.data],
+  );
+  const watchersReady = useRepoWatches(cloneIds);
+  const reload = useMutation({
+    mutationFn: api.worktreeGcReload,
+    onSuccess: (r) => {
+      if (r) queryClient.setQueryData(WORKTREE_GC_KEY, r);
+    },
+    onError: (e) => console.warn("worktree reload failed", e),
+  });
+  const reloadRef = useRef(reload.mutate);
+  reloadRef.current = reload.mutate;
+  const scanningRef = useRef(scanning);
+  scanningRef.current = scanning;
+  useEffect(() => {
+    if (!watchersReady) return;
+    const run = () => {
+      if (!scanningRef.current) reloadRef.current();
+    };
+    run();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const unlisten = listen(GIT_CHANGED_EVENT, () => {
+      clearTimeout(timer);
+      timer = setTimeout(run, RELOAD_DEBOUNCE_MS);
+    });
+    return () => {
+      clearTimeout(timer);
+      void unlisten.then((f) => f());
+    };
+  }, [watchersReady]);
   const report = reportQuery.data ?? null;
   const rescan = () => scan.mutate(false);
   const patchRow = (path: string, f: (row: WorktreeRow) => WorktreeRow | null) =>
@@ -147,7 +188,9 @@ export function WorktreesView() {
               ? `${counts.total} worktrees · ${counts.flag} need a look · ${actionable} actionable · scanned ${timeAgo(report.ran_at)}`
               : scanning
                 ? "Scanning all repositories…"
-                : "Not scanned yet — press Scan to check every repository's worktrees"}
+                : reload.isPending
+                  ? "Reading worktrees…"
+                  : "Not scanned yet — press Scan to fetch and check every repository's worktrees"}
           </p>
         </div>
         <div className="worktrees-head-actions">

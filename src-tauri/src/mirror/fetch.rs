@@ -16,15 +16,22 @@ const REFETCH_BATCH_SIZE: usize = 25;
 const REFETCH_CONCURRENCY: usize = 4;
 const SEARCH_PAGE: i64 = 25;
 
-/// `IssueCore` / `PrCore`, appended to every mirror query. The PR fragment
-/// covers the union of what Inbox, Board and Review display.
-pub const FRAGMENTS: &str = r#"
+macro_rules! issue_core {
+    () => {
+        r#"
 fragment IssueCore on Issue {
   id number title url bodyText state updatedAt closedAt
   author { login avatarUrl }
   repository { nameWithOwner }
   comments(last: 1) { nodes { bodyText author { login } } }
 }
+"#
+    };
+}
+
+macro_rules! pr_core {
+    () => {
+        r#"
 fragment PrCore on PullRequest {
   id number title url bodyText state isDraft merged updatedAt closedAt
   baseRefName headRefName headRefOid
@@ -40,7 +47,17 @@ fragment PrCore on PullRequest {
   commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
   closingIssuesReferences(first: 20) { nodes { id number repository { nameWithOwner } } }
 }
-"#;
+"#
+    };
+}
+
+/// `IssueCore` / `PrCore`, appended to every mirror query. The PR fragment
+/// covers the union of what Inbox, Board and Review display.
+pub const FRAGMENTS: &str = concat!(issue_core!(), pr_core!());
+/// For PR-only queries: GitHub rejects a query with an unused fragment.
+const PR_FRAGMENT: &str = pr_core!();
+/// Branches per by-head lookup query (each alias returns up to 3 PRs).
+const HEAD_LOOKUP_BATCH: usize = 8;
 
 const SELECTION: &str = "__typename ...IssueCore ...PrCore";
 
@@ -515,6 +532,56 @@ pub fn resolve(owner: &str, name: &str, number: i64) -> AppResult<Node> {
         .ok_or_else(|| AppError::Other(format!("{owner}/{name}#{number} not found")))
 }
 
+fn prs_by_head_query(n: usize) -> String {
+    let decls: String = (0..n).map(|i| format!(", $b{i}: String!")).collect();
+    let fields: String = (0..n)
+        .map(|i| {
+            format!(
+                "    b{i}: pullRequests(headRefName: $b{i}, first: 3, orderBy: {{field: CREATED_AT, direction: DESC}}) {{ nodes {{ __typename ...PrCore }} }}\n"
+            )
+        })
+        .collect();
+    format!(
+        "query MirrorPrsByHead($owner: String!, $name: String!{decls}) {{\n  repository(owner: $owner, name: $name) {{\n{fields}  }}\n}}\n{PR_FRAGMENT}"
+    )
+}
+
+#[derive(Debug, Deserialize)]
+struct ByHeadData {
+    repository: Option<HashMap<String, ByHeadConn>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ByHeadConn {
+    nodes: Vec<Node>,
+}
+
+/// The PRs (any state, newest 3 per branch) whose head branch is one of
+/// `branches`, in concurrent batches. Also returns the branches whose batch
+/// failed (their PRs are unknown, not absent).
+pub fn prs_by_head(owner: &str, name: &str, branches: &[String]) -> (Vec<Node>, Vec<String>) {
+    let chunks: Vec<&[String]> = branches.chunks(HEAD_LOOKUP_BATCH).collect();
+    let results = crate::inbox::concurrent_map(chunks, REFETCH_CONCURRENCY, |chunk| {
+        let mut vars = json!({ "owner": owner, "name": name });
+        for (i, b) in chunk.iter().enumerate() {
+            vars[format!("b{i}")] = json!(b);
+        }
+        (chunk.to_vec(), gh::graphql::<ByHeadData>(&prs_by_head_query(chunk.len()), vars))
+    });
+    let mut nodes = Vec::new();
+    let mut failed = Vec::new();
+    for (chunk, r) in results {
+        match r {
+            Ok(data) => nodes.extend(data.repository.into_iter().flat_map(|m| m.into_values()).flat_map(|c| c.nodes)),
+            Err(e) => {
+                crate::logging::warn(&format!("[mirror.by_head] {owner}/{name} batch failed: {e}"));
+                failed.extend(chunk);
+            }
+        }
+    }
+    (nodes.into_iter().filter(Node::is_pr).collect(), failed)
+}
+
 /// Resolve a PR by `owner/name#number`, rejecting issues.
 pub fn resolve_pr(owner: &str, name: &str, number: i64) -> AppResult<Node> {
     let node = resolve(owner, name, number)?;
@@ -527,6 +594,26 @@ pub fn resolve_pr(owner: &str, name: &str, number: i64) -> AppResult<Node> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn by_head_query_aliases_each_branch_and_uses_only_the_pr_fragment() {
+        let q = prs_by_head_query(2);
+        assert!(q.contains("$b0: String!, $b1: String!"));
+        assert!(q.contains("b1: pullRequests(headRefName: $b1"));
+        assert!(q.contains("fragment PrCore"));
+        assert!(!q.contains("IssueCore"), "an unused fragment fails the whole query");
+        assert!(FRAGMENTS.contains("fragment IssueCore") && FRAGMENTS.contains("fragment PrCore"));
+    }
+
+    #[test]
+    fn by_head_response_flattens_aliases() {
+        let data: ByHeadData = serde_json::from_value(serde_json::json!({
+            "repository": { "b0": { "nodes": [] }, "b1": { "nodes": [serde_json::from_str::<serde_json::Value>(PR_NODE_FIXTURE).unwrap()] } }
+        }))
+        .unwrap();
+        let n: usize = data.repository.unwrap().into_values().map(|c| c.nodes.len()).sum();
+        assert_eq!(n, 1);
+    }
 
     const PR_NODE_FIXTURE: &str = r#"{
       "__typename": "PullRequest",

@@ -300,6 +300,7 @@ export const api = {
   worktreeGcRun: (remove: boolean, sync: boolean) =>
     invoke<WorktreeGcReport>("worktree_gc_run", { remove, sync }),
   worktreeGcLast: () => invoke<WorktreeGcReport | null>("worktree_gc_last"),
+  worktreeGcReload: () => invoke<WorktreeGcReport | null>("worktree_gc_reload"),
   worktreeSync: (repoId: number, worktreePath: string) =>
     invoke<string>("worktree_sync", { repoId, worktreePath }),
   worktreeOpenTerminal: (

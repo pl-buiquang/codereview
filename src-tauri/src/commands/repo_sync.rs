@@ -45,6 +45,7 @@ pub fn watch_acquire(app: AppHandle, repo_id: i64, db: State<Db>, watchers: Stat
     )?;
     let Some(local_path) = local_path else { return Ok(false) };
     let on_change = Arc::new(move |repo_id: i64, kinds: Vec<ChangeKind>| {
+        crate::worktree_gc::note_change(repo_id);
         if let Err(e) = repo_sync::record_local_change(&app.state::<Db>().0.lock().unwrap(), repo_id) {
             crate::logging::warn(&format!("[watch] could not record change for repo {repo_id}: {e}"));
         }
