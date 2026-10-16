@@ -12,13 +12,17 @@ import { Icon } from "./icons";
 const REF_RE = /(?<![\w/[#-])((?:[\w.-]+\/)?[\w.-]+)#(\d+)\b/g;
 const CARD_HREF = "#card=";
 
+// Models abbreviate repo names (cardiologs-front → front), so the number is the
+// primary key and the repo ref only disambiguates.
 function findCard(cards: BoardCard[], repoRef: string, number: number): BoardCard | undefined {
+  const candidates = cards.filter((c) => c.number === number);
+  if (candidates.length <= 1) return candidates[0];
   const ref = repoRef.toLowerCase();
-  return cards.find((c) => {
-    if (c.number !== number) return false;
-    const repo = c.repo.toLowerCase();
-    return repo === ref || repo.endsWith(`/${ref}`);
-  });
+  const short = (c: BoardCard) => c.repo.toLowerCase().split("/").pop() ?? "";
+  return (
+    candidates.find((c) => c.repo.toLowerCase() === ref || short(c) === ref) ??
+    candidates.find((c) => short(c).endsWith(`-${ref}`) || short(c).includes(ref))
+  );
 }
 
 /** Turns `repo#N` / `owner/repo#N` into markdown links to the matching board card. */

@@ -12,6 +12,12 @@ describe("linkCardRefs", () => {
     );
   });
 
+  it("matches abbreviated repo names by number", () => {
+    const more = [...cards, card("C", "acme/cardiologs-front", 12)];
+    expect(linkCardRefs("front#7", cards)).toBe("[front#7](#card=B)");
+    expect(linkCardRefs("front#12", more)).toBe("[front#12](#card=C)");
+  });
+
   it("leaves unknown refs and URLs alone", () => {
     expect(linkCardRefs("back#99 https://x.io/acme/back#12", cards)).toBe(
       "back#99 https://x.io/acme/back#12",

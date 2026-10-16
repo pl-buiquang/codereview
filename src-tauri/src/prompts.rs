@@ -73,7 +73,8 @@ Rules: use only the snapshot; never invent facts.
   CHANGES_REQUESTED means it is waiting on the user's review.
 - The user's own drafts (mine draft) are work in progress: never urgent, never in Do next for
   CI/conflicts; mention them only under Stale when upd ≥14d.
-- Refer to items as repo#N (short repo name) so they become links.
+- Refer to items exactly as the repo header says (e.g. cardiologs-front#123), never
+  abbreviated, so they become links.
 - Be terse: bullets, max ~12 words each. Skip empty sections.
 
 Output Markdown with exactly these sections:

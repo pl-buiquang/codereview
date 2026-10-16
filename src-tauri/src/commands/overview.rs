@@ -135,7 +135,7 @@ pub fn build_snapshot(cards: &[BoardCardWithExtras], now: DateTime<Utc>) -> (Str
         by_repo.len()
     );
     for (repo, lines) in &by_repo {
-        out.push_str(&format!("## {repo}\n"));
+        out.push_str(&format!("## {} (ref as {}#N)\n", repo, short_repo(repo)));
         for l in lines {
             out.push_str(l);
             out.push('\n');
