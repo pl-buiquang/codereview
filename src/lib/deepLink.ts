@@ -5,17 +5,19 @@ import { api } from "./api";
 import { queryClient } from "./queryClient";
 import { toast } from "./toast";
 import { parseRepoBasePaths, useSettingsStore } from "./settings";
+import { findBoardCard } from "./commandPaletteSearch";
 
 type DeepLinkAction =
   | { kind: "openReview"; review_id: number }
   | { kind: "openPr"; owner: string; name: string; number: number }
   | { kind: "openDiff"; repo_id: number; base_ref: string; head_ref: string; three_dot: boolean }
-  | { kind: "navigateHome"; section: string | null };
+  | { kind: "navigateHome"; section: string | null }
+  | { kind: "showBoardCard"; owner: string; name: string; number: number };
 
-const VALID_SECTIONS = new Set<HomeSection>(["sessions", "inbox", "reviews", "archive", "worktrees", "repositories"]);
+const VALID_SECTIONS = new Set<HomeSection>(["sessions", "board", "inbox", "reviews", "archive", "worktrees", "repositories"]);
 
 export async function handleDeepLinkAction(action: DeepLinkAction): Promise<void> {
-  const { openReview, setActiveTab, setHomeSection } = useUIStore.getState();
+  const { openReview, setActiveTab, setHomeSection, showBoardCard } = useUIStore.getState();
 
   switch (action.kind) {
     case "openReview":
@@ -50,6 +52,17 @@ export async function handleDeepLinkAction(action: DeepLinkAction): Promise<void
         threeDot: action.three_dot,
       });
       openReview(review.id, action.repo_id);
+      break;
+    }
+
+    case "showBoardCard": {
+      const cards = await queryClient.fetchQuery({ queryKey: ["board"], queryFn: api.boardList });
+      const card = findBoardCard(cards, `${action.owner}/${action.name}`, action.number);
+      if (!card) {
+        toast.error(`${action.owner}/${action.name}#${action.number} is not on the board`);
+        return;
+      }
+      showBoardCard(card.id);
       break;
     }
 

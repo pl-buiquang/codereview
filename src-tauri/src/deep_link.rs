@@ -20,6 +20,11 @@ pub enum DeepLinkAction {
     NavigateHome {
         section: Option<String>,
     },
+    ShowBoardCard {
+        owner: String,
+        name: String,
+        number: i64,
+    },
 }
 
 /// Parse a `codereview://` URL into a navigation action.
@@ -50,6 +55,16 @@ pub fn parse_deep_link(raw: &str) -> Result<DeepLinkAction, String> {
                 .parse::<i64>()
                 .map_err(|_| format!("invalid PR number: {number}"))?;
             Ok(DeepLinkAction::OpenPr {
+                owner: (*owner).to_string(),
+                name: (*name).to_string(),
+                number,
+            })
+        }
+        ["board", owner, name, number] => {
+            let number = number
+                .parse::<i64>()
+                .map_err(|_| format!("invalid number: {number}"))?;
+            Ok(DeepLinkAction::ShowBoardCard {
                 owner: (*owner).to_string(),
                 name: (*name).to_string(),
                 number,
@@ -120,6 +135,15 @@ mod tests {
             panic!("expected OpenReview, got {a:?}");
         };
         assert_eq!(review_id, 42);
+    }
+
+    #[test]
+    fn parse_board_card() {
+        let a = parse_deep_link("codereview://board/acme/widget/7").unwrap();
+        let DeepLinkAction::ShowBoardCard { owner, name, number } = a else {
+            panic!("expected ShowBoardCard, got {a:?}");
+        };
+        assert_eq!((owner.as_str(), name.as_str(), number), ("acme", "widget", 7));
     }
 
     #[test]

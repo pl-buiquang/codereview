@@ -1,4 +1,4 @@
-import type { Repository, ReviewSummary } from "./types";
+import type { BoardCard, Repository, ReviewSummary } from "./types";
 
 export interface PaletteReviewResult {
   kind: "review";
@@ -19,7 +19,16 @@ export interface PaletteCreateResult {
   repoLabel: string;
 }
 
-export type PaletteResult = PaletteReviewResult | PaletteCreateResult;
+export interface PaletteBoardResult {
+  kind: "board-card";
+  cardId: string;
+  title: string;
+  repoLabel: string;
+  number: number;
+  type: "pr" | "issue";
+}
+
+export type PaletteResult = PaletteBoardResult | PaletteReviewResult | PaletteCreateResult;
 
 const MAX_REVIEWS = 10;
 const MAX_CREATES = 3;
@@ -46,6 +55,34 @@ function buildSearchText(s: ReviewSummary): string {
 const WORD_NUMBER_RE = /^(\S+)\s+(\d+)$/;
 const GITHUB_PR_RE = /github\.com\/([^/\s]+)\/([^/\s]+)\/pull\/(\d+)/;
 
+const GITHUB_ITEM_RE = /github\.com\/([^/\s]+)\/([^/\s]+)\/(?:pull|issues)\/(\d+)/i;
+const REPO_REF_RE = /^([\w.-]+)\/([\w.-]+)#(\d+)$/;
+
+/** Visible (tracked, not archived/discarded) card for `owner/name` + number. */
+export function findBoardCard(cards: BoardCard[], repo: string, number: number): BoardCard | undefined {
+  const r = repo.toLowerCase();
+  return cards.find(
+    (c) => c.number === number && c.repo.toLowerCase() === r && !c.archived_at && !c.discarded_at,
+  );
+}
+
+/** Board card for a pasted PR/issue URL or `owner/repo#N`. */
+export function matchBoardCard(query: string, cards: BoardCard[]): PaletteBoardResult | null {
+  const q = query.trim();
+  const m = GITHUB_ITEM_RE.exec(q) ?? REPO_REF_RE.exec(q);
+  if (!m) return null;
+  const card = findBoardCard(cards, `${m[1]}/${m[2]}`, parseInt(m[3], 10));
+  if (!card) return null;
+  return {
+    kind: "board-card",
+    cardId: card.id,
+    title: card.title,
+    repoLabel: card.repo,
+    number: card.number,
+    type: card.type,
+  };
+}
+
 function parseGithubPrUrl(q: string): { owner: string; name: string; prNumber: number } | null {
   const m = GITHUB_PR_RE.exec(q);
   if (!m) return null;
@@ -56,8 +93,11 @@ export function searchPalette(
   query: string,
   reviews: ReviewSummary[],
   repos: Repository[],
+  boardCards: BoardCard[] = [],
 ): PaletteResult[] {
   const q = query.trim().toLowerCase();
+  const boardHit = matchBoardCard(query, boardCards);
+  const boardResults: PaletteBoardResult[] = boardHit ? [boardHit] : [];
 
   // Empty query → 5 most recent
   if (!q) {
@@ -74,9 +114,16 @@ export function searchPalette(
   }
 
   const tokens = q.split(/\s+/);
+  const pastedPr = parseGithubPrUrl(query.trim());
 
   const matched = reviews
     .filter((s) => {
+      if (pastedPr) {
+        return (
+          s.target.github_pr_number === pastedPr.prNumber &&
+          s.repo_label.toLowerCase() === `${pastedPr.owner}/${pastedPr.name}`.toLowerCase()
+        );
+      }
       const text = buildSearchText(s);
       return tokens.every((t) => text.includes(t));
     })
@@ -125,12 +172,11 @@ export function searchPalette(
   }
 
   // GitHub PR URL pasted → always offer to open it (if not already in results)
-  const urlParsed = parseGithubPrUrl(q);
-  if (urlParsed) {
-    const { owner, name, prNumber } = urlParsed;
+  if (pastedPr) {
+    const { owner, name, prNumber } = pastedPr;
     const label = `${owner}/${name}`;
     const alreadyInReviews = reviewResults.some(
-      (r) => r.repoLabel === label && r.prNumber === prNumber,
+      (r) => r.repoLabel.toLowerCase() === label.toLowerCase() && r.prNumber === prNumber,
     );
     const alreadyInCreates = createResults.some(
       (r) => r.owner === owner && r.name === name && r.prNumber === prNumber,
@@ -140,5 +186,5 @@ export function searchPalette(
     }
   }
 
-  return [...reviewResults, ...createResults];
+  return [...boardResults, ...reviewResults, ...createResults];
 }
