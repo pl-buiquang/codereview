@@ -21,6 +21,7 @@ pub mod provider;
 pub mod prompts;
 pub mod repo_sync;
 pub mod session_summaries;
+pub mod sync;
 pub mod terminal;
 pub mod tools;
 pub mod watch;
@@ -133,6 +134,7 @@ pub fn run() {
             commands::focus::fail_interrupted(&conn)?;
             app.manage(Db(Mutex::new(conn)));
             app.manage(db::DbPath(db_path.clone()));
+            app.manage(sync::SyncEngine::start(app.handle().clone()));
 
             let log_dir = db_path
                 .parent()
@@ -242,7 +244,6 @@ pub fn run() {
             commands::gh::set_pr_thread_resolved,
             commands::gh::check_environment,
             commands::gh::fetch_github_image,
-            commands::inbox::refresh_inbox,
             commands::inbox::list_inbox,
             commands::inbox::list_archive,
             commands::inbox::list_closed,
@@ -252,7 +253,6 @@ pub fn run() {
             commands::inbox::retrack_item,
             commands::inbox::open_pr_review,
             commands::inbox::inbox_meta,
-            commands::board::board_refresh,
             commands::board::board_last_refresh_at,
             commands::board::board_list,
             commands::board::board_tracked_ids,
@@ -306,6 +306,12 @@ pub fn run() {
             commands::graph::delete_gone_branches,
             commands::graph::list_gone_branches,
             commands::repo_sync::fetch_repo,
+            commands::sync::sync_hint,
+            commands::sync::sync_window_state,
+            commands::sync::sync_configure,
+            commands::sync::sync_status,
+            commands::sync::sync_now,
+            commands::sync::reset_mirror,
             commands::repo_sync::repo_sync_state,
             commands::repo_sync::watch_acquire,
             commands::repo_sync::watch_release,

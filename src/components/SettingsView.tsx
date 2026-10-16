@@ -3,6 +3,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useUIStore } from "../store";
 import {
   AUTO_FETCH_OPTIONS,
+  AUTO_SYNC_OPTIONS,
+  DISCOVERY_INTERVAL_OPTIONS,
   effectiveTheme,
   exportSettings,
   importSettings,
@@ -20,7 +22,9 @@ import { DEFAULT_CONFIG_PATTERNS, DEFAULT_TEST_PATTERNS } from "../lib/fileCateg
 import { DIRECTIONS } from "../lib/themes";
 import { api, pickJsonFile, pickSavePath } from "../lib/api";
 import { toast } from "../lib/toast";
-import type { ToolEnv } from "../lib/types";
+import { confirmDialog } from "../lib/confirm";
+import { invalidateMirrorQueries } from "../lib/sync";
+import type { AutoSync, ToolEnv } from "../lib/types";
 import { Icon, type IconName } from "./icons";
 import { AiSection } from "./SettingsAiSection";
 
@@ -224,6 +228,10 @@ function GeneralSection() {
   const largeDiffMaxLines = useSettingsStore((s) => s.largeDiffMaxLines);
   const setLargeDiffMaxLines = useSettingsStore((s) => s.setLargeDiffMaxLines);
   const setBoardStatusBorderSide = useSettingsStore((s) => s.setBoardStatusBorderSide);
+  const autoSync = useSettingsStore((s) => s.autoSync);
+  const setAutoSync = useSettingsStore((s) => s.setAutoSync);
+  const discoveryIntervalMin = useSettingsStore((s) => s.discoveryIntervalMin);
+  const setDiscoveryIntervalMin = useSettingsStore((s) => s.setDiscoveryIntervalMin);
   const autoFetchMinutes = useSettingsStore((s) => s.autoFetchMinutes);
   const setAutoFetchMinutes = useSettingsStore((s) => s.setAutoFetchMinutes);
   const fileTestPatterns = useSettingsStore((s) => s.fileTestPatterns);
@@ -278,6 +286,23 @@ function GeneralSection() {
   };
 
   const queryClient = useQueryClient();
+  const resetMirror = useMutation({
+    mutationFn: api.resetMirror,
+    onSuccess: () => {
+      invalidateMirrorQueries();
+      toast.success("Mirror reset — rebuilding from GitHub");
+    },
+    onError: (err) => toast.error(`Reset failed:\n${String(err)}`),
+  });
+  const onResetMirror = async () => {
+    const ok = await confirmDialog({
+      title: "Reset mirror",
+      message:
+        "Delete the local copy of GitHub PRs, issues and users, then rebuild it from GitHub? Inbox triage, board tracking and reviews are kept; they show placeholders until the rebuild lands.",
+      confirmLabel: "Reset",
+    });
+    if (ok) resetMirror.mutate();
+  };
   const autoLink = useMutation({
     mutationFn: () => api.autoLinkRepos(parseRepoBasePaths(repoBasePaths)),
     onSuccess: (count) => {
@@ -394,6 +419,48 @@ function GeneralSection() {
             <option value="left">Left</option>
           </select>
         </label>
+      </section>
+
+      <section className="settings-group">
+        <h3>Sync</h3>
+        <label
+          className="settings-row"
+          title="When Inbox, Board and Review sync from GitHub on their own. On focus: when a view opens or the window regains focus. Periodic: also every few minutes while the app is visible (slower when nothing changes)."
+        >
+          <span>Auto Sync</span>
+          <select className="select" value={autoSync} onChange={(e) => setAutoSync(e.target.value as AutoSync)}>
+            {AUTO_SYNC_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label
+          className="settings-row"
+          title="Search GitHub for new review requests, mentions and authored PRs this often while the app is visible (and on return after a longer absence). Needs Auto Sync on; a Sync click always looks."
+        >
+          <span>Look for new PRs/issues every</span>
+          <select
+            className="select"
+            value={discoveryIntervalMin}
+            onChange={(e) => setDiscoveryIntervalMin(Number(e.target.value))}
+          >
+            {DISCOVERY_INTERVAL_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className="settings-row" title="Wipe the local copy of GitHub data and rebuild it. Your own state is kept.">
+          <span>GitHub mirror</span>
+          <span className="settings-control">
+            <button className="btn btn-sm" onClick={onResetMirror} disabled={resetMirror.isPending}>
+              Reset mirror…
+            </button>
+          </span>
+        </div>
       </section>
 
       <section className="settings-group">

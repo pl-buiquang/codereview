@@ -10,6 +10,7 @@ use codereview_lib::db_path::resolve_db_path;
 use codereview_lib::error::{AppError, AppResult};
 use codereview_lib::gh::{self, GhRepo};
 use codereview_lib::provider::provider_for;
+use codereview_lib::sync::{self, Mode, Scope, SyncReport, SyncRequest};
 use codereview_lib::tools;
 
 #[derive(Parser)]
@@ -112,6 +113,15 @@ enum Cmd {
         #[command(subcommand)]
         action: BoardAction,
     },
+    /// Sync the GitHub mirror (Inbox + Board): discovery, then refetch what changed
+    Sync {
+        /// Refetch everything, ignoring change keys; also fetches every local clone
+        #[arg(long, conflicts_with = "light")]
+        full: bool,
+        /// Only check known items for changes (no search for new ones)
+        #[arg(long)]
+        light: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -135,8 +145,9 @@ enum BoardAction {
         /// GitHub URL or owner/repo#n
         reference: String,
     },
-    /// Refresh the board from GitHub
-    Refresh,
+    /// Sync the board from GitHub
+    #[command(alias = "refresh")]
+    Sync,
     /// Manually link a PR to a backlog issue card
     Link {
         /// The backlog issue's card id (see `cr board list --json`)
@@ -370,8 +381,9 @@ enum RepoAction {
 enum InboxAction {
     /// List inbox items
     List,
-    /// Refresh inbox from GitHub
-    Refresh,
+    /// Sync the inbox from GitHub
+    #[command(alias = "refresh")]
+    Sync,
 }
 
 #[derive(Subcommand)]
@@ -966,20 +978,7 @@ fn run(cmd: Cmd, json: bool, db: &Db) -> AppResult<()> {
                     }
                 }
             }
-            InboxAction::Refresh => {
-                let result = inbox::refresh_inbox_impl(db)?;
-                if json {
-                    println!("{}", serde_json::to_string_pretty(&result)?);
-                } else {
-                    println!(
-                        "Refreshed inbox for {} — {} items, {} closed ({}ms)",
-                        result.viewer_login,
-                        result.item_count,
-                        result.closed_count,
-                        result.duration_ms,
-                    );
-                }
-            }
+            InboxAction::Sync => print_sync(&sync_once(db, Scope::Inbox, Mode::Forced)?, json)?,
         },
 
         Cmd::Focus { action } => run_focus(action, json, db)?,
@@ -1016,6 +1015,44 @@ fn run(cmd: Cmd, json: bool, db: &Db) -> AppResult<()> {
         }
 
         Cmd::Board { action } => run_board(action, json, db)?,
+        Cmd::Sync { full, light } => {
+            let mode = if full {
+                Mode::Full
+            } else if light {
+                Mode::Light
+            } else {
+                Mode::Forced
+            };
+            print_sync(&sync_once(db, Scope::All, mode)?, json)?;
+        }
+    }
+    Ok(())
+}
+
+/// The one-shot in-process sync (ADR 0003): no scheduler, no events; the app
+/// sees the fresh rows on its next read.
+fn sync_once(db: &Db, scope: Scope, mode: Mode) -> AppResult<SyncReport> {
+    sync::run(db, &SyncRequest::new(scope, mode), &|_| {})
+}
+
+fn print_sync(r: &SyncReport, json: bool) -> AppResult<()> {
+    if json {
+        println!("{}", serde_json::to_string_pretty(r)?);
+    } else {
+        println!(
+            "Synced for {} — {} inbox items ({} closed), {} board cards ({} newly tracked); \
+             {} probed, {} refetched, {} threads, {} files ({}ms)",
+            r.viewer_login,
+            r.item_count,
+            r.closed_count,
+            r.card_count,
+            r.auto_tracked,
+            r.probed,
+            r.changed,
+            r.threads,
+            r.files,
+            r.duration_ms,
+        );
     }
     Ok(())
 }
@@ -1089,17 +1126,7 @@ fn run_board(action: BoardAction, json: bool, db: &Db) -> AppResult<()> {
             }
         }
 
-        BoardAction::Refresh => {
-            let result = board_cmd::board_refresh_impl(db)?;
-            if json {
-                println!("{}", serde_json::to_string_pretty(&result)?);
-            } else {
-                println!(
-                    "Refreshed board — {} cards, {} newly auto-tracked ({}ms)",
-                    result.card_count, result.auto_tracked, result.duration_ms,
-                );
-            }
-        }
+        BoardAction::Sync => print_sync(&sync_once(db, Scope::Board, Mode::Forced)?, json)?,
 
         BoardAction::Link { issue_id, pr_reference } => {
             board_cmd::board_link_pr_impl(db, &issue_id, &pr_reference)?;

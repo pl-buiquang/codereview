@@ -19,6 +19,7 @@ import { useApplySettings } from "./lib/useApplySettings";
 import { useDeepLinkListener } from "./lib/deepLink";
 import { dismissSplash } from "./lib/splash";
 import { GIT_CHANGED_EVENT, gitChangedQueryKeys, type GitChangedPayload } from "./lib/gitChanged";
+import { useSyncBridge } from "./lib/sync";
 import { useUIStore, type Tab } from "./store";
 
 const CLOSE_ACTIVE_TAB_EVENT = "close-active-tab";
@@ -46,6 +47,7 @@ function registerCloseTabKeydown() {
 function App() {
   useApplySettings();
   useDeepLinkListener();
+  useSyncBridge();
   const tabs = useUIStore((s) => s.tabs);
   const closeTab = useUIStore((s) => s.closeTab);
   const openRepoIds = useUIStore((s) => s.openRepoIds);

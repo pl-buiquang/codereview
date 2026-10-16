@@ -1594,7 +1594,7 @@ fn prepare_publish(review_id: i64, db: &Db) -> AppResult<(ReviewDetail, String, 
 /// lock it (published reviews can't be edited or re-published). Returns the
 /// updated review.
 // Async so the GitHub round-trip runs off the main thread — a sync command would
-// block the webview and freeze the UI while publishing (see `refresh_inbox`).
+// block the webview and freeze the UI while publishing (it shells out to `gh`).
 #[tauri::command]
 pub async fn publish_review(review_id: i64, db: State<'_, Db>) -> AppResult<Review> {
     let (detail, owner, name, number) = prepare_publish(review_id, &db)?;

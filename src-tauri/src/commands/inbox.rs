@@ -1,10 +1,7 @@
-//! Tauri commands for the GitHub inbox. These own the DB and orchestrate the
-//! pure pipeline in `crate::inbox`. The refresh deliberately performs all `gh`
-//! network I/O OUTSIDE the DB lock and writes the results in one transaction, so
-//! the single `Mutex<Connection>` is never held across a subprocess.
+//! Tauri commands for the GitHub inbox: triage state on `inbox_entry`, read
+//! through the mirror. Syncing it from GitHub lives in `crate::sync`.
 
-use std::collections::{HashMap, HashSet};
-use std::time::Instant;
+use std::collections::HashMap;
 
 use chrono::Utc;
 use rusqlite::{params, params_from_iter, Connection, OptionalExtension};
@@ -15,7 +12,7 @@ use crate::db::models::{ItemReason, ItemRow, ItemWithReasons, Review};
 use crate::db::Db;
 use crate::error::AppResult;
 use crate::inbox::{self, ViewerInfo};
-use crate::mirror::{self, Node};
+use crate::mirror::Node;
 
 fn now() -> String {
     Utc::now().to_rfc3339()
@@ -81,7 +78,7 @@ const ITEM_VIEW: &str = "(
 )";
 
 /// Track a surfaced item, reopening it if the inbox had seen it close.
-fn upsert_entry(conn: &Connection, node: &Node, ts: &str) -> AppResult<()> {
+pub(crate) fn upsert_entry(conn: &Connection, node: &Node, ts: &str) -> AppResult<()> {
     let typ = if node.is_pr() { "pr" } else { "issue" };
     conn.execute(
         "INSERT INTO inbox_entry (id, type, first_seen_at) VALUES (?1, ?2, ?3)
@@ -91,7 +88,7 @@ fn upsert_entry(conn: &Connection, node: &Node, ts: &str) -> AppResult<()> {
     Ok(())
 }
 
-fn replace_reasons(conn: &Connection, item_id: &str, reasons: &[inbox::Reason]) -> AppResult<()> {
+pub(crate) fn replace_reasons(conn: &Connection, item_id: &str, reasons: &[inbox::Reason]) -> AppResult<()> {
     conn.execute("DELETE FROM item_reasons WHERE item_id = ?1", params![item_id])?;
     for r in reasons {
         conn.execute(
@@ -102,62 +99,24 @@ fn replace_reasons(conn: &Connection, item_id: &str, reasons: &[inbox::Reason]) 
     Ok(())
 }
 
-fn mark_item_closed(conn: &Connection, id: &str, ts: &str) -> AppResult<()> {
-    conn.execute(
+pub(crate) fn mark_item_closed(conn: &Connection, id: &str, ts: &str) -> AppResult<bool> {
+    Ok(conn.execute(
         "UPDATE inbox_entry SET closed_at = ?1 WHERE id = ?2 AND closed_at IS NULL",
         params![ts, id],
-    )?;
-    Ok(())
+    )? > 0)
 }
 
-/// What the mirror knows of each PR's files facet: `(gh_updated_at, files
-/// head_sha)`, the latter `Some(None)` for files without a head key.
-type FilesKey = (Option<String>, Option<Option<String>>);
-
-fn existing_files_keys(conn: &Connection, ids: &[String]) -> AppResult<HashMap<String, FilesKey>> {
-    if ids.is_empty() {
-        return Ok(HashMap::new());
-    }
-    let placeholders = vec!["?"; ids.len()].join(",");
-    let sql = format!(
-        "SELECT p.node_id, p.gh_updated_at,
-                EXISTS (SELECT 1 FROM gh_pr_file f WHERE f.pr_id = p.node_id),
-                (SELECT MAX(f.head_sha) FROM gh_pr_file f WHERE f.pr_id = p.node_id)
-         FROM gh_pr p WHERE p.node_id IN ({placeholders})"
-    );
-    let mut stmt = conn.prepare(&sql)?;
-    let rows = stmt.query_map(params_from_iter(ids.iter()), |r| {
-        let has_files: bool = r.get(2)?;
-        let head: Option<String> = r.get(3)?;
-        Ok((r.get::<_, String>(0)?, (r.get(1)?, has_files.then_some(head))))
-    })?;
-    rows.collect::<rusqlite::Result<_>>().map_err(Into::into)
-}
-
-/// The files facet is fresh when fetched at the node's head; rows backfilled
-/// without a head key stay fresh until the PR changes.
-fn files_need_fetch(node: &Node, key: Option<&FilesKey>) -> bool {
-    match key {
-        Some((_, Some(Some(head)))) => node.head_ref_oid.as_deref() != Some(head.as_str()),
-        Some((updated_at, Some(None))) => updated_at.as_deref() != Some(node.updated_at.as_str()),
-        _ => true,
-    }
-}
-
-/// Ids currently in the inbox (tracked, not closed, with reasons) that were NOT
-/// returned by this refresh — candidates for closed/merged detection.
-fn stale_inbox_ids(conn: &Connection, current: &[String]) -> AppResult<Vec<String>> {
+/// Ids currently in the inbox (tracked, not closed, with reasons): the
+/// entities an inbox sync probes.
+pub(crate) fn active_inbox_ids(conn: &Connection) -> AppResult<Vec<String>> {
     let mut stmt = conn.prepare(
         "SELECT id FROM inbox_entry
          WHERE untracked_at IS NULL
            AND closed_at IS NULL
            AND id IN (SELECT item_id FROM item_reasons)",
     )?;
-    let ids: Vec<String> = stmt
-        .query_map([], |r| r.get(0))?
-        .collect::<rusqlite::Result<_>>()?;
-    let set: HashSet<&str> = current.iter().map(String::as_str).collect();
-    Ok(ids.into_iter().filter(|id| !set.contains(id.as_str())).collect())
+    let ids = stmt.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
+    Ok(ids)
 }
 
 /// Attach each item's reasons (one extra grouped query, like the TS layer).
@@ -226,23 +185,8 @@ pub(crate) fn cached_viewer(conn: &Connection) -> Option<ViewerInfo> {
 // Commands
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RefreshResult {
-    pub viewer_login: String,
-    pub item_count: i64,
-    pub closed_count: i64,
-    pub duration_ms: i64,
-}
-
-/// Refresh the inbox from GitHub. Network I/O happens unlocked; the DB lock is
-/// taken only for short reads and the final write transaction.
-///
-/// Declared `async` so Tauri runs it off the main (UI) thread — the body is
-/// synchronous and contains no `.await`, but the `gh` fan-out is slow and would
-/// otherwise freeze the webview.
 /// Cached viewer (24h TTL), fetching and persisting it on a cache miss. Shared
-/// with the board refresh, which only needs the login (not the team slugs).
+/// by every sync; the board only needs the login (not the team slugs).
 pub(crate) fn cached_or_fetch_viewer(db: &Db) -> AppResult<ViewerInfo> {
     let cached = {
         let conn = db.0.lock().unwrap();
@@ -259,83 +203,6 @@ pub(crate) fn cached_or_fetch_viewer(db: &Db) -> AppResult<ViewerInfo> {
             Ok(v)
         }
     }
-}
-
-pub fn refresh_inbox_impl(db: &Db) -> AppResult<RefreshResult> {
-    let start = Instant::now();
-
-    let viewer = cached_or_fetch_viewer(db)?;
-    let scope = std::env::var("CODEREVIEW_SEARCH_SCOPE").ok();
-    let merged = inbox::run_all_searches(&viewer, scope.as_deref());
-    let merged_ids: Vec<String> = merged.iter().map(|r| r.node.id.clone()).collect();
-
-    let (files_keys, stale_ids) = {
-        let conn = db.0.lock().unwrap();
-        (existing_files_keys(&conn, &merged_ids)?, stale_inbox_ids(&conn, &merged_ids)?)
-    };
-    let to_enrich: Vec<inbox::EnrichTarget> = merged
-        .iter()
-        .filter(|r| r.node.is_pr() && files_need_fetch(&r.node, files_keys.get(&r.node.id)))
-        .filter_map(|r| {
-            Some(inbox::EnrichTarget {
-                id: r.node.id.clone(),
-                repo: r.node.repo()?.to_string(),
-                number: r.node.number,
-                head_sha: r.node.head_ref_oid.clone(),
-            })
-        })
-        .collect();
-    let files = inbox::enrich_all(to_enrich);
-    let refetched = if stale_ids.is_empty() {
-        HashMap::new()
-    } else {
-        mirror::fetch::refetch(&stale_ids)
-    };
-
-    let ts = now();
-    let mut conn = db.0.lock().unwrap();
-    let tx = conn.transaction()?;
-    for r in &merged {
-        mirror::store::upsert_node(&tx, &r.node, &ts)?;
-        upsert_entry(&tx, &r.node, &ts)?;
-        replace_reasons(&tx, &r.node.id, &r.reasons)?;
-    }
-    for (target, files) in &files {
-        if let Some(files) = files {
-            mirror::store::upsert_files(&tx, &target.id, target.head_sha.as_deref(), files)?;
-        }
-    }
-    let mut closed_count = 0i64;
-    for id in &stale_ids {
-        let closed = match refetched.get(id) {
-            Some(Some(node)) => {
-                mirror::store::upsert_node(&tx, node, &ts)?;
-                node.is_closed()
-            }
-            Some(None) => true,
-            // Its batch failed: state unknown, try again next sync.
-            None => false,
-        };
-        if closed {
-            mark_item_closed(&tx, id, &ts)?;
-            closed_count += 1;
-        }
-    }
-    mirror::store::gc(&tx)?;
-    set_meta(&tx, "last_refresh_at", &ts)?;
-    tx.commit()?;
-
-    Ok(RefreshResult {
-        viewer_login: viewer.login,
-        item_count: merged.len() as i64,
-        closed_count,
-        duration_ms: start.elapsed().as_millis() as i64,
-    })
-}
-
-#[tauri::command]
-pub async fn refresh_inbox(db: State<'_, Db>) -> AppResult<RefreshResult> {
-    refresh_inbox_impl(&db)
 }
 
 pub fn list_inbox_impl(conn: &Connection) -> AppResult<Vec<ItemWithReasons>> {
@@ -426,7 +293,7 @@ pub fn retrack_item(id: String, db: State<Db>) -> AppResult<()> {
 /// Open an inbox PR as a review: marks the item engaged (visited), then
 /// creates/reuses a review for the PR (clone-less if the repo isn't added).
 ///
-/// `async` so the `gh pr view` lookup runs off the UI thread (see `refresh_inbox`).
+/// `async` so the `gh pr view` lookup runs off the UI thread.
 #[tauri::command]
 pub async fn open_pr_review(
     item_id: String,

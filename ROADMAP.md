@@ -44,8 +44,11 @@ on a 3-direction (Continuity / Modern / Terminal) × dark/light token-based desi
   **Submit** (with the stored verdict) or **Discard** (deletes it, unlocks the local draft). The
   review is locked locally while pending. Still TODO: incremental comment-by-comment sync onto an
   existing pending review, and adopting a pending review created on github.com.
-- **Auto-refresh & polling** — a manual "Refresh" re-resolves SHAs and re-fetches a review's
-  diff/threads today; still want PR-list refresh and optional interval polling.
+- **Auto Sync** — ~~interval polling~~ Done: a backend sync engine (`src-tauri/src/sync/`,
+  ADR 0003) keeps Inbox and Board in sync (Settings → Sync: off / on focus / periodic, plus the
+  discovery interval). The Review's PR facets and the repo PR list are still fetched by frontend
+  queries, which follow the same Auto Sync setting. Still TODO: gate discovery behind
+  `GET /notifications` with `If-Modified-Since` / `X-Poll-Interval`.
 
 ## 4. Export
 
@@ -133,6 +136,7 @@ Repo/filesystem:
 - **Reviews-lane comment badge edge cases** — `pending_threads` for the "Reviewing" mode counts
   only threads whose *first* comment is the viewer's; a thread the viewer joined partway through
   (replied but didn't start) never counts. Revisit if that undercounts in practice.
-- **Board refresh cost** — `board_refresh` fetches review threads for every open PR card
-  sequentially-ish (8-way concurrency, like the inbox); on a board with many open PRs this is the
-  slowest step. Consider skipping unchanged PRs (compare `updated_at`) the way inbox enrichment does.
+- **Board sync cost** — ~~threads for every open PR card~~ Done: the sync probe refetches only
+  changed PRs, and threads only when `updatedAt` moved or they're 15 min old. The probe of open
+  PRs is still the slowest light step (~100 ms per open PR on GitHub's side, for
+  `mergeStateStatus` / `reviewDecision` / the CI rollup).

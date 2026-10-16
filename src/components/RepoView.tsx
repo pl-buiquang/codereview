@@ -3,7 +3,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { toast } from "../lib/toast";
 import { confirmDialog } from "../lib/confirm";
-import { PR_LIST_POLL_OPTIONS, useSettingsStore, parseRepoBasePaths } from "../lib/settings";
+import { useSettingsStore, parseRepoBasePaths } from "../lib/settings";
+import { autoSyncRefetch } from "../lib/sync";
 import { timeAgo } from "../lib/timeAgo";
 import { repoLabel, repoDisplayName } from "../lib/repoLabel";
 import { GraphView } from "./graph/GraphView";
@@ -171,18 +172,18 @@ export function RepoView({ repo }: { repo: Repository }) {
 
 function PrList({ repo, onOpen }: { repo: Repository; onOpen: (id: number) => void }) {
   const queryClient = useQueryClient();
-  const prListPollMs = useSettingsStore((s) => s.prListPollMs);
-  const setPrListPollMs = useSettingsStore((s) => s.setPrListPollMs);
+  const autoSync = useSettingsStore((s) => s.autoSync);
 
   const authQuery = useQuery({ queryKey: ["gh-auth"], queryFn: api.ghAuthStatus });
   const prsQuery = useQuery({
     queryKey: ["prs", repo.id],
     queryFn: () => api.listPrs(repo.id),
     enabled: authQuery.data === true,
-    refetchInterval: prListPollMs > 0 ? prListPollMs : false,
+    staleTime: 60_000,
+    ...autoSyncRefetch(autoSync, 5 * 60_000),
   });
 
-  // Re-render every 30s so the "updated Xm ago" label stays honest with polling off.
+  // Re-render every 30s so the "synced Xm ago" label stays honest between syncs.
   const [, setTick] = useState(0);
   useEffect(() => {
     const id = setInterval(() => setTick((n) => n + 1), 30_000);
@@ -253,22 +254,8 @@ function PrList({ repo, onOpen }: { repo: Repository; onOpen: (id: number) => vo
         <span className="muted">Open pull requests</span>
         <span className="cr-spacer" />
         {prsQuery.dataUpdatedAt > 0 && (
-          <span className="cr-sub">updated {timeAgo(prsQuery.dataUpdatedAt)}</span>
+          <span className="cr-sub">synced {timeAgo(prsQuery.dataUpdatedAt)}</span>
         )}
-        <label className="sort-control">
-          auto
-          <select
-            className="sort-select"
-            value={prListPollMs}
-            onChange={(e) => setPrListPollMs(Number(e.target.value))}
-          >
-            {PR_LIST_POLL_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-        </label>
         <button
           className="btn btn-primary"
           disabled={prsQuery.isFetching}
@@ -276,11 +263,11 @@ function PrList({ repo, onOpen }: { repo: Repository; onOpen: (id: number) => vo
         >
           {prsQuery.isFetching ? (
             <>
-              <span className="spinner" /> Refreshing…
+              <span className="spinner" /> Syncing…
             </>
           ) : (
             <>
-              <Icon name="refresh" size={13} /> Refresh
+              <Icon name="refresh" size={13} /> Sync
             </>
           )}
         </button>

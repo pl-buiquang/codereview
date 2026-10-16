@@ -266,11 +266,39 @@ export interface InboxItem {
   reasons: ItemReason[];
 }
 
-export interface RefreshResult {
+export type SyncScope = "inbox" | "board" | "all";
+/** light: probe + changed only; forced: a Sync click; full: refetch everything. */
+export type SyncMode = "light" | "forced" | "full";
+export type AutoSync = "off" | "on_focus" | "periodic";
+
+export interface SyncReport {
+  discovered: boolean;
   viewerLogin: string;
   itemCount: number;
+  cardCount: number;
   closedCount: number;
+  autoTracked: number;
+  probed: number;
+  changed: number;
+  threads: number;
+  files: number;
   durationMs: number;
+}
+
+export interface SyncStatus {
+  running: SyncScope[];
+  discovering: boolean;
+  full: boolean;
+  lastDiscoveryAt: string | null;
+  lastInboxAt: string | null;
+  lastBoardAt: string | null;
+  lastError: string | null;
+  lastErrorAt: string | null;
+}
+
+export interface MirrorUpdatedPayload {
+  scopes: SyncScope[];
+  ids: string[];
 }
 
 /** A review's pin compared with its target's live head. */
@@ -527,12 +555,6 @@ export interface CardSession {
 export interface SessionsSnapshot {
   sessions: ClaudeSession[];
   card_sessions: CardSession[];
-}
-
-export interface BoardRefreshResult {
-  cardCount: number;
-  autoTracked: number;
-  durationMs: number;
 }
 
 export interface ChatWorktree {

@@ -115,13 +115,19 @@ pub fn upsert_node(conn: &Connection, node: &Node, ts: &str) -> AppResult<()> {
         return Ok(());
     }
 
+    let closing_ids = node
+        .closing_issues_references
+        .as_ref()
+        .map(|c| serde_json::to_string(&c.nodes.iter().map(|n| n.id.as_str()).collect::<Vec<_>>()))
+        .transpose()?;
     conn.execute(
         "INSERT INTO gh_pr (node_id, repo_id, number, title, url, author_login, state, is_draft,
             body_snippet, base_ref, head_ref, head_sha, review_decision, review_count,
             additions, deletions, changed_files, latest_comment, latest_actor,
-            gh_updated_at, closed_at, fetched_at)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22)
+            gh_updated_at, closed_at, fetched_at, closing_issue_ids)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23)
          ON CONFLICT(node_id) DO UPDATE SET
+            closing_issue_ids = COALESCE(excluded.closing_issue_ids, gh_pr.closing_issue_ids),
             repo_id = excluded.repo_id, number = excluded.number, title = excluded.title,
             url = excluded.url, author_login = excluded.author_login, state = excluded.state,
             is_draft = excluded.is_draft, body_snippet = excluded.body_snippet,
@@ -154,6 +160,7 @@ pub fn upsert_node(conn: &Connection, node: &Node, ts: &str) -> AppResult<()> {
             node.updated_at,
             node.closed_at,
             ts,
+            closing_ids,
         ],
     )?;
     let auto_merge_by = node
@@ -346,6 +353,13 @@ pub fn read_threads(conn: &Connection, owner: &str, name: &str, number: i64) -> 
         .optional()?
         .flatten();
     Ok(json.and_then(|s| serde_json::from_str(&s).ok()))
+}
+
+/// Wipe the mirror (facets cascade). User tables keep their soft refs and show
+/// placeholders until the next sync refetches them.
+pub fn reset(conn: &Connection) -> AppResult<()> {
+    conn.execute_batch("DELETE FROM gh_pr; DELETE FROM gh_issue; DELETE FROM gh_user;")?;
+    Ok(())
 }
 
 /// Delete mirror rows nothing references that haven't synced in 30 days, then

@@ -18,8 +18,8 @@ beforeEach(() => {
     defaultThreeDot: true,
     botLogins: "",
     repoStripPrefixes: "",
-    prListPollMs: 0,
-    inboxPollMs: 0,
+    autoSync: "periodic",
+    discoveryIntervalMin: 15,
     fileTestPatterns: "",
     fileConfigPatterns: "",
   });
@@ -35,7 +35,8 @@ describe("useSettingsStore", () => {
     expect(s.diffFontSize).toBe(12.5);
     expect(s.defaultViewType).toBe("split");
     expect(s.defaultThreeDot).toBe(true);
-    expect(s.prListPollMs).toBe(0);
+    expect(s.autoSync).toBe("periodic");
+    expect(s.discoveryIntervalMin).toBe(15);
   });
 
   it("setters update each field", () => {
@@ -47,8 +48,8 @@ describe("useSettingsStore", () => {
     s.setDefaultThreeDot(false);
     s.setBotLogins("dependabot, renovate");
     s.setRepoStripPrefixes("philips-internal/cardiologs-");
-    s.setPrListPollMs(30000);
-    s.setInboxPollMs(300000);
+    s.setAutoSync("on_focus");
+    s.setDiscoveryIntervalMin(30);
     const n = useSettingsStore.getState();
     expect(n.direction).toBe("c");
     expect(n.mode).toBe("light");
@@ -57,8 +58,8 @@ describe("useSettingsStore", () => {
     expect(n.defaultThreeDot).toBe(false);
     expect(n.botLogins).toBe("dependabot, renovate");
     expect(n.repoStripPrefixes).toBe("philips-internal/cardiologs-");
-    expect(n.prListPollMs).toBe(30000);
-    expect(n.inboxPollMs).toBe(300000);
+    expect(n.autoSync).toBe("on_focus");
+    expect(n.discoveryIntervalMin).toBe(30);
   });
 
   it("partialize persists the v2 keys and no setters", () => {
@@ -68,8 +69,8 @@ describe("useSettingsStore", () => {
     expect(Object.keys(snapshot).sort()).toEqual(
       [
         "autoFetchMinutes",
+        "autoSync",
         "boardOverviewOpen",
-        "boardPollMs",
         "boardStatusBorderSide",
         "botLogins",
         "chatModel",
@@ -78,15 +79,14 @@ describe("useSettingsStore", () => {
         "defaultViewType",
         "diffFontSize",
         "direction",
+        "discoveryIntervalMin",
         "fileConfigPatterns",
         "fileTestPatterns",
-        "inboxPollMs",
         "largeDiffMaxLines",
         "leftPaneTab",
         "markEdits",
         "mode",
         "overviewModel",
-        "prListPollMs",
         "repoBasePaths",
         "repoStripPrefixes",
         "sessionHistoryDays",
@@ -112,7 +112,7 @@ describe("exportSettings / importSettings", () => {
     s.setFileTestPatterns("");
     const applied = importSettings(json);
     const n = useSettingsStore.getState();
-    expect(applied).toBe(26);
+    expect(applied).toBe(25);
     expect(n.mode).toBe("light");
     expect(n.diffFontSize).toBe(15);
     expect(n.fileTestPatterns).toBe("*.spec.rb");
@@ -146,7 +146,7 @@ describe("settings migration to v2", () => {
         defaultViewType: "unified",
         defaultThreeDot: false,
         botLogins: "bot1",
-        prListPollMs: 60000,
+        autoSync: "off",
       },
       0,
     ) as Record<string, unknown>;
@@ -156,7 +156,7 @@ describe("settings migration to v2", () => {
     expect(out.defaultViewType).toBe("unified");
     expect(out.defaultThreeDot).toBe(false);
     expect(out.botLogins).toBe("bot1");
-    expect(out.prListPollMs).toBe(60000);
+    expect(out.autoSync).toBe("off");
     expect(out).not.toHaveProperty("reviewTabColor");
     expect(out).not.toHaveProperty("theme");
   });
@@ -172,7 +172,6 @@ describe("settings migration to v2", () => {
         defaultViewType: "split",
         defaultThreeDot: true,
         botLogins: "",
-        prListPollMs: 0,
       },
       1,
     ) as Record<string, unknown>;
@@ -194,8 +193,8 @@ describe("settings migration to v2", () => {
     expect(out.defaultThreeDot).toBe(true);
     expect(out.botLogins).toBe("");
     expect(out.repoStripPrefixes).toBe("");
-    expect(out.prListPollMs).toBe(0);
-    expect(out.inboxPollMs).toBe(0);
+    expect(out.autoSync).toBe("periodic");
+    expect(out.discoveryIntervalMin).toBe(15);
   });
 });
 

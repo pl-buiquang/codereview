@@ -82,6 +82,10 @@ places and must stay consistent:
 - **Git reads must be lock-free:** `run_git` sets `GIT_OPTIONAL_LOCKS=0`. Repo watchers
   (`watch.rs`) react to `.git` changes, so a `git status` that refreshes the index would retrigger
   itself in a loop. Spawn git through `run_git` (or set the same env).
+- **GitHub sync is backend-scheduled** (`src-tauri/src/sync/`, ADR 0003): views don't poll. They
+  send `sync_hint` and invalidate mirror-backed queries on `mirror-updated` (`src/lib/sync.ts`).
+  Never invalidate the Review's live `["pr-meta"]`/`["pr-threads"]` queries from that event — they
+  emit it themselves, so it would loop.
 
 ## Contributing
 

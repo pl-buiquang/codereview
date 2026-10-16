@@ -3,6 +3,7 @@ import { createJSONStorage, persist, type StateStorage } from "zustand/middlewar
 import { api } from "./api";
 import { DIRECTIONS, type Direction } from "./themes";
 import { DEFAULT_CONFIG_PATTERNS, DEFAULT_TEST_PATTERNS } from "./fileCategory";
+import type { AutoSync } from "./types";
 
 export type ThemeMode = "dark" | "light" | "system";
 export type ThemeBase = "dark" | "light";
@@ -32,21 +33,20 @@ export const TMUX_TARGET_OPTIONS: { label: string; value: TmuxTarget }[] = [
 
 export const DEFAULT_DIFF_FONT_SIZE = 12.5;
 
-/** PR-list auto-refresh choices; value is the refetchInterval in ms, 0 = off. */
-export const PR_LIST_POLL_OPTIONS: { label: string; value: number }[] = [
-  { label: "off", value: 0 },
-  { label: "30s", value: 30_000 },
-  { label: "60s", value: 60_000 },
-  { label: "5m", value: 300_000 },
+/** Auto Sync modes (the backend sync engine's schedule). */
+export const AUTO_SYNC_OPTIONS: { label: string; value: AutoSync }[] = [
+  { label: "Off", value: "off" },
+  { label: "On focus", value: "on_focus" },
+  { label: "Periodic", value: "periodic" },
 ];
 
-/** Inbox auto-refresh choices. Conservative by design — each refresh is a live
- *  GitHub fan-out (many API calls), so the shortest option is 5 minutes. */
-export const INBOX_POLL_OPTIONS: { label: string; value: number }[] = [
+/** Discovery ("look for new PRs/issues") interval choices, in minutes; 0 = off. */
+export const DISCOVERY_INTERVAL_OPTIONS: { label: string; value: number }[] = [
   { label: "off", value: 0 },
-  { label: "5m", value: 300_000 },
-  { label: "15m", value: 900_000 },
-  { label: "30m", value: 1_800_000 },
+  { label: "5 min", value: 5 },
+  { label: "15 min", value: 15 },
+  { label: "30 min", value: 30 },
+  { label: "60 min", value: 60 },
 ];
 
 /** Background Fetch choices, in minutes; 0 = off (the default). */
@@ -56,10 +56,6 @@ export const AUTO_FETCH_OPTIONS: { label: string; value: number }[] = [
   { label: "15 min", value: 15 },
   { label: "30 min", value: 30 },
 ];
-
-/** Board auto-refresh choices — same cadence as the inbox (also a live
- *  GitHub fan-out: tracked cards + review threads). */
-export const BOARD_POLL_OPTIONS = INBOX_POLL_OPTIONS;
 
 type PersistedSettings = Pick<
   SettingsState,
@@ -71,9 +67,8 @@ type PersistedSettings = Pick<
   | "botLogins"
   | "repoStripPrefixes"
   | "repoBasePaths"
-  | "prListPollMs"
-  | "inboxPollMs"
-  | "boardPollMs"
+  | "autoSync"
+  | "discoveryIntervalMin"
   | "autoFetchMinutes"
   | "boardStatusBorderSide"
   | "chatModel"
@@ -100,9 +95,8 @@ const DEFAULTS: PersistedSettings = {
   botLogins: "",
   repoStripPrefixes: "",
   repoBasePaths: "~/projects",
-  prListPollMs: 0,
-  inboxPollMs: 0,
-  boardPollMs: 0,
+  autoSync: "periodic",
+  discoveryIntervalMin: 15,
   autoFetchMinutes: 0,
   boardStatusBorderSide: "top",
   chatModel: "",
@@ -136,12 +130,11 @@ interface SettingsState {
   repoStripPrefixes: string;
   /** Comma-separated base directories where local git clones live (e.g. "~/projects"). */
   repoBasePaths: string;
-  /** PR-list auto-refresh interval in ms; 0 = off. */
-  prListPollMs: number;
-  /** Inbox auto-refresh interval in ms; 0 = off. */
-  inboxPollMs: number;
-  /** Board auto-refresh interval in ms; 0 = off. */
-  boardPollMs: number;
+  /** When the GitHub mirror syncs on its own: never, on view mount/window
+   *  focus, or also periodically while the app is visible. */
+  autoSync: AutoSync;
+  /** Minutes between discoveries (searches for new PRs/issues); 0 = off. */
+  discoveryIntervalMin: number;
   /** Fetch a repo when its view opens or regains focus and the last fetch is
    *  older than this many minutes; 0 = never fetch in the background. */
   autoFetchMinutes: number;
@@ -180,9 +173,8 @@ interface SettingsState {
   setBotLogins: (s: string) => void;
   setRepoStripPrefixes: (s: string) => void;
   setRepoBasePaths: (s: string) => void;
-  setPrListPollMs: (ms: number) => void;
-  setInboxPollMs: (ms: number) => void;
-  setBoardPollMs: (ms: number) => void;
+  setAutoSync: (mode: AutoSync) => void;
+  setDiscoveryIntervalMin: (minutes: number) => void;
   setAutoFetchMinutes: (minutes: number) => void;
   setBoardStatusBorderSide: (side: BoardBorderSide) => void;
   setChatModel: (s: string) => void;
@@ -208,6 +200,7 @@ const ENUMS: Partial<Record<keyof PersistedSettings, readonly string[]>> = {
   leftPaneTab: ["files", "context"],
   defaultTerminal: TERMINAL_HOST_OPTIONS.map((o) => o.value),
   tmuxTarget: TMUX_TARGET_OPTIONS.map((o) => o.value),
+  autoSync: AUTO_SYNC_OPTIONS.map((o) => o.value),
 };
 
 function writeMirror(value: string) {
@@ -251,9 +244,8 @@ export const useSettingsStore = create<SettingsState>()(
       setBotLogins: (botLogins) => set({ botLogins }),
       setRepoStripPrefixes: (repoStripPrefixes) => set({ repoStripPrefixes }),
       setRepoBasePaths: (repoBasePaths) => set({ repoBasePaths }),
-      setPrListPollMs: (prListPollMs) => set({ prListPollMs }),
-      setInboxPollMs: (inboxPollMs) => set({ inboxPollMs }),
-      setBoardPollMs: (boardPollMs) => set({ boardPollMs }),
+      setAutoSync: (autoSync) => set({ autoSync }),
+      setDiscoveryIntervalMin: (discoveryIntervalMin) => set({ discoveryIntervalMin }),
       setAutoFetchMinutes: (autoFetchMinutes) => set({ autoFetchMinutes }),
       setBoardStatusBorderSide: (boardStatusBorderSide) => set({ boardStatusBorderSide }),
       setChatModel: (chatModel) => set({ chatModel }),

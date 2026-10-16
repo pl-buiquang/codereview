@@ -8,7 +8,6 @@ import type {
   PromptInfo,
   BoardMeta,
   BoardMetaKind,
-  BoardRefreshResult,
   Branch,
   SessionsSnapshot,
   ChatMessage,
@@ -32,7 +31,6 @@ import type {
   PublishDraftRepliesResult,
   RefInfo,
   ReanchorResult,
-  RefreshResult,
   RepoSyncState,
   Repository,
   Review,
@@ -40,6 +38,11 @@ import type {
   ReviewEvent,
   ReviewSummary,
   Side,
+  SyncMode,
+  SyncReport,
+  SyncScope,
+  SyncStatus,
+  AutoSync,
   ToolEnv,
   UpdateReviewResult,
   WipKind,
@@ -182,8 +185,19 @@ export const api = {
   discardPendingReview: (reviewId: number) =>
     invoke<Review>("discard_pending_review", { reviewId }),
 
+  // Sync engine
+  syncHint: (scope: SyncScope, active: boolean, visibleIds: string[] = []) =>
+    invoke<void>("sync_hint", { scope, active, visibleIds }),
+  syncNow: (scope: SyncScope, mode: SyncMode, visibleIds: string[] = []) =>
+    invoke<SyncReport>("sync_now", { scope, mode, visibleIds }),
+  syncWindowState: (visible: boolean, focused: boolean) =>
+    invoke<void>("sync_window_state", { visible, focused }),
+  syncConfigure: (autoSync: AutoSync, discoveryIntervalMin: number) =>
+    invoke<void>("sync_configure", { config: { autoSync, discoveryIntervalMin } }),
+  syncStatus: () => invoke<SyncStatus>("sync_status"),
+  resetMirror: () => invoke<void>("reset_mirror"),
+
   // GitHub inbox
-  refreshInbox: () => invoke<RefreshResult>("refresh_inbox"),
   listInbox: () => invoke<InboxItem[]>("list_inbox"),
   listArchive: (search: string | null) =>
     invoke<InboxItem[]>("list_archive", { search }),
@@ -203,7 +217,6 @@ export const api = {
     invoke<Repository>("set_repository_friendly_name", { repoId, friendlyName }),
 
   // Kanban board
-  boardRefresh: () => invoke<BoardRefreshResult>("board_refresh"),
   boardLastRefreshAt: () => invoke<string | null>("board_last_refresh_at"),
   boardList: () => invoke<BoardCard[]>("board_list"),
   boardOverviewGet: () => invoke<BoardOverview | null>("board_overview_get"),

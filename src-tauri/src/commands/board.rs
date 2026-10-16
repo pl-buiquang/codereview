@@ -1,22 +1,17 @@
-//! Tauri commands for the kanban board. Owns the DB and orchestrates the
-//! pure pipeline in `crate::board`, following the same split-lock discipline
-//! as `commands/inbox.rs`: `gh` network I/O runs unlocked, writes happen in
-//! short locked sections. GitHub facts live in the mirror; `board_card` only
-//! records what is tracked.
+//! Tauri commands for the kanban board. GitHub facts live in the mirror;
+//! `board_card` only records what is tracked. `gh` network I/O runs unlocked,
+//! writes happen in short locked sections. Syncing lives in `crate::sync`.
 
 use std::collections::HashMap;
-use std::time::Instant;
 
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use rusqlite::{params, Connection, OptionalExtension};
-use serde::Serialize;
 use tauri::State;
 
 use crate::board;
 use crate::db::models::{BoardCardRow, BoardCardWithExtras, BoardMetaRow, Review};
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
-use crate::gh;
 use crate::mirror::{self, Node};
 
 fn now() -> String {
@@ -62,7 +57,7 @@ pub(crate) const CARD_VIEW: &str = "(
 )";
 
 /// Mirror a fetched node and track it as a card. `clear_discard` is set only
-/// by explicit tracking actions (Track / Link PR) — routine refreshes never
+/// by explicit tracking actions (Track / Link PR) — routine syncs never
 /// resurrect a discarded card.
 fn track_node(conn: &Connection, node: &Node, ts: &str, clear_discard: bool) -> AppResult<()> {
     mirror::store::upsert_node(conn, node, ts)?;
@@ -100,106 +95,49 @@ fn pr_card_coords(db: &Db, card_id: &str) -> AppResult<(String, String, i64)> {
     let (owner, name) = card
         .repo
         .split_once('/')
-        .ok_or_else(|| AppError::Other("this card isn't synced yet — refresh the board".into()))?;
+        .ok_or_else(|| AppError::Other("this card isn't synced yet — sync the board".into()))?;
     Ok((owner.to_string(), name.to_string(), card.number))
 }
 
 // ---------------------------------------------------------------------------
-// Refresh
+// Sync helpers (the pipeline lives in `crate::sync`)
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct BoardRefreshResult {
-    pub card_count: i64,
-    pub auto_tracked: i64,
-    pub duration_ms: i64,
+/// Ids tracked on the board (not discarded/archived): the entities a board
+/// sync probes.
+pub(crate) fn tracked_ids(conn: &Connection) -> AppResult<Vec<String>> {
+    let mut stmt = conn.prepare("SELECT id FROM board_card WHERE archived_at IS NULL AND discarded_at IS NULL")?;
+    let rows = stmt.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
+    Ok(rows)
 }
 
-const AUTHORED_SEARCH_LIMIT: i64 = 50;
-
-/// Refresh the board: auto-track new open PRs of mine in registered repos,
-/// refetch every tracked card's state, reconcile issue<->PR auto-links, and
-/// recompute each open PR's pending-threads comment badge.
-pub fn board_refresh_impl(db: &Db) -> AppResult<BoardRefreshResult> {
-    let start = Instant::now();
-    crate::commands::inbox::cached_or_fetch_viewer(db)?;
-
-    let tracked_ids: Vec<String> = {
-        let conn = db.0.lock().unwrap();
-        let mut stmt = conn
-            .prepare("SELECT id FROM board_card WHERE archived_at IS NULL AND discarded_at IS NULL")?;
-        let rows = stmt.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
-        rows
-    };
-
-    let authored = mirror::fetch::search("is:pr is:open author:@me", AUTHORED_SEARCH_LIMIT)
-        .unwrap_or_else(|e| {
-            crate::logging::warn(&format!("[board.refresh] authored search failed: {e}"));
-            Vec::new()
-        });
-    let mut auto_tracked = 0i64;
-    let ts = now();
-    let untracked_authored: Vec<&Node> = authored.iter().filter(|n| !tracked_ids.contains(&n.id)).collect();
-    {
-        let conn = db.0.lock().unwrap();
-        for node in &authored {
-            mirror::store::upsert_node(&conn, node, &ts)?;
-        }
-        for node in &untracked_authored {
-            let Some((owner, name)) = node.owner_name() else { continue };
-            if registered_repo(&conn, owner, name)? {
-                track_node(&conn, node, &ts, false)?;
-                auto_tracked += 1;
-            }
+/// Auto-track open PRs of mine in registered repos. Returns how many were
+/// newly tracked; a discarded card stays discarded.
+pub(crate) fn auto_track_authored<'a>(
+    conn: &Connection,
+    authored: impl Iterator<Item = &'a Node>,
+    ts: &str,
+) -> AppResult<i64> {
+    let tracked: std::collections::HashSet<String> = tracked_ids(conn)?.into_iter().collect();
+    let mut n = 0;
+    for node in authored.filter(|n| n.is_pr() && !n.is_closed() && !tracked.contains(&n.id)) {
+        let Some((owner, name)) = node.owner_name() else { continue };
+        if registered_repo(conn, owner, name)? {
+            let inserted = conn.execute(
+                "INSERT INTO board_card (id, type, tracked_at) VALUES (?1, 'pr', ?2) ON CONFLICT(id) DO NOTHING",
+                params![node.id, ts],
+            )?;
+            n += inserted as i64;
         }
     }
-
-    let refetched: HashMap<String, Node> = mirror::fetch::refetch(&tracked_ids)
-        .into_iter()
-        .filter_map(|(id, node)| Some((id, node?)))
-        .collect();
-    let ts = now();
-    {
-        let conn = db.0.lock().unwrap();
-        for node in refetched.values() {
-            mirror::store::upsert_node(&conn, node, &ts)?;
-        }
-    }
-
-    reconcile_links(db, refetched.values().chain(untracked_authored.iter().copied()))?;
-    refresh_pending_threads(db)?;
-
-    let conn = db.0.lock().unwrap();
-    mirror::store::gc(&conn)?;
-    let card_count: i64 = conn.query_row("SELECT COUNT(*) FROM board_card WHERE archived_at IS NULL", [], |r| r.get(0))?;
-    crate::commands::inbox::set_meta(&conn, "board_last_refresh_at", &now())?;
-
-    Ok(BoardRefreshResult {
-        card_count,
-        auto_tracked,
-        duration_ms: start.elapsed().as_millis() as i64,
-    })
+    Ok(n)
 }
 
-#[tauri::command]
-pub async fn board_refresh(db: State<'_, Db>) -> AppResult<BoardRefreshResult> {
-    board_refresh_impl(&db)
-}
-
-#[tauri::command]
-pub fn board_last_refresh_at(db: State<Db>) -> AppResult<Option<String>> {
-    let conn = db.0.lock().unwrap();
-    Ok(crate::commands::inbox::get_meta(&conn, "board_last_refresh_at"))
-}
-
-/// Rebuild every auto-detected issue<->PR link from this refresh's PR nodes:
-/// GitHub's own `closingIssuesReferences`, plus the `issue-<n>` branch-name
-/// convention within the same repo. Only links against issue cards that are
-/// themselves tracked (not discarded/archived) — an untracked issue never
-/// gets a card just because a PR closes it.
-fn reconcile_links<'a>(db: &Db, prs: impl Iterator<Item = &'a Node>) -> AppResult<()> {
-    let conn = db.0.lock().unwrap();
+/// Rebuild every auto-detected issue<->PR link from the mirror: GitHub's own
+/// closing references, plus the `issue-<n>` branch-name convention within the
+/// same repo. Only between tracked cards (not discarded/archived) — an
+/// untracked issue never gets a card just because a PR closes it.
+pub(crate) fn reconcile_links(conn: &Connection) -> AppResult<()> {
     conn.execute("DELETE FROM board_link WHERE source = 'auto'", [])?;
 
     let issues: Vec<(String, String, i64)> = {
@@ -212,101 +150,48 @@ fn reconcile_links<'a>(db: &Db, prs: impl Iterator<Item = &'a Node>) -> AppResul
             .collect::<rusqlite::Result<_>>()?;
         rows
     };
-
-    for pr in prs.filter(|n| n.is_pr()) {
-        if let Some(refs) = &pr.closing_issues_references {
-            for closing in &refs.nodes {
-                if issues.iter().any(|(id, _, _)| id == &closing.id) {
-                    conn.execute(
-                        "INSERT OR IGNORE INTO board_link (issue_id, pr_id, source) VALUES (?1, ?2, 'auto')",
-                        params![closing.id, pr.id],
-                    )?;
-                }
-            }
-        }
-
-        if let (Some(head_ref), Some(pr_repo)) = (&pr.head_ref_name, pr.repo()) {
-            for (issue_id, issue_repo, issue_number) in &issues {
-                if issue_repo.eq_ignore_ascii_case(pr_repo) && board::branch_matches_issue(head_ref, *issue_number) {
-                    conn.execute(
-                        "INSERT OR IGNORE INTO board_link (issue_id, pr_id, source) VALUES (?1, ?2, 'auto')",
-                        params![issue_id, pr.id],
-                    )?;
-                }
-            }
-        }
+    if issues.is_empty() {
+        return Ok(());
     }
-    Ok(())
-}
-
-/// Resolving or unresolving a thread does not bump the PR's `updatedAt`, so an
-/// unchanged PR still gets its threads refetched once this old.
-const THREADS_MAX_AGE: chrono::Duration = chrono::Duration::minutes(15);
-
-/// Whether a PR's mirrored threads are stale: never counted, fetched before
-/// the PR's current `updatedAt`, or older than [`THREADS_MAX_AGE`].
-fn threads_need_fetch(
-    stored_updated_at: Option<&str>,
-    updated_at: &str,
-    has_count: bool,
-    fetched_at: Option<&str>,
-    now: DateTime<Utc>,
-) -> bool {
-    let fetched = fetched_at.and_then(|t| DateTime::parse_from_rfc3339(t).ok());
-    !has_count
-        || stored_updated_at != Some(updated_at)
-        || fetched.is_none_or(|t| now.signed_duration_since(t) >= THREADS_MAX_AGE)
-}
-
-/// For every open, tracked PR card whose threads may have changed, fetch its
-/// review threads into the mirror, which recomputes the pending-threads badge
-/// (concurrently, like the inbox's files facet).
-fn refresh_pending_threads(db: &Db) -> AppResult<()> {
-    struct ThreadJob {
-        id: String,
-        owner: String,
-        name: String,
-        number: i64,
-    }
-
-    let started = Utc::now();
-    let jobs: Vec<ThreadJob> = {
-        let conn = db.0.lock().unwrap();
-        let mut stmt = conn.prepare(&format!(
-            "SELECT c.id, c.repo, c.number, c.updated_at, th.gh_updated_at,
-                    th.pending_count IS NOT NULL, th.fetched_at
-             FROM {CARD_VIEW} c LEFT JOIN gh_pr_threads th ON th.pr_id = c.id
-             WHERE c.type = 'pr' AND c.archived_at IS NULL AND c.discarded_at IS NULL
-               AND c.state NOT IN ('merged', 'closed')"
-        ))?;
-        type Row = (String, String, i64, String, Option<String>, bool, Option<String>);
-        let rows: Vec<Row> = stmt
-            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?)))?
+    type PrRow = (String, Option<String>, String, Option<String>);
+    let prs: Vec<PrRow> = {
+        let mut stmt = conn.prepare(
+            "SELECT b.id, p.head_ref, r.remote_owner || '/' || r.remote_name, p.closing_issue_ids
+             FROM board_card b
+             JOIN gh_pr p ON p.node_id = b.id
+             JOIN repository r ON r.id = p.repo_id
+             WHERE b.discarded_at IS NULL AND b.archived_at IS NULL",
+        )?;
+        let rows = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
             .collect::<rusqlite::Result<_>>()?;
-        rows.into_iter()
-            .filter(|(_, _, _, updated_at, stored, has_count, fetched_at)| {
-                threads_need_fetch(stored.as_deref(), updated_at, *has_count, fetched_at.as_deref(), started)
-            })
-            .filter_map(|(id, repo, number, ..)| {
-                let (owner, name) = repo.split_once('/')?;
-                Some(ThreadJob { id, owner: owner.to_string(), name: name.to_string(), number })
-            })
-            .collect()
+        rows
     };
 
-    let results = crate::inbox::concurrent_map(jobs, 8, |job| {
-        (job.id.clone(), gh::pr_review_threads(&job.owner, &job.name, job.number).ok())
-    });
-
-    let conn = db.0.lock().unwrap();
-    let ts = started.to_rfc3339();
-    for (id, threads) in results {
-        // A failed fetch keeps the previous count rather than writing 0.
-        if let Some(threads) = threads {
-            mirror::store::upsert_threads(&conn, &id, &threads, &ts)?;
+    let link = |issue_id: &str, pr_id: &str| {
+        conn.execute(
+            "INSERT OR IGNORE INTO board_link (issue_id, pr_id, source) VALUES (?1, ?2, 'auto')",
+            params![issue_id, pr_id],
+        )
+    };
+    for (pr_id, head_ref, pr_repo, closing) in &prs {
+        let closing: Vec<String> = closing.as_deref().and_then(|s| serde_json::from_str(s).ok()).unwrap_or_default();
+        for (issue_id, issue_repo, issue_number) in &issues {
+            let closes = closing.contains(issue_id);
+            let by_branch = issue_repo.eq_ignore_ascii_case(pr_repo)
+                && head_ref.as_deref().is_some_and(|h| board::branch_matches_issue(h, *issue_number));
+            if closes || by_branch {
+                link(issue_id, pr_id)?;
+            }
         }
     }
     Ok(())
+}
+
+#[tauri::command]
+pub fn board_last_refresh_at(db: State<Db>) -> AppResult<Option<String>> {
+    let conn = db.0.lock().unwrap();
+    Ok(crate::commands::inbox::get_meta(&conn, "board_last_refresh_at"))
 }
 
 // ---------------------------------------------------------------------------
@@ -915,20 +800,6 @@ mod tests {
     use super::*;
     use crate::db::open_memory;
 
-    #[test]
-    fn threads_skipped_only_when_unchanged_counted_and_recent() {
-        let now = Utc::now();
-        let recent = now.to_rfc3339();
-        let recent = Some(recent.as_str());
-        assert!(!threads_need_fetch(Some("t1"), "t1", true, recent, now));
-        assert!(threads_need_fetch(Some("t0"), "t1", true, recent, now), "PR updated");
-        assert!(threads_need_fetch(None, "t1", true, recent, now), "newly tracked");
-        assert!(threads_need_fetch(Some("t1"), "t1", false, recent, now), "never counted");
-        assert!(threads_need_fetch(Some("t1"), "t1", true, None, now), "never fetched");
-        let later = now + THREADS_MAX_AGE;
-        assert!(threads_need_fetch(Some("t1"), "t1", true, recent, later), "resolutions don't bump updatedAt");
-    }
-
     fn seed_card(conn: &Connection, id: &str, repo: &str, number: i64, typ: &str) {
         let (owner, name) = repo.split_once('/').unwrap();
         let repo_id = mirror::store::ensure_repo(conn, owner, name, "now").unwrap();
@@ -968,6 +839,37 @@ mod tests {
         crate::commands::inbox::set_meta(&conn, "viewer_login", "me").unwrap();
         assert!(card_row(&conn, "pr1").unwrap().is_mine);
         assert!(board_discard_impl(&conn, "pr1").is_err(), "own PRs can't be discarded");
+    }
+
+    #[test]
+    fn reconcile_links_rebuilds_auto_links_from_the_mirror() {
+        let conn = open_memory();
+        seed_card(&conn, "issue7", "owner/repo", 7, "issue");
+        seed_card(&conn, "issue8", "owner/repo", 8, "issue");
+        seed_card(&conn, "pr_branch", "owner/repo", 20, "pr");
+        seed_card(&conn, "pr_closes", "owner/repo", 21, "pr");
+        conn.execute("UPDATE gh_issue SET state = 'open'", []).unwrap();
+        conn.execute("UPDATE gh_pr SET head_ref = 'pbq/issue-7' WHERE node_id = 'pr_branch'", []).unwrap();
+        conn.execute("UPDATE gh_pr SET closing_issue_ids = '[\"issue8\"]' WHERE node_id = 'pr_closes'", [])
+            .unwrap();
+        conn.execute("INSERT INTO board_link (issue_id, pr_id, source) VALUES ('issue8', 'pr_branch', 'auto')", [])
+            .unwrap();
+
+        reconcile_links(&conn).unwrap();
+
+        let mut links: Vec<(String, String)> = conn
+            .prepare("SELECT issue_id, pr_id FROM board_link ORDER BY issue_id")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        links.sort();
+        assert_eq!(
+            links,
+            vec![("issue7".into(), "pr_branch".into()), ("issue8".into(), "pr_closes".into())],
+            "stale auto link dropped, branch + closing-ref links rebuilt"
+        );
     }
 
     fn seed_meta(conn: &Connection, card_id: &str, value: &str) {

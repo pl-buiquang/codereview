@@ -5,6 +5,7 @@ import { repoLabel, repoShortName } from "../lib/repoLabel";
 import { useUIStore, type HomeSection } from "../store";
 import { Icon, type IconName } from "./icons";
 import { Tooltip } from "./Tooltip";
+import { SyncIndicator } from "./SyncIndicator";
 
 const NAV: { key: HomeSection; label: string; icon: IconName }[] = [
   { key: "sessions", label: "Sessions", icon: "terminal" },
@@ -129,6 +130,7 @@ export function HomeNav({
         </div>
       )}
       <div className="cr-side-foot cr-nav">
+        <SyncIndicator collapsed={collapsed} />
         <button
           className={`cr-nav-item${activeTabId === "settings" ? " active" : ""}`}
           onClick={go(openSettingsTab)}

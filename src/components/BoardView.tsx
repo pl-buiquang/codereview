@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { toast } from "../lib/toast";
 import { timeAgo } from "../lib/timeAgo";
 import { confirmDialog } from "../lib/confirm";
-import { BOARD_POLL_OPTIONS, parseRepoBasePaths, useSettingsStore } from "../lib/settings";
+import { parseRepoBasePaths, useSettingsStore } from "../lib/settings";
+import { useSyncNow, useSyncScope } from "../lib/sync";
 import { findRepoByFullName } from "../lib/repoLabel";
 import { useUIStore } from "../store";
 import type { BoardCard as BoardCardT, BoardLane, BoardMetaKind, ClaudeSession } from "../lib/types";
@@ -14,6 +15,7 @@ import { TagFilter } from "./TagFilter";
 import { TrackPrDialog } from "./TrackPrDialog";
 import { BoardOverviewPane } from "./BoardOverviewPane";
 import { Icon } from "./icons";
+import { SyncButton } from "./SyncButton";
 
 const LANES: { key: BoardLane; label: string }[] = [
   { key: "backlog", label: "Backlog" },
@@ -51,11 +53,10 @@ export function BoardView() {
   const collapsedLanes = useUIStore((s) => s.collapsedLanes);
   const toggleLane = useUIStore((s) => s.toggleLane);
   const repoBasePaths = useSettingsStore((s) => s.repoBasePaths);
-  const boardPollMs = useSettingsStore((s) => s.boardPollMs);
+  const onHome = useUIStore((s) => s.activeTabId === "home" && s.homeRepoId == null);
   const defaultTerminal = useSettingsStore((s) => s.defaultTerminal);
   const tmuxTarget = useSettingsStore((s) => s.tmuxTarget);
   const tmuxSessionName = useSettingsStore((s) => s.tmuxSessionName);
-  const setBoardPollMs = useSettingsStore((s) => s.setBoardPollMs);
   const [repoFilter, setRepoFilter] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [ciFilter, setCiFilter] = useState<string | null>(null);
@@ -101,30 +102,7 @@ export function BoardView() {
   const invalidate = () => invalidateBoard(queryClient);
   const onErr = (e: unknown) => toast.error(String(e));
 
-  const refresh = useMutation({
-    mutationFn: (_opts?: { silent?: boolean }) => api.boardRefresh(),
-    onSuccess: (r, opts) => {
-      invalidate();
-      queryClient.invalidateQueries({ queryKey: ["board-last-refresh"] });
-      if (!opts?.silent)
-        toast.success(`Refreshed board: ${r.cardCount} cards, ${r.autoTracked} newly tracked (${r.durationMs}ms)`);
-    },
-    onError: (e) => toast.error(`Board refresh failed:\n${String(e)}`),
-  });
-
-  const refreshRef = useRef(refresh);
-  useEffect(() => {
-    refreshRef.current = refresh;
-  });
-  useEffect(() => {
-    if (boardPollMs <= 0) return;
-    const id = setInterval(() => {
-      if (document.visibilityState !== "visible") return;
-      if (refreshRef.current.isPending) return;
-      refreshRef.current.mutate({ silent: true });
-    }, boardPollMs);
-    return () => clearInterval(id);
-  }, [boardPollMs]);
+  const sync = useSyncNow("board");
 
   const track = useMutation({ mutationFn: (reference: string) => api.boardTrack(reference), onSuccess: invalidate, onError: onErr });
   const discard = useMutation({ mutationFn: (cardId: string) => api.boardDiscard(cardId), onSuccess: invalidate, onError: onErr });
@@ -269,6 +247,8 @@ export function BoardView() {
   };
   const filtered = allCards.filter((c) => matches(c));
   const visibleIds = new Set(filtered.map((c) => c.id));
+  const visibleIdList = [...visibleIds];
+  useSyncScope("board", onHome, visibleIdList);
 
   // Each facet counts cards matching every other active filter, so its own options stay comparable.
   const facetCounts = (skip: "repo" | "status" | "ci" | "merge" | "tags", keysOf: (c: BoardCardT) => (string | null | undefined)[]) => {
@@ -339,29 +319,9 @@ export function BoardView() {
             <button className="btn" onClick={() => setShowTrackDialog(true)}>
               <Icon name="plus" size={13} /> Track
             </button>
-            <label className="sort-control" title="Automatically refresh the board on this interval">
-              auto
-              <select className="sort-select" value={boardPollMs} onChange={(e) => setBoardPollMs(Number(e.target.value))}>
-                {BOARD_POLL_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <button className="btn btn-primary" onClick={() => refresh.mutate({})} disabled={refresh.isPending}>
-              {refresh.isPending ? (
-                <>
-                  <span className="spinner" /> Refreshing…
-                </>
-              ) : (
-                <>
-                  <Icon name="refresh" size={13} /> Refresh
-                </>
-              )}
-            </button>
+            <SyncButton scope="board" sync={sync} visibleIds={visibleIdList} />
           </div>
-          {lastRefresh && <span className="cr-sub">updated {timeAgo(lastRefresh)}</span>}
+          {lastRefresh && <span className="cr-sub">synced {timeAgo(lastRefresh)}</span>}
         </div>
       </header>
 

@@ -68,7 +68,7 @@ async function openPrTab(user: ReturnType<typeof userEvent.setup>) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  useSettingsStore.setState({ prListPollMs: 0 });
+  useSettingsStore.setState({ autoSync: "off" });
   listReviews.mockResolvedValue([]);
   listBranches.mockResolvedValue([]);
   ghAuthStatus.mockResolvedValue(true);
@@ -107,7 +107,7 @@ describe("RepoView tabs", () => {
 });
 
 describe("RepoView PR list", () => {
-  it("manual refresh refetches the PR list", async () => {
+  it("manual sync refetches the PR list", async () => {
     const user = userEvent.setup();
     renderRepo();
     await openPrTab(user);
@@ -115,7 +115,7 @@ describe("RepoView PR list", () => {
     await waitFor(() => expect(screen.getByText(/#42 Fix anchor drift/)).toBeInTheDocument());
     const before = listPrs.mock.calls.length;
 
-    await user.click(screen.getByRole("button", { name: "Refresh" }));
+    await user.click(screen.getByRole("button", { name: "Sync" }));
     await waitFor(() => expect(listPrs).toHaveBeenCalledTimes(before + 1));
   });
 
@@ -125,17 +125,7 @@ describe("RepoView PR list", () => {
     await openPrTab(user);
 
     await waitFor(() => expect(screen.getByText(/#42 Fix anchor drift/)).toBeInTheDocument());
-    expect(screen.getByText(/updated just now/)).toBeInTheDocument();
-  });
-
-  it("interval select writes the setting", async () => {
-    const user = userEvent.setup();
-    renderRepo();
-    await openPrTab(user);
-
-    await waitFor(() => expect(screen.getByText(/#42 Fix anchor drift/)).toBeInTheDocument());
-    await user.selectOptions(screen.getByRole("combobox"), "30s");
-    expect(useSettingsStore.getState().prListPollMs).toBe(30000);
+    expect(screen.getByText(/synced just now/)).toBeInTheDocument();
   });
 
   it("toolbar still renders when the list is empty", async () => {
@@ -147,6 +137,6 @@ describe("RepoView PR list", () => {
     await waitFor(() =>
       expect(screen.getByText("No open pull requests.")).toBeInTheDocument(),
     );
-    expect(screen.getByRole("button", { name: "Refresh" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Sync" })).toBeInTheDocument();
   });
 });

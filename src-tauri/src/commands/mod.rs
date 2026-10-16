@@ -12,4 +12,5 @@ pub mod repo;
 pub mod repo_sync;
 pub mod review;
 pub mod sessions;
+pub mod sync;
 pub mod worktree;

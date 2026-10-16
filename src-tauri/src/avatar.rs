@@ -43,6 +43,15 @@ pub fn store(conn: &Connection, email: &str, data_url: Option<&str>, now: i64) -
     Ok(())
 }
 
+/// Drop cache rows past their TTL. Returns rows deleted.
+pub fn purge_stale(conn: &Connection, now: i64) -> AppResult<usize> {
+    Ok(conn.execute(
+        "DELETE FROM avatar_cache
+         WHERE (data_url IS NOT NULL AND fetched_at <= ?1) OR (data_url IS NULL AND fetched_at <= ?2)",
+        params![now - HIT_TTL_SECS, now - MISS_TTL_SECS],
+    )?)
+}
+
 enum Noreply {
     Id(String),
     Login(String),

@@ -1,14 +1,16 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { toast } from "../lib/toast";
-import { INBOX_POLL_OPTIONS, parseBotLogins, parseRepoBasePaths, useSettingsStore } from "../lib/settings";
+import { parseBotLogins, parseRepoBasePaths, useSettingsStore } from "../lib/settings";
+import { useSyncNow, useSyncScope } from "../lib/sync";
 import { timeAgo } from "../lib/timeAgo";
 import { useUIStore } from "../store";
 import type { InboxItem } from "../lib/types";
 import { InboxItemRow, type RowVariant } from "./InboxItemRow";
 import { RepoName } from "./RepoName";
 import { Icon, type IconName } from "./icons";
+import { SyncButton } from "./SyncButton";
 
 type BucketKey = "needs-you" | "authored" | "team-review" | "bots" | "visited" | "closed";
 
@@ -69,8 +71,7 @@ export function InboxView() {
   const openReview = useUIStore((s) => s.openReview);
   const botLogins = useSettingsStore((s) => s.botLogins);
   const repoBasePaths = useSettingsStore((s) => s.repoBasePaths);
-  const inboxPollMs = useSettingsStore((s) => s.inboxPollMs);
-  const setInboxPollMs = useSettingsStore((s) => s.setInboxPollMs);
+  const onHome = useUIStore((s) => s.activeTabId === "home" && s.homeRepoId == null);
   const [active, setActive] = useState<BucketKey>("needs-you");
   const [repoFilter, setRepoFilter] = useState<string | null>(null);
   const [authorFilter, setAuthorFilter] = useState<string | null>(null);
@@ -106,36 +107,7 @@ export function InboxView() {
     queryClient.invalidateQueries({ queryKey: ["inbox-meta"] });
   };
 
-  const refresh = useMutation({
-    mutationFn: (_opts?: { silent?: boolean }) => api.refreshInbox(),
-    onSuccess: (r, opts) => {
-      invalidate();
-      // Auto-refreshes stay quiet (the "updated …" timestamp is feedback enough);
-      // a manual click still confirms with a toast.
-      if (!opts?.silent)
-        toast.success(`Refreshed: ${r.itemCount} items, ${r.closedCount} closed (${r.durationMs}ms)`);
-    },
-    onError: (e) => toast.error(`Refresh failed:\n${String(e)}`),
-  });
-
-  // Keep a live handle to the mutation so the interval below reads the latest
-  // pending state / mutate without resetting the timer every render.
-  const refreshRef = useRef(refresh);
-  useEffect(() => {
-    refreshRef.current = refresh;
-  });
-
-  // Configurable auto-refresh. Gentle by design: skips ticks while the window is
-  // hidden or a refresh is already running, so it never piles up GitHub calls.
-  useEffect(() => {
-    if (inboxPollMs <= 0) return;
-    const id = setInterval(() => {
-      if (document.visibilityState !== "visible") return;
-      if (refreshRef.current.isPending) return;
-      refreshRef.current.mutate({ silent: true });
-    }, inboxPollMs);
-    return () => clearInterval(id);
-  }, [inboxPollMs]);
+  const sync = useSyncNow("inbox");
 
   const onErr = (e: unknown) => toast.error(String(e));
   const engage = useMutation({ mutationFn: api.engageItem, onSuccess: invalidate, onError: onErr });
@@ -232,6 +204,9 @@ export function InboxView() {
     return true;
   });
 
+  const visibleIds = items.map((i) => i.id);
+  useSyncScope("inbox", onHome, visibleIds);
+
   const busy = engage.isPending || unengage.isPending || untrack.isPending || openPr.isPending || track.isPending;
   const lastRefresh = metaQuery.data?.lastRefreshAt;
 
@@ -249,33 +224,9 @@ export function InboxView() {
         <div className="cr-spacer" />
         <div className="inbox-head-actions">
           <div className="inbox-head-buttons">
-            <label className="sort-control" title="Automatically refresh the inbox on this interval">
-              auto
-              <select
-                className="sort-select"
-                value={inboxPollMs}
-                onChange={(e) => setInboxPollMs(Number(e.target.value))}
-              >
-                {INBOX_POLL_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <button className="btn btn-primary" onClick={() => refresh.mutate({})} disabled={refresh.isPending}>
-              {refresh.isPending ? (
-                <>
-                  <span className="spinner" /> Refreshing…
-                </>
-              ) : (
-                <>
-                  <Icon name="refresh" size={13} /> Refresh
-                </>
-              )}
-            </button>
+            <SyncButton scope="inbox" sync={sync} visibleIds={visibleIds} />
           </div>
-          {lastRefresh && <span className="cr-sub">updated {timeAgo(lastRefresh)}</span>}
+          {lastRefresh && <span className="cr-sub">synced {timeAgo(lastRefresh)}</span>}
         </div>
       </header>
 
@@ -318,17 +269,17 @@ export function InboxView() {
         </aside>
 
         <div className="cr-list">
-          {refresh.isPending && (
+          {sync.isPending && (
             <div className="inbox-loading">
               <span className="spinner spinner-lg" />
-              <span className="muted">Refreshing from GitHub…</span>
+              <span className="muted">Syncing from GitHub…</span>
             </div>
           )}
           {inboxQuery.isLoading && <p className="muted">Loading…</p>}
           {!inboxQuery.isLoading && items.length === 0 && (
             <p className="muted">
               Nothing here.{" "}
-              {inboxItems.length === 0 && closedItems.length === 0 && "Hit Refresh to fetch from GitHub."}
+              {inboxItems.length === 0 && closedItems.length === 0 && "Hit Sync to fetch from GitHub."}
             </p>
           )}
           {items.map((item) => {

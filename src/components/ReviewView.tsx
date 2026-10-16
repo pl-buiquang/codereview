@@ -77,6 +77,7 @@ import { AgentSessionItems, KebabMenu } from "./KebabMenu";
 import { githubPrUrl } from "../lib/githubUrl";
 import { useDebouncedCallback } from "../lib/useDebouncedCallback";
 import { useSettingsStore } from "../lib/settings";
+import { autoSyncRefetch } from "../lib/sync";
 import { useUIStore } from "../store";
 import {
   isEditableTarget,
@@ -258,11 +259,15 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
     queryFn: () => api.mirrorPrThreads(owner!, name!, prNumber!),
     staleTime: Infinity,
   });
+  // The threads facet: always fetched while this Review tab is active.
+  const autoSync = useSettingsStore((s) => s.autoSync);
   const threadsQuery = useQuery({
     queryKey: ["pr-threads", owner, name, prNumber],
-    enabled: threadsEnabled,
+    enabled: threadsEnabled && isActiveTab,
     queryFn: () => api.prReviewThreads(owner!, name!, prNumber!),
     placeholderData: mirroredThreads.data ?? undefined,
+    staleTime: 30_000,
+    ...autoSyncRefetch(autoSync, 3 * 60_000),
   });
 
   // n/p: stateless, DOM-query based. Collect rendered thread blocks inside the
@@ -951,7 +956,7 @@ function ReviewHeader({
   const prMetaQuery = usePrMeta(owner, name, prNumber, isActiveTab);
 
   // Live head vs the review's pin. Local targets check automatically (cheap
-  // git, re-run on git-changed); PR targets on Refresh, plus the PR meta's head.
+  // git, re-run on git-changed); PR targets on Sync, plus the PR meta's head.
   const liveKey = ["review-live", target.repo_id, review.id];
   const liveQuery = useQuery({
     queryKey: liveKey,
@@ -967,7 +972,7 @@ function ReviewHeader({
       queryClient.invalidateQueries({ queryKey: ["pr-threads", owner, name, prNumber] });
       queryClient.invalidateQueries({ queryKey: ["pr-meta", owner, name, prNumber] });
     },
-    onError: (e) => toast.error(`Refresh failed:\n${String(e)}`),
+    onError: (e) => toast.error(`Sync failed:\n${String(e)}`),
   });
   const updatePin = useMutation({
     mutationFn: () => api.updateReviewPin(review.id),
@@ -1260,18 +1265,18 @@ function ReviewHeader({
           disabled={readOnly || refreshReview.isPending}
           title={
             readOnly
-              ? "Published reviews cannot be refreshed"
-              : "Check the branch for new commits (the review stays on its commits until you update it)"
+              ? "Published reviews cannot be synced"
+              : "Sync the PR and check the branch for new commits (the review stays on its commits until you update it)"
           }
           onClick={() => refreshReview.mutate()}
         >
           {refreshReview.isPending ? (
             <>
-              <span className="spinner" /> Refreshing…
+              <span className="spinner" /> Syncing…
             </>
           ) : (
             <>
-              <Icon name="refresh" size={13} /> Refresh
+              <Icon name="refresh" size={13} /> Sync
             </>
           )}
         </button>

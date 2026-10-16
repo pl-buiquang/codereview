@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
+import { useSettingsStore } from "../lib/settings";
+import { autoSyncRefetch } from "../lib/sync";
 import { Markdown } from "./Markdown";
 import type { PrCheck, PrLabel, PrReviewer } from "../lib/types";
 
@@ -16,6 +18,7 @@ export function usePrMeta(
   active = true,
 ) {
   const known = owner != null && name != null && number != null;
+  const autoSync = useSettingsStore((s) => s.autoSync);
   // The mirror's copy renders at once while the live fetch runs.
   const mirrored = useQuery({
     queryKey: ["pr-meta-mirror", owner, name, number],
@@ -28,7 +31,7 @@ export function usePrMeta(
     queryFn: () => api.prMeta(owner as string, name as string, number as number),
     enabled: active && known,
     staleTime: 30_000,
-    refetchOnWindowFocus: true,
+    ...autoSyncRefetch(autoSync, 3 * 60_000),
     placeholderData: mirrored.data ?? undefined,
   });
 }

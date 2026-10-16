@@ -1,9 +1,10 @@
 use serde::Serialize;
-use tauri::State;
+use tauri::{AppHandle, Emitter, State};
 
 use crate::db::Db;
 use crate::error::AppResult;
 use crate::provider::provider_for;
+use crate::sync::{MirrorUpdated, Scope, MIRROR_UPDATED_EVENT};
 use crate::{gh, mirror, tools};
 
 #[tauri::command]
@@ -22,15 +23,28 @@ fn now() -> String {
     chrono::Utc::now().to_rfc3339()
 }
 
+/// The Review's live fetches land in the mirror too, so Inbox and Board follow.
+fn notify_mirror(app: &AppHandle, id: &str) {
+    let update = MirrorUpdated { scopes: vec![Scope::Inbox, Scope::Board], ids: vec![id.to_string()] };
+    let _ = app.emit(MIRROR_UPDATED_EVENT, update);
+}
+
 /// Sync a PR's header metadata into the mirror and return it.
 ///
 /// `async` so Tauri runs the slow `gh` GraphQL call off the main (UI) thread,
 /// letting it overlap the diff/threads fetches instead of freezing the webview
 /// (same rationale as the inbox commands). The DB lock is only taken to write.
 #[tauri::command]
-pub async fn pr_meta(owner: String, name: String, number: i64, db: State<'_, Db>) -> AppResult<gh::PrMeta> {
+pub async fn pr_meta(
+    owner: String,
+    name: String,
+    number: i64,
+    app: AppHandle,
+    db: State<'_, Db>,
+) -> AppResult<gh::PrMeta> {
     let detail = provider_for().pr_detail(&owner, &name, number)?;
     mirror::store::upsert_pr_detail(&db.0.lock().unwrap(), &detail, &now())?;
+    notify_mirror(&app, &detail.node.id);
     Ok(detail.meta)
 }
 
@@ -63,12 +77,14 @@ pub async fn pr_review_threads(
     owner: String,
     name: String,
     number: i64,
+    app: AppHandle,
     db: State<'_, Db>,
 ) -> AppResult<Vec<gh::PrThread>> {
     let threads = provider_for().pr_review_threads(&owner, &name, number)?;
     let conn = db.0.lock().unwrap();
     if let Some(id) = mirror::store::pr_node_id(&conn, &owner, &name, number)? {
         mirror::store::upsert_threads(&conn, &id, &threads, &now())?;
+        notify_mirror(&app, &id);
     }
     Ok(threads)
 }

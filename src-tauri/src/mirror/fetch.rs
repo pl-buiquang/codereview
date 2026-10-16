@@ -269,11 +269,6 @@ impl Node {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Deserialize)]
-struct NodesData {
-    nodes: Vec<Option<Node>>,
-}
-
-#[derive(Debug, Deserialize)]
 struct SearchData {
     search: SearchConn,
 }
@@ -333,46 +328,179 @@ pub fn search(q: &str, limit: i64) -> AppResult<Vec<Node>> {
     Ok(nodes)
 }
 
+/// A `nodes(ids:)` result node: a PR/issue `T`, or another type (no `id`).
+trait Fetched: serde::de::DeserializeOwned {
+    fn supported_id(&self) -> Option<&str>;
+}
+
+impl Fetched for Node {
+    fn supported_id(&self) -> Option<&str> {
+        self.is_supported().then_some(self.id.as_str())
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(bound = "T: serde::de::DeserializeOwned")]
+struct NodesOf<T> {
+    nodes: Vec<Option<T>>,
+}
+
 /// One `nodes(ids:)` batch. A failed batch (usually a GitHub timeout) is
 /// split in half and retried once; ids that still fail are left out.
-fn refetch_batch(query: &str, ids: &[String], may_split: bool) -> HashMap<String, Option<Node>> {
-    match gh::graphql::<NodesData>(query, json!({ "ids": ids })) {
+fn nodes_batch<T: Fetched>(query: &str, ids: &[String], may_split: bool) -> HashMap<String, Option<T>> {
+    match gh::graphql::<NodesOf<T>>(query, json!({ "ids": ids })) {
         Ok(data) => {
-            let mut found: HashMap<String, Node> = data
+            let mut found: HashMap<String, T> = data
                 .nodes
                 .into_iter()
                 .flatten()
-                .filter(Node::is_supported)
-                .map(|n| (n.id.clone(), n))
+                .filter_map(|n| Some((n.supported_id()?.to_string(), n)))
                 .collect();
             ids.iter().map(|id| (id.clone(), found.remove(id))).collect()
         }
         Err(e) if may_split && ids.len() > 1 => {
-            crate::logging::warn(&format!("[mirror.refetch] batch of {} failed, splitting: {e}", ids.len()));
+            crate::logging::warn(&format!("[mirror.nodes] batch of {} failed, splitting: {e}", ids.len()));
             let (a, b) = ids.split_at(ids.len() / 2);
-            let mut out = refetch_batch(query, a, false);
-            out.extend(refetch_batch(query, b, false));
+            let mut out = nodes_batch(query, a, false);
+            out.extend(nodes_batch(query, b, false));
             out
         }
         Err(e) => {
-            crate::logging::warn(&format!("[mirror.refetch] batch of {} failed: {e}", ids.len()));
+            crate::logging::warn(&format!("[mirror.nodes] batch of {} failed: {e}", ids.len()));
             HashMap::new()
         }
     }
 }
 
-/// Refetch nodes by id, in concurrent batches. Every id of a successful batch
-/// is present: `None` when GitHub no longer returns it (deleted or
-/// inaccessible). Ids of a failed batch are absent, since their state is unknown.
+/// Every id of a successful batch is present: `None` when GitHub no longer
+/// returns it (deleted or inaccessible). Ids of a failed batch are absent,
+/// since their state is unknown.
+fn nodes_by_id<T: Fetched + Send>(query: &str, ids: &[String], batch: usize) -> HashMap<String, Option<T>> {
+    let chunks: Vec<&[String]> = ids.chunks(batch).collect();
+    crate::inbox::concurrent_map(chunks, REFETCH_CONCURRENCY, |chunk| nodes_batch(query, chunk, true))
+        .into_iter()
+        .flatten()
+        .collect()
+}
+
+/// Refetch nodes by id with the full fragment, in concurrent batches.
 pub fn refetch(ids: &[String]) -> HashMap<String, Option<Node>> {
     let query = with_fragments(format!(
         "query MirrorNodes($ids: [ID!]!) {{\n  nodes(ids: $ids) {{ {SELECTION} }}\n}}"
     ));
-    let chunks: Vec<&[String]> = ids.chunks(REFETCH_BATCH_SIZE).collect();
-    crate::inbox::concurrent_map(chunks, REFETCH_CONCURRENCY, |chunk| refetch_batch(&query, chunk, true))
-        .into_iter()
-        .flatten()
-        .collect()
+    nodes_by_id(&query, ids, REFETCH_BATCH_SIZE)
+}
+
+// ---------------------------------------------------------------------------
+// Probe
+// ---------------------------------------------------------------------------
+
+/// `mergeStateStatus`, `reviewDecision` and the CI rollup cost GitHub ~100 ms
+/// per open PR, so the full probe runs in small parallel batches; the cheap
+/// one (`updatedAt` + `state`) fits 100 ids in about a second.
+const PROBE_BATCH_SIZE: usize = 20;
+const CHEAP_PROBE_BATCH_SIZE: usize = 100;
+
+const PROBE_QUERY: &str = r#"
+query MirrorProbe($ids: [ID!]!) {
+  nodes(ids: $ids) {
+    __typename
+    ... on PullRequest {
+      id updatedAt headRefOid state merged isDraft reviewDecision mergeStateStatus
+      autoMergeRequest { mergeMethod }
+      commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
+    }
+    ... on Issue { id updatedAt state }
+  }
+}
+"#;
+
+const CHEAP_PROBE_QUERY: &str = r#"
+query MirrorProbeCheap($ids: [ID!]!) {
+  nodes(ids: $ids) {
+    __typename
+    ... on PullRequest { id updatedAt state merged }
+    ... on Issue { id updatedAt state }
+  }
+}
+"#;
+
+/// The change keys of a PR or issue: cheap to fetch, and enough to decide
+/// whether the full fragment needs refetching. `updatedAt` alone misses CI and
+/// mergeability changes, hence the extra fields.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Probe {
+    #[serde(rename = "__typename")]
+    pub typename: String,
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub updated_at: Option<String>,
+    #[serde(default)]
+    pub head_ref_oid: Option<String>,
+    #[serde(default)]
+    pub state: Option<String>,
+    #[serde(default)]
+    pub merged: bool,
+    #[serde(default)]
+    pub is_draft: bool,
+    #[serde(default)]
+    pub review_decision: Option<String>,
+    #[serde(default)]
+    pub merge_state_status: Option<String>,
+    #[serde(default)]
+    pub auto_merge_request: Option<AutoMergeRef>,
+    #[serde(default)]
+    pub commits: Option<CommitConn>,
+    /// From the cheap probe: only `updatedAt` and `state` are meaningful.
+    #[serde(skip)]
+    pub cheap: bool,
+}
+
+impl Fetched for Probe {
+    fn supported_id(&self) -> Option<&str> {
+        matches!(self.typename.as_str(), "PullRequest" | "Issue").then_some(self.id.as_deref()).flatten()
+    }
+}
+
+impl Probe {
+    pub fn is_pr(&self) -> bool {
+        self.typename == "PullRequest"
+    }
+
+    /// Same normalization as [`Node::normalized_state`].
+    pub fn normalized_state(&self) -> Option<String> {
+        if self.is_pr() && self.merged {
+            Some("merged".to_string())
+        } else {
+            self.state.as_ref().map(|s| s.to_lowercase())
+        }
+    }
+
+    pub fn ci_state(&self) -> Option<String> {
+        self.commits
+            .as_ref()
+            .and_then(|c| c.nodes.first())
+            .and_then(|n| n.commit.status_check_rollup.as_ref())
+            .and_then(|r| r.state.clone())
+    }
+
+    /// Same default as [`Node::auto_merge_method`].
+    pub fn auto_merge_method(&self) -> Option<String> {
+        self.auto_merge_request
+            .as_ref()
+            .map(|r| r.merge_method.clone().unwrap_or_else(|| "MERGE".into()))
+    }
+}
+
+/// Probe nodes by id, with the same presence semantics as [`refetch`]. `cheap`
+/// ids (closed PRs, issues, ids not mirrored yet) only get `updatedAt` + `state`.
+pub fn probe(full: &[String], cheap: &[String]) -> HashMap<String, Option<Probe>> {
+    let mut out = nodes_by_id(PROBE_QUERY, full, PROBE_BATCH_SIZE);
+    let cheap: HashMap<String, Option<Probe>> = nodes_by_id(CHEAP_PROBE_QUERY, cheap, CHEAP_PROBE_BATCH_SIZE);
+    out.extend(cheap.into_iter().map(|(id, p)| (id, p.map(|p| Probe { cheap: true, ..p }))));
+    out
 }
 
 /// Resolve an issue or PR by `owner/name#number`.
@@ -453,6 +581,28 @@ mod tests {
         node.state = Some("CLOSED".into());
         assert_eq!(node.normalized_state().as_deref(), Some("merged"));
         assert!(node.is_closed());
+    }
+
+    #[test]
+    fn probe_deserializes_prs_issues_and_skips_other_types() {
+        let data: NodesOf<Probe> = serde_json::from_str(
+            r#"{ "nodes": [
+              { "__typename": "PullRequest", "id": "PR_1", "updatedAt": "t", "headRefOid": "h",
+                "state": "CLOSED", "merged": true, "isDraft": false, "mergeStateStatus": "CLEAN",
+                "autoMergeRequest": { "mergeMethod": null },
+                "commits": { "nodes": [ { "commit": { "statusCheckRollup": { "state": "FAILURE" } } } ] } },
+              { "__typename": "Issue", "id": "I_1", "updatedAt": "t", "state": "OPEN" },
+              { "__typename": "Commit" },
+              null
+            ] }"#,
+        )
+        .unwrap();
+        let ids: Vec<Option<&str>> = data.nodes.iter().map(|n| n.as_ref().and_then(Fetched::supported_id)).collect();
+        assert_eq!(ids, vec![Some("PR_1"), Some("I_1"), None, None]);
+        let pr = data.nodes[0].as_ref().unwrap();
+        assert_eq!(pr.normalized_state().as_deref(), Some("merged"));
+        assert_eq!(pr.ci_state().as_deref(), Some("FAILURE"));
+        assert_eq!(pr.auto_merge_method().as_deref(), Some("MERGE"));
     }
 
     #[test]

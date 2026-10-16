@@ -71,6 +71,12 @@ pub fn get_or_load(
     Ok(diff)
 }
 
+pub fn clear() {
+    let mut lru = CACHE.lock().unwrap();
+    lru.entries.clear();
+    lru.bytes = 0;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

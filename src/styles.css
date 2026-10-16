@@ -2984,6 +2984,50 @@ tr.search-current {
 .cr-side-foot {
   margin-top: auto;
 }
+.cr-sync {
+  position: relative;
+}
+.cr-sync-btn {
+  width: 100%;
+}
+.cr-sync-btn.error {
+  color: var(--danger);
+}
+.cr-sync-label {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.cr-sync-pop {
+  position: fixed;
+  bottom: 56px;
+  left: 12px;
+  z-index: 30;
+  width: 260px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  box-shadow: var(--shadow-pop);
+  font-size: 12px;
+}
+.cr-sync-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+.cr-sync-error {
+  color: var(--danger);
+  max-height: 80px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.cr-sync-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
 .cr-side {
   transition: width 0.15s ease;
   overflow: hidden;
