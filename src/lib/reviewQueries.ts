@@ -1,23 +1,23 @@
 import { queryOptions } from "@tanstack/react-query";
 import { api } from "./api";
-import type { Target } from "./types";
+import type { ReviewDetail } from "./types";
 
-type DiffKeyTarget = Pick<Target, "id" | "base_sha" | "head_sha" | "three_dot">;
+type DiffKeyDetail = { review: Pick<ReviewDetail["review"], "base_sha" | "head_sha">; target: Pick<ReviewDetail["target"], "id" | "three_dot"> };
 
-/** A diff is immutable for a given (base, head, three_dot), and those are all
- *  in the key, so it never goes stale; a moved head or base changes the key. */
-export function reviewDiffQuery(reviewId: number, target: DiffKeyTarget | undefined) {
+/** A diff is immutable for a given pin (base, head) and three_dot, and those
+ *  are all in the key, so it never goes stale; moving the pin changes the key. */
+export function reviewDiffQuery(reviewId: number, detail: DiffKeyDetail | undefined) {
   return queryOptions({
     queryKey: [
       "review-diff",
       reviewId,
-      target?.id,
-      target?.base_sha,
-      target?.head_sha,
-      target?.three_dot,
+      detail?.target.id,
+      detail?.review.base_sha,
+      detail?.review.head_sha,
+      detail?.target.three_dot,
     ],
     queryFn: () => api.reviewDiff(reviewId),
-    enabled: target != null,
+    enabled: detail != null,
     staleTime: Infinity,
   });
 }

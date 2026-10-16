@@ -19,11 +19,18 @@ fn worktrees_base_in(home: &Path) -> PathBuf {
 /// session. Reuses an existing worktree already on that branch — including
 /// the main checkout — found via `list_worktrees`; otherwise creates one
 /// under `~/.codereview/worktrees/<repo_name>/<branch>/`.
-pub fn ensure_branch_worktree(repo: &Path, target: &Target) -> AppResult<PathBuf> {
-    ensure_branch_worktree_in(repo, target, &worktrees_base())
+/// `head_sha` is where a new PR worktree starts before `gh pr checkout` moves
+/// it onto the PR branch (the review's pin, so the commit is known to exist).
+pub fn ensure_branch_worktree(repo: &Path, target: &Target, head_sha: Option<&str>) -> AppResult<PathBuf> {
+    ensure_branch_worktree_in(repo, target, head_sha, &worktrees_base())
 }
 
-fn ensure_branch_worktree_in(repo: &Path, target: &Target, base: &Path) -> AppResult<PathBuf> {
+fn ensure_branch_worktree_in(
+    repo: &Path,
+    target: &Target,
+    head_sha: Option<&str>,
+    base: &Path,
+) -> AppResult<PathBuf> {
     let branch = &target.head_ref;
 
     for wt in list_worktrees(repo)? {
@@ -43,10 +50,7 @@ fn ensure_branch_worktree_in(repo: &Path, target: &Target, base: &Path) -> AppRe
         .map_err(|e| AppError::Git(format!("failed to create worktrees dir: {e}")))?;
 
     if target.kind == "github_pr" {
-        let head_sha = target
-            .head_sha
-            .as_deref()
-            .ok_or_else(|| AppError::Git("PR head SHA is not resolved yet".into()))?;
+        let head_sha = head_sha.ok_or_else(|| AppError::Git("PR head SHA is not resolved yet".into()))?;
         let number = target
             .github_pr_number
             .ok_or_else(|| AppError::Git("github_pr target is missing a PR number".into()))?;
@@ -325,8 +329,6 @@ mod tests {
             title: "t".into(),
             base_ref: "main".into(),
             head_ref: head_ref.into(),
-            base_sha: None,
-            head_sha: None,
             three_dot: true,
             created_at: "now".into(),
         }
@@ -338,7 +340,7 @@ mod tests {
         git(repo.path(), &["checkout", "-q", "feature"]);
         let base = TempDir::new().unwrap();
 
-        let wt = ensure_branch_worktree_in(repo.path(), &local_target("feature"), base.path())
+        let wt = ensure_branch_worktree_in(repo.path(), &local_target("feature"), None, base.path())
             .unwrap();
 
         // Compare canonicalized paths — on macOS `TempDir` lives under a `/tmp`
@@ -351,7 +353,7 @@ mod tests {
         let repo = fixture_repo();
         let base = TempDir::new().unwrap();
 
-        let wt = ensure_branch_worktree_in(repo.path(), &local_target("feature"), base.path())
+        let wt = ensure_branch_worktree_in(repo.path(), &local_target("feature"), None, base.path())
             .unwrap();
 
         assert!(wt.starts_with(base.path()));
@@ -360,7 +362,7 @@ mod tests {
         // Second call reuses the same worktree instead of erroring/duplicating.
         // (Found via `git worktree list` this time, which reports the canonicalized
         // path, hence comparing canonicalized paths on both sides.)
-        let wt2 = ensure_branch_worktree_in(repo.path(), &local_target("feature"), base.path())
+        let wt2 = ensure_branch_worktree_in(repo.path(), &local_target("feature"), None, base.path())
             .unwrap();
         assert_eq!(fs::canonicalize(wt).unwrap(), fs::canonicalize(wt2).unwrap());
     }
@@ -370,7 +372,7 @@ mod tests {
         let repo = fixture_repo();
         let base = TempDir::new().unwrap();
 
-        let err = ensure_branch_worktree_in(repo.path(), &local_target("no-such-branch"), base.path())
+        let err = ensure_branch_worktree_in(repo.path(), &local_target("no-such-branch"), None, base.path())
             .unwrap_err();
         assert!(matches!(err, AppError::Git(_)));
     }
@@ -382,7 +384,7 @@ mod tests {
         let slot = base.path().join(repo.path().file_name().unwrap()).join("feature");
         git(repo.path(), &["worktree", "add", "--detach", slot.to_str().unwrap(), "main"]);
 
-        let wt = ensure_branch_worktree_in(repo.path(), &local_target("feature"), base.path())
+        let wt = ensure_branch_worktree_in(repo.path(), &local_target("feature"), None, base.path())
             .unwrap();
 
         assert_eq!(current_branch(&wt).as_deref(), Some("feature"));
@@ -396,7 +398,7 @@ mod tests {
         git(repo.path(), &["worktree", "add", "--detach", slot.to_str().unwrap(), "main"]);
         fs::write(slot.join("wip.txt"), "wip").unwrap();
 
-        let err = ensure_branch_worktree_in(repo.path(), &local_target("feature"), base.path())
+        let err = ensure_branch_worktree_in(repo.path(), &local_target("feature"), None, base.path())
             .unwrap_err();
         assert!(err.to_string().contains("uncommitted"));
     }
@@ -405,7 +407,7 @@ mod tests {
     fn detects_main_checkout_vs_linked_worktree() {
         let repo = fixture_repo();
         let base = TempDir::new().unwrap();
-        let wt = ensure_branch_worktree_in(repo.path(), &local_target("feature"), base.path())
+        let wt = ensure_branch_worktree_in(repo.path(), &local_target("feature"), None, base.path())
             .unwrap();
 
         assert!(is_main_checkout(repo.path()));
@@ -417,7 +419,7 @@ mod tests {
     fn remove_refuses_dirty_worktree() {
         let repo = fixture_repo();
         let base = TempDir::new().unwrap();
-        let wt = ensure_branch_worktree_in(repo.path(), &local_target("feature"), base.path())
+        let wt = ensure_branch_worktree_in(repo.path(), &local_target("feature"), None, base.path())
             .unwrap();
         fs::write(wt.join("untracked.txt"), "wip").unwrap();
 

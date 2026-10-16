@@ -248,7 +248,7 @@ export function FocusDigest({
         )}
         {view.stale && (
           <span className="focus-stale">
-            Focus generated at <code>{shortSha(focus.head_sha)}</code>; head is now{" "}
+            Focus generated at <code>{shortSha(focus.head_sha)}</code>; the review is now on{" "}
             <code>{shortSha(headSha)}</code>
             {onRegenerate && (
               <button className="expand-btn" onClick={onRegenerate}>

@@ -424,7 +424,7 @@ pub async fn chat_send(
     let repo_path = Path::new(local_path_str);
 
     let stored_path = existing_chat.as_ref().and_then(|c| c.worktree_path.clone());
-    let worktree_path = resolve_chat_worktree(repo_path, &detail.target, stored_path.as_deref())?;
+    let worktree_path = resolve_chat_worktree(repo_path, &detail.target, detail.review.head_sha.as_deref(), stored_path.as_deref())?;
 
     // `claude --resume` looks sessions up by cwd, so a chat that moved to a
     // different checkout starts a fresh session there.
@@ -573,13 +573,18 @@ pub fn chat_messages(review_id: i64, db: State<Db>) -> AppResult<Vec<ChatMessage
 /// path if it still exists and is on the review's branch, otherwise whatever
 /// checkout holds the branch now (the main checkout included), creating a
 /// worktree only when none does.
-fn resolve_chat_worktree(repo: &Path, target: &Target, stored: Option<&str>) -> AppResult<PathBuf> {
+fn resolve_chat_worktree(
+    repo: &Path,
+    target: &Target,
+    head_sha: Option<&str>,
+    stored: Option<&str>,
+) -> AppResult<PathBuf> {
     if let Some(p) = stored.map(Path::new).filter(|p| p.exists()) {
         if worktree::is_on_branch(p, &target.head_ref) {
             return Ok(p.to_path_buf());
         }
     }
-    worktree::ensure_branch_worktree(repo, target)
+    worktree::ensure_branch_worktree(repo, target, head_sha)
 }
 
 /// Delete the chat (and all its messages) for a review. Its worktree is left
@@ -615,7 +620,12 @@ pub async fn ensure_chat_worktree(review_id: i64, db: State<'_, Db>) -> AppResul
     let local_path_str = detail.local_path.as_deref().ok_or_else(|| {
         AppError::Chat("Chat requires a local clone. Link one in the Repositories section.".into())
     })?;
-    let path = resolve_chat_worktree(Path::new(local_path_str), &detail.target, stored.as_deref())?;
+    let path = resolve_chat_worktree(
+        Path::new(local_path_str),
+        &detail.target,
+        detail.review.head_sha.as_deref(),
+        stored.as_deref(),
+    )?;
     let path_str = path.to_string_lossy().into_owned();
 
     if stored.as_deref() != Some(path_str.as_str()) {

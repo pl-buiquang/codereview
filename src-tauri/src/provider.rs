@@ -52,6 +52,7 @@ pub trait ReviewProvider: Send + Sync {
         head: &str,
     ) -> AppResult<Vec<ComparedFile>>;
     fn merge_base_sha(&self, owner: &str, name: &str, base: &str, head: &str) -> AppResult<String>; // spec 10
+    fn compare_diff(&self, owner: &str, name: &str, base: &str, head: &str) -> AppResult<String>;
     fn file_at_ref(
         &self,
         owner: &str,
@@ -174,6 +175,10 @@ impl ReviewProvider for GithubProvider {
 
     fn merge_base_sha(&self, owner: &str, name: &str, base: &str, head: &str) -> AppResult<String> {
         gh::merge_base_sha(owner, name, base, head)
+    }
+
+    fn compare_diff(&self, owner: &str, name: &str, base: &str, head: &str) -> AppResult<String> {
+        gh::compare_diff(owner, name, base, head)
     }
 
     fn file_at_ref(

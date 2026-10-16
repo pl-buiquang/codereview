@@ -18,7 +18,8 @@ vi.mock("../lib/api", () => ({
   pickSavePath: () => Promise.resolve(null),
 }));
 
-import { ReviewView } from "./ReviewView";
+import { ReviewView, newCommitsLabel } from "./ReviewView";
+import { useUIStore } from "../store";
 
 globalThis.ResizeObserver ??= class {
   observe() {}
@@ -83,6 +84,8 @@ function detail(comments: Comment[] = []): ReviewDetail {
       body: "",
       event: null,
       status: "draft",
+      base_sha: "base",
+      head_sha: "head",
       published_at: null,
       github_review_id: null,
       last_exported_at: null,
@@ -101,8 +104,6 @@ function detail(comments: Comment[] = []): ReviewDetail {
       title: "feature",
       base_ref: "main",
       head_ref: "feature",
-      base_sha: "base",
-      head_sha: "head",
       three_dot: true,
       created_at: "now",
     },
@@ -288,5 +289,30 @@ describe("ReviewView focus overlay", () => {
     await waitFor(() =>
       expect(screen.getByRole("button", { name: /Generate focus/ })).toBeDisabled(),
     );
+  });
+});
+
+describe("ReviewView pin", () => {
+  it("shows new commits on a local draft and Update review moves the pin", async () => {
+    const user = userEvent.setup();
+    useUIStore.setState({ activeTabId: "review-7" });
+    handlers.refreshReview = vi.fn(() =>
+      Promise.resolve({ moved: true, pinnedHeadSha: "head", liveHeadSha: "head2", liveBaseSha: "base", newCommits: 2 }),
+    );
+    handlers.updateReviewPin = vi.fn(() =>
+      Promise.resolve({ moved: true, reanchor: { reanchored: 1, lost: 0, skippedNoChange: 0 } }),
+    );
+    renderReview();
+
+    expect(await screen.findByText("2 new commits")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Update review" }));
+    await waitFor(() => expect(handlers.updateReviewPin).toHaveBeenCalledWith(7));
+  });
+
+  it("labels what moved", () => {
+    const live = { moved: true, pinnedHeadSha: "h", liveHeadSha: "h2", liveBaseSha: "b", newCommits: 1 };
+    expect(newCommitsLabel(live, "h")).toBe("1 new commit");
+    expect(newCommitsLabel({ ...live, liveHeadSha: "h", newCommits: 0 }, "h")).toBe("base moved");
+    expect(newCommitsLabel(undefined, "h")).toBe("new commits");
   });
 });

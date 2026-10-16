@@ -216,6 +216,7 @@ pub fn run() {
             commands::review::submit_pending_review,
             commands::review::discard_pending_review,
             commands::review::refresh_review,
+            commands::review::update_review_pin,
             commands::review::reanchor_comments,
             commands::export::preview_review,
             commands::export::export_review,

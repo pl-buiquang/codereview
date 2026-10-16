@@ -41,6 +41,7 @@ import type {
   ReviewSummary,
   Side,
   ToolEnv,
+  UpdateReviewResult,
   WipKind,
   WipStatus,
   WorktreeInfo,
@@ -127,6 +128,8 @@ export const api = {
     invoke<FreshnessResult>("refresh_review", { reviewId }),
   reanchorComments: (reviewId: number) =>
     invoke<ReanchorResult>("reanchor_comments", { reviewId }),
+  updateReviewPin: (reviewId: number) =>
+    invoke<UpdateReviewResult>("update_review_pin", { reviewId }),
 
   // GitHub
   ghAuthStatus: () => invoke<boolean>("gh_auth_status"),

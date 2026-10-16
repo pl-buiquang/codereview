@@ -61,11 +61,11 @@ export function FileViewPane({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  const sourceQuery = useQuery(headFileSourceQuery(reviewId, filePath, detail.target.head_sha));
+  const sourceQuery = useQuery(headFileSourceQuery(reviewId, filePath, detail.review.head_sha));
 
   // The diff is already cached from the main view. We only need it to know
   // which head lines are added/modified.
-  const diffQuery = useQuery(reviewDiffQuery(reviewId, detail.target));
+  const diffQuery = useQuery(reviewDiffQuery(reviewId, detail));
 
   const diffFile = useMemo(() => {
     if (diffQuery.data == null) return null;
@@ -151,7 +151,7 @@ export function FileViewPane({
       line: range.hi,
       startLine: range.lo === range.hi ? null : range.lo,
       body: text,
-      anchoredHeadSha: detail.target.head_sha,
+      anchoredHeadSha: detail.review.head_sha,
     });
     setSelection(null);
     onSaved();
@@ -170,8 +170,8 @@ export function FileViewPane({
     widgets[key] = (
       <LineWidget
         threads={commentsByKey.get(key) ?? []}
-        headSha={detail.target.head_sha}
-        baseSha={detail.target.base_sha}
+        headSha={detail.review.head_sha}
+        baseSha={detail.review.base_sha}
         composerOpen={!!composerOpen}
         rangeLabel={rangeLabel}
         readOnly={readOnly}
@@ -231,8 +231,8 @@ export function FileViewPane({
                   <ThreadItem
                     key={t.root.id}
                     thread={t}
-                    headSha={detail.target.head_sha}
-                    baseSha={detail.target.base_sha}
+                    headSha={detail.review.head_sha}
+                    baseSha={detail.review.base_sha}
                     readOnly={readOnly}
                     showOrigin
                     canReply={false}

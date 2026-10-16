@@ -521,6 +521,17 @@ pub fn merge_base_sha(owner: &str, name: &str, base: &str, head: &str) -> AppRes
         .ok_or_else(|| AppError::Gh("compare response missing merge_base_commit".into()))
 }
 
+/// Unified diff of `base...head` via the compare API's diff media type: a PR's
+/// diff at a pinned head, with no clone needed.
+pub fn compare_diff(owner: &str, name: &str, base: &str, head: &str) -> AppResult<String> {
+    let endpoint = format!("repos/{owner}/{name}/compare/{base}...{head}");
+    let ctx = GhRepo::Remote {
+        owner: owner.to_string(),
+        name: name.to_string(),
+    };
+    run_gh(&ctx, &["api", &endpoint, "-H", "Accept: application/vnd.github.diff"])
+}
+
 pub fn pr_diff(ctx: &GhRepo, number: i64) -> AppResult<String> {
     let num = number.to_string();
     let mut args = vec!["pr", "diff", num.as_str()];
@@ -584,6 +595,7 @@ query PrMeta($owner: String!, $name: String!, $number: Int!) {
       body
       state
       isDraft
+      headRefOid
       mergeable
       mergeStateStatus
       viewerCanUpdateBranch
@@ -626,6 +638,8 @@ pub struct PrMeta {
     pub body: String,
     pub state: String,
     pub is_draft: bool,
+    /// The PR's live head, compared with a review's pin for "head moved".
+    pub head_ref_oid: Option<String>,
     pub mergeable: Option<String>,
     pub merge_state_status: Option<String>,
     pub viewer_can_update_branch: bool,
@@ -698,6 +712,8 @@ struct PrMetaPr {
     state: String,
     #[serde(default)]
     is_draft: bool,
+    #[serde(default)]
+    head_ref_oid: Option<String>,
     #[serde(default)]
     mergeable: Option<String>,
     #[serde(default)]
@@ -861,6 +877,7 @@ fn map_pr_meta(pr: PrMetaPr) -> PrMeta {
         body: pr.body.unwrap_or_default(),
         state: pr.state,
         is_draft: pr.is_draft,
+        head_ref_oid: pr.head_ref_oid,
         mergeable: pr.mergeable,
         merge_state_status: pr.merge_state_status,
         viewer_can_update_branch: pr.viewer_can_update_branch,

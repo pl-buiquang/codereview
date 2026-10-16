@@ -40,8 +40,6 @@ pub struct Target {
     pub title: String,
     pub base_ref: String,
     pub head_ref: String,
-    pub base_sha: Option<String>,
-    pub head_sha: Option<String>,
     pub three_dot: bool,
     pub created_at: String,
 }
@@ -56,8 +54,6 @@ impl Target {
             title: row.get("title")?,
             base_ref: row.get("base_ref")?,
             head_ref: row.get("head_ref")?,
-            base_sha: row.get("base_sha")?,
-            head_sha: row.get("head_sha")?,
             three_dot: row.get::<_, i64>("three_dot")? != 0,
             created_at: row.get("created_at")?,
         })
@@ -71,6 +67,10 @@ pub struct Review {
     pub body: String,
     pub event: Option<String>,
     pub status: String,
+    /// The pin: the merge-base (or two-dot base tip) and head this review was
+    /// written against. None when unresolved at creation.
+    pub base_sha: Option<String>,
+    pub head_sha: Option<String>,
     pub published_at: Option<String>,
     pub github_review_id: Option<i64>,
     pub last_exported_at: Option<String>,
@@ -90,6 +90,8 @@ impl Review {
             body: row.get("body")?,
             event: row.get("event")?,
             status: row.get("status")?,
+            base_sha: row.get("base_sha")?,
+            head_sha: row.get("head_sha")?,
             published_at: row.get("published_at")?,
             github_review_id: row.get("github_review_id")?,
             last_exported_at: row.get("last_exported_at")?,

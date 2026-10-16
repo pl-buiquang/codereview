@@ -521,10 +521,10 @@ fn focus_id(conn: &Connection, review_id: i64) -> AppResult<i64> {
     .ok_or_else(|| AppError::Other(format!("review {review_id} has no focus")))
 }
 
-fn target_shas(conn: &Connection, review_id: i64) -> AppResult<(Option<String>, Option<String>)> {
+/// The review's pin as (head, base): a focus planned against another pin is stale.
+fn pin_shas(conn: &Connection, review_id: i64) -> AppResult<(Option<String>, Option<String>)> {
     conn.query_row(
-        "SELECT t.head_sha, t.base_sha FROM target t JOIN review r ON r.target_id = t.id
-         WHERE r.id = ?1",
+        "SELECT head_sha, base_sha FROM review WHERE id = ?1",
         params![review_id],
         |r| Ok((r.get(0)?, r.get(1)?)),
     )
@@ -609,7 +609,7 @@ pub fn get_focus_from(
         })
         .collect();
 
-    let (head, base) = target_shas(conn, review_id)?;
+    let (head, base) = pin_shas(conn, review_id)?;
     let stale = planned && (focus.head_sha != head || focus.base_sha != base);
     Ok(Some(FocusView {
         focus,
@@ -654,7 +654,7 @@ pub fn set_focus_plan_from(
         )));
     }
 
-    let (head, base) = target_shas(conn, review_id)?;
+    let (head, base) = pin_shas(conn, review_id)?;
     let tx = conn.unchecked_transaction()?;
     tx.execute(
         "INSERT INTO focus (review_id, head_sha, base_sha, level, summary, status, planned_at)
@@ -852,7 +852,7 @@ fn note_comment(conn: &Connection, review_id: i64, h: &DiffHunk, note: &str) -> 
                 .chain(h.body[lo..=hi].iter().map(String::as_str))
                 .collect::<Vec<_>>()
                 .join("\n");
-            let (head, _) = target_shas(conn, review_id)?;
+            let (head, _) = pin_shas(conn, review_id)?;
             add_comment_impl(
                 conn,
                 review_id,
@@ -1238,15 +1238,15 @@ mod tests {
         )
         .unwrap();
         conn.execute(
-            "INSERT INTO target (repo_id, kind, title, base_ref, head_ref, base_sha, head_sha, created_at)
-             VALUES (1, 'local', 't', 'main', 'feat', 'base0', ?1, 'now')",
-            params![head],
+            "INSERT INTO target (repo_id, kind, title, base_ref, head_ref, created_at)
+             VALUES (1, 'local', 't', 'main', 'feat', 'now')",
+            [],
         )
         .unwrap();
         conn.execute(
-            "INSERT INTO review (target_id, body, status, created_at, updated_at)
-             VALUES (1, '', 'draft', 'now', 'now')",
-            [],
+            "INSERT INTO review (target_id, body, status, base_sha, head_sha, created_at, updated_at)
+             VALUES (1, '', 'draft', 'base0', ?1, 'now', 'now')",
+            params![head],
         )
         .unwrap();
         conn.last_insert_rowid()
@@ -1302,7 +1302,8 @@ mod tests {
         set_focus_level_impl(&conn, rid, "critical").unwrap();
 
         set_focus_plan_from(&conn, rid, &hunks, plan(r#"{"summary":"again"}"#), None).unwrap();
-        conn.execute("UPDATE target SET head_sha = 'head2'", []).unwrap();
+        // The review's pin moved (Update review): the planned focus is now stale.
+        conn.execute("UPDATE review SET head_sha = 'head2'", []).unwrap();
         let mut moved = hunks.clone();
         moved.push(DiffHunk {
             hunk_id: "fresh0000000".into(),

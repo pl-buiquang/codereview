@@ -12,6 +12,7 @@ describe("gitChangedQueryKeys", () => {
       ["refs", 4],
       ["graph", 4],
       ["branches", 4],
+      ["review-live", 4],
       ["repo-sync", 4],
     ]);
   });

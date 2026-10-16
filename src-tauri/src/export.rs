@@ -53,9 +53,9 @@ pub fn render_markdown(detail: &ReviewDetail, repo_label: &str) -> String {
     out.push_str(&format!(
         "Repo: {repo_label} · Base: {} ({}) → Head: {} ({})\n",
         t.base_ref,
-        short_sha(&t.base_sha),
+        short_sha(&r.base_sha),
         t.head_ref,
-        short_sha(&t.head_sha),
+        short_sha(&r.head_sha),
     ));
     if let Some(ev) = &r.event {
         out.push_str(&format!("Verdict: {ev}\n"));
@@ -159,9 +159,9 @@ pub fn render_json(detail: &ReviewDetail, repo_label: &str) -> String {
         "kind": t.kind,
         "github_pr_number": t.github_pr_number,
         "base_ref": t.base_ref,
-        "base_sha": t.base_sha,
+        "base_sha": r.base_sha,
         "head_ref": t.head_ref,
-        "head_sha": t.head_sha,
+        "head_sha": r.head_sha,
         "verdict": r.event,
         "status": r.status,
         "summary": r.body,
@@ -203,7 +203,7 @@ pub fn render_vscode(detail: &ReviewDetail, repo_path: &Path) -> serde_json::Val
             let (before, anchor, after) = if c.subject_type == "file" {
                 (vec![], vec![], vec![])
             } else {
-                let sha_opt = if c.side == "LEFT" { &t.base_sha } else { &t.head_sha };
+                let sha_opt = if c.side == "LEFT" { &r.base_sha } else { &r.head_sha };
                 sha_opt.as_ref().map_or((vec![], vec![], vec![]), |sha| {
                     let key = (sha.clone(), c.file_path.clone());
                     let lines = file_cache.entry(key).or_insert_with(|| {
@@ -268,8 +268,6 @@ mod tests {
             title: "Improve thing".into(),
             base_ref: "main".into(),
             head_ref: "feature".into(),
-            base_sha: Some("abcdef1234567890".into()),
-            head_sha: Some("1234567890abcdef".into()),
             three_dot: true,
             created_at: "2026-01-01T00:00:00Z".into(),
         }
@@ -282,6 +280,8 @@ mod tests {
             body: "Looks good overall.".into(),
             event: Some("approve".into()),
             status: "draft".into(),
+            base_sha: Some("abcdef1234567890".into()),
+            head_sha: Some("1234567890abcdef".into()),
             published_at: None,
             github_review_id: None,
             last_exported_at: None,

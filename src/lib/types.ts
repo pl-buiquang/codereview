@@ -25,8 +25,6 @@ export interface Target {
   title: string;
   base_ref: string;
   head_ref: string;
-  base_sha: string | null;
-  head_sha: string | null;
   three_dot: boolean;
   created_at: string;
 }
@@ -37,6 +35,9 @@ export interface Review {
   body: string;
   event: ReviewEvent | null;
   status: "draft" | "published_pending" | "published";
+  /** The pin: the merge-base (or two-dot base tip) and head this review was written against. */
+  base_sha: string | null;
+  head_sha: string | null;
   published_at: string | null;
   github_review_id: number | null;
   last_exported_at: string | null;
@@ -163,6 +164,7 @@ export interface PrMeta {
   body: string; // Markdown source
   state: string; // OPEN | CLOSED | MERGED
   isDraft: boolean;
+  headRefOid: string | null;
   mergeable: string | null; // MERGEABLE | CONFLICTING | UNKNOWN
   mergeStateStatus: string | null; // BEHIND | CLEAN | DIRTY | BLOCKED | ...
   viewerCanUpdateBranch: boolean;
@@ -267,10 +269,19 @@ export interface RefreshResult {
   durationMs: number;
 }
 
+/** A review's pin compared with its target's live head. */
 export interface FreshnessResult {
-  headMoved: boolean;
-  previousHeadSha: string | null;
-  currentHeadSha: string | null;
+  moved: boolean;
+  pinnedHeadSha: string | null;
+  liveHeadSha: string | null;
+  liveBaseSha: string | null;
+  /** Commits on the live head the pinned head lacks; local targets only. */
+  newCommits: number | null;
+}
+
+export interface UpdateReviewResult {
+  moved: boolean;
+  reanchor: ReanchorResult;
 }
 
 export interface ReanchorResult {

@@ -22,6 +22,7 @@ import {
 } from "react-diff-view";
 import { api, pickSavePath } from "../lib/api";
 import { reviewDiffQuery } from "../lib/reviewQueries";
+import { useRepoWatch } from "../lib/useRepoWatch";
 import { toast } from "../lib/toast";
 import { confirmDialog } from "../lib/confirm";
 import {
@@ -90,6 +91,7 @@ import { summaryLine } from "../lib/text";
 import type {
   Comment,
   FocusView,
+  FreshnessResult,
   PrMeta,
   PrThread,
   PrThreadCtx,
@@ -163,8 +165,10 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
     queryKey: ["review", reviewId],
     queryFn: () => api.getReview(reviewId),
   });
+  // Local targets (and PRs with a clone) follow the branch via the repo watcher.
+  useRepoWatch(detailQuery.data?.local_path != null ? detailQuery.data.target.repo_id : null);
 
-  const diffQuery = useQuery(reviewDiffQuery(reviewId, detailQuery.data?.target));
+  const diffQuery = useQuery(reviewDiffQuery(reviewId, detailQuery.data));
 
   useEffect(() => {
     if (detailQuery.data) {
@@ -295,7 +299,7 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
   );
 
   const focusQuery = useQuery({
-    queryKey: ["focus", reviewId, detailQuery.data?.target.head_sha],
+    queryKey: ["focus", reviewId, detailQuery.data?.review.head_sha],
     enabled: detailQuery.data != null,
     queryFn: () => api.getFocus(reviewId),
   });
@@ -628,7 +632,7 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
               <FocusDigest
                 view={focusView}
                 model={focusModel}
-                headSha={detail.target.head_sha}
+                headSha={detail.review.head_sha}
                 readOnly={readOnly}
                 actions={focusActions}
                 onReveal={reveal}
@@ -760,6 +764,15 @@ function DiffSearchBar({
       </button>
     </div>
   );
+}
+
+/** "3 new commits", or a generic label when the count is unknown (PR targets)
+ *  or only the base moved. */
+export function newCommitsLabel(live: FreshnessResult | undefined, pinnedHead: string | null): string {
+  const n = live?.newCommits;
+  if (n != null && n > 0) return `${n} new commit${n === 1 ? "" : "s"}`;
+  if (live && live.liveHeadSha === pinnedHead) return "base moved";
+  return "new commits";
 }
 
 function PrNumberLink({ prNumber, prUrl }: { prNumber: number; prUrl: string }) {
@@ -929,15 +942,41 @@ function ReviewHeader({
   const prNumber = target.github_pr_number ?? null;
   const prMetaQuery = usePrMeta(owner, name, prNumber, isActiveTab);
 
+  // Live head vs the review's pin. Local targets check automatically (cheap
+  // git, re-run on git-changed); PR targets on Refresh, plus the PR meta's head.
+  const liveKey = ["review-live", target.repo_id, review.id];
+  const liveQuery = useQuery({
+    queryKey: liveKey,
+    queryFn: () => api.refreshReview(review.id),
+    enabled: target.kind === "local" && detail.local_path != null && isActiveTab,
+    refetchOnWindowFocus: true,
+  });
   const refreshReview = useMutation({
     mutationFn: () => api.refreshReview(review.id),
     onSuccess: (r) => {
+      queryClient.setQueryData(liveKey, r);
       queryClient.invalidateQueries({ queryKey: ["review", review.id] });
       queryClient.invalidateQueries({ queryKey: ["pr-threads", owner, name, prNumber] });
       queryClient.invalidateQueries({ queryKey: ["pr-meta", owner, name, prNumber] });
-      if (r.headMoved) toast.success("Head moved — re-anchor to update comments.");
     },
     onError: (e) => toast.error(`Refresh failed:\n${String(e)}`),
+  });
+  const updatePin = useMutation({
+    mutationFn: () => api.updateReviewPin(review.id),
+    onSuccess: (r) => {
+      queryClient.invalidateQueries({ queryKey: ["review", review.id] });
+      queryClient.invalidateQueries({ queryKey: liveKey });
+      queryClient.invalidateQueries({ queryKey: ["reviews"] });
+      if (!r.moved) {
+        toast.success("Review is already on the latest commits.");
+        return;
+      }
+      const { reanchored, lost } = r.reanchor;
+      toast.success(
+        `Review updated to the latest commits.${reanchored ? ` ${reanchored} comment${reanchored === 1 ? "" : "s"} moved.` : ""}${lost ? ` ${lost} could not follow and are marked outdated.` : ""}`,
+      );
+    },
+    onError: (e) => toast.error(`Update review failed:\n${String(e)}`),
   });
 
   const togglePrDraft = useMutation({
@@ -1076,8 +1115,13 @@ function ReviewHeader({
         ? "Request changes"
         : "Comment";
   const anchorsStale = detail.comments.some(
-    (c) => !isDraftReply(c) && isCommentOutdated(c, target.base_sha, target.head_sha),
+    (c) => !isDraftReply(c) && isCommentOutdated(c, review.base_sha, review.head_sha),
   );
+  const live = liveQuery.data;
+  const prHead = prMetaQuery.data?.headRefOid ?? null;
+  const prHeadMoved = isPr && prHead != null && review.head_sha != null && prHead !== review.head_sha;
+  const pinMoved = (live?.moved ?? false) || prHeadMoved;
+  const movedLabel = newCommitsLabel(live, review.head_sha);
   const prUrl =
     isPr && detail.remote_owner && detail.remote_name && target.github_pr_number != null
       ? githubPrUrl(detail.remote_owner, detail.remote_name, target.github_pr_number)
@@ -1157,13 +1201,37 @@ function ReviewHeader({
           claudeAvailable={claudeAvailable}
           generate={generateFocus}
         />
+        {pinMoved && (
+          <span className="head-moved">
+            <span
+              className="head-moved-badge"
+              title={
+                isDraft
+                  ? "The branch moved since this review's commits. Update review moves it to the latest commits and re-anchors its comments."
+                  : "The branch moved since the commits this review was written against."
+              }
+            >
+              {movedLabel}
+            </span>
+            {isDraft && (
+              <button
+                className="btn btn-sm"
+                disabled={updatePin.isPending}
+                title="Move this review to the latest commits and re-anchor its comments"
+                onClick={() => updatePin.mutate()}
+              >
+                {updatePin.isPending ? "Updating…" : "Update review"}
+              </button>
+            )}
+          </span>
+        )}
         {anchorsStale && (
           <span className="head-moved">
             <span
               className="head-moved-badge"
-              title="The base or head has moved since some comments were written — they may no longer line up with the code."
+              title="Some comments were written against other commits than this review's — they may no longer line up with the code."
             >
-              ⚠ target moved
+              ⚠ outdated comments
             </span>
             <button
               className="btn btn-sm"
@@ -1171,7 +1239,7 @@ function ReviewHeader({
               title={
                 readOnly
                   ? "Published reviews cannot be re-anchored"
-                  : "Move comments onto the current base/head and clear outdated badges"
+                  : "Move comments onto this review's commits and clear outdated badges"
               }
               onClick={() => reanchorComments.mutate()}
             >
@@ -1185,7 +1253,7 @@ function ReviewHeader({
           title={
             readOnly
               ? "Published reviews cannot be refreshed"
-              : "Re-resolve the head/base and refresh the diff"
+              : "Check the branch for new commits (the review stays on its commits until you update it)"
           }
           onClick={() => refreshReview.mutate()}
         >
@@ -1887,11 +1955,11 @@ function FileReview({
   const suggestionSeedFor = useCallback(
     (c: Comment): string | null => {
       if (c.side !== "RIGHT" || c.subject_type !== "line" || c.origin !== "diff") return null;
-      if (c.anchored_head_sha && c.anchored_head_sha !== detail.target.head_sha) return null;
+      if (c.anchored_head_sha && c.anchored_head_sha !== detail.review.head_sha) return null;
       const lines = rightLinesText(hunks, c.start_line ?? c.line, c.line);
       return lines ? suggestionFence(lines) : null;
     },
-    [hunks, detail.target.head_sha],
+    [hunks, detail.review.head_sha],
   );
 
   const submitSelectionComment = async (text: string) => {
@@ -1919,7 +1987,7 @@ function FileReview({
       startLine: range.lo === range.hi ? null : range.lo,
       diffHunk,
       body: text,
-      anchoredHeadSha: detail.target.head_sha,
+      anchoredHeadSha: detail.review.head_sha,
     });
     setSelection(null);
     onSaved();
@@ -1968,8 +2036,8 @@ function FileReview({
       <>
         <LineWidget
           threads={commentsByKey.get(key) ?? []}
-          headSha={detail.target.head_sha}
-          baseSha={detail.target.base_sha}
+          headSha={detail.review.head_sha}
+          baseSha={detail.review.base_sha}
           composerOpen={!!composerOpen}
           rangeLabel={rangeLabel}
           composerSuggestionSeed={composerOpen ? composerSuggestionSeed : null}
@@ -2108,8 +2176,8 @@ function FileReview({
             <ThreadItem
               key={t.root.id}
               thread={t}
-              headSha={detail.target.head_sha}
-              baseSha={detail.target.base_sha}
+              headSha={detail.review.head_sha}
+              baseSha={detail.review.base_sha}
               readOnly={readOnly}
               canReply={false}
               onSaving={onSaving}
@@ -2153,8 +2221,8 @@ function FileReview({
           threadCtx={threadCtx}
           reviewId={reviewId}
           draftRepliesByRoot={draftRepliesByRoot}
-          headSha={detail.target.head_sha}
-          baseSha={detail.target.base_sha}
+          headSha={detail.review.head_sha}
+          baseSha={detail.review.base_sha}
           readOnly={readOnly}
           canExpand={canExpand}
           focus={focus}

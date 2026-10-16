@@ -10,8 +10,8 @@ export interface GitChangedPayload {
 
 const KEYS_BY_KIND: Record<GitChangeKind, string[]> = {
   index: ["wip"],
-  head: ["wip", "refs", "graph", "worktrees", "branches"],
-  refs: ["refs", "graph", "branches"],
+  head: ["wip", "refs", "graph", "worktrees", "branches", "review-live"],
+  refs: ["refs", "graph", "branches", "review-live"],
   fetch: ["refs", "graph", "branches", "repo-sync"],
 };
 

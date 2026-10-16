@@ -168,7 +168,7 @@ export function FileJumpList({
   });
   const detail = detailQuery.data;
 
-  const diffQuery = useQuery(reviewDiffQuery(reviewId, detail?.target));
+  const diffQuery = useQuery(reviewDiffQuery(reviewId, detail));
   const diff = diffQuery.data;
 
   const files = useMemo(() => (diff ? parseDiff(diff) : []), [diff]);

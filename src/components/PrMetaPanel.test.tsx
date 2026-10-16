@@ -23,6 +23,7 @@ const meta = (over: Partial<PrMeta> = {}): PrMeta => ({
   body: "",
   state: "OPEN",
   isDraft: false,
+  headRefOid: null,
   mergeable: "MERGEABLE",
   mergeStateStatus: "CLEAN",
   viewerCanUpdateBranch: false,

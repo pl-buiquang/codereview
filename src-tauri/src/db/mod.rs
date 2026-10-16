@@ -42,6 +42,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("migrations/0023_board_auto_merge.sql"),
     include_str!("migrations/0024_worktree_gc_report.sql"),
     include_str!("migrations/0025_repo_sync.sql"),
+    include_str!("migrations/0026_review_pin.sql"),
 ];
 
 pub fn open(path: &Path) -> AppResult<Connection> {
@@ -199,6 +200,48 @@ mod tests {
             .query_row("SELECT anchored_base_sha FROM comment WHERE id = 1", [], |r| r.get(0))
             .unwrap();
         assert!(base_sha.is_none(), "old comment defaults to NULL base pin");
+    }
+
+    #[test]
+    fn migration_0026_backfills_review_pins_from_their_target() {
+        // A DB at schema 25: two reviews share a target that holds the SHAs.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        for script in &MIGRATIONS[..25] {
+            conn.execute_batch(script).unwrap();
+        }
+        conn.pragma_update(None, "user_version", 25_i64).unwrap();
+        conn.execute(
+            "INSERT INTO repository (local_path, default_branch, added_at) VALUES ('/r', 'main', 'now')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO target (repo_id, kind, title, base_ref, head_ref, base_sha, head_sha, created_at)
+             VALUES (1, 'local', 't', 'a', 'b', 'base1', 'head1', 'now'),
+                    (1, 'local', 'u', 'a', 'c', NULL, NULL, 'now')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO review (target_id, body, status, created_at, updated_at)
+             VALUES (1, '', 'draft', 'now', 'now'), (1, '', 'published', 'now', 'now'),
+                    (2, '', 'draft', 'now', 'now')",
+            [],
+        )
+        .unwrap();
+
+        migrate(&conn).unwrap();
+
+        let pins: Vec<(Option<String>, Option<String>)> = conn
+            .prepare("SELECT base_sha, head_sha FROM review ORDER BY id")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        let both = (Some("base1".to_string()), Some("head1".to_string()));
+        assert_eq!(pins, vec![both.clone(), both, (None, None)]);
     }
 
     #[test]

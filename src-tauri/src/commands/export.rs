@@ -209,19 +209,9 @@ fn import_review_impl(conn: &Connection, payload: ImportPayload) -> AppResult<Re
     let head_ref = payload.head_ref.as_deref().unwrap_or("unknown");
 
     conn.execute(
-        "INSERT INTO target (repo_id, kind, github_pr_number, title, base_ref, head_ref, base_sha, head_sha, three_dot, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1, ?9)",
-        params![
-            repo_id,
-            kind,
-            payload.github_pr_number,
-            payload.title,
-            base_ref,
-            head_ref,
-            payload.base_sha,
-            payload.head_sha,
-            ts,
-        ],
+        "INSERT INTO target (repo_id, kind, github_pr_number, title, base_ref, head_ref, three_dot, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, ?7)",
+        params![repo_id, kind, payload.github_pr_number, payload.title, base_ref, head_ref, ts],
     )?;
     let target_id = conn.last_insert_rowid();
 
@@ -234,9 +224,9 @@ fn import_review_impl(conn: &Connection, payload: ImportPayload) -> AppResult<Re
     let body = payload.summary.as_deref().unwrap_or("");
 
     conn.execute(
-        "INSERT INTO review (target_id, body, event, status, created_at, updated_at)
-         VALUES (?1, ?2, ?3, 'draft', ?4, ?4)",
-        params![target_id, body, event, ts],
+        "INSERT INTO review (target_id, body, event, status, base_sha, head_sha, created_at, updated_at)
+         VALUES (?1, ?2, ?3, 'draft', ?4, ?5, ?6, ?6)",
+        params![target_id, body, event, payload.base_sha, payload.head_sha, ts],
     )?;
     let review_id = conn.last_insert_rowid();
 
