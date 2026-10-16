@@ -41,8 +41,8 @@ Glossary of domain terms used in this app.
   holds no user decisions and can be wiped and rebuilt from GitHub. Inbox, Board and Review
   read the mirror and keep only their own state.
 - **Sync** — bring the mirror up to date. *Light* sync checks cheaply what changed and
-  fetches only that; it runs automatically. *Full* sync ignores what it thinks is fresh and
-  refetches everything.
+  fetches only that; it runs automatically. A sync the user asks for is always fresh for
+  everything on screen. *Full* sync ignores what it thinks is fresh and refetches everything.
   _Avoid_: refresh
 - **Discovery** — the part of a sync that finds *new* PRs and issues (inbox searches, authored
   PRs). It runs less often than the rest of a light sync.
