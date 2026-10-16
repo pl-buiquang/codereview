@@ -47,6 +47,22 @@ export function ciStatus(card: BoardCardT): string | null {
   return card.ci_status.toLowerCase();
 }
 
+export const MERGE_FACET_LABEL: Record<string, string> = {
+  auto_merge: "auto-merge",
+  conflicts: "merge conflict",
+  behind: "needs update",
+};
+
+/** Merge-related GitHub states of an open PR (several can apply at once). */
+export function mergeFacets(card: BoardCardT): string[] {
+  if (card.type !== "pr" || card.state !== "open") return [];
+  const out: string[] = [];
+  if (card.auto_merge) out.push("auto_merge");
+  if (card.mergeable === "CONFLICTING" || card.merge_state_status === "DIRTY") out.push("conflicts");
+  if (card.merge_state_status === "BEHIND") out.push("behind");
+  return out;
+}
+
 /** Distinct tags carried by a card's own + inherited metadata, for the
  *  board's Tags filter. */
 export function cardTags(card: BoardCardT): string[] {
