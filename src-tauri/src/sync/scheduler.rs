@@ -16,10 +16,15 @@ use crate::error::AppResult;
 
 /// A view mount or window focus syncs a scope only when its last sync is older.
 const LIGHT_TTL: Duration = Duration::from_secs(60);
-/// Periodic light sync interval, doubled per unchanged sync up to
-/// `MAX_BACKOFF`×, and doubled again while the window is unfocused.
-const PERIODIC_BASE: Duration = Duration::from_secs(3 * 60);
-const MAX_BACKOFF: u32 = 4;
+/// Periodic light sync interval per scope, doubled per unchanged sync up to
+/// its max backoff, and again while the window is unfocused. The board's PR
+/// states should look live, and its light sync is only a probe (~5 calls).
+fn periodic_base(scope: Scope) -> (Duration, u32) {
+    match scope {
+        Scope::Board => (Duration::from_secs(60), 2),
+        _ => (Duration::from_secs(3 * 60), 4),
+    }
+}
 const TICK: Duration = Duration::from_secs(20);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -87,7 +92,7 @@ impl State {
 
     fn periodic_interval(&self, scope: Scope) -> Duration {
         let backoff = self.backoff.get(&scope).copied().unwrap_or(1);
-        PERIODIC_BASE * backoff * if self.focused { 1 } else { 2 }
+        periodic_base(scope).0 * backoff * if self.focused { 1 } else { 2 }
     }
 
     fn discovery_interval(&self) -> Option<Duration> {
@@ -304,7 +309,7 @@ impl SyncEngine {
                         }
                         s.last_sync.insert(scope, now);
                         let b = s.backoff.entry(scope).or_insert(1);
-                        *b = if req.mode == Mode::Light && report.changed == 0 { (*b * 2).min(MAX_BACKOFF) } else { 1 };
+                        *b = if req.mode == Mode::Light && report.changed == 0 { (*b * 2).min(periodic_base(scope).1) } else { 1 };
                     }
                     if report.discovered && req.scope.inbox() {
                         s.last_discovery = Some(now);

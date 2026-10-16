@@ -319,7 +319,7 @@ export function BoardView() {
             <button className="btn" onClick={() => setShowTrackDialog(true)}>
               <Icon name="plus" size={13} /> Track
             </button>
-            <SyncButton scope="board" sync={sync} visibleIds={visibleIdList} />
+            <SyncButton scope="board" sync={sync} visibleIds={visibleIdList} statusOnly />
           </div>
           {lastRefresh && <span className="cr-sub">synced {timeAgo(lastRefresh)}</span>}
         </div>

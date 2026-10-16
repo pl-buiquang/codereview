@@ -85,15 +85,17 @@ pub fn run(db: &Db, req: &SyncRequest, notify: &dyn Fn(MirrorUpdated)) -> AppRes
     let to_fetch: Vec<String> = if req.mode == Mode::Full {
         entities.clone()
     } else {
-        report.probed = entities.len();
-        let keys = mirror_keys(&db.0.lock().unwrap(), &entities)?;
+        // Visible ids of a Forced sync are refetched anyway, so not probed.
+        let (mut out, probed): (Vec<String>, Vec<String>) =
+            entities.iter().cloned().partition(|id| visible.contains(id.as_str()));
+        report.probed = probed.len();
+        let keys = mirror_keys(&db.0.lock().unwrap(), &probed)?;
         let (full, cheap): (Vec<String>, Vec<String>) =
-            entities.iter().cloned().partition(|id| keys.get(id).is_some_and(MirrorKey::is_open_pr));
+            probed.iter().cloned().partition(|id| keys.get(id).is_some_and(MirrorKey::is_open_pr));
         let probes = mirror::fetch::probe(&full, &cheap);
-        let mut out = Vec::new();
-        for id in &entities {
+        for id in &probed {
             match probes.get(id) {
-                Some(Some(p)) if visible.contains(id.as_str()) || needs_refetch(p, keys.get(id)) => out.push(id.clone()),
+                Some(Some(p)) if needs_refetch(p, keys.get(id)) => out.push(id.clone()),
                 Some(None) => gone.push(id.clone()),
                 // Unchanged, or its probe batch failed (state unknown).
                 _ => {}
