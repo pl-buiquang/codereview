@@ -18,6 +18,7 @@ import { toggleCommandPalette } from "./lib/commandPalette";
 import { useApplySettings } from "./lib/useApplySettings";
 import { useDeepLinkListener } from "./lib/deepLink";
 import { dismissSplash } from "./lib/splash";
+import { GIT_CHANGED_EVENT, gitChangedQueryKeys, type GitChangedPayload } from "./lib/gitChanged";
 import { useUIStore, type Tab } from "./store";
 
 const CLOSE_ACTIVE_TAB_EVENT = "close-active-tab";
@@ -65,6 +66,24 @@ function App() {
         else unlisten = dispose;
       })
       .catch((e) => console.warn("Could not register focus listener", e));
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    listen<GitChangedPayload>(GIT_CHANGED_EVENT, ({ payload }) => {
+      for (const queryKey of gitChangedQueryKeys(payload)) queryClient.invalidateQueries({ queryKey });
+    })
+      .then((dispose) => {
+        if (disposed) dispose();
+        else unlisten = dispose;
+      })
+      .catch((e) => console.warn("Could not register git-changed listener", e));
     return () => {
       disposed = true;
       unlisten?.();

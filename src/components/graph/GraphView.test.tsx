@@ -11,6 +11,9 @@ const worktreeStatus = vi.fn();
 const listWorktrees = vi.fn();
 const commitDetail = vi.fn();
 const commitFileDiff = vi.fn();
+const watchAcquire = vi.fn((_id: number) => Promise.resolve(true));
+const watchRelease = vi.fn((_id: number) => Promise.resolve());
+const fetchRepo = vi.fn();
 vi.mock("../../lib/api", () => ({
   api: {
     graphLog: (a: unknown) => graphLog(a),
@@ -20,6 +23,10 @@ vi.mock("../../lib/api", () => ({
     commitDetail: (id: number, sha: string) => commitDetail(id, sha),
     commitFileDiff: (a: unknown) => commitFileDiff(a),
     listBranches: () => Promise.resolve([]),
+    watchAcquire: (id: number) => watchAcquire(id),
+    watchRelease: (id: number) => watchRelease(id),
+    repoSyncState: () => Promise.resolve({ last_fetch_at: null, last_fetch_error: null, last_local_change_at: null }),
+    fetchRepo: (id: number, min?: number) => fetchRepo(id, min),
   },
 }));
 
@@ -28,7 +35,7 @@ vi.mock("../../lib/toast", () => ({
   toast: { error: (m: string) => toastError(m), success: vi.fn() },
 }));
 
-import { GraphView, GRAPH_PAGE_SIZE } from "./GraphView";
+import { GraphView, GRAPH_PAGE_SIZE, fetchLabel } from "./GraphView";
 
 const repo: Repository = {
   id: 3,
@@ -195,5 +202,39 @@ describe("GraphView", () => {
     await user.click(wipRow);
     expect(screen.getByText("Uncommitted changes")).toBeInTheDocument();
     expect(screen.getByText("notes.txt")).toBeInTheDocument();
+  });
+
+  it("holds the repo's git watcher while mounted", async () => {
+    const { unmount } = renderView();
+    await waitFor(() => expect(watchAcquire).toHaveBeenCalledWith(repo.id));
+    unmount();
+    await waitFor(() => expect(watchRelease).toHaveBeenCalledWith(repo.id));
+  });
+
+  it("Fetch runs a fetch and reloads the refs", async () => {
+    const user = userEvent.setup();
+    fetchRepo.mockResolvedValue({
+      fetched: true,
+      state: { last_fetch_at: new Date().toISOString(), last_fetch_error: null, last_local_change_at: null },
+    });
+    renderView();
+    await waitFor(() => expect(listRefs).toHaveBeenCalledTimes(1));
+    expect(screen.getByText("never fetched")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Fetch/ }));
+    await waitFor(() => expect(fetchRepo).toHaveBeenCalledWith(repo.id, undefined));
+    await waitFor(() => expect(listRefs).toHaveBeenCalledTimes(2));
+  });
+});
+
+describe("fetchLabel", () => {
+  it("prefers the error, then the age", () => {
+    expect(fetchLabel(undefined)).toBe("never fetched");
+    expect(fetchLabel({ last_fetch_at: "2020-01-01T00:00:00Z", last_fetch_error: "boom", last_local_change_at: null })).toBe(
+      "fetch failed",
+    );
+    expect(fetchLabel({ last_fetch_at: new Date().toISOString(), last_fetch_error: null, last_local_change_at: null })).toBe(
+      "fetched just now",
+    );
   });
 });

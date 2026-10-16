@@ -20,6 +20,9 @@ vi.mock("../lib/api", () => ({
     worktreeStatus: () =>
       Promise.resolve({ head_sha: "a".repeat(40), staged: [], unstaged: [], untracked: [] }),
     listWorktrees: () => Promise.resolve([]),
+    watchAcquire: () => Promise.resolve(true),
+    watchRelease: () => Promise.resolve(),
+    repoSyncState: () => Promise.resolve({ last_fetch_at: null, last_fetch_error: null, last_local_change_at: null }),
     ghAuthStatus: () => ghAuthStatus(),
     listPrs: (id: number) => listPrs(id),
     createReviewForPr: (o: string, n: string, num: number, paths: string[]) => createReviewForPr(o, n, num, paths),

@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
-import { useInfiniteQuery, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import { toast } from "../../lib/toast";
+import { useSettingsStore } from "../../lib/settings";
+import { timeAgo } from "../../lib/timeAgo";
+import { useRepoWatch } from "../../lib/useRepoWatch";
+import { useUIStore } from "../../store";
+import type { RepoSyncState } from "../../lib/types";
+import { KebabMenu } from "../KebabMenu";
 import { layoutGraph } from "../../lib/graphLayout";
 import type { ChangedFile, GraphScope, RefInfo, Repository, WipKind } from "../../lib/types";
 import { Icon } from "../icons";
@@ -24,6 +30,14 @@ const SCOPE_OPTIONS: { value: GraphScope; label: string }[] = [
 
 type WipEntry = { path: string; kind: WipKind };
 
+const FETCHED_KEYS = ["graph", "refs", "worktrees", "branches", "repo-sync", "prs"];
+
+export function fetchLabel(state: RepoSyncState | undefined): string {
+  if (state?.last_fetch_error) return "fetch failed";
+  if (state?.last_fetch_at) return `fetched ${timeAgo(state.last_fetch_at)}`;
+  return "never fetched";
+}
+
 function basename(path: string): string {
   const parts = path.split(/[\\/]/).filter(Boolean);
   return parts[parts.length - 1] ?? path;
@@ -42,6 +56,9 @@ export function GraphView({ repo }: { repo: Repository }) {
   const [pillMenu, setPillMenu] = useState<{ branch: string; anchor: MenuAnchor } | null>(null);
   const [leftWidth, setLeftWidth] = useState(240);
   const [rightWidth, setRightWidth] = useState(340);
+  const hasClone = repo.local_path != null;
+  // Watched repos reload from git-changed events; the rest reload on focus.
+  const watching = useRepoWatch(hasClone ? repo.id : null);
 
   const graphQuery = useInfiniteQuery({
     queryKey: ["graph", repo.id, scope, ctx],
@@ -56,11 +73,13 @@ export function GraphView({ repo }: { repo: Repository }) {
     initialPageParam: 0,
     getNextPageParam: (last, all) =>
       last.length < GRAPH_PAGE_SIZE ? undefined : all.length * GRAPH_PAGE_SIZE,
+    refetchOnWindowFocus: !watching,
   });
 
   const refsQuery = useQuery({
     queryKey: ["refs", repo.id, ctx],
     queryFn: () => api.listRefs(repo.id, ctx),
+    refetchOnWindowFocus: !watching,
   });
 
   const wipQuery = useQuery({
@@ -72,8 +91,52 @@ export function GraphView({ repo }: { repo: Repository }) {
   const worktreesQuery = useQuery({
     queryKey: ["worktrees", repo.id],
     queryFn: () => api.listWorktrees(repo.id),
-    enabled: repo.local_path != null,
+    enabled: hasClone,
+    refetchOnWindowFocus: !watching,
   });
+
+  const syncQuery = useQuery({
+    queryKey: ["repo-sync", repo.id],
+    queryFn: () => api.repoSyncState(repo.id),
+    enabled: hasClone,
+  });
+  const afterFetch = useCallback(() => {
+    for (const key of FETCHED_KEYS) queryClient.invalidateQueries({ queryKey: [key, repo.id] });
+    queryClient.invalidateQueries({ queryKey: ["repositories"] });
+  }, [queryClient, repo.id]);
+  const fetchRepo = useMutation({
+    mutationFn: () => api.fetchRepo(repo.id),
+    onSuccess: afterFetch,
+    onError: (e) => {
+      queryClient.invalidateQueries({ queryKey: ["repo-sync", repo.id] });
+      toast.error(`Fetch failed:\n${String(e)}`);
+    },
+  });
+
+  const autoFetchMinutes = useSettingsStore((s) => s.autoFetchMinutes);
+  const visible = useUIStore((s) => s.activeTabId === "home" && s.homeRepoId === repo.id);
+  useEffect(() => {
+    if (!hasClone || !visible || autoFetchMinutes <= 0) return;
+    const run = () => {
+      api
+        .fetchRepo(repo.id, autoFetchMinutes * 60)
+        .then((r) => {
+          if (r.fetched) afterFetch();
+        })
+        .catch(() => queryClient.invalidateQueries({ queryKey: ["repo-sync", repo.id] }));
+    };
+    run();
+    window.addEventListener("focus", run);
+    return () => window.removeEventListener("focus", run);
+  }, [hasClone, visible, autoFetchMinutes, repo.id, afterFetch, queryClient]);
+
+  // Keeps "fetched N min ago" current.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (!syncQuery.data?.last_fetch_at) return;
+    const id = setInterval(() => setTick((n) => n + 1), 30_000);
+    return () => clearInterval(id);
+  }, [syncQuery.data?.last_fetch_at]);
 
   const isCommitSelected = selected != null && selected !== WIP_SELECTION;
   const detailQuery = useQuery({
@@ -248,12 +311,12 @@ export function GraphView({ repo }: { repo: Repository }) {
     [ctx, resetContext],
   );
 
-  const refresh = () => {
+  const reload = () => {
     for (const key of ["graph", "refs", "wip", "worktrees"]) {
       queryClient.invalidateQueries({ queryKey: [key, repo.id] });
     }
   };
-  const refreshing =
+  const reloading =
     graphQuery.isFetching || refsQuery.isFetching || wipQuery.isFetching;
 
   const startResize = (side: "left" | "right") => (e: ReactMouseEvent) => {
@@ -383,15 +446,40 @@ export function GraphView({ repo }: { repo: Repository }) {
           )}
         </span>
         <span className="cr-spacer" />
-        <button
-          className="btn btn-sm"
-          title="Refresh graph"
-          aria-label="Refresh graph"
-          disabled={refreshing}
-          onClick={refresh}
-        >
-          {refreshing ? <span className="spinner" /> : <Icon name="refresh" size={13} />}
-        </button>
+        {reloading && <span className="spinner" aria-label="Reloading" />}
+        {hasClone && (
+          <>
+            <span
+              className="cr-sub gv-fetched"
+              title={syncQuery.data?.last_fetch_error ?? syncQuery.data?.last_fetch_at ?? undefined}
+            >
+              {fetchLabel(syncQuery.data)}
+            </span>
+            <button
+              className="btn btn-sm"
+              title="git fetch --prune origin"
+              disabled={fetchRepo.isPending}
+              onClick={() => fetchRepo.mutate()}
+            >
+              {fetchRepo.isPending ? <span className="spinner" /> : <Icon name="refresh" size={13} />}
+              Fetch
+            </button>
+          </>
+        )}
+        <KebabMenu title="Graph actions">
+          {(close) => (
+            <button
+              role="menuitem"
+              title="Re-read local git state (normally automatic)"
+              onClick={() => {
+                close();
+                reload();
+              }}
+            >
+              Reload
+            </button>
+          )}
+        </KebabMenu>
       </div>
 
       <div className="gv-panes">

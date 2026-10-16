@@ -49,6 +49,14 @@ export const INBOX_POLL_OPTIONS: { label: string; value: number }[] = [
   { label: "30m", value: 1_800_000 },
 ];
 
+/** Background Fetch choices, in minutes; 0 = off (the default). */
+export const AUTO_FETCH_OPTIONS: { label: string; value: number }[] = [
+  { label: "off", value: 0 },
+  { label: "5 min", value: 5 },
+  { label: "15 min", value: 15 },
+  { label: "30 min", value: 30 },
+];
+
 /** Board auto-refresh choices — same cadence as the inbox (also a live
  *  GitHub fan-out: tracked cards + review threads). */
 export const BOARD_POLL_OPTIONS = INBOX_POLL_OPTIONS;
@@ -66,6 +74,7 @@ type PersistedSettings = Pick<
   | "prListPollMs"
   | "inboxPollMs"
   | "boardPollMs"
+  | "autoFetchMinutes"
   | "boardStatusBorderSide"
   | "chatModel"
   | "overviewModel"
@@ -94,6 +103,7 @@ const DEFAULTS: PersistedSettings = {
   prListPollMs: 0,
   inboxPollMs: 0,
   boardPollMs: 0,
+  autoFetchMinutes: 0,
   boardStatusBorderSide: "top",
   chatModel: "",
   overviewModel: "sonnet",
@@ -132,6 +142,9 @@ interface SettingsState {
   inboxPollMs: number;
   /** Board auto-refresh interval in ms; 0 = off. */
   boardPollMs: number;
+  /** Fetch a repo when its view opens or regains focus and the last fetch is
+   *  older than this many minutes; 0 = never fetch in the background. */
+  autoFetchMinutes: number;
   /** Which edge of a board card shows the PR-status color. */
   boardStatusBorderSide: BoardBorderSide;
   /** Highlight intra-line character-level changes (markEdits). */
@@ -170,6 +183,7 @@ interface SettingsState {
   setPrListPollMs: (ms: number) => void;
   setInboxPollMs: (ms: number) => void;
   setBoardPollMs: (ms: number) => void;
+  setAutoFetchMinutes: (minutes: number) => void;
   setBoardStatusBorderSide: (side: BoardBorderSide) => void;
   setChatModel: (s: string) => void;
   setMarkEdits: (b: boolean) => void;
@@ -240,6 +254,7 @@ export const useSettingsStore = create<SettingsState>()(
       setPrListPollMs: (prListPollMs) => set({ prListPollMs }),
       setInboxPollMs: (inboxPollMs) => set({ inboxPollMs }),
       setBoardPollMs: (boardPollMs) => set({ boardPollMs }),
+      setAutoFetchMinutes: (autoFetchMinutes) => set({ autoFetchMinutes }),
       setBoardStatusBorderSide: (boardStatusBorderSide) => set({ boardStatusBorderSide }),
       setChatModel: (chatModel) => set({ chatModel }),
       setMarkEdits: (markEdits) => set({ markEdits }),

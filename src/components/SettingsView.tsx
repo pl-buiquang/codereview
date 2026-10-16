@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useUIStore } from "../store";
 import {
+  AUTO_FETCH_OPTIONS,
   effectiveTheme,
   exportSettings,
   importSettings,
@@ -223,6 +224,8 @@ function GeneralSection() {
   const largeDiffMaxLines = useSettingsStore((s) => s.largeDiffMaxLines);
   const setLargeDiffMaxLines = useSettingsStore((s) => s.setLargeDiffMaxLines);
   const setBoardStatusBorderSide = useSettingsStore((s) => s.setBoardStatusBorderSide);
+  const autoFetchMinutes = useSettingsStore((s) => s.autoFetchMinutes);
+  const setAutoFetchMinutes = useSettingsStore((s) => s.setAutoFetchMinutes);
   const fileTestPatterns = useSettingsStore((s) => s.fileTestPatterns);
   const fileConfigPatterns = useSettingsStore((s) => s.fileConfigPatterns);
   const defaultTerminal = useSettingsStore((s) => s.defaultTerminal);
@@ -389,6 +392,27 @@ function GeneralSection() {
             <option value="right">Right</option>
             <option value="bottom">Bottom</option>
             <option value="left">Left</option>
+          </select>
+        </label>
+      </section>
+
+      <section className="settings-group">
+        <h3>Repositories</h3>
+        <label
+          className="settings-row"
+          title="git fetch a repository when its Graph opens or the window regains focus, if the last fetch is older than this"
+        >
+          <span>Background fetch</span>
+          <select
+            className="select"
+            value={autoFetchMinutes}
+            onChange={(e) => setAutoFetchMinutes(Number(e.target.value))}
+          >
+            {AUTO_FETCH_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.value === 0 ? o.label : `when older than ${o.label}`}
+              </option>
+            ))}
           </select>
         </label>
       </section>

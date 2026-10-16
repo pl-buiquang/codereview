@@ -119,6 +119,7 @@ export function RepoSidebar({
       });
       return ok ? api.deleteGoneBranches(repo.id, gone) : undefined;
     },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["repo-sync", repo.id] }),
     onSuccess: (outcome) => {
       if (outcome === null) {
         toast.success("No gone branches.");
@@ -227,7 +228,7 @@ export function RepoSidebar({
             className="btn btn-sm"
             disabled={pruneGone.isPending}
             onClick={() => pruneGone.mutate()}
-            title="git fetch --prune, then delete local branches whose upstream is gone"
+            title="Fetch, then delete local branches whose upstream is gone"
           >
             {pruneGone.isPending ? <span className="spinner" /> : "Prune gone"}
           </button>

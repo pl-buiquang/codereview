@@ -20,6 +20,7 @@ import type {
   FocusLevel,
   FocusOverride,
   FocusView,
+  FetchResult,
   FreshnessResult,
   GraphCommit,
   GraphScope,
@@ -32,6 +33,7 @@ import type {
   RefInfo,
   ReanchorResult,
   RefreshResult,
+  RepoSyncState,
   Repository,
   Review,
   ReviewDetail,
@@ -307,6 +309,11 @@ export const api = {
   listRefs: (repoId: number, worktreePath?: string | null) =>
     invoke<RefInfo[]>("list_refs", { repoId, worktreePath: worktreePath ?? null }),
   listGoneBranches: (repoId: number) => invoke<string[]>("list_gone_branches", { repoId }),
+  fetchRepo: (repoId: number, minIntervalSecs?: number) =>
+    invoke<FetchResult>("fetch_repo", { repoId, minIntervalSecs: minIntervalSecs ?? null }),
+  repoSyncState: (repoId: number) => invoke<RepoSyncState>("repo_sync_state", { repoId }),
+  watchAcquire: (repoId: number) => invoke<boolean>("watch_acquire", { repoId }),
+  watchRelease: (repoId: number) => invoke<void>("watch_release", { repoId }),
   deleteGoneBranches: (repoId: number, names: string[]) =>
     invoke<DeleteGoneOutcome>("delete_gone_branches", { repoId, names }),
   commitAvatar: (repoId: number, email: string, sha: string) =>

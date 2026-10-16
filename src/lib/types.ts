@@ -600,3 +600,18 @@ export interface PromptInfo {
   default: string;
   override: string | null;
 }
+
+/** Fetch / local-change bookkeeping for one repository (`repo_sync`). */
+export interface RepoSyncState {
+  last_fetch_at: string | null;
+  last_fetch_error: string | null;
+  last_local_change_at: string | null;
+}
+
+export interface FetchResult {
+  /** false when skipped because the last successful fetch was recent enough. */
+  fetched: boolean;
+  state: RepoSyncState;
+}
+
+export type GitChangeKind = "head" | "refs" | "index" | "fetch";
