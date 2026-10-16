@@ -4,7 +4,8 @@
 //! short locked sections.
 
 use std::collections::{HashMap, HashSet};
-use std::time::Instant;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use chrono::Utc;
 use rusqlite::{params, Connection, OptionalExtension};
@@ -142,6 +143,12 @@ pub fn board_refresh_impl(db: &Db) -> AppResult<BoardRefreshResult> {
         rows
     };
     let tracked_set: HashSet<&str> = tracked_ids.iter().map(String::as_str).collect();
+    let prev_updated_at: HashMap<String, String> = {
+        let conn = db.0.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT id, updated_at FROM board_card WHERE type = 'pr'")?;
+        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<_>>()?;
+        rows
+    };
 
     let authored = board::search_authored_open_prs().unwrap_or_else(|e| {
         crate::logging::warn(&format!("[board.refresh] authored search failed: {e}"));
@@ -174,7 +181,7 @@ pub fn board_refresh_impl(db: &Db) -> AppResult<BoardRefreshResult> {
     }
 
     reconcile_links(db, refetched.values().chain(authored.iter().filter(|n| !tracked_set.contains(n.id.as_str()))))?;
-    refresh_pending_threads(db, &viewer.login)?;
+    refresh_pending_threads(db, &viewer.login, &prev_updated_at)?;
 
     let card_count: i64 = {
         let conn = db.0.lock().unwrap();
@@ -251,10 +258,33 @@ fn reconcile_links<'a>(db: &Db, prs: impl Iterator<Item = &'a BoardNode>) -> App
     Ok(())
 }
 
-/// For every open, tracked PR card, fetch its review threads and recompute
-/// the pending-threads comment badge (concurrently, like the inbox's
-/// top-files enrichment).
-fn refresh_pending_threads(db: &Db, viewer_login: &str) -> AppResult<()> {
+/// Resolving or unresolving a thread does not bump the PR's `updatedAt`, so an
+/// unchanged PR still gets its threads refetched once this old.
+const THREADS_MAX_AGE: Duration = Duration::from_secs(15 * 60);
+
+/// When each card's threads were last fetched, by this process.
+static THREADS_FETCHED_AT: Mutex<Option<HashMap<String, Instant>>> = Mutex::new(None);
+
+fn threads_need_fetch(
+    prev_updated_at: Option<&str>,
+    updated_at: &str,
+    has_count: bool,
+    fetched_at: Option<Instant>,
+    now: Instant,
+) -> bool {
+    !has_count
+        || prev_updated_at != Some(updated_at)
+        || fetched_at.is_none_or(|t| now.duration_since(t) >= THREADS_MAX_AGE)
+}
+
+/// For every open, tracked PR card whose threads may have changed, fetch its
+/// review threads and recompute the pending-threads comment badge
+/// (concurrently, like the inbox's top-files enrichment).
+fn refresh_pending_threads(
+    db: &Db,
+    viewer_login: &str,
+    prev_updated_at: &HashMap<String, String>,
+) -> AppResult<()> {
     struct ThreadJob {
         id: String,
         owner: String,
@@ -263,18 +293,29 @@ fn refresh_pending_threads(db: &Db, viewer_login: &str) -> AppResult<()> {
         is_mine: bool,
     }
 
+    let started = Instant::now();
+    let fetched_at = THREADS_FETCHED_AT.lock().unwrap().clone().unwrap_or_default();
     let jobs: Vec<ThreadJob> = {
         let conn = db.0.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, repo, number, is_mine FROM board_card
+            "SELECT id, repo, number, is_mine, updated_at, pending_threads IS NOT NULL FROM board_card
              WHERE type = 'pr' AND archived_at IS NULL AND discarded_at IS NULL
                AND state NOT IN ('merged', 'closed')",
         )?;
-        let rows: Vec<(String, String, i64, i64)> = stmt
-            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
+        let rows: Vec<(String, String, i64, i64, String, bool)> = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)))?
             .collect::<rusqlite::Result<_>>()?;
         rows.into_iter()
-            .filter_map(|(id, repo, number, is_mine)| {
+            .filter(|(id, _, _, _, updated_at, has_count)| {
+                threads_need_fetch(
+                    prev_updated_at.get(id).map(String::as_str),
+                    updated_at,
+                    *has_count,
+                    fetched_at.get(id).copied(),
+                    started,
+                )
+            })
+            .filter_map(|(id, repo, number, is_mine, _, _)| {
                 let (owner, name) = repo.split_once('/')?;
                 Some(ThreadJob {
                     id,
@@ -288,17 +329,22 @@ fn refresh_pending_threads(db: &Db, viewer_login: &str) -> AppResult<()> {
     };
 
     let results = crate::inbox::concurrent_map(jobs, 8, |job| {
-        let threads = gh::pr_review_threads(&job.owner, &job.name, job.number).unwrap_or_default();
+        let threads = gh::pr_review_threads(&job.owner, &job.name, job.number).ok();
         let mode = if job.is_mine { ThreadMode::Mine } else { ThreadMode::Reviewing };
-        (job.id.clone(), board::pending_threads(&threads, viewer_login, mode))
+        let count = threads.map(|t| board::pending_threads(&t, viewer_login, mode));
+        (job.id.clone(), count)
     });
 
     let conn = db.0.lock().unwrap();
+    let mut fetched = THREADS_FETCHED_AT.lock().unwrap();
+    let fetched = fetched.get_or_insert_with(HashMap::new);
     for (id, count) in results {
+        let Some(count) = count else { continue };
         conn.execute(
             "UPDATE board_card SET pending_threads = ?1 WHERE id = ?2",
             params![count as i64, id],
         )?;
+        fetched.insert(id, started);
     }
     Ok(())
 }
@@ -914,6 +960,19 @@ pub fn board_meta_tags(db: State<Db>) -> AppResult<Vec<String>> {
 mod tests {
     use super::*;
     use crate::db::open_memory;
+
+    #[test]
+    fn threads_skipped_only_when_unchanged_counted_and_recent() {
+        let now = Instant::now();
+        let recent = Some(now);
+        assert!(!threads_need_fetch(Some("t1"), "t1", true, recent, now));
+        assert!(threads_need_fetch(Some("t0"), "t1", true, recent, now), "PR updated");
+        assert!(threads_need_fetch(None, "t1", true, recent, now), "newly tracked");
+        assert!(threads_need_fetch(Some("t1"), "t1", false, recent, now), "never counted");
+        assert!(threads_need_fetch(Some("t1"), "t1", true, None, now), "not fetched by this process");
+        let later = now + THREADS_MAX_AGE;
+        assert!(threads_need_fetch(Some("t1"), "t1", true, recent, later), "resolutions don't bump updatedAt");
+    }
 
     fn seed_card(conn: &Connection, id: &str, repo: &str, number: i64, typ: &str) {
         conn.execute(
