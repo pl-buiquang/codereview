@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useIsMutating, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { toast } from "../lib/toast";
 import { confirmDialog } from "../lib/confirm";
@@ -20,6 +20,7 @@ const VERDICT_LABEL: Record<WorktreeVerdict["kind"], string> = {
 const VERDICT_ORDER: WorktreeVerdict["kind"][] = ["flag", "remove", "prune", "fast_forward", "resync", "keep"];
 
 const WORKTREE_GC_KEY = ["worktree-gc"] as const;
+const WORKTREE_SCAN_KEY = ["worktree-gc-run"] as const;
 
 function summarizeActions(actions: WorktreeGcAction[]): string {
   const ok = actions.filter((a) => a.ok);
@@ -62,6 +63,7 @@ export function WorktreesView() {
   });
 
   const scan = useMutation({
+    mutationKey: WORKTREE_SCAN_KEY,
     mutationFn: (apply: boolean) => api.worktreeGcRun(apply, apply),
     onSuccess: (report, apply) => {
       queryClient.setQueryData(WORKTREE_GC_KEY, report);
@@ -70,6 +72,9 @@ export function WorktreesView() {
     onError: (e) => toast.error(`Worktree scan failed:\n${String(e)}`),
   });
 
+  // The scan outlives this view (backend keeps running when the pane switches),
+  // so read "running" from the mutation cache rather than this observer.
+  const scanning = useIsMutating({ mutationKey: WORKTREE_SCAN_KEY }) > 0;
   const report = reportQuery.data ?? null;
   const rescan = () => scan.mutate(false);
   const patchRow = (path: string, f: (row: WorktreeRow) => WorktreeRow | null) =>
@@ -140,7 +145,7 @@ export function WorktreesView() {
           <p className="cr-sub">
             {report
               ? `${counts.total} worktrees · ${counts.flag} need a look · ${actionable} actionable · scanned ${timeAgo(report.ran_at)}`
-              : scan.isPending
+              : scanning
                 ? "Scanning all repositories…"
                 : "Not scanned yet — press Scan to check every repository's worktrees"}
           </p>
@@ -149,10 +154,10 @@ export function WorktreesView() {
           <label className="worktrees-toggle">
             <input type="checkbox" checked={showKept} onChange={(e) => setShowKept(e.target.checked)} /> Show kept
           </label>
-          <button className="btn btn-sm" disabled={scan.isPending} onClick={rescan}>
-            <Icon name="refresh" size={13} /> {scan.isPending ? "Scanning…" : "Scan"}
+          <button className="btn btn-sm" disabled={scanning} onClick={rescan}>
+            <Icon name="refresh" size={13} /> {scanning ? "Scanning…" : "Scan"}
           </button>
-          <button className="btn btn-sm btn-primary" disabled={scan.isPending || actionable === 0} onClick={runCleanup}>
+          <button className="btn btn-sm btn-primary" disabled={scanning || actionable === 0} onClick={runCleanup}>
             <Icon name="trash" size={13} /> Clean up
           </button>
         </div>

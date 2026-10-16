@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use rusqlite::OptionalExtension;
 use tauri::State;
 
 use crate::db::Db;
@@ -100,14 +101,28 @@ pub async fn worktree_gc_run(
         (repos, chat_paths)
     };
     let opts = GcOptions { remove, sync };
-    tauri::async_runtime::spawn_blocking(move || worktree_gc::run(&repos, chat_paths, opts))
+    let report = tauri::async_runtime::spawn_blocking(move || worktree_gc::run(&repos, chat_paths, opts))
         .await
-        .map_err(|e| AppError::Other(format!("worktree gc task failed: {e}")))?
+        .map_err(|e| AppError::Other(format!("worktree gc task failed: {e}")))??;
+    let conn = db.0.lock().unwrap();
+    conn.execute(
+        "INSERT INTO worktree_gc_report (id, report, created_at) VALUES (1, ?1, datetime('now'))
+         ON CONFLICT(id) DO UPDATE SET report = excluded.report, created_at = excluded.created_at",
+        rusqlite::params![serde_json::to_string(&report)?],
+    )?;
+    Ok(report)
 }
 
 #[tauri::command]
-pub fn worktree_gc_last() -> Option<GcReport> {
-    worktree_gc::last_report()
+pub fn worktree_gc_last(db: State<Db>) -> AppResult<Option<serde_json::Value>> {
+    if let Some(report) = worktree_gc::last_report() {
+        return Ok(Some(serde_json::to_value(report)?));
+    }
+    let conn = db.0.lock().unwrap();
+    let stored: Option<String> = conn
+        .query_row("SELECT report FROM worktree_gc_report WHERE id = 1", [], |r| r.get(0))
+        .optional()?;
+    Ok(stored.and_then(|s| serde_json::from_str(&s).ok()))
 }
 
 /// Fast-forwards (or resyncs after an upstream rewrite) one registered worktree.
