@@ -33,7 +33,7 @@ jobs:
       - name: Enforce audit exception review deadline
         run: |
           if [[ "$(date -u +%F)" > "2026-11-06" ]]; then
-            echo '::error::Review the GTK3 exceptions in .cargo/audit.toml and specs/security.md before extending this deadline.'
+            echo '::error::Review the GTK3 and yanked-crate exceptions in .cargo/audit.toml and specs/security.md before extending this deadline.'
             exit 1
           fi
       - run: rustup toolchain install

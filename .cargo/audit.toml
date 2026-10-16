@@ -4,3 +4,8 @@ ignore = [
     "RUSTSEC-2024-0429", # glib 0.18.5: VariantStrIter unsoundness
     "RUSTSEC-2024-0370", # proc-macro-error 1.0.4: unmaintained
 ]
+
+# zip 4.x/5.x are all yanked and tauri-plugin-updater (2.14) still requires zip ^4.
+# cargo-audit can't scope this per crate; review by 2026-11-06. See specs/security.md.
+[yanked]
+enabled = false

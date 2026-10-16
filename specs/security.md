@@ -32,8 +32,9 @@ Implemented for 0.1.2:
   dependencies, audits the Rust lockfile with warnings treated as failures, and
   scans full fetched Git history with redacted Gitleaks output. Scanner failures
   fail the workflow; they are not treated as clean results.
-- Only the two named GTK3 advisories below are temporarily excepted. CI refuses
-  to use these exceptions after 2026-11-06 until they are reviewed explicitly.
+- Only the two named GTK3 advisories below, and the yanked-crate check (see
+  "yanked zip"), are temporarily excepted. CI refuses to use these exceptions
+  after 2026-11-06 until they are reviewed explicitly.
 - Dependabot checks npm, Cargo, and Actions weekly. Coupled React and Vitest
   packages are grouped. Updates still require review and passing CI.
 - Third-party Actions are pinned to commit SHAs; Gitleaks is pinned to a release
@@ -145,6 +146,19 @@ Remove each exception from `.cargo/audit.toml` when resolved. Remove the deadlin
 gate when both exceptions are gone; any extension must update the rationale and
 deadline here, in the audit config, and in the security workflow together. New
 advisories must fail CI rather than being folded into these exceptions.
+
+## P2: re-enable the yanked-crate check (zip)
+
+Status: open. Review deadline: **2026-11-06**.
+
+Every `zip` 4.x and 5.x release is yanked, and `tauri-plugin-updater` (2.14, the
+latest 2.x) requires `zip ^4` for Windows `.zip` and Linux AppImage update
+extraction. No compatible non-yanked version exists, and cargo-audit can't
+exempt a single crate, so `[yanked] enabled = false` is set in `.cargo/audit.toml`.
+RustSec advisories are still enforced.
+
+Remove the `[yanked]` section once the updater moves to a non-yanked `zip`
+(`cargo update -p tauri-plugin-updater`, then check `cargo audit`).
 
 ## P2: signing and release verification
 
