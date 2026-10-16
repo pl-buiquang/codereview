@@ -44,8 +44,10 @@ Glossary of domain terms used in this app.
   fetches only that; it runs automatically. A sync the user asks for is always fresh for
   everything on screen. *Full* sync ignores what it thinks is fresh and refetches everything.
   _Avoid_: refresh
-- **Discovery** — the part of a sync that finds *new* PRs and issues (inbox searches, authored
-  PRs). It runs less often than the rest of a light sync.
+- **Discovery** — finding PRs and issues the mirror doesn't know yet (review requests,
+  mentions, team requests, newly authored PRs). Separate from Sync: it has its own "Check for
+  new" action and runs on its own slower schedule while the app is visible.
+  _Avoid_: inbox refresh
 - **Reset mirror** — wipe the mirror and let it rebuild. Never touches user state.
 - **Fetch** — download a repository's remote branches (`git fetch`). Always explicit or
   opt-in, never a side effect of looking at a view.
