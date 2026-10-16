@@ -12,6 +12,7 @@ import { BoardCard, cardTags, ciStatus, prStatus, prStatusLabel } from "./BoardC
 import { RepoName } from "./RepoName";
 import { TagFilter } from "./TagFilter";
 import { TrackPrDialog } from "./TrackPrDialog";
+import { BoardOverviewPane } from "./BoardOverviewPane";
 import { Icon } from "./icons";
 
 const LANES: { key: BoardLane; label: string }[] = [
@@ -63,6 +64,8 @@ export function BoardView() {
   const [addingLane, setAddingLane] = useState<BoardLane | null>(null);
   const [addValue, setAddValue] = useState("");
   const [showTrackDialog, setShowTrackDialog] = useState(false);
+  const overviewOpen = useSettingsStore((s) => s.boardOverviewOpen);
+  const setOverviewOpen = useSettingsStore((s) => s.setBoardOverviewOpen);
 
   const boardQuery = useQuery({ queryKey: ["board"], queryFn: api.boardList });
   const tagsQuery = useQuery({ queryKey: ["board-meta-tags"], queryFn: api.boardMetaTags });
@@ -263,6 +266,7 @@ export function BoardView() {
     return true;
   };
   const filtered = allCards.filter((c) => matches(c));
+  const visibleIds = new Set(filtered.map((c) => c.id));
 
   // Each facet counts cards matching every other active filter, so its own options stay comparable.
   const facetCounts = (skip: "repo" | "status" | "ci" | "tags", keysOf: (c: BoardCardT) => (string | null | undefined)[]) => {
@@ -322,6 +326,13 @@ export function BoardView() {
         <div className="cr-spacer" />
         <div className="inbox-head-actions">
           <div className="inbox-head-buttons">
+            <button
+              className={`btn${overviewOpen ? " active" : ""}`}
+              onClick={() => setOverviewOpen(!overviewOpen)}
+              title={overviewOpen ? "Hide AI overview" : "Show AI overview"}
+            >
+              <Icon name="bot" size={13} /> AI Overview
+            </button>
             <button className="btn" onClick={() => setShowTrackDialog(true)}>
               <Icon name="plus" size={13} /> Track
             </button>
@@ -350,6 +361,8 @@ export function BoardView() {
           {lastRefresh && <span className="cr-sub">updated {timeAgo(lastRefresh)}</span>}
         </div>
       </header>
+
+      {overviewOpen && <BoardOverviewPane cards={boardQuery.data ?? []} visibleIds={visibleIds} />}
 
       <div className="inbox-layout">
         <aside className="cr-rail">

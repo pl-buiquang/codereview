@@ -573,3 +573,23 @@ export interface WorktreeGcReport {
   repos: WorktreeRepoReport[];
   actions: WorktreeGcAction[];
 }
+
+export interface BoardOverview {
+  markdown: string;
+  generated_at: string;
+  model: string | null;
+  card_count: number;
+  card_ids: string[];
+  input_tokens: number | null;
+  output_tokens: number | null;
+  cost_usd: number | null;
+}
+
+export interface PromptInfo {
+  key: string;
+  label: string;
+  description: string;
+  placeholders: string[];
+  default: string;
+  override: string | null;
+}

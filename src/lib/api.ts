@@ -4,6 +4,8 @@ import type {
   ChatWorktree,
   WorktreeGcReport,
   BoardCard,
+  BoardOverview,
+  PromptInfo,
   BoardMeta,
   BoardMetaKind,
   BoardRefreshResult,
@@ -191,6 +193,14 @@ export const api = {
   boardRefresh: () => invoke<BoardRefreshResult>("board_refresh"),
   boardLastRefreshAt: () => invoke<string | null>("board_last_refresh_at"),
   boardList: () => invoke<BoardCard[]>("board_list"),
+  boardOverviewGet: () => invoke<BoardOverview | null>("board_overview_get"),
+  boardOverviewGenerate: (model: string) =>
+    invoke<BoardOverview>("board_overview_generate", { model: model || null }),
+
+  // AI prompts
+  promptsList: () => invoke<PromptInfo[]>("prompts_list"),
+  promptSet: (key: string, body: string) => invoke<void>("prompt_set", { key, body }),
+  promptReset: (key: string) => invoke<void>("prompt_reset", { key }),
   boardTrackedIds: () => invoke<string[]>("board_tracked_ids"),
   boardTrack: (reference: string) => invoke<string>("board_track", { reference }),
   boardTrackPr: (reference: string) => invoke<string>("board_track_pr", { reference }),

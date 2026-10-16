@@ -5,6 +5,7 @@ import {
   effectiveTheme,
   exportSettings,
   importSettings,
+  parsePromptOverrides,
   parseRepoBasePaths,
   TERMINAL_HOST_OPTIONS,
   TMUX_TARGET_OPTIONS,
@@ -20,11 +21,13 @@ import { api, pickJsonFile, pickSavePath } from "../lib/api";
 import { toast } from "../lib/toast";
 import type { ToolEnv } from "../lib/types";
 import { Icon, type IconName } from "./icons";
+import { AiSection } from "./SettingsAiSection";
 
-type SettingsSection = "general" | "logs";
+type SettingsSection = "general" | "ai" | "logs";
 
 const SECTIONS: { key: SettingsSection; label: string; icon: IconName }[] = [
   { key: "general", label: "General", icon: "gear" },
+  { key: "ai", label: "AI", icon: "bot" },
   { key: "logs", label: "Logs", icon: "file" },
 ];
 
@@ -211,13 +214,11 @@ function GeneralSection() {
   const setDiffFontSize = useSettingsStore((s) => s.setDiffFontSize);
   const setDefaultViewType = useSettingsStore((s) => s.setDefaultViewType);
   const setDefaultThreeDot = useSettingsStore((s) => s.setDefaultThreeDot);
-  const chatModel = useSettingsStore((s) => s.chatModel);
   const markEdits = useSettingsStore((s) => s.markEdits);
   const boardStatusBorderSide = useSettingsStore((s) => s.boardStatusBorderSide);
   const setBotLogins = useSettingsStore((s) => s.setBotLogins);
   const setRepoStripPrefixes = useSettingsStore((s) => s.setRepoStripPrefixes);
   const setRepoBasePaths = useSettingsStore((s) => s.setRepoBasePaths);
-  const setChatModel = useSettingsStore((s) => s.setChatModel);
   const setMarkEdits = useSettingsStore((s) => s.setMarkEdits);
   const largeDiffMaxLines = useSettingsStore((s) => s.largeDiffMaxLines);
   const setLargeDiffMaxLines = useSettingsStore((s) => s.setLargeDiffMaxLines);
@@ -241,7 +242,10 @@ function GeneralSection() {
     try {
       const dest = await pickSavePath("codereview-settings.json", "json");
       if (!dest) return;
-      await api.writeSettingsFile(dest, exportSettings());
+      const prompts = Object.fromEntries(
+        (await api.promptsList()).flatMap((p) => (p.override != null ? [[p.key, p.override]] : [])),
+      );
+      await api.writeSettingsFile(dest, exportSettings(prompts));
       toast.success("Settings exported");
     } catch (err) {
       toast.error(`Export failed:\n${String(err)}`);
@@ -252,7 +256,18 @@ function GeneralSection() {
     try {
       const src = await pickJsonFile();
       if (!src) return;
-      const count = importSettings(await api.readSettingsFile(src));
+      const json = await api.readSettingsFile(src);
+      const count = importSettings(json);
+      const overrides = parsePromptOverrides(json);
+      if (overrides) {
+        const known = await api.promptsList();
+        await Promise.all(
+          known.map((p) =>
+            p.key in overrides ? api.promptSet(p.key, overrides[p.key]) : api.promptReset(p.key),
+          ),
+        );
+        queryClient.invalidateQueries({ queryKey: ["prompts"] });
+      }
       toast.success(`Imported ${count} setting${count === 1 ? "" : "s"}`);
     } catch (err) {
       toast.error(`Import failed:\n${err instanceof Error ? err.message : String(err)}`);
@@ -548,24 +563,6 @@ function GeneralSection() {
       </section>
 
       <section className="settings-group">
-        <h3>Chat</h3>
-        <label className="settings-row settings-row-stack">
-          <span>Model</span>
-          <input
-            type="text"
-            className="input"
-            placeholder="leave empty to use opus (ANTHROPIC_DEFAULT_OPUS_MODEL)"
-            value={chatModel}
-            onChange={(e) => setChatModel(e.target.value)}
-          />
-          <span className="settings-hint muted">
-            Passed as <code>--model</code> to <code>claude -p</code>. Leave empty to use the
-            env-configured default (Bedrock ARN, model name, etc.).
-          </span>
-        </label>
-      </section>
-
-      <section className="settings-group">
         <h3>Backup</h3>
         <div className="settings-row">
           <span>Settings file (JSON)</span>
@@ -617,6 +614,7 @@ export function SettingsView() {
 
         <div className="settings-content">
           {section === "general" && <GeneralSection />}
+          {section === "ai" && <AiSection />}
           {section === "logs" && <LogsSection />}
         </div>
       </div>

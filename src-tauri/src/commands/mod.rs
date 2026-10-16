@@ -6,6 +6,8 @@ pub mod focus;
 pub mod gh;
 pub mod graph;
 pub mod inbox;
+pub mod overview;
+pub mod prompts;
 pub mod repo;
 pub mod review;
 pub mod sessions;

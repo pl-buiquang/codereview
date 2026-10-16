@@ -68,6 +68,8 @@ type PersistedSettings = Pick<
   | "boardPollMs"
   | "boardStatusBorderSide"
   | "chatModel"
+  | "overviewModel"
+  | "boardOverviewOpen"
   | "markEdits"
   | "largeDiffMaxLines"
   | "fileTestPatterns"
@@ -94,6 +96,8 @@ const DEFAULTS: PersistedSettings = {
   boardPollMs: 0,
   boardStatusBorderSide: "top",
   chatModel: "",
+  overviewModel: "sonnet",
+  boardOverviewOpen: false,
   markEdits: false,
   largeDiffMaxLines: 3000,
   fileTestPatterns: DEFAULT_TEST_PATTERNS,
@@ -136,6 +140,9 @@ interface SettingsState {
   largeDiffMaxLines: number;
   /** Model passed to `claude -p --model`. Empty = use env default (opus). */
   chatModel: string;
+  /** Model for the board AI overview; empty = same resolution as chat. */
+  overviewModel: string;
+  boardOverviewOpen: boolean;
   /** Newline-separated globs classifying changed files as tests (checked first). */
   fileTestPatterns: string;
   /** Newline-separated globs classifying changed files as config/docs. */
@@ -175,6 +182,8 @@ interface SettingsState {
   setTmuxSessionName: (s: string) => void;
   setSessionHistoryDays: (days: number) => void;
   setSessionSummaryDir: (s: string) => void;
+  setOverviewModel: (m: string) => void;
+  setBoardOverviewOpen: (open: boolean) => void;
 }
 
 const ENUMS: Partial<Record<keyof PersistedSettings, readonly string[]>> = {
@@ -243,6 +252,8 @@ export const useSettingsStore = create<SettingsState>()(
       setTmuxSessionName: (tmuxSessionName) => set({ tmuxSessionName }),
       setSessionHistoryDays: (sessionHistoryDays) => set({ sessionHistoryDays }),
       setSessionSummaryDir: (sessionSummaryDir) => set({ sessionSummaryDir }),
+      setOverviewModel: (overviewModel) => set({ overviewModel }),
+      setBoardOverviewOpen: (boardOverviewOpen) => set({ boardOverviewOpen }),
     }),
     {
       name: "codereview-settings",
@@ -271,14 +282,15 @@ function pickPersisted(s: PersistedSettings): PersistedSettings {
 }
 
 
-/** Serialize the persisted settings to a portable JSON document. */
-export function exportSettings(): string {
+/** Serialize the persisted settings (and AI prompt overrides, keyed by prompt) to a portable JSON document. */
+export function exportSettings(prompts: Record<string, string> = {}): string {
   return JSON.stringify(
     {
       app: "codereview",
       kind: "settings",
       exportedAt: new Date().toISOString(),
       settings: pickPersisted(useSettingsStore.getState()),
+      prompts,
     },
     null,
     2,
@@ -305,6 +317,18 @@ export function importSettings(json: string): number {
   if (count === 0) throw new Error("No recognized settings in file");
   useSettingsStore.setState(picked);
   return count;
+}
+
+/** Prompt overrides from an exported document; null when the file predates prompt export. */
+export function parsePromptOverrides(json: string): Record<string, string> | null {
+  const root = JSON.parse(json) as Record<string, unknown> | null;
+  const prompts = root && typeof root === "object" ? root.prompts : undefined;
+  if (!prompts || typeof prompts !== "object") return null;
+  return Object.fromEntries(
+    Object.entries(prompts as Record<string, unknown>).filter(
+      (e): e is [string, string] => typeof e[1] === "string",
+    ),
+  );
 }
 
 /** Known keys whose value has the default's type (and a valid enum value); the rest is dropped. */

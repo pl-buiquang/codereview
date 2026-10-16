@@ -919,7 +919,6 @@ pub fn set_focus_plan_impl(
 // ---------------------------------------------------------------------------
 // In-app runner
 
-const SKILL_PROMPT: &str = include_str!("../../../skills/focus-review/SKILL.md");
 const FOCUS_TOOLS: &[&str] = &[
     "Bash(cr focus:*)",
     "Bash(cr diff:*)",
@@ -956,10 +955,10 @@ pub fn finish_generation(conn: &Connection, review_id: i64, error: Option<String
     Ok(())
 }
 
-fn app_mode_prompt(review_id: i64, plan_path: &Path) -> String {
+fn app_mode_prompt(skill: &str, review_id: i64, plan_path: &Path) -> String {
     let plan = plan_path.display();
     format!(
-        "{SKILL_PROMPT}\n\n---\n\nApp mode. Review id = {review_id}. Do not create or open reviews. \
+        "{skill}\n\n---\n\nApp mode. Review id = {review_id}. Do not create or open reviews. \
          The `cr` CLI on PATH already points at the app's database. \
          Write the plan with the Write tool to `{plan}` (the only writable path), then run \
          `cr focus set {review_id} --file {plan}`."
@@ -981,6 +980,7 @@ fn child_path() -> Option<std::ffi::OsString> {
 }
 
 fn run_generation(
+    skill: &str,
     review_id: i64,
     model: &str,
     local_path: Option<String>,
@@ -1009,7 +1009,7 @@ fn run_generation(
     let write_rule = format!("Edit(/{}/**)", scratch.display());
     let mut tools: Vec<&str> = FOCUS_TOOLS.to_vec();
     tools.push(&write_rule);
-    let system_prompt = app_mode_prompt(review_id, &plan_path);
+    let system_prompt = app_mode_prompt(skill, review_id, &plan_path);
     let result = crate::commands::chat::run_claude(crate::commands::chat::ClaudeRun {
         model,
         allowed_tools: &tools,
@@ -1020,6 +1020,8 @@ fn run_generation(
         extra_dirs: &[scratch.as_path()],
         session: None,
         env,
+        extra_args: &[],
+        replace_system_prompt: false,
         prompt: &format!("Generate the focus for review {review_id}."),
     });
     let _ = std::fs::remove_dir_all(&scratch);
@@ -1046,15 +1048,16 @@ pub fn generate_focus(
         return Err(AppError::Other("the `claude` CLI was not found on PATH".into()));
     }
     let model = crate::commands::chat::resolve_model(model);
-    let local_path = {
+    let (local_path, skill) = {
         let conn = db.0.lock().unwrap();
+        let skill = crate::prompts::resolve(&conn, crate::prompts::FOCUS_SYSTEM)?;
         begin_generation(&conn, review_id, &model)?;
-        review_local_path(&conn, review_id)?
+        (review_local_path(&conn, review_id)?, skill)
     };
     let db_path = db_path.0.clone();
     let _ = app.emit("focus-updated", FocusUpdated { review_id });
     tauri::async_runtime::spawn_blocking(move || {
-        let result = run_generation(review_id, &model, local_path, &db_path);
+        let result = run_generation(&skill, review_id, &model, local_path, &db_path);
         {
             let db = app.state::<Db>();
             let conn = db.0.lock().unwrap();
@@ -1396,7 +1399,7 @@ mod tests {
         assert_eq!(f.status, "ready", "a submitted plan wins over a late error");
         assert_eq!(f.level, "critical");
         assert!(f.error.is_none());
-        let prompt = app_mode_prompt(rid, Path::new("/tmp/p.json"));
+        let prompt = app_mode_prompt("skill", rid, Path::new("/tmp/p.json"));
         assert!(prompt.contains("App mode. Review id = 1."));
         assert!(prompt.contains("--file /tmp/p.json"));
     }
@@ -1447,7 +1450,8 @@ mod tests {
         .unwrap();
         std::env::set_var("PATH", path);
 
-        let result = run_generation(rid, "sonnet", Some(repo.to_str().unwrap().into()), &db_path);
+        let skill = crate::prompts::resolve(&crate::db::open(&db_path).unwrap(), crate::prompts::FOCUS_SYSTEM).unwrap();
+        let result = run_generation(&skill, rid, "sonnet", Some(repo.to_str().unwrap().into()), &db_path);
         let conn = crate::db::open(&db_path).unwrap();
         finish_generation(&conn, rid, result.err().map(|e| e.to_string())).unwrap();
         let f = load_focus(&conn, rid).unwrap().unwrap();

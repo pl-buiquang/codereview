@@ -67,6 +67,7 @@ describe("useSettingsStore", () => {
     ) as Record<string, unknown>;
     expect(Object.keys(snapshot).sort()).toEqual(
       [
+        "boardOverviewOpen",
         "boardPollMs",
         "boardStatusBorderSide",
         "botLogins",
@@ -83,6 +84,7 @@ describe("useSettingsStore", () => {
         "leftPaneTab",
         "markEdits",
         "mode",
+        "overviewModel",
         "prListPollMs",
         "repoBasePaths",
         "repoStripPrefixes",
@@ -109,7 +111,7 @@ describe("exportSettings / importSettings", () => {
     s.setFileTestPatterns("");
     const applied = importSettings(json);
     const n = useSettingsStore.getState();
-    expect(applied).toBe(23);
+    expect(applied).toBe(25);
     expect(n.mode).toBe("light");
     expect(n.diffFontSize).toBe(15);
     expect(n.fileTestPatterns).toBe("*.spec.rb");

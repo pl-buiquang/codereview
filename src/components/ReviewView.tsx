@@ -67,6 +67,7 @@ import { Markdown } from "./Markdown";
 import { ChatPanel } from "./ChatPanel";
 import { PublishButton } from "./PublishButton";
 import { PrMetaPanel, usePrMeta } from "./PrMetaPanel";
+import { ReviewSummaryRow } from "./ReviewSummaryRow";
 import { ReviewSwitcher } from "./ReviewSwitcher";
 import { CiBadge, StatusPill } from "./InboxBadges";
 import { Icon } from "./icons";
@@ -113,6 +114,7 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
   const [pendingChatMessage, setPendingChatMessage] = useState<string | null>(null);
   const [typeFilter, setTypeFilter] = useState<"all" | FileCategory>("all");
   const diffAreaRef = useRef<HTMLDivElement>(null);
+  const summaryBodyRef = useRef<string | null>(null);
 
   // Keyboard navigation. The single window listener lives here (see the effect
   // below); FileJumpList and each FileReview publish imperative handles into
@@ -569,12 +571,7 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
         focusView={focusView}
         focusActions={focusActions}
         generateFocus={generateFocus}
-        summaryAppend={summaryAppend}
-        onSaving={() => setSaveState("saving")}
-        onSaved={() => {
-          setSaveState("saved");
-          queryClient.invalidateQueries({ queryKey: ["reviews"] });
-        }}
+        bodyRef={summaryBodyRef}
       />
 
       <div
@@ -613,6 +610,19 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
               onClose={() => setSearchOpen(false)}
             />
           )}
+          <ReviewSummaryRow
+              key={detail.review.id}
+              reviewId={detail.review.id}
+              initialBody={detail.review.body}
+              readOnly={readOnly}
+              bodyRef={summaryBodyRef}
+              summaryAppend={summaryAppend}
+              onSaving={() => setSaveState("saving")}
+              onSaved={() => {
+                setSaveState("saved");
+                queryClient.invalidateQueries({ queryKey: ["reviews"] });
+              }}
+            />
           {!readOnly && (
             <p className="hint muted">
               Click a line to comment · shift-click another line on the same side to select a range.
@@ -816,9 +826,7 @@ function ReviewHeader({
   focusView,
   focusActions,
   generateFocus,
-  summaryAppend,
-  onSaving,
-  onSaved,
+  bodyRef,
 }: {
   detail: ReviewDetail;
   saveState: SaveState;
@@ -828,17 +836,12 @@ function ReviewHeader({
   focusView: FocusView | null;
   focusActions: FocusActions;
   generateFocus: GenerateFocus;
-  summaryAppend: { text: string; nonce: number } | null;
-  onSaving: () => void;
-  onSaved: () => void;
+  bodyRef: MutableRefObject<string | null>;
 }) {
   const queryClient = useQueryClient();
   const closeReview = useUIStore((s) => s.closeReview);
   const openRepo = useUIStore((s) => s.openRepo);
   const { review, target } = detail;
-  const [body, setBody] = useState(review.body);
-  const bodyRef = useRef(body);
-  bodyRef.current = body;
   const [showExport, setShowExport] = useState(false);
   const [collapsed, setCollapsed] = useState(true);
   const [openingWorktree, setOpeningWorktree] = useState(false);
@@ -863,24 +866,6 @@ function ReviewHeader({
   });
   const claudeAvailable = envQuery.data ? envQuery.data.claude != null : true;
 
-  const save = useDebouncedCallback((nextBody: string) => {
-    onSaving();
-    api
-      .updateReview(review.id, nextBody)
-      .then(onSaved)
-      .catch((e) => toast.error(String(e)));
-  }, 400);
-
-  useEffect(() => {
-    if (!summaryAppend) return;
-    const prev = bodyRef.current.trimEnd();
-    const next = prev ? `${prev}\n\n${summaryAppend.text}` : summaryAppend.text;
-    setBody(next);
-    save(next);
-    setCollapsed(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [summaryAppend]);
-
   const deleteReview = useMutation({
     mutationFn: () => api.deleteReview(review.id),
     onSuccess: () => {
@@ -894,7 +879,7 @@ function ReviewHeader({
     // Persist the chosen verdict (and any unsaved summary) before publishing —
     // the backend reads `review.event` from the DB to build the GitHub payload.
     mutationFn: async (event: ReviewEvent) => {
-      await api.updateReview(review.id, body, event);
+      await api.updateReview(review.id, bodyRef.current ?? review.body, event);
       return api.publishReview(review.id);
     },
     onSuccess: () => {
@@ -917,7 +902,7 @@ function ReviewHeader({
     // Persist the verdict + summary first, same as a normal publish — the pending
     // payload is built from the stored review, just with the event omitted.
     mutationFn: async (event: ReviewEvent) => {
-      await api.updateReview(review.id, body, event);
+      await api.updateReview(review.id, bodyRef.current ?? review.body, event);
       return api.publishReviewPending(review.id);
     },
     onSuccess: () => {
@@ -1072,6 +1057,7 @@ function ReviewHeader({
   });
 
   const isPr = target.kind === "github_pr";
+  const hasPrMeta = isPr && !!detail.remote_owner && !!detail.remote_name && target.github_pr_number != null;
   const published = review.status === "published";
   const pending = review.status === "published_pending";
   const isDraft = review.status === "draft";
@@ -1094,13 +1080,15 @@ function ReviewHeader({
   return (
     <header className="review-header">
       <div className="review-header-top">
-        <button
-          className="btn btn-ghost"
-          title={collapsed ? "Show review details" : "Hide review details"}
-          onClick={() => setCollapsed((c) => !c)}
-        >
-          <Icon name="chev" size={13} /> {collapsed ? "Expand" : "Collapse"}
-        </button>
+        {hasPrMeta && (
+          <button
+            className="btn btn-ghost"
+            title={collapsed ? "Show PR details" : "Hide PR details"}
+            onClick={() => setCollapsed((c) => !c)}
+          >
+            <Icon name="chev" size={13} /> {collapsed ? "Expand" : "Collapse"}
+          </button>
+        )}
         <div className="review-title-wrap">
           <h2 className="review-title">{target.title}</h2>
           {(sourceRepo || detail.local_path) && (
@@ -1386,29 +1374,8 @@ function ReviewHeader({
         />
       )}
 
-      {!collapsed && (
-        <>
-          {isPr && detail.remote_owner && detail.remote_name && target.github_pr_number != null && (
-            <PrMetaPanel
-              owner={detail.remote_owner}
-              name={detail.remote_name}
-              number={target.github_pr_number}
-            />
-          )}
-
-          <div className="review-summary">
-            <textarea
-              className="textarea"
-              placeholder="Review summary…"
-              value={body}
-              disabled={readOnly}
-              onChange={(e) => {
-                setBody(e.target.value);
-                save(e.target.value);
-              }}
-            />
-          </div>
-        </>
+      {!collapsed && hasPrMeta && (
+        <PrMetaPanel owner={detail.remote_owner!} name={detail.remote_name!} number={target.github_pr_number!} />
       )}
     </header>
   );

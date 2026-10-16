@@ -85,6 +85,9 @@ pub(crate) struct ClaudeRun<'a> {
     /// `(session_id, is_first_turn)`; None runs without session persistence.
     pub session: Option<(&'a str, bool)>,
     pub env: Vec<(String, std::ffi::OsString)>,
+    pub extra_args: &'a [&'a str],
+    /// Replace Claude Code's default system prompt instead of appending to it.
+    pub replace_system_prompt: bool,
     pub prompt: &'a str,
 }
 
@@ -111,6 +114,8 @@ fn call_claude_turn(
         extra_dirs: &[],
         session: Some((session_id, is_first_turn)),
         env: Vec::new(),
+        extra_args: &[],
+        replace_system_prompt: false,
         prompt: text,
     })
 }
@@ -144,9 +149,10 @@ pub(crate) fn run_claude(run: ClaudeRun) -> AppResult<TurnResult> {
         .arg(run.permission_mode)
         .arg("--add-dir")
         .arg(run.cwd)
-        .args(run.extra_dirs.iter().flat_map(|d| [std::ffi::OsStr::new("--add-dir"), d.as_os_str()]))
-        .arg("--allowedTools")
-        .args(run.allowed_tools);
+        .args(run.extra_dirs.iter().flat_map(|d| [std::ffi::OsStr::new("--add-dir"), d.as_os_str()]));
+    if !run.allowed_tools.is_empty() {
+        cmd.arg("--allowedTools").args(run.allowed_tools);
+    }
     for (k, v) in &run.env {
         cmd.env(k, v);
     }
@@ -154,6 +160,7 @@ pub(crate) fn run_claude(run: ClaudeRun) -> AppResult<TurnResult> {
     if !run.model.is_empty() {
         cmd.arg("--model").arg(run.model);
     }
+    cmd.args(run.extra_args);
 
     match run.session {
         Some((id, true)) => {
@@ -173,7 +180,12 @@ pub(crate) fn run_claude(run: ClaudeRun) -> AppResult<TurnResult> {
             let path = std::env::temp_dir().join(format!("codereview_{}.txt", run.prompt_file_tag));
             std::fs::write(&path, sys)
                 .map_err(|e| AppError::Chat(format!("failed to write system prompt: {e}")))?;
-            cmd.arg("--append-system-prompt-file").arg(&path);
+            let flag = if run.replace_system_prompt {
+                "--system-prompt-file"
+            } else {
+                "--append-system-prompt-file"
+            };
+            cmd.arg(flag).arg(&path);
             Some(path)
         }
         None => None,
@@ -249,6 +261,7 @@ pub(crate) fn run_claude(run: ClaudeRun) -> AppResult<TurnResult> {
 
 #[allow(clippy::too_many_arguments)]
 fn build_system_prompt(
+    template: &str,
     title: &str,
     owner: Option<&str>,
     repo_name: Option<&str>,
@@ -273,51 +286,20 @@ fn build_system_prompt(
         None => format!("- Local diff: {base_ref} → {head_ref}"),
     };
 
-    format!(
-        "You are a code review assistant for: {title}
-
-## Context
-- Repository: {repo_label}
-{pr_line}
-
-## Changed files
-{diff_summary}
-
-## Capabilities
-You have full read/write access to the repository, checked out on branch `{head_ref}`.
-Code is checked out at: {worktree_path}
-- Use Bash to run git commands (git log, git show, git blame, git diff, git commit, etc.)
-- Use Read/Grep/Glob to explore the codebase
-- Use Edit/Write to make code changes
-- Commits you make land on `{head_ref}` directly (this worktree is a real branch checkout,
-  not detached). Only run `git push` when the user explicitly asks you to.
-
-## Guidelines
-- Focus on understanding the code changes and their implications
-- When asked about specific lines, read the actual file for full context
-- Use git blame/log to understand the history of changed code when relevant
-- Reference files by their repo-relative path
-- Be concise but thorough
-- Don't commit or push unless the user asks you to
-{comments_section}
-## Review operations (cr CLI)
-You can read and modify this review using the `cr` command-line tool.
-The current review ID is: {review_id}
-
-Reading:
-  cr show {review_id} --json             # full review detail with all comments
-  cr diff {review_id}                    # the diff being reviewed
-
-Adding comments:
-  cr comment add {review_id} --file <path> --line <N> --body \"...\" [--side LEFT|RIGHT]
-  cr comment add-file {review_id} --file <path> --body \"...\"   # file-level comment
-
-Modifying comments:
-  cr comment update <COMMENT_ID> --body \"new text\"
-  cr comment resolve <COMMENT_ID>
-  cr comment unresolve <COMMENT_ID>
-  cr comment delete <COMMENT_ID>",
-        worktree_path = worktree_path.display(),
+    let worktree = worktree_path.display().to_string();
+    let review_id = review_id.to_string();
+    crate::prompts::render(
+        template,
+        &[
+            ("title", title),
+            ("repo", &repo_label),
+            ("pr_line", &pr_line),
+            ("diff_summary", diff_summary),
+            ("head_ref", head_ref),
+            ("worktree_path", &worktree),
+            ("comments", comments_section),
+            ("review_id", &review_id),
+        ],
     )
 }
 
@@ -413,8 +395,9 @@ pub async fn chat_send(
     db: State<'_, Db>,
 ) -> AppResult<ChatTurnResult> {
     // --- Phase 1: gather context under DB lock ---
-    let (detail, existing_chat, diff) = {
+    let (detail, existing_chat, diff, chat_template) = {
         let conn = db.0.lock().unwrap();
+        let chat_template = crate::prompts::resolve(&conn, crate::prompts::CHAT_SYSTEM)?;
 
         let detail = crate::commands::review::load_detail(&conn, review_id)?;
 
@@ -429,7 +412,7 @@ pub async fn chat_send(
         let diff = crate::commands::review::review_diff_impl(&conn, review_id)
             .unwrap_or_default();
 
-        (detail, existing_chat, diff)
+        (detail, existing_chat, diff, chat_template)
     };
 
     // --- Phase 2: worktree + system prompt (no DB lock) ---
@@ -461,6 +444,7 @@ pub async fn chat_send(
         let diff_summary = diff_file_summary(&diff);
         let comments_section = format_review_comments(&detail.comments, 50);
         Some(build_system_prompt(
+            &chat_template,
             &detail.target.title,
             detail.remote_owner.as_deref(),
             detail.remote_name.as_deref(),

@@ -1170,12 +1170,60 @@ td.diff-code {
   cursor: help;
 }
 
-.review-summary {
-  margin-top: 12px;
+/* Review summary: expandable row above the diffs. */
+.review-summary-row {
+  margin-bottom: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-l);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
 }
-.review-summary textarea {
+.review-summary-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   width: 100%;
+  padding: 7px 12px;
+  background: none;
+  border: 0;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.review-summary-chev {
+  flex: none;
+  transform: rotate(-90deg);
+  transition: transform 0.12s ease;
+}
+.review-summary-row.open .review-summary-chev {
+  transform: none;
+}
+.review-summary-label {
+  flex: none;
+  font-weight: 600;
+  font-size: 12.5px;
+}
+.review-summary-preview {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+.review-summary-count {
+  flex: none;
+  margin-left: auto;
+  font-size: 11px;
+}
+.review-summary-row textarea {
+  display: block;
+  width: calc(100% - 24px);
+  margin: 0 12px 10px;
   min-height: 64px;
+  max-height: 30vh;
   resize: vertical;
   background: var(--surface);
   color: var(--text);
@@ -5163,4 +5211,93 @@ input[type="range"] {
 .board-card-highlight {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+
+/* --- Board AI overview ---------------------------------------------------- */
+.btn.active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+.board-overview {
+  flex: none;
+  margin: 12px 24px 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-l);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+  display: flex;
+  flex-direction: column;
+  max-height: 42vh;
+  min-height: 0;
+}
+.board-overview-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+  border-radius: var(--radius-l) var(--radius-l) 0 0;
+}
+.board-overview-drift {
+  font-size: 11px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+.board-overview-body {
+  overflow-y: auto;
+  padding: 10px 16px 12px;
+  min-height: 0;
+}
+.board-overview-body .markdown-body h2 {
+  font-size: 13px;
+  margin: 12px 0 4px;
+}
+.board-overview-body .markdown-body h2:first-child {
+  margin-top: 0;
+}
+.board-overview-ref {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+/* --- Settings: AI prompts --------------------------------------------------- */
+.settings-section-narrow.ai-settings {
+  max-width: 900px;
+}
+.ai-prompt + .ai-prompt {
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+.ai-prompt-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ai-prompt-badge {
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+.ai-prompt-vars {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  font-size: 11px;
+}
+.ai-prompt-text {
+  min-height: 220px;
+  font-size: 12px;
+  line-height: 1.45;
 }

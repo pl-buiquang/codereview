@@ -16,6 +16,7 @@ pub mod inbox;
 pub mod logging;
 mod path_env;
 pub mod provider;
+pub mod prompts;
 pub mod session_summaries;
 pub mod terminal;
 pub mod tools;
@@ -271,6 +272,11 @@ pub fn run() {
             commands::board::board_meta_delete,
             commands::board::board_meta_tags,
             commands::board::board_card_for_pr,
+            commands::overview::board_overview_get,
+            commands::overview::board_overview_generate,
+            commands::prompts::prompts_list,
+            commands::prompts::prompt_set,
+            commands::prompts::prompt_reset,
             commands::chat::chat_send,
             commands::chat::chat_messages,
             commands::chat::chat_clear,
