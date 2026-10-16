@@ -219,6 +219,8 @@ function GeneralSection() {
   const setRepoBasePaths = useSettingsStore((s) => s.setRepoBasePaths);
   const setChatModel = useSettingsStore((s) => s.setChatModel);
   const setMarkEdits = useSettingsStore((s) => s.setMarkEdits);
+  const largeDiffMaxLines = useSettingsStore((s) => s.largeDiffMaxLines);
+  const setLargeDiffMaxLines = useSettingsStore((s) => s.setLargeDiffMaxLines);
   const setBoardStatusBorderSide = useSettingsStore((s) => s.setBoardStatusBorderSide);
   const fileTestPatterns = useSettingsStore((s) => s.fileTestPatterns);
   const fileConfigPatterns = useSettingsStore((s) => s.fileConfigPatterns);
@@ -338,6 +340,23 @@ function GeneralSection() {
             type="checkbox"
             checked={markEdits}
             onChange={(e) => setMarkEdits(e.target.checked)}
+          />
+        </label>
+        <label
+          className="settings-row"
+          title="Files with more changed lines are not rendered (to keep the UI responsive). Open them in VSCode instead."
+        >
+          <span>Max diff lines per file</span>
+          <input
+            type="number"
+            className="input"
+            min={100}
+            step={100}
+            value={largeDiffMaxLines}
+            onChange={(e) => {
+              const n = Number(e.target.value);
+              if (Number.isFinite(n)) setLargeDiffMaxLines(Math.max(100, Math.round(n)));
+            }}
           />
         </label>
       </section>

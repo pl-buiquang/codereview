@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { Diff, Hunk, parseDiff, type FileData, type ViewType } from "react-diff-view";
 import { countChanges, tokenizeFile } from "../lib/diff";
+import { useSettingsStore } from "../lib/settings";
 
 function filePath(file: FileData): string {
   if (file.type === "delete") return file.oldPath;
@@ -36,7 +37,9 @@ export function DiffViewer({
 
 function DiffFile({ file, viewType }: { file: FileData; viewType: ViewType }) {
   const { add, del } = countChanges(file);
-  const tokens = useMemo(() => tokenizeFile(file), [file]);
+  const maxLines = useSettingsStore((s) => s.largeDiffMaxLines);
+  const tooLarge = add + del > maxLines;
+  const tokens = useMemo(() => (tooLarge ? undefined : tokenizeFile(file)), [file, tooLarge]);
   return (
     <div className="diff-file">
       <div className="diff-file-header">
@@ -48,6 +51,11 @@ function DiffFile({ file, viewType }: { file: FileData; viewType: ViewType }) {
       </div>
       {file.isBinary ? (
         <p className="muted binary-note">Binary file not shown.</p>
+      ) : tooLarge ? (
+        <p className="muted binary-note">
+          Diff too large to display ({(add + del).toLocaleString()} changed lines, limit{" "}
+          {maxLines.toLocaleString()}).
+        </p>
       ) : (
         <Diff viewType={viewType} diffType={file.type} hunks={file.hunks} tokens={tokens}>
           {(hunks) => hunks.map((hunk) => <Hunk key={hunk.content} hunk={hunk} />)}

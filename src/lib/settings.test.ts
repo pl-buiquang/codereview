@@ -79,6 +79,7 @@ describe("useSettingsStore", () => {
         "fileConfigPatterns",
         "fileTestPatterns",
         "inboxPollMs",
+        "largeDiffMaxLines",
         "leftPaneTab",
         "markEdits",
         "mode",
@@ -108,7 +109,7 @@ describe("exportSettings / importSettings", () => {
     s.setFileTestPatterns("");
     const applied = importSettings(json);
     const n = useSettingsStore.getState();
-    expect(applied).toBe(22);
+    expect(applied).toBe(23);
     expect(n.mode).toBe("light");
     expect(n.diffFontSize).toBe(15);
     expect(n.fileTestPatterns).toBe("*.spec.rb");

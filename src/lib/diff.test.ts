@@ -15,6 +15,7 @@ import {
   changeKeyOf,
   countChanges,
   hunkContextSnippet,
+  isLargeDiff,
   leadingExpandRange,
   rightLinesText,
   sourceLineCount,
@@ -156,6 +157,14 @@ describe("anchorByLine", () => {
     const { byKey, orphans } = anchorByLine(items, sideLine, keyByAnchor);
     expect(byKey.size).toBe(0);
     expect(orphans.map((i) => i.id)).toEqual(["nullline", "missing", "nullside"]);
+  });
+});
+
+describe("isLargeDiff", () => {
+  it("is true only when add + del exceeds the limit", () => {
+    const [file] = parseDiff(SAMPLE_DIFF);
+    expect(isLargeDiff(file, 2)).toBe(false);
+    expect(isLargeDiff(file, 1)).toBe(true);
   });
 });
 

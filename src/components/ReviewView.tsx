@@ -30,6 +30,7 @@ import {
   fileDisplayPath,
   hunkContextSnippet,
   indexFile,
+  isLargeDiff,
   leadingExpandRange,
   rightLinesText,
   sourceLineCount,
@@ -372,11 +373,18 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
     () => (searchOpen ? files.map((f) => indexFile(f).metaByKey) : []),
     [searchOpen, files],
   );
+  const largeDiffMaxLines = useSettingsStore((s) => s.largeDiffMaxLines);
+  const largeFileIdx = useMemo(
+    () => new Set(files.flatMap((f, i) => (isLargeDiff(f, largeDiffMaxLines) ? [i] : []))),
+    [files, largeDiffMaxLines],
+  );
   const matches = useMemo<DiffMatch[]>(() => {
     if (!searchOpen) return [];
-    const all = filterDiffMatches(perFileMeta, searchQuery);
-    return visibleFileIdx == null ? all : all.filter((m) => visibleFileIdx.has(m.fileIndex));
-  }, [searchOpen, perFileMeta, searchQuery, visibleFileIdx]);
+    return filterDiffMatches(perFileMeta, searchQuery).filter(
+      (m) =>
+        (visibleFileIdx == null || visibleFileIdx.has(m.fileIndex)) && !largeFileIdx.has(m.fileIndex),
+    );
+  }, [searchOpen, perFileMeta, searchQuery, visibleFileIdx, largeFileIdx]);
   const curMatch = matches.length ? matches[wrapIndex(searchIdx, matches.length)] : null;
   const matchKeysByFile = useMemo(() => {
     const m = new Map<number, Set<string>>();
@@ -1659,12 +1667,17 @@ function FileReview({
     [file, hunks],
   );
   const markEditsEnabled = useSettingsStore((s) => s.markEdits);
-  const tokens = useMemo(
-    () => tokenizeFile({ ...file, hunks }, { markEditsMaxChanges: markEditsEnabled ? undefined : 0 }),
-    [file, hunks, markEditsEnabled],
-  );
+  const largeDiffMaxLines = useSettingsStore((s) => s.largeDiffMaxLines);
+  const tooLarge = useMemo(() => isLargeDiff(file, largeDiffMaxLines), [file, largeDiffMaxLines]);
   const [selection, setSelection] = useState<Selection | null>(null);
   const viewed = detail.viewed_files.includes(path);
+  const tokens = useMemo(
+    () =>
+      tooLarge || viewed
+        ? undefined
+        : tokenizeFile({ ...file, hunks }, { markEditsMaxChanges: markEditsEnabled ? undefined : 0 }),
+    [file, hunks, markEditsEnabled, tooLarge, viewed],
+  );
   const [fileComposerOpen, setFileComposerOpen] = useState(false);
 
   // indexFile walks hunks (and user-expanded context) in document order, so the
@@ -1676,7 +1689,7 @@ function FileReview({
   useEffect(() => {
     const handle: FileKbHandle = {
       moveCursor: (d) => {
-        if (viewed) return; // collapsed: FileBody isn't rendered, nothing to outline
+        if (viewed || tooLarge) return; // FileBody isn't rendered, nothing to outline
         setKbFocusKey((cur) => moveCursorKey(orderedKeys, cur, d));
       },
       openComposer: () => {
@@ -2025,9 +2038,11 @@ function FileReview({
                 ? "File was deleted; no head version to view"
                 : file.isBinary
                   ? "Binary file; nothing to view"
-                  : "View the full file and comment on any line"
+                  : tooLarge
+                    ? "File too large to view here; open it in VSCode"
+                    : "View the full file and comment on any line"
             }
-            disabled={isDeleted || file.isBinary}
+            disabled={isDeleted || file.isBinary || tooLarge}
             onClick={() => onOpenFilePane(path)}
           >
             <Icon name="eye" size={12} /> View file
@@ -2095,7 +2110,21 @@ function FileReview({
           )}
         </div>
       )}
-      {viewed ? null : (
+      {viewed ? null : tooLarge ? (
+        <p className="muted binary-note">
+          Diff too large to display ({(add + del).toLocaleString()} changed lines, limit{" "}
+          {largeDiffMaxLines.toLocaleString()}).{" "}
+          {!isDeleted && (
+            <button
+              className="btn btn-sm btn-ghost"
+              disabled={openingInVscode}
+              onClick={openInChatWorktree}
+            >
+              <Icon name="ext" size={12} /> Open in VSCode
+            </button>
+          )}
+        </p>
+      ) : (
         <FileBody
           file={file}
           hunks={hunks}

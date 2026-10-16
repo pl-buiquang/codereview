@@ -398,3 +398,8 @@ export function countChanges(file: FileData): { add: number; del: number } {
   }
   return { add, del };
 }
+
+export function isLargeDiff(file: FileData, maxLines: number): boolean {
+  const { add, del } = countChanges(file);
+  return add + del > maxLines;
+}

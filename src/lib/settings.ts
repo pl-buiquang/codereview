@@ -69,6 +69,7 @@ type PersistedSettings = Pick<
   | "boardStatusBorderSide"
   | "chatModel"
   | "markEdits"
+  | "largeDiffMaxLines"
   | "fileTestPatterns"
   | "fileConfigPatterns"
   | "leftPaneTab"
@@ -94,6 +95,7 @@ const DEFAULTS: PersistedSettings = {
   boardStatusBorderSide: "top",
   chatModel: "",
   markEdits: false,
+  largeDiffMaxLines: 3000,
   fileTestPatterns: DEFAULT_TEST_PATTERNS,
   fileConfigPatterns: DEFAULT_CONFIG_PATTERNS,
   leftPaneTab: "files",
@@ -130,6 +132,8 @@ interface SettingsState {
   boardStatusBorderSide: BoardBorderSide;
   /** Highlight intra-line character-level changes (markEdits). */
   markEdits: boolean;
+  /** Files with more changed lines (add + del) are not rendered in the diff. */
+  largeDiffMaxLines: number;
   /** Model passed to `claude -p --model`. Empty = use env default (opus). */
   chatModel: string;
   /** Newline-separated globs classifying changed files as tests (checked first). */
@@ -162,6 +166,7 @@ interface SettingsState {
   setBoardStatusBorderSide: (side: BoardBorderSide) => void;
   setChatModel: (s: string) => void;
   setMarkEdits: (b: boolean) => void;
+  setLargeDiffMaxLines: (n: number) => void;
   setFileTestPatterns: (s: string) => void;
   setFileConfigPatterns: (s: string) => void;
   setLeftPaneTab: (tab: LeftPaneTab) => void;
@@ -229,6 +234,7 @@ export const useSettingsStore = create<SettingsState>()(
       setBoardStatusBorderSide: (boardStatusBorderSide) => set({ boardStatusBorderSide }),
       setChatModel: (chatModel) => set({ chatModel }),
       setMarkEdits: (markEdits) => set({ markEdits }),
+      setLargeDiffMaxLines: (largeDiffMaxLines) => set({ largeDiffMaxLines }),
       setFileTestPatterns: (fileTestPatterns) => set({ fileTestPatterns }),
       setFileConfigPatterns: (fileConfigPatterns) => set({ fileConfigPatterns }),
       setLeftPaneTab: (leftPaneTab) => set({ leftPaneTab }),
