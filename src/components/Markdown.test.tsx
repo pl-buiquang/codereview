@@ -89,4 +89,26 @@ describe("Markdown", () => {
     expect(empty).not.toBeNull();
     expect(empty?.textContent).toBe("(removes the selected lines)");
   });
+
+  it("fetches a proxied GitHub image once across mounts", async () => {
+    const src = "https://github.com/user-attachments/assets/cache-test";
+    const fetchImage = vi
+      .spyOn(api, "fetchGithubImage")
+      .mockResolvedValue("data:image/png;base64,AAAA");
+
+    const first = render(<Markdown source={`![shot](${src})`} />);
+    expect(await screen.findByRole("img", { name: "shot" })).toHaveAttribute(
+      "src",
+      "data:image/png;base64,AAAA",
+    );
+    first.unmount();
+
+    render(<Markdown source={`![shot](${src})`} />);
+    expect(screen.getByRole("img", { name: "shot" })).toHaveAttribute(
+      "src",
+      "data:image/png;base64,AAAA",
+    );
+    expect(fetchImage).toHaveBeenCalledTimes(1);
+    fetchImage.mockRestore();
+  });
 });

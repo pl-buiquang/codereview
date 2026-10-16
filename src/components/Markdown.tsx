@@ -6,28 +6,60 @@ import { api } from "../lib/api";
 const GITHUB_IMAGE_RE =
   /^https:\/\/(?:github\.com\/.*\/assets\/|user-images\.githubusercontent\.com\/|private-user-images\.githubusercontent\.com\/|github\.com\/user-attachments\/)/;
 
-function ProxiedImage({ src, alt }: { src: string; alt?: string }) {
-  const [dataUrl, setDataUrl] = useState<string | null>(null);
-  const [failed, setFailed] = useState(false);
+const MAX_CACHED_IMAGES = 200;
+const imageCache = new Map<string, string>();
+const imageInflight = new Map<string, Promise<string>>();
 
-  useEffect(() => {
-    let cancelled = false;
-    api
+/** Proxied GitHub images by URL, shared across mounts; failures aren't cached. */
+function loadGithubImage(src: string): Promise<string> {
+  const cached = imageCache.get(src);
+  if (cached) return Promise.resolve(cached);
+  let pending = imageInflight.get(src);
+  if (!pending) {
+    pending = api
       .fetchGithubImage(src)
       .then((url) => {
-        if (!cancelled) setDataUrl(url);
+        imageCache.set(src, url);
+        if (imageCache.size > MAX_CACHED_IMAGES) {
+          imageCache.delete(imageCache.keys().next().value as string);
+        }
+        return url;
+      })
+      .finally(() => imageInflight.delete(src));
+    imageInflight.set(src, pending);
+  }
+  return pending;
+}
+
+function ProxiedImage({ src, alt }: { src: string; alt?: string }) {
+  const [loaded, setLoaded] = useState<{ src: string; url: string } | null>(() => {
+    const url = imageCache.get(src);
+    return url ? { src, url } : null;
+  });
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
+
+  useEffect(() => {
+    const cached = imageCache.get(src);
+    if (cached) {
+      setLoaded((prev) => (prev?.src === src ? prev : { src, url: cached }));
+      return;
+    }
+    let cancelled = false;
+    loadGithubImage(src)
+      .then((url) => {
+        if (!cancelled) setLoaded({ src, url });
       })
       .catch(() => {
-        if (!cancelled) setFailed(true);
+        if (!cancelled) setFailedSrc(src);
       });
     return () => {
       cancelled = true;
     };
   }, [src]);
 
-  if (failed) return <img src={src} alt={alt} />;
-  if (!dataUrl) return <span className="image-loading" title={alt ?? src} />;
-  return <img src={dataUrl} alt={alt} />;
+  if (failedSrc === src) return <img src={src} alt={alt} />;
+  if (loaded?.src !== src) return <span className="image-loading" title={alt ?? src} />;
+  return <img src={loaded.url} alt={alt} />;
 }
 
 export function Markdown({ source }: { source: string }) {
