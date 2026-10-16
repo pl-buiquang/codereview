@@ -18,9 +18,11 @@ pub mod logging;
 mod path_env;
 pub mod provider;
 pub mod prompts;
+pub mod repo_sync;
 pub mod session_summaries;
 pub mod terminal;
 pub mod tools;
+pub mod watch;
 pub mod worktree;
 pub mod worktree_gc;
 
@@ -108,6 +110,7 @@ pub fn run() {
             }
         })
         .manage(CrNote(Mutex::new(cr_note)))
+        .manage(watch::Watchers::default())
         .setup(move |app| {
             // Ensure ~/.codereview/ exists for worktrees and future per-user data.
             if let Some(home) = dirs::home_dir() {
@@ -298,6 +301,10 @@ pub fn run() {
             commands::graph::commit_detail,
             commands::graph::delete_gone_branches,
             commands::graph::list_gone_branches,
+            commands::repo_sync::fetch_repo,
+            commands::repo_sync::repo_sync_state,
+            commands::repo_sync::watch_acquire,
+            commands::repo_sync::watch_release,
             commands::graph::commit_file_diff,
             commands::graph::worktree_status,
             commands::graph::worktree_file_diff,

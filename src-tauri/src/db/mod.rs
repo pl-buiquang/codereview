@@ -41,6 +41,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("migrations/0022_prompts_overview.sql"),
     include_str!("migrations/0023_board_auto_merge.sql"),
     include_str!("migrations/0024_worktree_gc_report.sql"),
+    include_str!("migrations/0025_repo_sync.sql"),
 ];
 
 pub fn open(path: &Path) -> AppResult<Connection> {

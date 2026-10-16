@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use tauri::State;
 
 use crate::avatar;
@@ -8,11 +10,15 @@ use crate::error::AppResult;
 use crate::git;
 use crate::graph::{self, CommitDetail, GraphCommit, RefInfo, Scope, WipKind, WipStatus};
 
-/// `async`: runs `git fetch --prune` (network) off the UI thread.
+const GONE_FETCH_MIN_INTERVAL: Duration = Duration::from_secs(30);
+
+/// Fetch (unless fresh), then the local branches whose upstream is gone.
+/// `async`: the fetch is network, kept off the UI thread.
 #[tauri::command]
 pub async fn list_gone_branches(repo_id: i64, db: State<'_, Db>) -> AppResult<Vec<String>> {
+    crate::repo_sync::fetch_repo(&db, repo_id, GONE_FETCH_MIN_INTERVAL)?;
     let checkout = resolve_checkout(&db, repo_id, None)?;
-    graph::gone_branches(&checkout)
+    graph::list_gone(&checkout)
 }
 
 #[tauri::command]

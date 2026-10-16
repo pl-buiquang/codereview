@@ -1,13 +1,18 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::Duration;
 
 use rusqlite::OptionalExtension;
 use tauri::State;
 
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
+use crate::repo_sync;
 use crate::worktree::{self, WorktreeInfo};
 use crate::worktree_gc::{self, GcOptions, GcReport, RepoCtx};
+
+const SCAN_FETCH_MIN_INTERVAL: Duration = Duration::from_secs(120);
+const ROW_SYNC_FETCH_MIN_INTERVAL: Duration = Duration::from_secs(60);
 
 pub(crate) fn repo_local_path(db: &Db, repo_id: i64) -> AppResult<String> {
     let conn = db.0.lock().unwrap();
@@ -68,6 +73,7 @@ pub fn prune_worktrees(repo_id: i64, db: State<Db>) -> AppResult<String> {
 /// actions). Manual only; the git/gh work runs off the UI thread.
 #[tauri::command]
 pub async fn worktree_gc_run(
+    app: tauri::AppHandle,
     remove: bool,
     sync: bool,
     db: State<'_, Db>,
@@ -101,8 +107,16 @@ pub async fn worktree_gc_run(
         (repos, chat_paths)
     };
     let opts = GcOptions { remove, sync };
-    let report = tauri::async_runtime::spawn_blocking(move || worktree_gc::run(&repos, chat_paths, opts))
-        .await
+    let report = tauri::async_runtime::spawn_blocking(move || {
+        use tauri::Manager;
+        let fetch = |repo: &RepoCtx| {
+            repo_sync::fetch_repo(&app.state::<Db>(), repo.repo_id, SCAN_FETCH_MIN_INTERVAL)
+                .map(|_| ())
+                .map_err(|e| e.to_string())
+        };
+        worktree_gc::run(&repos, chat_paths, opts, &fetch)
+    })
+    .await
         .map_err(|e| AppError::Other(format!("worktree gc task failed: {e}")))??;
     let conn = db.0.lock().unwrap();
     conn.execute(
@@ -125,11 +139,18 @@ pub fn worktree_gc_last(db: State<Db>) -> AppResult<Option<serde_json::Value>> {
     Ok(stored.and_then(|s| serde_json::from_str(&s).ok()))
 }
 
-/// Fast-forwards (or resyncs after an upstream rewrite) one registered worktree.
+/// Fetches (unless fresh), then fast-forwards (or resyncs after an upstream
+/// rewrite) one registered worktree. A failed fetch still syncs to the
+/// upstream already known locally, and says so.
 #[tauri::command]
-pub fn worktree_sync(repo_id: i64, worktree_path: String, db: State<Db>) -> AppResult<String> {
+pub async fn worktree_sync(repo_id: i64, worktree_path: String, db: State<'_, Db>) -> AppResult<String> {
     let path = resolve_checkout(&db, repo_id, Some(worktree_path))?;
-    worktree_gc::sync_one(&path)
+    let fetch = repo_sync::fetch_repo(&db, repo_id, ROW_SYNC_FETCH_MIN_INTERVAL);
+    let outcome = worktree_gc::sync_one(&path)?;
+    Ok(match fetch {
+        Ok(_) => outcome,
+        Err(e) => format!("{outcome} (fetch failed: {e})"),
+    })
 }
 
 /// Opens a terminal (tmux window when available, like the board's Claude

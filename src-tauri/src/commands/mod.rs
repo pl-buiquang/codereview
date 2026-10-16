@@ -9,6 +9,7 @@ pub mod inbox;
 pub mod overview;
 pub mod prompts;
 pub mod repo;
+pub mod repo_sync;
 pub mod review;
 pub mod sessions;
 pub mod worktree;

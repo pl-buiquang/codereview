@@ -389,7 +389,13 @@ pub fn last_report() -> Option<GcReport> {
 
 /// Scans every repo and applies the actions `opts` allows. Only run on demand
 /// from the Worktrees view; a second call while one is running is refused.
-pub fn run(repos: &[RepoCtx], chat_paths: Vec<String>, opts: GcOptions) -> crate::error::AppResult<GcReport> {
+/// `fetch` brings a repo's `origin/*` up to date before its worktrees are judged.
+pub fn run(
+    repos: &[RepoCtx],
+    chat_paths: Vec<String>,
+    opts: GcOptions,
+    fetch: &dyn Fn(&RepoCtx) -> Result<(), String>,
+) -> crate::error::AppResult<GcReport> {
     let Ok(_guard) = RUNNING.try_lock() else {
         return Err(crate::error::AppError::Other("a worktree scan is already running".into()));
     };
@@ -418,7 +424,7 @@ pub fn run(repos: &[RepoCtx], chat_paths: Vec<String>, opts: GcOptions) -> crate
         if wts.len() <= 1 {
             continue;
         }
-        if let Err(e) = run_git(&repo.path, &["fetch", "--quiet", "--prune", "origin"]) {
+        if let Err(e) = fetch(repo) {
             report.error = Some(format!("fetch failed: {e}"));
         }
         let trunk = trunk_of(repo);

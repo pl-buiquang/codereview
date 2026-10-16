@@ -27,12 +27,6 @@ pub fn list_gone(checkout: &Path) -> AppResult<Vec<String>> {
         .collect())
 }
 
-/// `git fetch --prune` then report gone branches. Nothing is deleted.
-pub fn gone_branches(checkout: &Path) -> AppResult<Vec<String>> {
-    run_git(checkout, &["fetch", "--prune", "--quiet"])?;
-    list_gone(checkout)
-}
-
 #[derive(Debug, Serialize)]
 pub struct FailedDelete {
     pub name: String,
@@ -95,7 +89,8 @@ mod tests {
     #[test]
     fn finds_and_deletes_only_gone_branches() {
         let (_remote, local) = setup();
-        let gone = gone_branches(local.path()).unwrap();
+        git(local.path(), &["fetch", "-q", "--prune", "origin"]);
+        let gone = list_gone(local.path()).unwrap();
         assert_eq!(gone, vec!["feat/gone".to_string()]);
 
         let outcome = delete_gone_branches(
