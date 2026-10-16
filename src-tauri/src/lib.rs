@@ -266,7 +266,6 @@ pub fn run() {
             commands::sessions::focus_claude_session,
             commands::sessions::resume_claude_session,
             commands::sessions::stop_claude_session,
-            commands::sessions::board_card_sessions,
             commands::sessions::review_agent_sessions,
             commands::sessions::review_open_agent,
             commands::board::board_meta_add,

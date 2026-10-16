@@ -78,21 +78,16 @@ export function BoardView() {
     queryFn: () => api.listClaudeSessions(0, ""),
     refetchInterval: 15_000,
   });
-  const cardSessionsQuery = useQuery({
-    queryKey: ["board-card-sessions"],
-    queryFn: api.boardCardSessions,
-    refetchInterval: 15_000,
-  });
   const focusableByCard = useMemo(() => {
-    const byId = new Map((liveSessionsQuery.data ?? []).map((s) => [s.session_id, s]));
+    const byId = new Map((liveSessionsQuery.data?.sessions ?? []).map((s) => [s.session_id, s]));
     const out = new Map<string, ClaudeSession[]>();
-    for (const link of cardSessionsQuery.data ?? []) {
+    for (const link of liveSessionsQuery.data?.card_sessions ?? []) {
       const s = byId.get(link.session_id);
       if (!s || (s.focus !== "ready" && s.agent_view?.focus !== "ready")) continue;
       out.set(link.card_id, [...(out.get(link.card_id) ?? []), s]);
     }
     return out;
-  }, [liveSessionsQuery.data, cardSessionsQuery.data]);
+  }, [liveSessionsQuery.data]);
 
   const openCardRepo = (repo: string) => {
     const match = findRepoByFullName(repositoriesQuery.data ?? [], repo);
@@ -208,7 +203,6 @@ export function BoardView() {
     onSuccess: () => {
       invalidate();
       queryClient.invalidateQueries({ queryKey: ["claude-sessions"] });
-      queryClient.invalidateQueries({ queryKey: ["board-card-sessions"] });
     },
     onError: (e) => toast.error(`Could not open agent session:\n${String(e)}`),
   });

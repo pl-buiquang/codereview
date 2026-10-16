@@ -49,13 +49,9 @@ export function SessionsView() {
   const sessionsQuery = useQuery({
     queryKey: ["claude-sessions", historyDays, summaryDir],
     queryFn: () => api.listClaudeSessions(historyDays, summaryDir),
-    refetchInterval: 3_000,
+    refetchInterval: 5_000,
   });
-  const cardSessionsQuery = useQuery({
-    queryKey: ["board-card-sessions"],
-    queryFn: api.boardCardSessions,
-    refetchInterval: 3_000,
-  });
+  const cardSessions = sessionsQuery.data?.card_sessions;
 
   const focus = useMutation({
     mutationFn: api.focusClaudeSession,
@@ -89,13 +85,13 @@ export function SessionsView() {
 
   const cardsBySession = useMemo(() => {
     const m = new Map<string, CardSession[]>();
-    for (const link of cardSessionsQuery.data ?? []) {
+    for (const link of cardSessions ?? []) {
       m.set(link.session_id, [...(m.get(link.session_id) ?? []), link]);
     }
     return m;
-  }, [cardSessionsQuery.data]);
+  }, [cardSessions]);
 
-  const sessions = sessionsQuery.data ?? [];
+  const sessions = sessionsQuery.data?.sessions ?? [];
   const live = sessions.filter((s) => s.live);
   const history = sessions.filter((s) => !s.live);
 

@@ -10,10 +10,27 @@ use crate::error::{AppError, AppResult};
 use crate::session_summaries;
 use crate::terminal;
 
+#[derive(Debug, Serialize)]
+pub struct SessionsSnapshot {
+    pub sessions: Vec<ClaudeSession>,
+    pub card_sessions: Vec<CardSession>,
+}
+
+/// Live + history sessions and which board cards the live ones belong to,
+/// from a single (expensive) live-session scan.
 #[tauri::command]
-pub async fn list_claude_sessions(history_days: u32, summary_dir: Option<String>) -> AppResult<Vec<ClaudeSession>> {
+pub async fn list_claude_sessions(
+    history_days: u32,
+    summary_dir: Option<String>,
+    db: State<'_, Db>,
+) -> AppResult<SessionsSnapshot> {
+    let (cards, meta) = {
+        let conn = db.0.lock().unwrap();
+        load_pr_cards(&conn)?
+    };
     let agents = claude_sessions::agents();
     let (mut sessions, mut exclude) = claude_sessions::live_sessions_and_hidden(&agents);
+    let card_sessions = match_card_sessions(&cards, &meta, &sessions);
     exclude.extend(sessions.iter().map(|s| s.session_id.clone()));
     let mut summaries = summary_dir
         .map(|d| d.trim().to_string())
@@ -21,7 +38,7 @@ pub async fn list_claude_sessions(history_days: u32, summary_dir: Option<String>
         .map(|d| session_summaries::load(std::path::Path::new(&crate::commands::repo::expand_home(&d))))
         .unwrap_or_default();
     sessions.extend(claude_sessions::history_sessions(history_days, &exclude, &mut summaries));
-    Ok(sessions)
+    Ok(SessionsSnapshot { sessions, card_sessions })
 }
 
 #[tauri::command]
@@ -136,16 +153,6 @@ fn match_card_sessions(
         }
     }
     out
-}
-
-#[tauri::command]
-pub async fn board_card_sessions(db: State<'_, Db>) -> AppResult<Vec<CardSession>> {
-    let (cards, meta) = {
-        let conn = db.0.lock().unwrap();
-        load_pr_cards(&conn)?
-    };
-    let sessions = claude_sessions::live_sessions();
-    Ok(match_card_sessions(&cards, &meta, &sessions))
 }
 
 /// Most recent `claude_session` recorded on the card that isn't currently live (resuming a live

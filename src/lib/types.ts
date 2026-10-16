@@ -509,6 +509,11 @@ export interface CardSession {
   session_id: string;
 }
 
+export interface SessionsSnapshot {
+  sessions: ClaudeSession[];
+  card_sessions: CardSession[];
+}
+
 export interface BoardRefreshResult {
   cardCount: number;
   autoTracked: number;

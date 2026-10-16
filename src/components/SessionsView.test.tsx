@@ -2,16 +2,14 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { ClaudeSession } from "../lib/types";
+import type { CardSession, ClaudeSession, SessionsSnapshot } from "../lib/types";
 
 const listClaudeSessions = vi.fn();
-const boardCardSessions = vi.fn();
 const focusClaudeSession = vi.fn();
 const resumeClaudeSession = vi.fn();
 vi.mock("../lib/api", () => ({
   api: {
     listClaudeSessions: (d: number, dir: string) => listClaudeSessions(d, dir),
-    boardCardSessions: () => boardCardSessions(),
     focusClaudeSession: (id: string) => focusClaudeSession(id),
     resumeClaudeSession: (...args: unknown[]) => resumeClaudeSession(...args),
   },
@@ -43,6 +41,11 @@ const session = (over: Partial<ClaudeSession> = {}): ClaudeSession => ({
   ...over,
 });
 
+const snapshot = (sessions: ClaudeSession[], card_sessions: CardSession[] = []): SessionsSnapshot => ({
+  sessions,
+  card_sessions,
+});
+
 function renderView() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
@@ -57,8 +60,7 @@ describe("SessionsView", () => {
     vi.clearAllMocks();
     focusClaudeSession.mockResolvedValue(undefined);
     resumeClaudeSession.mockResolvedValue(undefined);
-    boardCardSessions.mockResolvedValue([{ card_id: "c1", repo: "org/app", number: 42, session_id: "s1" }]);
-    listClaudeSessions.mockResolvedValue([
+    listClaudeSessions.mockResolvedValue(snapshot([
       session(),
       session({ session_id: "s2", name: "detached one", focus: "detached" }),
       session({ session_id: "bg123456789", name: "bg one", kind: "bg", job_id: "job12345", tmux: null, focus: "background" }),
@@ -73,7 +75,7 @@ describe("SessionsView", () => {
         agent_view: { pid: 9, cwd: "/Users/me/projects", filter_cwd: null, tmux: { session: "0", window: "@1", pane: "%0", label: "0:1" }, tty: "/dev/ttys003", focus: "ready" },
       }),
       session({ session_id: "s3", name: "old one", live: false, pid: null, tmux: null, focus: "not_live" }),
-    ]);
+    ], [{ card_id: "c1", repo: "org/app", number: 42, session_id: "s1" }]));
   });
 
   it("lists live and history sessions, focuses ready ones, disables detached", async () => {
@@ -116,7 +118,7 @@ describe("SessionsView", () => {
   });
 
   it("expands a history session's summaries; the original name is a tooltip", async () => {
-    listClaudeSessions.mockResolvedValue([
+    listClaudeSessions.mockResolvedValue(snapshot([
       session({
         session_id: "h1",
         name: "Add summaries",
@@ -131,7 +133,7 @@ describe("SessionsView", () => {
         ],
       }),
       session({ session_id: "h2", name: "plain", live: false, pid: null, tmux: null, focus: "not_live" }),
-    ]);
+    ]));
     renderView();
     expect((await screen.findByText("Add summaries")).closest("button")).toHaveAttribute("title", "look at the notes");
     expect(screen.getAllByRole("button", { name: /show summary/i })).toHaveLength(1);

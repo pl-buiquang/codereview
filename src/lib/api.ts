@@ -10,7 +10,7 @@ import type {
   BoardMetaKind,
   BoardRefreshResult,
   Branch,
-  CardSession,
+  SessionsSnapshot,
   ChatMessage,
   ChatTurnResult,
   ClaudeSession,
@@ -238,9 +238,8 @@ export const api = {
   reviewAgentSessions: (reviewId: number) => invoke<ClaudeSession[]>("review_agent_sessions", { reviewId }),
   reviewOpenAgent: (reviewId: number, host: TerminalHost, tmuxTarget: TmuxTarget, tmuxSession: string) =>
     invoke<void>("review_open_agent", { reviewId, host, tmuxTarget, tmuxSession }),
-  boardCardSessions: () => invoke<CardSession[]>("board_card_sessions"),
   listClaudeSessions: (historyDays: number, summaryDir: string) =>
-    invoke<ClaudeSession[]>("list_claude_sessions", { historyDays, summaryDir }),
+    invoke<SessionsSnapshot>("list_claude_sessions", { historyDays, summaryDir }),
   focusClaudeSession: (sessionId: string) => invoke<void>("focus_claude_session", { sessionId }),
   resumeClaudeSession: (
     sessionId: string,

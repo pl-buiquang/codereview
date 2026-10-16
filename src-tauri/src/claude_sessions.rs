@@ -200,7 +200,44 @@ fn tmux_state() -> TmuxState {
     state
 }
 
-fn git_info(cwd: &str) -> (Option<String>, Option<String>) {
+type GitInfo = (Option<String>, Option<String>);
+
+/// Branch and `owner/name` per cwd, valid while the checkout's HEAD file is unchanged.
+static GIT_INFO_CACHE: Mutex<Option<HashMap<String, (SystemTime, GitInfo)>>> = Mutex::new(None);
+
+fn git_info(cwd: &str) -> GitInfo {
+    let Some(mtime) = head_mtime(Path::new(cwd)) else {
+        return read_git_info(cwd);
+    };
+    if let Some((cached_mtime, info)) = GIT_INFO_CACHE.lock().unwrap().as_ref().and_then(|c| c.get(cwd)) {
+        if *cached_mtime == mtime {
+            return info.clone();
+        }
+    }
+    let info = read_git_info(cwd);
+    GIT_INFO_CACHE
+        .lock()
+        .unwrap()
+        .get_or_insert_with(HashMap::new)
+        .insert(cwd.to_string(), (mtime, info.clone()));
+    info
+}
+
+/// mtime of the HEAD file of the checkout containing `dir` (walking up; `.git`
+/// may be a directory or, in a linked worktree, a `gitdir:` pointer file).
+fn head_mtime(dir: &Path) -> Option<SystemTime> {
+    let dot_git = dir.ancestors().map(|d| d.join(".git")).find(|p| p.exists())?;
+    let git_dir = if dot_git.is_dir() {
+        dot_git
+    } else {
+        let pointer = fs::read_to_string(&dot_git).ok()?;
+        let target = PathBuf::from(pointer.strip_prefix("gitdir:")?.trim());
+        if target.is_absolute() { target } else { dot_git.parent()?.join(target) }
+    };
+    fs::metadata(git_dir.join("HEAD")).ok()?.modified().ok()
+}
+
+fn read_git_info(cwd: &str) -> GitInfo {
     let path = Path::new(cwd);
     let branch = crate::git::run_git(path, &["rev-parse", "--abbrev-ref", "HEAD"])
         .ok()
@@ -613,6 +650,25 @@ pub fn history_sessions(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn head_mtime_follows_main_and_linked_worktree_checkouts() {
+        let root = tempfile::tempdir().unwrap();
+        let main = root.path().join("main");
+        fs::create_dir_all(main.join(".git/worktrees/wt")).unwrap();
+        fs::create_dir_all(main.join("src/deep")).unwrap();
+        fs::write(main.join(".git/HEAD"), "ref: refs/heads/main\n").unwrap();
+        fs::write(main.join(".git/worktrees/wt/HEAD"), "ref: refs/heads/feat\n").unwrap();
+        let wt = root.path().join("wt");
+        fs::create_dir_all(&wt).unwrap();
+        fs::write(wt.join(".git"), format!("gitdir: {}\n", main.join(".git/worktrees/wt").display())).unwrap();
+
+        let main_head = fs::metadata(main.join(".git/HEAD")).unwrap().modified().unwrap();
+        let wt_head = fs::metadata(main.join(".git/worktrees/wt/HEAD")).unwrap().modified().unwrap();
+        assert_eq!(head_mtime(&main.join("src/deep")), Some(main_head));
+        assert_eq!(head_mtime(&wt), Some(wt_head));
+        assert_eq!(head_mtime(&root.path().join("nowhere")), None);
+    }
 
     #[test]
     fn parses_tmux_locator() {
