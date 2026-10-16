@@ -1,6 +1,6 @@
 [package]
 name = "codereview"
-version = "0.3.0"
+version = "0.4.0"
 description = "Local desktop app for reviewing GitHub PRs and local branch diffs"
 authors = ["Paul Bui-Quang"]
 edition = "2021"
