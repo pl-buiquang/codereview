@@ -55,7 +55,7 @@ fragment PrCore on PullRequest {
 /// covers the union of what Inbox, Board and Review display.
 pub const FRAGMENTS: &str = concat!(issue_core!(), pr_core!());
 /// For PR-only queries: GitHub rejects a query with an unused fragment.
-const PR_FRAGMENT: &str = pr_core!();
+pub const PR_FRAGMENT: &str = pr_core!();
 /// Branches per by-head lookup query (each alias returns up to 3 PRs).
 const HEAD_LOOKUP_BATCH: usize = 8;
 

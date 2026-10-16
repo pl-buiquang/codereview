@@ -872,7 +872,7 @@ pub struct PrDetail {
 /// Fetch a PR's metadata for the review header. Clone-less (owner/name/number).
 pub fn pr_detail(owner: &str, name: &str, number: i64) -> AppResult<PrDetail> {
     let vars = serde_json::json!({ "owner": owner, "name": name, "number": number });
-    let query = format!("{PR_META_QUERY}\n{}", crate::mirror::FRAGMENTS);
+    let query = format!("{PR_META_QUERY}\n{}", crate::mirror::PR_FRAGMENT);
     let data: serde_json::Value = graphql(&query, vars)?;
     let pr = data
         .pointer("/repository/pullRequest")
@@ -1280,6 +1280,19 @@ pub fn set_thread_resolved(thread_id: &str, resolved: bool) -> AppResult<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pr_meta_query_sends_only_the_fragment_it_uses() {
+        assert!(PR_META_QUERY.contains("...PrCore") && !PR_META_QUERY.contains("...IssueCore"));
+        assert!(!crate::mirror::PR_FRAGMENT.contains("IssueCore"), "GitHub rejects unused fragments");
+    }
+
+    #[test]
+    #[ignore = "live: needs gh auth"]
+    fn pr_detail_live() {
+        let d = pr_detail("pl-buiquang", "codereview", 21).unwrap();
+        assert_eq!(d.node.number, 21);
+    }
 
     #[test]
     fn attachment_urls_require_trusted_https_origins() {

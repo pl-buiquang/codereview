@@ -5,4 +5,4 @@
 pub mod fetch;
 pub mod store;
 
-pub use fetch::{Node, FRAGMENTS};
+pub use fetch::{Node, FRAGMENTS, PR_FRAGMENT};
