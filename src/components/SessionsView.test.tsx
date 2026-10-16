@@ -10,7 +10,7 @@ const focusClaudeSession = vi.fn();
 const resumeClaudeSession = vi.fn();
 vi.mock("../lib/api", () => ({
   api: {
-    listClaudeSessions: (d: number) => listClaudeSessions(d),
+    listClaudeSessions: (d: number, dir: string) => listClaudeSessions(d, dir),
     boardCardSessions: () => boardCardSessions(),
     focusClaudeSession: (id: string) => focusClaudeSession(id),
     resumeClaudeSession: (...args: unknown[]) => resumeClaudeSession(...args),
@@ -38,6 +38,8 @@ const session = (over: Partial<ClaudeSession> = {}): ClaudeSession => ({
   tty: null,
   updated_at: Date.now(),
   focus: "ready",
+  summaries: [],
+  original_name: null,
   ...over,
 });
 
@@ -111,6 +113,33 @@ describe("SessionsView", () => {
     const s = useUIStore.getState();
     expect(s.homeSection).toBe("board");
     expect(s.boardHighlightCardId).toBe("c1");
+  });
+
+  it("expands a history session's summaries; the original name is a tooltip", async () => {
+    listClaudeSessions.mockResolvedValue([
+      session({
+        session_id: "h1",
+        name: "Add summaries",
+        original_name: "look at the notes",
+        live: false,
+        pid: null,
+        tmux: null,
+        focus: "not_live",
+        summaries: [
+          { date: "2026-10-16 11:00", title: "Add summaries", body: "## Goal\nSecond run" },
+          { date: "2026-10-16 10:00", title: null, body: "## Goal\nFirst run" },
+        ],
+      }),
+      session({ session_id: "h2", name: "plain", live: false, pid: null, tmux: null, focus: "not_live" }),
+    ]);
+    renderView();
+    expect((await screen.findByText("Add summaries")).closest("button")).toHaveAttribute("title", "look at the notes");
+    expect(screen.getAllByRole("button", { name: /show summary/i })).toHaveLength(1);
+    expect(screen.queryByText("Second run")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /show summary/i }));
+    expect(screen.getByText("Second run")).toBeInTheDocument();
+    expect(screen.getByText("First run")).toBeInTheDocument();
+    expect(screen.getByText("2026-10-16 11:00")).toBeInTheDocument();
   });
 });
 

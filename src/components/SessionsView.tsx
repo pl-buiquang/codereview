@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { toast } from "../lib/toast";
@@ -8,6 +8,7 @@ import { useSettingsStore } from "../lib/settings";
 import { useUIStore } from "../store";
 import type { CardSession, ClaudeSession, SessionFocusState } from "../lib/types";
 import { Icon } from "./icons";
+import { Markdown } from "./Markdown";
 
 const FOCUS_DISABLED_REASON: Record<Exclude<SessionFocusState, "ready">, string> = {
   detached: "No terminal is attached to this tmux session",
@@ -38,6 +39,7 @@ export function resumeCommand(s: Pick<ClaudeSession, "cwd" | "session_id">): str
 
 export function SessionsView() {
   const historyDays = useSettingsStore((s) => s.sessionHistoryDays);
+  const summaryDir = useSettingsStore((s) => s.sessionSummaryDir);
   const defaultTerminal = useSettingsStore((s) => s.defaultTerminal);
   const tmuxTarget = useSettingsStore((s) => s.tmuxTarget);
   const tmuxSessionName = useSettingsStore((s) => s.tmuxSessionName);
@@ -45,8 +47,8 @@ export function SessionsView() {
   const queryClient = useQueryClient();
 
   const sessionsQuery = useQuery({
-    queryKey: ["claude-sessions", historyDays],
-    queryFn: () => api.listClaudeSessions(historyDays),
+    queryKey: ["claude-sessions", historyDays, summaryDir],
+    queryFn: () => api.listClaudeSessions(historyDays, summaryDir),
     refetchInterval: 3_000,
   });
   const cardSessionsQuery = useQuery({
@@ -255,48 +257,82 @@ function SessionRow({
   action: React.ReactNode;
 }) {
   const status = statusClass(s);
+  const [expanded, setExpanded] = useState(false);
+  const summaries = s.live ? [] : (s.summaries ?? []);
   return (
-    <div className="card sessions-row">
-      <span className={`sessions-dot sessions-dot-${status}`} title={status} />
-      <div className="sessions-main">
-        <div className="sessions-title">
-          <span className="sessions-name">{s.name ?? s.session_id}</span>
-          {s.kind === "bg" && (
-            <span className="badge badge-pending" title={s.attached ? "Background session viewed via claude attach" : undefined}>
-              {s.attached ? "attached" : "background"}
+    <div className="card sessions-card">
+      <div className="sessions-row-head">
+        <span className={`sessions-dot sessions-dot-${status}`} title={status} />
+        <div className="sessions-main">
+          <div className="sessions-title">
+            {summaries.length > 0 ? (
+              <button
+                className="sessions-name-toggle"
+                aria-expanded={expanded}
+                title={s.original_name ?? undefined}
+                onClick={() => setExpanded((v) => !v)}
+              >
+                <span className="sessions-name">{s.name ?? s.session_id}</span>
+                <span
+                  className={`sessions-expand${expanded ? "" : " sessions-expand-closed"}`}
+                  aria-label={expanded ? "Hide summary" : "Show summary"}
+                  role="img"
+                >
+                  <Icon name="chev" size={11} />
+                </span>
+              </button>
+            ) : (
+              <span className="sessions-name" title={s.original_name ?? undefined}>
+                {s.name ?? s.session_id}
+              </span>
+            )}
+            {s.kind === "bg" && (
+              <span className="badge badge-pending" title={s.attached ? "Background session viewed via claude attach" : undefined}>
+                {s.attached ? "attached" : "background"}
+              </span>
+            )}
+            {s.focus === "detached" && <span className="badge badge-draft">detached</span>}
+            {isWaiting(s) && <span className="badge badge-review">{s.waiting_for ?? "waiting"}</span>}
+            {cards.map((c) => (
+              <button
+                key={c.card_id}
+                className="badge badge-pr badge-toggle"
+                title="Show on the Board"
+                onClick={() => onShowCard(c.card_id)}
+              >
+                {c.repo.split("/").pop()}#{c.number}
+              </button>
+            ))}
+          </div>
+          <div className="sessions-meta">
+            <span className="chip" title={s.cwd}>
+              <Icon name="folder" size={11} /> {tildePath(s.cwd)}
             </span>
-          )}
-          {s.focus === "detached" && <span className="badge badge-draft">detached</span>}
-          {isWaiting(s) && <span className="badge badge-review">{s.waiting_for ?? "waiting"}</span>}
-          {cards.map((c) => (
-            <button
-              key={c.card_id}
-              className="badge badge-pr badge-toggle"
-              title="Show on the Board"
-              onClick={() => onShowCard(c.card_id)}
-            >
-              {c.repo.split("/").pop()}#{c.number}
-            </button>
+            {s.git_branch && (
+              <span className="chip">
+                <Icon name="branch" size={11} /> {s.git_branch}
+              </span>
+            )}
+            {s.tmux?.label && (
+              <span className="chip" title={`tmux pane ${s.tmux.pane}`}>
+                <Icon name="terminal" size={11} /> {s.tmux.label}
+              </span>
+            )}
+            <span className="chip">{timeAgo(s.updated_at)}</span>
+          </div>
+        </div>
+        <div className="sessions-actions">{action}</div>
+      </div>
+      {expanded && (
+        <div className="sessions-summaries">
+          {summaries.map((sum, i) => (
+            <div key={i} className="sessions-summary">
+              {summaries.length > 1 && sum.date && <div className="sessions-summary-date">{sum.date}</div>}
+              <Markdown source={sum.body} />
+            </div>
           ))}
         </div>
-        <div className="sessions-meta">
-          <span className="chip" title={s.cwd}>
-            <Icon name="folder" size={11} /> {tildePath(s.cwd)}
-          </span>
-          {s.git_branch && (
-            <span className="chip">
-              <Icon name="branch" size={11} /> {s.git_branch}
-            </span>
-          )}
-          {s.tmux?.label && (
-            <span className="chip" title={`tmux pane ${s.tmux.pane}`}>
-              <Icon name="terminal" size={11} /> {s.tmux.label}
-            </span>
-          )}
-          <span className="chip">{timeAgo(s.updated_at)}</span>
-        </div>
-      </div>
-      <div className="sessions-actions">{action}</div>
+      )}
     </div>
   );
 }

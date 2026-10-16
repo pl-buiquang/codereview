@@ -71,7 +71,7 @@ export function BoardView() {
   const lastRefresh = lastRefreshQuery.data;
   const liveSessionsQuery = useQuery({
     queryKey: ["claude-sessions", 0],
-    queryFn: () => api.listClaudeSessions(0),
+    queryFn: () => api.listClaudeSessions(0, ""),
     refetchInterval: 15_000,
   });
   const cardSessionsQuery = useQuery({

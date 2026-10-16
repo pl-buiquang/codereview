@@ -230,6 +230,8 @@ function GeneralSection() {
   const setTmuxSessionName = useSettingsStore((s) => s.setTmuxSessionName);
   const sessionHistoryDays = useSettingsStore((s) => s.sessionHistoryDays);
   const setSessionHistoryDays = useSettingsStore((s) => s.setSessionHistoryDays);
+  const sessionSummaryDir = useSettingsStore((s) => s.sessionSummaryDir);
+  const setSessionSummaryDir = useSettingsStore((s) => s.setSessionSummaryDir);
   const setFileTestPatterns = useSettingsStore((s) => s.setFileTestPatterns);
   const setFileConfigPatterns = useSettingsStore((s) => s.setFileConfigPatterns);
 
@@ -408,6 +410,18 @@ function GeneralSection() {
               const n = Number(e.target.value);
               if (Number.isFinite(n)) setSessionHistoryDays(Math.max(0, Math.min(30, Math.round(n))));
             }}
+          />
+        </label>
+        <label
+          className="settings-row"
+          title="Markdown session summaries (frontmatter with session_id, optional title) shown on history cards. Empty = off."
+        >
+          <span>History summary directory</span>
+          <input
+            className="input"
+            value={sessionSummaryDir}
+            placeholder="~/Nextcloud/Notes/_work/sessions"
+            onChange={(e) => setSessionSummaryDir(e.target.value)}
           />
         </label>
       </section>

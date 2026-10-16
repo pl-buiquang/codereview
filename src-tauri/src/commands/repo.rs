@@ -215,7 +215,7 @@ pub fn auto_link_repos(base_paths: Vec<String>, db: State<Db>) -> AppResult<i64>
 }
 
 /// Expand a leading `~/` to the real home directory.
-fn expand_home(path: &str) -> String {
+pub(crate) fn expand_home(path: &str) -> String {
     if let Some(rest) = path.strip_prefix("~/") {
         if let Some(home) = dirs::home_dir() {
             return home.join(rest).to_string_lossy().into_owned();

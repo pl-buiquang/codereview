@@ -86,6 +86,7 @@ describe("useSettingsStore", () => {
         "repoBasePaths",
         "repoStripPrefixes",
         "sessionHistoryDays",
+        "sessionSummaryDir",
         "tmuxSessionName",
         "tmuxTarget",
       ].sort(),
@@ -107,7 +108,7 @@ describe("exportSettings / importSettings", () => {
     s.setFileTestPatterns("");
     const applied = importSettings(json);
     const n = useSettingsStore.getState();
-    expect(applied).toBe(21);
+    expect(applied).toBe(22);
     expect(n.mode).toBe("light");
     expect(n.diffFontSize).toBe(15);
     expect(n.fileTestPatterns).toBe("*.spec.rb");
@@ -191,6 +192,28 @@ describe("settings migration to v2", () => {
     expect(out.repoStripPrefixes).toBe("");
     expect(out.prListPollMs).toBe(0);
     expect(out.inboxPollMs).toBe(0);
+  });
+});
+
+describe("settings migration from v2+", () => {
+  it("keeps every valid persisted value, including direction and newer keys", () => {
+    const out = migrate(
+      { direction: "c", mode: "dark", sessionSummaryDir: "~/notes", tmuxTarget: "per_repo", sessionHistoryDays: 7 },
+      9,
+    ) as Record<string, unknown>;
+    expect(out.direction).toBe("c");
+    expect(out.mode).toBe("dark");
+    expect(out.sessionSummaryDir).toBe("~/notes");
+    expect(out.tmuxTarget).toBe("per_repo");
+    expect(out.sessionHistoryDays).toBe(7);
+    expect(out.repoBasePaths).toBe("~/projects");
+  });
+
+  it("drops mistyped or out-of-enum values back to defaults", () => {
+    const out = migrate({ direction: "zzz", diffFontSize: "big", tmuxTarget: "nope" }, 9) as Record<string, unknown>;
+    expect(out.direction).toBe("a");
+    expect(out.diffFontSize).toBe(DEFAULT_DIFF_FONT_SIZE);
+    expect(out.tmuxTarget).toBe("current");
   });
 });
 

@@ -15,6 +15,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
+use crate::session_summaries::SessionSummary;
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct TmuxLoc {
     pub session: String,
@@ -60,6 +62,10 @@ pub struct ClaudeSession {
     /// Last activity, epoch milliseconds.
     pub updated_at: i64,
     pub focus: FocusState,
+    /// Hook-written summaries for this session, newest first (history sessions only).
+    pub summaries: Vec<SessionSummary>,
+    /// The transcript-derived name when a summary title replaced it.
+    pub original_name: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -432,6 +438,8 @@ pub fn live_sessions_and_hidden(agents: &[AgentEntry]) -> (Vec<ClaudeSession>, H
                 tmux: tmux_loc,
                 tty,
                 focus,
+                summaries: Vec::new(),
+                original_name: None,
             }
         })
         .collect();
@@ -470,10 +478,11 @@ struct TranscriptInfo {
 }
 
 impl TranscriptInfo {
-    fn name(&self) -> Option<String> {
+    fn name(&self, summary_title: Option<&str>) -> Option<String> {
         self.custom_title
             .clone()
             .or_else(|| self.agent_name.clone())
+            .or_else(|| summary_title.map(str::to_string))
             .or_else(|| self.ai_title.clone())
             .or_else(|| self.last_prompt.as_ref().map(|p| truncate(p, 80)))
     }
@@ -540,7 +549,11 @@ fn transcript_info(path: &Path, mtime: SystemTime) -> Option<TranscriptInfo> {
 }
 
 /// Non-live sessions whose transcript was written within the last `days` days.
-pub fn history_sessions(days: u32, exclude: &HashSet<String>) -> Vec<ClaudeSession> {
+pub fn history_sessions(
+    days: u32,
+    exclude: &HashSet<String>,
+    summaries: &mut HashMap<String, Vec<SessionSummary>>,
+) -> Vec<ClaudeSession> {
     let Some(dir) = claude_dir() else { return Vec::new() };
     let cutoff = SystemTime::now() - Duration::from_secs(u64::from(days) * 86_400);
     let Ok(projects) = fs::read_dir(dir.join("projects")) else { return Vec::new() };
@@ -566,6 +579,10 @@ pub fn history_sessions(days: u32, exclude: &HashSet<String>) -> Vec<ClaudeSessi
                 continue;
             }
             let Some(cwd) = info.cwd.clone() else { continue };
+            let summaries = summaries.remove(&session_id).unwrap_or_default();
+            let summary_title = summaries.iter().find_map(|s| s.title.as_deref());
+            let name = info.name(summary_title);
+            let original_name = info.name(None).filter(|n| Some(n) != name.as_ref());
             out.push(ClaudeSession {
                 session_id,
                 pid: None,
@@ -576,7 +593,7 @@ pub fn history_sessions(days: u32, exclude: &HashSet<String>) -> Vec<ClaudeSessi
                 job_id: None,
                 waiting_for: None,
                 agent_view: None,
-                name: info.name(),
+                name,
                 cwd,
                 git_branch: info.git_branch,
                 repo: None,
@@ -584,6 +601,8 @@ pub fn history_sessions(days: u32, exclude: &HashSet<String>) -> Vec<ClaudeSessi
                 tty: None,
                 updated_at: mtime.duration_since(UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0),
                 focus: FocusState::NotLive,
+                summaries,
+                original_name,
             });
         }
     }
@@ -730,9 +749,9 @@ mod tests {
         let info = parse_transcript(jsonl.as_bytes());
         assert_eq!(info.cwd.as_deref(), Some("/repo"));
         assert_eq!(info.git_branch.as_deref(), Some("feat/x"));
-        assert_eq!(info.name().as_deref(), Some("new"));
+        assert_eq!(info.name(None).as_deref(), Some("new"));
 
         let only_prompt = parse_transcript(r#"{"type":"last-prompt","lastPrompt":"hello\nworld"}"#.as_bytes());
-        assert_eq!(only_prompt.name().as_deref(), Some("hello world"));
+        assert_eq!(only_prompt.name(None).as_deref(), Some("hello world"));
     }
 }

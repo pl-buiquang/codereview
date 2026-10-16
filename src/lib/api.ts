@@ -226,8 +226,8 @@ export const api = {
   reviewOpenAgent: (reviewId: number, host: TerminalHost, tmuxTarget: TmuxTarget, tmuxSession: string) =>
     invoke<void>("review_open_agent", { reviewId, host, tmuxTarget, tmuxSession }),
   boardCardSessions: () => invoke<CardSession[]>("board_card_sessions"),
-  listClaudeSessions: (historyDays: number) =>
-    invoke<ClaudeSession[]>("list_claude_sessions", { historyDays }),
+  listClaudeSessions: (historyDays: number, summaryDir: string) =>
+    invoke<ClaudeSession[]>("list_claude_sessions", { historyDays, summaryDir }),
   focusClaudeSession: (sessionId: string) => invoke<void>("focus_claude_session", { sessionId }),
   resumeClaudeSession: (
     sessionId: string,
@@ -383,6 +383,8 @@ export const api = {
     invoke<void>("write_settings_file", { destPath, contents }),
   readSettingsFile: (srcPath: string) =>
     invoke<string>("read_settings_file", { srcPath }),
+  readSettingsMirror: () => invoke<string | null>("read_settings_mirror"),
+  writeSettingsMirror: (contents: string) => invoke<void>("write_settings_mirror", { contents }),
 };
 
 /** Native save dialog; returns chosen path or null. */

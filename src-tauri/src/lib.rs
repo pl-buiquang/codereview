@@ -16,6 +16,7 @@ pub mod inbox;
 pub mod logging;
 mod path_env;
 pub mod provider;
+pub mod session_summaries;
 pub mod terminal;
 pub mod tools;
 pub mod worktree;
@@ -217,6 +218,8 @@ pub fn run() {
             commands::export::import_review,
             commands::export::write_settings_file,
             commands::export::read_settings_file,
+            commands::export::read_settings_mirror,
+            commands::export::write_settings_mirror,
             commands::editor::open_in_default_app,
             commands::editor::open_url,
             commands::gh::gh_auth_status,

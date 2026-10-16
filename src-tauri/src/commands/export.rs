@@ -314,6 +314,34 @@ pub fn read_settings_file(src_path: String) -> AppResult<String> {
     Ok(fs::read_to_string(&src_path)?)
 }
 
+/// Durable copy of the frontend settings store, in case the webview's localStorage is wiped.
+fn settings_mirror_path(app: &tauri::AppHandle) -> AppResult<std::path::PathBuf> {
+    use tauri::Manager;
+    let dir = app.path().app_data_dir().map_err(|e| AppError::Other(e.to_string()))?;
+    Ok(dir.join("settings.json"))
+}
+
+#[tauri::command]
+pub fn read_settings_mirror(app: tauri::AppHandle) -> AppResult<Option<String>> {
+    match fs::read_to_string(settings_mirror_path(&app)?) {
+        Ok(s) => Ok(Some(s)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+
+#[tauri::command]
+pub fn write_settings_mirror(app: tauri::AppHandle, contents: String) -> AppResult<()> {
+    let path = settings_mirror_path(&app)?;
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir)?;
+    }
+    let tmp = path.with_extension("json.tmp");
+    fs::write(&tmp, contents)?;
+    fs::rename(&tmp, &path)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

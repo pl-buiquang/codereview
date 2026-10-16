@@ -489,6 +489,14 @@ export interface ClaudeSession {
   tty: string | null;
   updated_at: number; // epoch ms
   focus: SessionFocusState;
+  summaries: SessionSummary[]; // newest first, history sessions only
+  original_name: string | null; // transcript name when a summary title replaced it
+}
+
+export interface SessionSummary {
+  date: string | null;
+  title: string | null;
+  body: string;
 }
 
 /** A live session matched to a PR card (via claude_session meta or head-branch checkout). */

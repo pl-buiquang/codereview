@@ -1,5 +1,6 @@
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
+import { createJSONStorage, persist, type StateStorage } from "zustand/middleware";
+import { api } from "./api";
 import { DIRECTIONS, type Direction } from "./themes";
 import { DEFAULT_CONFIG_PATTERNS, DEFAULT_TEST_PATTERNS } from "./fileCategory";
 
@@ -75,6 +76,7 @@ type PersistedSettings = Pick<
   | "tmuxTarget"
   | "tmuxSessionName"
   | "sessionHistoryDays"
+  | "sessionSummaryDir"
 >;
 
 const DEFAULTS: PersistedSettings = {
@@ -99,6 +101,7 @@ const DEFAULTS: PersistedSettings = {
   tmuxTarget: "current",
   tmuxSessionName: "codereview",
   sessionHistoryDays: 3,
+  sessionSummaryDir: "",
 };
 
 const PERSISTED_KEYS = Object.keys(DEFAULTS) as (keyof PersistedSettings)[];
@@ -143,6 +146,8 @@ interface SettingsState {
   tmuxSessionName: string;
   /** How many days of past Claude sessions the Sessions view lists. */
   sessionHistoryDays: number;
+  /** Directory of hook-written session summaries (markdown + frontmatter); empty = off. */
+  sessionSummaryDir: string;
   setDirection: (d: Direction) => void;
   setMode: (m: ThemeMode) => void;
   setDiffFontSize: (n: number) => void;
@@ -164,7 +169,47 @@ interface SettingsState {
   setTmuxTarget: (t: TmuxTarget) => void;
   setTmuxSessionName: (s: string) => void;
   setSessionHistoryDays: (days: number) => void;
+  setSessionSummaryDir: (s: string) => void;
 }
+
+const ENUMS: Partial<Record<keyof PersistedSettings, readonly string[]>> = {
+  direction: DIRECTIONS.map((d) => d.id),
+  mode: ["dark", "light", "system"],
+  defaultViewType: ["split", "unified"],
+  boardStatusBorderSide: ["left", "right", "top", "bottom"],
+  leftPaneTab: ["files", "context"],
+  defaultTerminal: TERMINAL_HOST_OPTIONS.map((o) => o.value),
+  tmuxTarget: TMUX_TARGET_OPTIONS.map((o) => o.value),
+};
+
+function writeMirror(value: string) {
+  try {
+    api.writeSettingsMirror(value).catch(() => {});
+  } catch {
+    // not running inside Tauri
+  }
+}
+
+/** localStorage, mirrored to a file in the app-data dir so a wiped webview store can recover. */
+const mirroredStorage: StateStorage = {
+  getItem: (name) => {
+    const local = localStorage.getItem(name);
+    if (local !== null) {
+      writeMirror(local);
+      return local;
+    }
+    try {
+      return api.readSettingsMirror().catch(() => null);
+    } catch {
+      return null;
+    }
+  },
+  setItem: (name, value) => {
+    localStorage.setItem(name, value);
+    writeMirror(value);
+  },
+  removeItem: (name) => localStorage.removeItem(name),
+};
 
 export const useSettingsStore = create<SettingsState>()(
   persist(
@@ -191,40 +236,25 @@ export const useSettingsStore = create<SettingsState>()(
       setTmuxTarget: (tmuxTarget) => set({ tmuxTarget }),
       setTmuxSessionName: (tmuxSessionName) => set({ tmuxSessionName }),
       setSessionHistoryDays: (sessionHistoryDays) => set({ sessionHistoryDays }),
+      setSessionSummaryDir: (sessionSummaryDir) => set({ sessionSummaryDir }),
     }),
     {
       name: "codereview-settings",
       version: 10,
+      storage: createJSONStorage(() => mirroredStorage),
       partialize: (s) => pickPersisted(s),
-      // v0 (flat: `theme`) and v1 (`themeMode` + theme slots) collapse the same
-      // way: direction resets to "a", the old mode maps over (custom themes,
-      // dark/light slot ids are intentionally dropped), non-theme settings carry.
+      // Adding a key needs no version bump: the default merge fills it from DEFAULTS.
+      // Only bump for renames/reshapes, and keep every other persisted value.
       migrate: (persisted, version) => {
         const p = (persisted ?? {}) as Record<string, unknown>;
-        const oldMode = version < 1 ? (p.theme as string) : (p.themeMode as string);
-        return {
-          direction: "a",
-          mode: oldMode === "dark" || oldMode === "light" ? oldMode : "system",
-          diffFontSize: (p.diffFontSize as number) ?? DEFAULT_DIFF_FONT_SIZE,
-          defaultViewType: (p.defaultViewType as DiffViewType) ?? "split",
-          defaultThreeDot: (p.defaultThreeDot as boolean) ?? true,
-          botLogins: (p.botLogins as string) ?? "",
-          repoStripPrefixes: (p.repoStripPrefixes as string) ?? "",
-          repoBasePaths: (p.repoBasePaths as string) ?? "~/projects",
-          prListPollMs: (p.prListPollMs as number) ?? 0,
-          inboxPollMs: (p.inboxPollMs as number) ?? 0,
-          boardPollMs: (p.boardPollMs as number) ?? 0,
-          boardStatusBorderSide: (p.boardStatusBorderSide as BoardBorderSide) ?? "top",
-          chatModel: (p.chatModel as string) ?? "",
-          markEdits: (p.markEdits as boolean) ?? false,
-          fileTestPatterns: (p.fileTestPatterns as string) ?? DEFAULT_TEST_PATTERNS,
-          fileConfigPatterns: (p.fileConfigPatterns as string) ?? DEFAULT_CONFIG_PATTERNS,
-          leftPaneTab: (p.leftPaneTab as LeftPaneTab) ?? "files",
-          defaultTerminal: (p.defaultTerminal as TerminalHost) ?? "iterm2",
-          tmuxTarget: (p.tmuxTarget as TmuxTarget) ?? "current",
-          tmuxSessionName: (p.tmuxSessionName as string) ?? "codereview",
-          sessionHistoryDays: (p.sessionHistoryDays as number) ?? 3,
-        } satisfies PersistedSettings;
+        const out: PersistedSettings = { ...DEFAULTS, ...sanitizeSettings(p) };
+        if (version < 2) {
+          // v0 (flat `theme`) / v1 (`themeMode` + theme slots): only the mode carries over.
+          const oldMode = version < 1 ? p.theme : p.themeMode;
+          out.direction = "a";
+          out.mode = oldMode === "dark" || oldMode === "light" ? oldMode : "system";
+        }
+        return out;
       },
     },
   ),
@@ -234,15 +264,6 @@ function pickPersisted(s: PersistedSettings): PersistedSettings {
   return Object.fromEntries(PERSISTED_KEYS.map((k) => [k, s[k]])) as PersistedSettings;
 }
 
-const ENUMS: Partial<Record<keyof PersistedSettings, readonly string[]>> = {
-  direction: DIRECTIONS.map((d) => d.id),
-  mode: ["dark", "light", "system"],
-  defaultViewType: ["split", "unified"],
-  boardStatusBorderSide: ["left", "right", "top", "bottom"],
-  leftPaneTab: ["files", "context"],
-  defaultTerminal: TERMINAL_HOST_OPTIONS.map((o) => o.value),
-  tmuxTarget: TMUX_TARGET_OPTIONS.map((o) => o.value),
-};
 
 /** Serialize the persisted settings to a portable JSON document. */
 export function exportSettings(): string {
@@ -273,6 +294,15 @@ export function importSettings(json: string): number {
     root.settings && typeof root.settings === "object" ? root.settings : root
   ) as Record<string, unknown>;
 
+  const picked = sanitizeSettings(source);
+  const count = Object.keys(picked).length;
+  if (count === 0) throw new Error("No recognized settings in file");
+  useSettingsStore.setState(picked);
+  return count;
+}
+
+/** Known keys whose value has the default's type (and a valid enum value); the rest is dropped. */
+function sanitizeSettings(source: Record<string, unknown>): Partial<PersistedSettings> {
   const picked: Record<string, unknown> = {};
   for (const key of PERSISTED_KEYS) {
     const value = source[key];
@@ -282,10 +312,7 @@ export function importSettings(json: string): number {
     if (allowed && !allowed.includes(value as string)) continue;
     picked[key] = value;
   }
-  const count = Object.keys(picked).length;
-  if (count === 0) throw new Error("No recognized settings in file");
-  useSettingsStore.setState(picked as Partial<PersistedSettings>);
-  return count;
+  return picked as Partial<PersistedSettings>;
 }
 
 /** Parse the configured repository base paths. */

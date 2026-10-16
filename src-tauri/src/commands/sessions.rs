@@ -7,14 +7,20 @@ use tauri::State;
 use crate::claude_sessions::{self, ClaudeSession};
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
+use crate::session_summaries;
 use crate::terminal;
 
 #[tauri::command]
-pub async fn list_claude_sessions(history_days: u32) -> AppResult<Vec<ClaudeSession>> {
+pub async fn list_claude_sessions(history_days: u32, summary_dir: Option<String>) -> AppResult<Vec<ClaudeSession>> {
     let agents = claude_sessions::agents();
     let (mut sessions, mut exclude) = claude_sessions::live_sessions_and_hidden(&agents);
     exclude.extend(sessions.iter().map(|s| s.session_id.clone()));
-    sessions.extend(claude_sessions::history_sessions(history_days, &exclude));
+    let mut summaries = summary_dir
+        .map(|d| d.trim().to_string())
+        .filter(|d| !d.is_empty())
+        .map(|d| session_summaries::load(std::path::Path::new(&crate::commands::repo::expand_home(&d))))
+        .unwrap_or_default();
+    sessions.extend(claude_sessions::history_sessions(history_days, &exclude, &mut summaries));
     Ok(sessions)
 }
 
@@ -285,6 +291,8 @@ mod tests {
             tty: None,
             updated_at: 0,
             focus: FocusState::Ready,
+            summaries: Vec::new(),
+            original_name: None,
         }
     }
 

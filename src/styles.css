@@ -5032,6 +5032,74 @@ input[type="range"] {
   display: flex;
   gap: 6px;
 }
+.sessions-card {
+  padding: 10px 14px;
+}
+.sessions-row-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.sessions-name-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.sessions-name-toggle:hover .sessions-name {
+  text-decoration: underline;
+}
+.sessions-name-toggle:hover .sessions-expand {
+  color: var(--text);
+}
+.sessions-expand {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  color: var(--text-3);
+  transition: transform 0.12s ease;
+}
+.sessions-expand svg {
+  display: block;
+}
+.sessions-expand-closed {
+  transform: rotate(-90deg);
+}
+.sessions-summaries {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 8px 0 0 20px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+.sessions-summary-date {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-3);
+  margin-bottom: 2px;
+}
+.sessions-summary .markdown-body {
+  font-size: 12.5px;
+}
+.sessions-summary .markdown-body > :first-child {
+  margin-top: 0;
+}
+.sessions-summary .markdown-body h1,
+.sessions-summary .markdown-body h2 {
+  font-size: 13px;
+  margin: 10px 0 4px;
+}
 .worktrees-list {
   gap: 8px;
 }
