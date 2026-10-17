@@ -516,10 +516,10 @@ struct TranscriptInfo {
 
 impl TranscriptInfo {
     fn name(&self, summary_title: Option<&str>) -> Option<String> {
-        self.custom_title
-            .clone()
+        summary_title
+            .map(str::to_string)
+            .or_else(|| self.custom_title.clone())
             .or_else(|| self.agent_name.clone())
-            .or_else(|| summary_title.map(str::to_string))
             .or_else(|| self.ai_title.clone())
             .or_else(|| self.last_prompt.as_ref().map(|p| truncate(p, 80)))
     }
@@ -806,6 +806,7 @@ mod tests {
         assert_eq!(info.cwd.as_deref(), Some("/repo"));
         assert_eq!(info.git_branch.as_deref(), Some("feat/x"));
         assert_eq!(info.name(None).as_deref(), Some("new"));
+        assert_eq!(info.name(Some("Summary")).as_deref(), Some("Summary"));
 
         let only_prompt = parse_transcript(r#"{"type":"last-prompt","lastPrompt":"hello\nworld"}"#.as_bytes());
         assert_eq!(only_prompt.name(None).as_deref(), Some("hello world"));
