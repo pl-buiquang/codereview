@@ -46,6 +46,7 @@ fn updated(scope: Scope, ids: impl IntoIterator<Item = String>) -> MirrorUpdated
 pub fn run(db: &Db, req: &SyncRequest, notify: &dyn Fn(MirrorUpdated)) -> AppResult<SyncReport> {
     let start = Instant::now();
     let scope = req.scope;
+    log::debug!(target: "pipeline", "run {scope:?} {:?} discover={}", req.mode, req.discover);
     let viewer = inbox_cmd::cached_or_fetch_viewer(db)?;
     let mut report = SyncReport { viewer_login: viewer.login.clone(), ..Default::default() };
     // Fetched with the full fragment during this run, so not probed again.
@@ -103,6 +104,12 @@ pub fn run(db: &Db, req: &SyncRequest, notify: &dyn Fn(MirrorUpdated)) -> AppRes
         }
         out
     };
+    log::debug!(
+        target: "pipeline",
+        "{} entities ({} inbox, {} board, {} targets), probed {}, to refetch {}, gone {}",
+        entities.len(), inbox_ids.len(), board_ids.len(), target_ids.len(),
+        report.probed, to_fetch.len(), gone.len()
+    );
     report.changed = to_fetch.len();
     refetch_into_mirror(db, &to_fetch, &mut gone)?;
     changed.extend(to_fetch);
@@ -146,6 +153,7 @@ pub fn run(db: &Db, req: &SyncRequest, notify: &dyn Fn(MirrorUpdated)) -> AppRes
     }
 
     report.duration_ms = start.elapsed().as_millis() as i64;
+    log::debug!(target: "pipeline", "run {scope:?} done: {} changed ids, {}ms", changed.len(), report.duration_ms);
     notify(updated(scope, changed));
     Ok(report)
 }

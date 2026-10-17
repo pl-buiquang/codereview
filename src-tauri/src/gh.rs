@@ -46,6 +46,7 @@ impl GhRepo {
 
 /// Run a `gh` command in the given repo context. Returns stdout on success.
 pub fn run_gh(ctx: &GhRepo, args: &[&str]) -> AppResult<String> {
+    let started = std::time::Instant::now();
     let output = Command::new(crate::tools::gh_bin())
         .current_dir(ctx.cwd())
         .args(args)
@@ -57,11 +58,20 @@ pub fn run_gh(ctx: &GhRepo, args: &[&str]) -> AppResult<String> {
         crate::logging::warn(&format!("[gh] `gh {}` failed: {stderr}", args.join(" ")));
         return Err(AppError::Gh(stderr));
     }
+    log::debug!(
+        target: "gh",
+        "`gh {}` ({:?}) ok in {}ms ({} bytes)",
+        args.join(" "),
+        ctx.cwd(),
+        started.elapsed().as_millis(),
+        output.stdout.len()
+    );
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
 /// Run a `gh` command feeding `input` to its stdin (used for `gh api --input -`).
 pub fn run_gh_stdin(ctx: &GhRepo, args: &[&str], input: &str) -> AppResult<String> {
+    let started = std::time::Instant::now();
     let mut child = Command::new(crate::tools::gh_bin())
         .current_dir(ctx.cwd())
         .args(args)
@@ -87,6 +97,13 @@ pub fn run_gh_stdin(ctx: &GhRepo, args: &[&str], input: &str) -> AppResult<Strin
         crate::logging::warn(&format!("[gh] `gh {}` failed: {stderr}", args.join(" ")));
         return Err(AppError::Gh(stderr));
     }
+    log::debug!(
+        target: "gh",
+        "`gh {}` (stdin {} bytes) ok in {}ms",
+        args.join(" "),
+        input.len(),
+        started.elapsed().as_millis()
+    );
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 

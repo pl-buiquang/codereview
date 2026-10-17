@@ -9,18 +9,38 @@ use crate::error::{AppError, AppResult};
 pub fn run_git(repo: &Path, args: &[&str]) -> AppResult<String> {
     // Reads must not write: `git status` would otherwise refresh the index,
     // which the repo watcher sees as a change and reacts to with another status.
+    let started = std::time::Instant::now();
     let output = Command::new(crate::tools::git_bin())
         .env("GIT_OPTIONAL_LOCKS", "0")
         .arg("-C")
         .arg(repo)
         .args(args)
         .output()
-        .map_err(|e| AppError::Git(format!("failed to spawn git: {e}")))?;
+        .map_err(|e| {
+            log::warn!(target: "git", "failed to spawn git in {}: {e}", repo.display());
+            AppError::Git(format!("failed to spawn git: {e}"))
+        })?;
 
+    let ms = started.elapsed().as_millis();
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
+        log::debug!(
+            target: "git",
+            "`git {}` in {} failed ({}) after {ms}ms: {}",
+            args.join(" "),
+            repo.display(),
+            output.status,
+            stderr.trim()
+        );
         return Err(AppError::Git(stderr.trim().to_string()));
     }
+    log::debug!(
+        target: "git",
+        "`git {}` in {} ok in {ms}ms ({} bytes)",
+        args.join(" "),
+        repo.display(),
+        output.stdout.len()
+    );
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
@@ -39,8 +59,22 @@ pub struct RemoteInfo {
 /// Best-effort parse of `origin`'s owner/repo (GitHub ssh or https form).
 pub fn remote_info(path: &Path) -> RemoteInfo {
     match run_git(path, &["remote", "get-url", "origin"]) {
-        Ok(url) => parse_owner_repo(&url),
-        Err(_) => RemoteInfo::default(),
+        Ok(url) => {
+            let info = parse_owner_repo(&url);
+            log::debug!(
+                target: "git",
+                "remote_info {}: origin {:?} -> owner {:?}, name {:?}",
+                path.display(),
+                url.trim(),
+                info.owner,
+                info.name
+            );
+            info
+        }
+        Err(e) => {
+            log::debug!(target: "git", "remote_info {}: no origin ({e})", path.display());
+            RemoteInfo::default()
+        }
     }
 }
 

@@ -1,4 +1,6 @@
 import { useEffect } from "react";
+import { api } from "./api";
+import { setClientLogLevel } from "./log";
 import { effectiveTheme, useSettingsStore } from "./settings";
 
 /** Apply the active theme as `cr cr-{dir} {mode}` classes on <html> + colorScheme. */
@@ -17,6 +19,7 @@ export function useApplySettings() {
   const direction = useSettingsStore((s) => s.direction);
   const mode = useSettingsStore((s) => s.mode);
   const diffFontSize = useSettingsStore((s) => s.diffFontSize);
+  const logLevel = useSettingsStore((s) => s.logLevel);
 
   useEffect(() => {
     const apply = () => applyTheme(direction, effectiveTheme(mode));
@@ -31,4 +34,11 @@ export function useApplySettings() {
   useEffect(() => {
     document.documentElement.style.setProperty("--diff-font-size", `${diffFontSize}px`);
   }, [diffFontSize]);
+
+  // The backend owns the log file; push the chosen level to it (and to the
+  // frontend logger) at startup and whenever it changes.
+  useEffect(() => {
+    setClientLogLevel(logLevel);
+    if ("__TAURI_INTERNALS__" in window) api.setLogLevel(logLevel).catch(() => {});
+  }, [logLevel]);
 }

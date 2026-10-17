@@ -100,10 +100,16 @@ pub fn fetch_repo(db: &Db, repo_id: i64, min_interval: Duration) -> AppResult<Fe
     let path = PathBuf::from(path.ok_or_else(|| AppError::Other("fetch requires a local clone".into()))?);
     let started = Utc::now();
     if is_fresh(&before, min_interval, started) {
+        log::debug!(target: "fetch", "repo {repo_id}: skipped, last fetch {:?} is fresh (< {min_interval:?})", before.last_fetch_at);
         return Ok(FetchResult { fetched: false, state: before });
     }
 
+    log::debug!(target: "fetch", "repo {repo_id}: git fetch origin in {}", path.display());
     let result = run_git(&path, &["fetch", "--quiet", "--prune", "origin"]);
+    match &result {
+        Ok(_) => log::debug!(target: "fetch", "repo {repo_id}: fetch ok"),
+        Err(e) => log::warn!(target: "fetch", "repo {repo_id}: fetch failed: {e}"),
+    }
     let check_branch = result.is_ok() && older_than(branch_checked_at.as_deref(), DEFAULT_BRANCH_MAX_AGE, started);
     let default_branch = check_branch.then(|| remote_default_branch(&path)).flatten();
 

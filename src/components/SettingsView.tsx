@@ -1,9 +1,11 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useUIStore } from "../store";
+import type { LogLevel } from "../lib/log";
 import {
   AUTO_FETCH_OPTIONS,
   AUTO_SYNC_OPTIONS,
+  LOG_LEVEL_OPTIONS,
   DISCOVERY_INTERVAL_OPTIONS,
   effectiveTheme,
   exportSettings,
@@ -144,6 +146,8 @@ function DirectionPicker() {
 const LOG_LINES = 400;
 
 function LogsSection() {
+  const logLevel = useSettingsStore((s) => s.logLevel);
+  const setLogLevel = useSettingsStore((s) => s.setLogLevel);
   const pathQuery = useQuery({ queryKey: ["log-path"], queryFn: api.logPath });
   const logQuery = useQuery({
     queryKey: ["app-log"],
@@ -162,6 +166,19 @@ function LogsSection() {
   return (
     <section className="settings-group">
       <h3>Logs</h3>
+      <label
+        className="settings-row"
+        title="How much the app writes to the log file. Warning is the default; pick Debug to trace every backend call, sync, git/gh command and query refetch while diagnosing a problem."
+      >
+        <span>Log level</span>
+        <select className="select" value={logLevel} onChange={(e) => setLogLevel(e.target.value as LogLevel)}>
+          {LOG_LEVEL_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+      </label>
       <div className="settings-row">
         <span>Log file</span>
         <span className="settings-control">

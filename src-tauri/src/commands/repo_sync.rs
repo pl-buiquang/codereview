@@ -43,12 +43,16 @@ pub fn watch_acquire(app: AppHandle, repo_id: i64, db: State<Db>, watchers: Stat
         rusqlite::params![repo_id],
         |r| r.get(0),
     )?;
-    let Some(local_path) = local_path else { return Ok(false) };
+    let Some(local_path) = local_path else {
+        log::debug!(target: "watch", "acquire repo {repo_id}: no local clone, not watching");
+        return Ok(false);
+    };
     let on_change = Arc::new(move |repo_id: i64, kinds: Vec<ChangeKind>| {
         crate::worktree_gc::note_change(repo_id);
         if let Err(e) = repo_sync::record_local_change(&app.state::<Db>().0.lock().unwrap(), repo_id) {
             crate::logging::warn(&format!("[watch] could not record change for repo {repo_id}: {e}"));
         }
+        log::debug!(target: "watch", "emit {GIT_CHANGED_EVENT} repo {repo_id} {kinds:?}");
         let _ = app.emit(GIT_CHANGED_EVENT, GitChanged { repo_id, kinds });
     });
     match watchers.acquire(repo_id, Path::new(&local_path), on_change) {
@@ -62,5 +66,6 @@ pub fn watch_acquire(app: AppHandle, repo_id: i64, db: State<Db>, watchers: Stat
 
 #[tauri::command]
 pub fn watch_release(repo_id: i64, watchers: State<Watchers>) {
+    log::debug!(target: "watch", "release repo {repo_id}");
     watchers.release(repo_id);
 }

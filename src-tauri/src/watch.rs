@@ -108,6 +108,7 @@ impl Watchers {
         if let Some(entry) = entries.get_mut(&repo_id) {
             entry.refs += 1;
             entry.generation += 1;
+            log::debug!(target: "watch", "acquire repo {repo_id}: now {} holders", entry.refs);
             return Ok(());
         }
         let git_dir = git_common_dir(checkout)?;
@@ -116,6 +117,12 @@ impl Watchers {
             let Ok(events) = res else { return };
             let kinds: BTreeSet<ChangeKind> =
                 events.iter().filter_map(|e| classify(&watched, &e.path)).collect();
+            log::debug!(
+                target: "watch",
+                "repo {repo_id}: {} fs events -> kinds {kinds:?}{}",
+                events.len(),
+                if kinds.is_empty() { " (ignored)" } else { "" }
+            );
             if !kinds.is_empty() {
                 on_change(repo_id, kinds.into_iter().collect());
             }

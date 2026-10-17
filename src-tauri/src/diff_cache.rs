@@ -64,8 +64,10 @@ pub fn get_or_load(
     load: impl FnOnce() -> crate::error::AppResult<String>,
 ) -> crate::error::AppResult<Arc<String>> {
     if let Some(hit) = CACHE.lock().unwrap().get(key) {
+        log::debug!(target: "diff", "cache hit {key:?} ({} bytes)", hit.len());
         return Ok(hit);
     }
+    log::debug!(target: "diff", "cache miss {key:?}");
     let diff = Arc::new(load()?);
     CACHE.lock().unwrap().put(key.clone(), diff.clone());
     Ok(diff)

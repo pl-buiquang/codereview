@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "./api";
+import { log } from "./log";
 
 /** Holds the backend git watcher for `repoId` while mounted (null = none).
  *  Returns whether the repo is watched; unwatched views should reload on
@@ -11,9 +12,11 @@ export function useRepoWatch(repoId: number | null): boolean {
     if (repoId == null) return;
     let disposed = false;
     let acquired = false;
+    log.debug("watch", `acquire repo ${repoId}`);
     api
       .watchAcquire(repoId)
       .then((ok) => {
+        log.debug("watch", `repo ${repoId} watchable=${ok}`);
         if (disposed) {
           if (ok) void api.watchRelease(repoId);
           return;

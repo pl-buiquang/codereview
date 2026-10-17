@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { log } from "../lib/log";
 import { useIsMutating, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { listen } from "@tauri-apps/api/event";
 import { api } from "../lib/api";
@@ -103,11 +104,13 @@ export function WorktreesView() {
   useEffect(() => {
     if (!watchersReady) return;
     const run = () => {
+      log.debug("worktrees", `reload (scanning=${scanningRef.current})`);
       if (!scanningRef.current) reloadRef.current();
     };
     run();
     let timer: ReturnType<typeof setTimeout> | undefined;
     const unlisten = listen(GIT_CHANGED_EVENT, () => {
+      log.debug("worktrees", `${GIT_CHANGED_EVENT} -> reload in ${RELOAD_DEBOUNCE_MS}ms`);
       clearTimeout(timer);
       timer = setTimeout(run, RELOAD_DEBOUNCE_MS);
     });

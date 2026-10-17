@@ -77,6 +77,42 @@ fn read_app_log(max_lines: usize, dir: tauri::State<logging::LogDir>) -> Result<
     logging::read_tail(&dir.0, max_lines).map_err(|e| format!("failed to read log: {e}"))
 }
 
+#[tauri::command]
+fn get_log_level() -> &'static str {
+    logging::current_level()
+}
+
+#[tauri::command]
+fn set_log_level(level: String, dir: tauri::State<logging::LogDir>) -> Result<(), String> {
+    let parsed = logging::parse_level(&level).ok_or_else(|| format!("unknown log level {level:?}"))?;
+    logging::set_level(&dir.0, parsed);
+    Ok(())
+}
+
+/// A log line from the frontend (already filtered by its level).
+#[tauri::command]
+fn frontend_log(level: String, target: String, message: String) {
+    logging::frontend(&level, &target, &message);
+}
+
+/// Commands that must not trace themselves: the Settings log viewer polls
+/// `read_app_log` every few seconds and every UI log line goes through
+/// `frontend_log`, so tracing them would feed the log with its own reads.
+const UNTRACED_COMMANDS: &[&str] = &["read_app_log", "log_path", "frontend_log", "get_log_level"];
+
+/// Wrap the invoke handler so every command call is logged at debug level.
+fn traced<R: tauri::Runtime>(
+    handler: impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static,
+) -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static {
+    move |invoke| {
+        let cmd = invoke.message.command();
+        if !UNTRACED_COMMANDS.contains(&cmd) && log::log_enabled!(log::Level::Debug) {
+            log::debug!(target: "cmd", "{cmd}");
+        }
+        handler(invoke)
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let t0 = std::time::Instant::now();
@@ -168,9 +204,12 @@ pub fn run() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![
+        .invoke_handler(traced(tauri::generate_handler![
             log_path,
             read_app_log,
+            get_log_level,
+            set_log_level,
+            frontend_log,
             commands::repo::add_repository,
             commands::repo::list_repositories,
             commands::repo::remove_repository,
@@ -321,7 +360,7 @@ pub fn run() {
             commands::graph::worktree_file_diff,
             cr_install_note,
             app_version,
-        ])
+        ]))
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

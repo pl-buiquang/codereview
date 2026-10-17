@@ -5,6 +5,7 @@ import { api } from "./api";
 import { queryClient } from "./queryClient";
 import { useSettingsStore } from "./settings";
 import { toast } from "./toast";
+import { brief, log } from "./log";
 import type { AutoSync, MirrorUpdatedPayload, SyncMode, SyncReport, SyncScope, SyncStatus } from "./types";
 
 export const MIRROR_UPDATED_EVENT = "mirror-updated";
@@ -49,11 +50,13 @@ export function useSyncScope(scope: SyncScope, active: boolean, visibleIds: stri
   const idsKey = visibleIds.join(",");
   useEffect(() => {
     if (!isTauriRuntime() || !active) return;
+    log.debug("sync", `hint ${scope} on (${idsKey ? idsKey.split(",").length : 0} ids)`);
     api.syncHint(scope, true, idsKey ? idsKey.split(",") : []).catch(() => {});
   }, [scope, active, idsKey]);
   useEffect(() => {
     if (!isTauriRuntime() || !active) return;
     return () => {
+      log.debug("sync", `hint ${scope} off`);
       api.syncHint(scope, false).catch(() => {});
     };
   }, [scope, active]);
@@ -100,7 +103,10 @@ function useTauriListener<T>(event: string, onPayload: (payload: T) => void) {
     if (!isTauriRuntime()) return;
     let disposed = false;
     let unlisten: (() => void) | undefined;
-    listen<T>(event, ({ payload }) => onPayload(payload))
+    listen<T>(event, ({ payload }) => {
+      log.debug("event", `${event} ${brief(payload)}`);
+      onPayload(payload);
+    })
       .then((dispose) => {
         if (disposed) dispose();
         else unlisten = dispose;
@@ -123,13 +129,18 @@ export function useSyncBridge() {
   const discoveryIntervalMin = useSettingsStore((s) => s.discoveryIntervalMin);
   useEffect(() => {
     if (!isTauriRuntime()) return;
+    log.debug("sync", `configure autoSync=${autoSync} discovery=${discoveryIntervalMin}min`);
     api.syncConfigure(autoSync, discoveryIntervalMin).catch(() => {});
   }, [autoSync, discoveryIntervalMin]);
 
   useEffect(() => {
     if (!isTauriRuntime()) return;
-    const report = () =>
-      api.syncWindowState(document.visibilityState === "visible", document.hasFocus()).catch(() => {});
+    const report = () => {
+      const visible = document.visibilityState === "visible";
+      const focused = document.hasFocus();
+      log.debug("window", `visible=${visible} focused=${focused}`);
+      return api.syncWindowState(visible, focused).catch(() => {});
+    };
     report();
     window.addEventListener("focus", report);
     window.addEventListener("blur", report);

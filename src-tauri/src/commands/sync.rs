@@ -43,6 +43,7 @@ pub async fn sync_now(
 #[tauri::command]
 pub fn reset_mirror(app: AppHandle, db: State<Db>, engine: State<SyncEngine>) -> AppResult<()> {
     mirror::store::reset(&db.0.lock().unwrap())?;
+    log::debug!(target: "mirror", "reset_mirror: emit {MIRROR_UPDATED_EVENT}");
     let _ = app.emit(MIRROR_UPDATED_EVENT, MirrorUpdated { scopes: vec![Scope::Inbox, Scope::Board], ids: vec![] });
     engine.spawn(SyncRequest::new(Scope::All, Mode::Light));
     Ok(())

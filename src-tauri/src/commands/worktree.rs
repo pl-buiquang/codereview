@@ -321,6 +321,7 @@ fn resolve_prs(db: &Db, wanted: &[(&RepoCtx, Vec<String>)], lookup: PrLookup) ->
 
 fn emit_refreshed(app: &tauri::AppHandle, ids: Vec<String>) {
     if !ids.is_empty() {
+        log::debug!(target: "mirror", "emit {MIRROR_UPDATED_EVENT} from a worktree scan: {} ids", ids.len());
         let _ = app.emit(MIRROR_UPDATED_EVENT, MirrorUpdated { scopes: vec![Scope::Inbox, Scope::Board], ids });
     }
 }

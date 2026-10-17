@@ -4,6 +4,7 @@ import { api } from "./api";
 import { DIRECTIONS, type Direction } from "./themes";
 import { DEFAULT_CONFIG_PATTERNS, DEFAULT_TEST_PATTERNS } from "./fileCategory";
 import type { AutoSync } from "./types";
+import { DEFAULT_LOG_LEVEL, type LogLevel } from "./log";
 
 export type ThemeMode = "dark" | "light" | "system";
 export type ThemeBase = "dark" | "light";
@@ -40,6 +41,14 @@ export const AUTO_SYNC_OPTIONS: { label: string; value: AutoSync }[] = [
   { label: "Periodic", value: "periodic" },
 ];
 
+/** Verbosity of the app log file (Settings → Logs). */
+export const LOG_LEVEL_OPTIONS: { label: string; value: LogLevel }[] = [
+  { label: "Error", value: "error" },
+  { label: "Warning", value: "warn" },
+  { label: "Info", value: "info" },
+  { label: "Debug (verbose)", value: "debug" },
+];
+
 /** Discovery ("look for new PRs/issues") interval choices, in minutes; 0 = off. */
 export const DISCOVERY_INTERVAL_OPTIONS: { label: string; value: number }[] = [
   { label: "off", value: 0 },
@@ -70,6 +79,7 @@ type PersistedSettings = Pick<
   | "autoSync"
   | "discoveryIntervalMin"
   | "autoFetchMinutes"
+  | "logLevel"
   | "boardStatusBorderSide"
   | "chatModel"
   | "overviewModel"
@@ -98,6 +108,7 @@ const DEFAULTS: PersistedSettings = {
   autoSync: "periodic",
   discoveryIntervalMin: 15,
   autoFetchMinutes: 0,
+  logLevel: DEFAULT_LOG_LEVEL,
   boardStatusBorderSide: "top",
   chatModel: "",
   overviewModel: "sonnet",
@@ -135,6 +146,8 @@ interface SettingsState {
   autoSync: AutoSync;
   /** Minutes between discoveries (searches for new PRs/issues); 0 = off. */
   discoveryIntervalMin: number;
+  /** Verbosity of the app log file; applied to the backend by `useApplySettings`. */
+  logLevel: LogLevel;
   /** Fetch a repo when its view opens or regains focus and the last fetch is
    *  older than this many minutes; 0 = never fetch in the background. */
   autoFetchMinutes: number;
@@ -174,6 +187,7 @@ interface SettingsState {
   setRepoStripPrefixes: (s: string) => void;
   setRepoBasePaths: (s: string) => void;
   setAutoSync: (mode: AutoSync) => void;
+  setLogLevel: (level: LogLevel) => void;
   setDiscoveryIntervalMin: (minutes: number) => void;
   setAutoFetchMinutes: (minutes: number) => void;
   setBoardStatusBorderSide: (side: BoardBorderSide) => void;
@@ -201,6 +215,7 @@ const ENUMS: Partial<Record<keyof PersistedSettings, readonly string[]>> = {
   defaultTerminal: TERMINAL_HOST_OPTIONS.map((o) => o.value),
   tmuxTarget: TMUX_TARGET_OPTIONS.map((o) => o.value),
   autoSync: AUTO_SYNC_OPTIONS.map((o) => o.value),
+  logLevel: LOG_LEVEL_OPTIONS.map((o) => o.value),
 };
 
 function writeMirror(value: string) {
@@ -245,6 +260,7 @@ export const useSettingsStore = create<SettingsState>()(
       setRepoStripPrefixes: (repoStripPrefixes) => set({ repoStripPrefixes }),
       setRepoBasePaths: (repoBasePaths) => set({ repoBasePaths }),
       setAutoSync: (autoSync) => set({ autoSync }),
+      setLogLevel: (logLevel) => set({ logLevel }),
       setDiscoveryIntervalMin: (discoveryIntervalMin) => set({ discoveryIntervalMin }),
       setAutoFetchMinutes: (autoFetchMinutes) => set({ autoFetchMinutes }),
       setBoardStatusBorderSide: (boardStatusBorderSide) => set({ boardStatusBorderSide }),

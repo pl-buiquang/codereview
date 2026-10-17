@@ -352,6 +352,11 @@ fn refresh_review_impl(review_id: i64, db: &Db) -> AppResult<FreshnessResult> {
     };
     let live = resolve_live(db, &target)?;
     let pin = review_pin(&review);
+    log::debug!(
+        target: "review",
+        "refresh_review {review_id} ({}): pinned head {:?}, live head {:?}",
+        target.kind, pin.head_sha, live.head_sha
+    );
     let new_commits = match (target.kind.as_str(), &pin.head_sha, &live.head_sha) {
         ("local", Some(pinned), Some(current)) if pinned != current => repo_local_path_of(db, target.repo_id)?
             .and_then(|p| count_new_commits(Path::new(&p), pinned, current)),

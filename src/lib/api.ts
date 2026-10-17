@@ -1,5 +1,6 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./tracedInvoke";
 import { open, save } from "@tauri-apps/plugin-dialog";
+import type { LogLevel } from "./log";
 import type {
   ChatWorktree,
   WorktreeGcReport,
@@ -102,6 +103,7 @@ export const api = {
 
   // Logs
   logPath: () => invoke<string>("log_path"),
+  setLogLevel: (level: LogLevel) => invoke<void>("set_log_level", { level }),
   readAppLog: (maxLines: number) => invoke<string>("read_app_log", { maxLines }),
 
   chatSend: (reviewId: number, text: string, model?: string) =>

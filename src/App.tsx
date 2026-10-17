@@ -20,6 +20,7 @@ import { useDeepLinkListener } from "./lib/deepLink";
 import { dismissSplash } from "./lib/splash";
 import { GIT_CHANGED_EVENT, gitChangedQueryKeys, type GitChangedPayload } from "./lib/gitChanged";
 import { useSyncBridge } from "./lib/sync";
+import { brief, log } from "./lib/log";
 import { useUIStore, type Tab } from "./store";
 
 const CLOSE_ACTIVE_TAB_EVENT = "close-active-tab";
@@ -79,6 +80,7 @@ function App() {
     let disposed = false;
     let unlisten: (() => void) | undefined;
     listen<GitChangedPayload>(GIT_CHANGED_EVENT, ({ payload }) => {
+      log.debug("event", `${GIT_CHANGED_EVENT} ${brief(payload)}`);
       for (const queryKey of gitChangedQueryKeys(payload)) queryClient.invalidateQueries({ queryKey });
     })
       .then((dispose) => {

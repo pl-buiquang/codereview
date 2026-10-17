@@ -168,6 +168,7 @@ impl SyncEngine {
     }
 
     pub fn configure(&self, config: SyncConfig) {
+        log::debug!(target: "sync", "configure {config:?}");
         self.state().config = config;
     }
 
@@ -177,11 +178,19 @@ impl SyncEngine {
         let due = {
             let mut s = self.state();
             if !active {
+                log::debug!(target: "sync", "hint {scope:?}: view gone");
                 s.active.remove(&scope);
                 return;
             }
+            let n_ids = visible_ids.len();
             let mounted = s.active.insert(scope, visible_ids).is_none();
-            mounted && s.config.auto_sync != AutoSync::Off && s.due(scope, LIGHT_TTL)
+            let due = mounted && s.config.auto_sync != AutoSync::Off && s.due(scope, LIGHT_TTL);
+            log::debug!(
+                target: "sync",
+                "hint {scope:?}: {n_ids} visible ids, newly mounted={mounted}, auto_sync={:?}, sync due={due}",
+                s.config.auto_sync
+            );
+            due
         };
         if due {
             self.spawn(SyncRequest::new(scope, Mode::Light));
@@ -195,6 +204,11 @@ impl SyncEngine {
             let mut s = self.state();
             let gained = focused && !s.focused;
             let away = s.blurred_at.map(|t| t.elapsed());
+            log::debug!(
+                target: "sync",
+                "window visible={visible} focused={focused} (gained focus={gained}, away {:?})",
+                away
+            );
             if focused {
                 s.blurred_at = None;
             } else if s.focused || s.blurred_at.is_none() {
@@ -222,6 +236,9 @@ impl SyncEngine {
                 s.active.keys().copied().filter(|sc| s.due(*sc, s.periodic_interval(*sc))).collect();
             (s.discovery_due(), scopes)
         };
+        if discover || !scopes.is_empty() {
+            log::debug!(target: "sync", "tick: discover={discover}, due scopes={scopes:?}");
+        }
         self.spawn_round(discover, scopes);
     }
 
@@ -240,8 +257,14 @@ impl SyncEngine {
     /// Start a background sync unless one overlapping its scope is running.
     pub fn spawn(&self, req: SyncRequest) {
         if !self.begin(&req, true) {
+            log::debug!(target: "sync", "spawn {:?} {:?}: skipped, overlapping sync running", req.scope, req.mode);
             return;
         }
+        log::debug!(
+            target: "sync",
+            "spawn {:?} {:?} discover={} ({} visible ids)",
+            req.scope, req.mode, req.discover, req.visible_ids.len()
+        );
         let engine = self.clone();
         let spawned = std::thread::Builder::new().name("sync".into()).spawn(move || {
             let _ = engine.execute(req);
@@ -259,6 +282,11 @@ impl SyncEngine {
                 req.visible_ids = ids.clone();
             }
         }
+        log::debug!(
+            target: "sync",
+            "run_now {:?} {:?} discover={} ({} visible ids)",
+            req.scope, req.mode, req.discover, req.visible_ids.len()
+        );
         self.begin(&req, false);
         self.execute(req)
     }
@@ -279,9 +307,13 @@ impl SyncEngine {
         let app = self.inner.app.clone();
         let db = app.state::<Db>();
         let notify = |u| {
+            log::debug!(target: "sync", "emit {MIRROR_UPDATED_EVENT} {u:?}");
             let _ = app.emit(MIRROR_UPDATED_EVENT, &u);
         };
+        let started = Instant::now();
+        log::debug!(target: "sync", "execute {:?} {:?} start", req.scope, req.mode);
         let result = pipeline::run(&db, &req, &notify);
+        log::debug!(target: "sync", "execute {:?} {:?} done in {}ms (ok={})", req.scope, req.mode, started.elapsed().as_millis(), result.is_ok());
         {
             let mut s = self.state();
             let me = Running { scope: req.scope, mode: req.mode, discover: req.discover };
@@ -357,6 +389,8 @@ impl SyncEngine {
     }
 
     fn emit_status(&self) {
-        let _ = self.inner.app.emit(SYNC_STATUS_EVENT, self.status());
+        let status = self.status();
+        log::debug!(target: "sync", "emit {SYNC_STATUS_EVENT} running={:?} discovering={}", status.running, status.discovering);
+        let _ = self.inner.app.emit(SYNC_STATUS_EVENT, status);
     }
 }
