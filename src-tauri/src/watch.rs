@@ -5,11 +5,11 @@
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use notify_debouncer_mini::notify::{RecommendedWatcher, RecursiveMode};
-use notify_debouncer_mini::{new_debouncer, DebounceEventResult, Debouncer};
+use notify::{recommended_watcher, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
 
 use crate::error::{AppError, AppResult};
@@ -74,6 +74,42 @@ pub fn git_common_dir(checkout: &Path) -> AppResult<PathBuf> {
 
 pub type OnChange = Arc<dyn Fn(i64, Vec<ChangeKind>) + Send + Sync>;
 
+/// inotify also reports opens and reads, so the app's own `git status` /
+/// `rev-parse` calls would otherwise look like changes and refetch forever.
+fn is_relevant(kind: &EventKind) -> bool {
+    matches!(kind, EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_))
+}
+
+/// Ends when the watcher (and with it the sender) is dropped.
+fn debounce_loop(repo_id: i64, git_dir: &Path, rx: mpsc::Receiver<notify::Event>, on_change: OnChange) {
+    while let Ok(first) = rx.recv() {
+        let mut events = vec![first];
+        let deadline = Instant::now() + DEBOUNCE;
+        loop {
+            match rx.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+                Ok(e) => events.push(e),
+                Err(RecvTimeoutError::Timeout) => break,
+                Err(RecvTimeoutError::Disconnected) => return,
+            }
+        }
+        let kinds: BTreeSet<ChangeKind> = events
+            .iter()
+            .filter(|e| is_relevant(&e.kind))
+            .flat_map(|e| e.paths.iter())
+            .filter_map(|p| classify(git_dir, p))
+            .collect();
+        log::debug!(
+            target: "watch",
+            "repo {repo_id}: {} fs events -> kinds {kinds:?}{}",
+            events.len(),
+            if kinds.is_empty() { " (ignored)" } else { "" }
+        );
+        if !kinds.is_empty() {
+            on_change(repo_id, kinds.into_iter().collect());
+        }
+    }
+}
+
 static NEXT_EPOCH: AtomicU64 = AtomicU64::new(1);
 
 struct Entry {
@@ -82,7 +118,7 @@ struct Entry {
     refs: usize,
     /// Bumped on every acquire, so a pending delayed stop can tell it's stale.
     generation: u64,
-    _debouncer: Debouncer<RecommendedWatcher>,
+    _watcher: RecommendedWatcher,
 }
 
 pub struct Watchers {
@@ -113,28 +149,20 @@ impl Watchers {
         }
         let git_dir = git_common_dir(checkout)?;
         let watched = git_dir.clone();
-        let mut debouncer = new_debouncer(DEBOUNCE, move |res: DebounceEventResult| {
-            let Ok(events) = res else { return };
-            let kinds: BTreeSet<ChangeKind> =
-                events.iter().filter_map(|e| classify(&watched, &e.path)).collect();
-            log::debug!(
-                target: "watch",
-                "repo {repo_id}: {} fs events -> kinds {kinds:?}{}",
-                events.len(),
-                if kinds.is_empty() { " (ignored)" } else { "" }
-            );
-            if !kinds.is_empty() {
-                on_change(repo_id, kinds.into_iter().collect());
+        let (tx, rx) = mpsc::channel::<notify::Event>();
+        let mut watcher = recommended_watcher(move |res: notify::Result<notify::Event>| {
+            if let Ok(event) = res {
+                let _ = tx.send(event);
             }
         })
         .map_err(|e| AppError::Other(format!("could not start watcher: {e}")))?;
-        debouncer
-            .watcher()
+        watcher
             .watch(&git_dir, RecursiveMode::Recursive)
             .map_err(|e| AppError::Other(format!("could not watch {}: {e}", git_dir.display())))?;
+        std::thread::spawn(move || debounce_loop(repo_id, &watched, rx, on_change));
         log::info!("[watch] start repo {repo_id} ({})", git_dir.display());
         let epoch = NEXT_EPOCH.fetch_add(1, Ordering::Relaxed);
-        entries.insert(repo_id, Entry { epoch, refs: 1, generation: 0, _debouncer: debouncer });
+        entries.insert(repo_id, Entry { epoch, refs: 1, generation: 0, _watcher: watcher });
         Ok(())
     }
 
@@ -226,6 +254,23 @@ mod tests {
         w.release(1);
         std::thread::sleep(Duration::from_millis(250));
         assert!(!w.is_watching(1));
+    }
+
+    #[test]
+    fn ignores_reads() {
+        let dir = repo();
+        let w = Watchers::new(Duration::from_millis(100));
+        let (tx, rx) = mpsc::channel();
+        let tx = Mutex::new(tx);
+        w.acquire(8, dir.path(), Arc::new(move |id, kinds| {
+            let _ = tx.lock().unwrap().send((id, kinds));
+        }))
+        .unwrap();
+        std::thread::sleep(Duration::from_millis(300));
+        git(dir.path(), &["rev-parse", "HEAD"]);
+        git(dir.path(), &["for-each-ref"]);
+        git(dir.path(), &["status", "--porcelain"]);
+        assert!(rx.recv_timeout(Duration::from_millis(1000)).is_err(), "reads must not emit");
     }
 
     #[test]
