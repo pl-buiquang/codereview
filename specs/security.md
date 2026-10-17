@@ -155,7 +155,9 @@ Every `zip` 4.x and 5.x release is yanked, and `tauri-plugin-updater` (2.14, the
 latest 2.x) requires `zip ^4` for Windows `.zip` and Linux AppImage update
 extraction. No compatible non-yanked version exists, and cargo-audit can't
 exempt a single crate, so `[yanked] enabled = false` is set in `.cargo/audit.toml`.
-RustSec advisories are still enforced.
+RustSec advisories are still enforced, except RUSTSEC-2026-0367/0368/0369 (`zip`
+4.6.1 `extract()` issues, fixed only in zip >=9): the updater is the sole consumer
+and only extracts archives from our own minisign-verified releases. Same deadline.
 
 Remove the `[yanked]` section once the updater moves to a non-yanked `zip`
 (`cargo update -p tauri-plugin-updater`, then check `cargo audit`).

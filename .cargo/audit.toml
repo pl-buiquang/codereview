@@ -3,6 +3,9 @@
 ignore = [
     "RUSTSEC-2024-0429", # glib 0.18.5: VariantStrIter unsoundness
     "RUSTSEC-2024-0370", # proc-macro-error 1.0.4: unmaintained
+    "RUSTSEC-2026-0367", # zip 4.6.1: extract() symlink permissions; updater only
+    "RUSTSEC-2026-0368", # zip 4.6.1: SUID/SGID preserved on extract; updater only
+    "RUSTSEC-2026-0369", # zip 4.6.1: extract() symlink targets escape destination; updater only
 ]
 
 # zip 4.x/5.x are all yanked and tauri-plugin-updater (2.14) still requires zip ^4.
