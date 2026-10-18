@@ -53,6 +53,8 @@ publishing. Compressed HTML exports require inspecting their decoded assets too.
 ## P1: remove work-related data from public history
 
 Status: open. Visibility and public history have not been changed by this work.
+The current checkout no longer contains the bundle (`specs/design_handoff_codereview_redesign/`
+was deleted); only the history cleanup below remains.
 
 The design handoff reference bundle contains work-related repository names,
 pull-request metadata, contributor identifiers, and application code excerpts.

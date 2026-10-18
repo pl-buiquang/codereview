@@ -5,7 +5,7 @@
    B · Modern      — Inter + JetBrains Mono, indigo accent, near-black darks, soft radii
    C · Terminal    — JetBrains Mono everywhere, green accent, sharp
 
-   Sourced from specs/design_handoff_codereview_redesign/tokens.css with two
+   Derived from the original design handoff with two
    additions per spec 22: the 8 `--tok-*` syntax-highlight values inside each
    theme block, and the COMPAT alias block at the end (removed in Phase 8).
    ============================================================ */
