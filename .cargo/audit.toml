@@ -6,6 +6,9 @@ ignore = [
     "RUSTSEC-2026-0367", # zip 4.6.1: extract() symlink permissions; updater only
     "RUSTSEC-2026-0368", # zip 4.6.1: SUID/SGID preserved on extract; updater only
     "RUSTSEC-2026-0369", # zip 4.6.1: extract() symlink targets escape destination; updater only
+    "RUSTSEC-2026-0370", # zvariant: unmaintained, no patched version; via zbus <- tauri-plugin-opener/single-instance
+    "RUSTSEC-2026-0371", # zbus_names: unmaintained, no patched version; same path
+    "RUSTSEC-2026-0372", # zvariant_derive: unmaintained, no patched version; same path
 ]
 
 # zip 4.x/5.x are all yanked and tauri-plugin-updater (2.14) still requires zip ^4.

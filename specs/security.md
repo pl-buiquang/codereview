@@ -137,6 +137,7 @@ Status: open. Review deadline: **2026-11-06**.
 | --- | --- | --- |
 | RUSTSEC-2024-0429 | Tauri -> gtk 0.18 -> glib 0.18.5 | `VariantStrIter` unsoundness; fixed upstream in glib 0.20 |
 | RUSTSEC-2024-0370 | Tauri -> gtk -> gtk3-macros -> proc-macro-error 1.0.4 | Unmaintained macro dependency |
+| RUSTSEC-2026-0370/0371/0372 | tauri-plugin-opener and tauri-plugin-single-instance -> zbus 5.19 -> zvariant, zbus_names, zvariant_derive | Unmaintained (published 2026-10-16), no patched version; Linux D-Bus only |
 
 These are Linux/BSD GTK3 dependencies and are outside the macOS dependency path.
 The latest compatible Tauri stack still requires GTK3's older crate family.
