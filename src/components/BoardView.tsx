@@ -137,6 +137,14 @@ export function BoardView() {
     },
     onError: (e) => toast.error(`Auto-merge failed:\n${String(e)}`),
   });
+  const prSquashMerge = useMutation({
+    mutationFn: ({ cardId }: { cardId: string }) => api.boardPrSquashMerge(cardId),
+    onSuccess: () => {
+      invalidate();
+      toast.success("Squash merged");
+    },
+    onError: (e) => toast.error(`Merge failed:\n${String(e)}`),
+  });
   const prSetDraft = useMutation({
     mutationFn: ({ cardId, draft }: { cardId: string; draft: boolean }) => api.boardPrSetDraft(cardId, draft),
     onSuccess: (_, { draft }) => {
@@ -163,6 +171,7 @@ export function BoardView() {
   });
   const prActionCardId =
     (prSetAutoMerge.isPending && prSetAutoMerge.variables?.cardId) ||
+    (prSquashMerge.isPending && prSquashMerge.variables?.cardId) ||
     (prSetDraft.isPending && prSetDraft.variables?.cardId) ||
     (prUpdateBranch.isPending && prUpdateBranch.variables?.cardId) ||
     (prRerunCi.isPending && prRerunCi.variables?.cardId) ||
@@ -357,6 +366,11 @@ export function BoardView() {
       label: "Enable auto-merge",
       cards: batchCards.filter(canEnableAutoMerge),
       fn: (c: BoardCardT) => api.boardPrSetAutoMerge(c.id, true),
+    },
+    {
+      label: "Squash merge now",
+      cards: batchCards.filter(canEnableAutoMerge),
+      fn: (c: BoardCardT) => api.boardPrSquashMerge(c.id),
     },
     {
       label: "Re-run failed jobs",
@@ -574,6 +588,7 @@ export function BoardView() {
                           ? {
                               busy: prActionCardId === card.id,
                               onSetAutoMerge: (enable) => prSetAutoMerge.mutate({ cardId: card.id, enable }),
+                              onSquashMerge: () => prSquashMerge.mutate({ cardId: card.id }),
                               onSetDraft: (draft) => prSetDraft.mutate({ cardId: card.id, draft }),
                               onUpdateBranch: (rebase) => prUpdateBranch.mutate({ cardId: card.id, rebase }),
                               onRerunCi: (failedOnly) => prRerunCi.mutate({ cardId: card.id, failedOnly }),

@@ -300,6 +300,7 @@ pub fn run() {
             commands::board::board_track_pr,
             commands::board::board_discard,
             commands::board::board_pr_set_auto_merge,
+            commands::board::board_pr_squash_merge,
             commands::board::board_pr_set_draft,
             commands::board::board_pr_update_branch,
             commands::board::board_pr_rerun_ci,

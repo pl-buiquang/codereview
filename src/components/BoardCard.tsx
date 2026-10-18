@@ -250,6 +250,7 @@ export function rerunCiDisabledReason(card: BoardCardT): string | null {
 export interface PrActions {
   busy: boolean;
   onSetAutoMerge: (enable: boolean) => void;
+  onSquashMerge: () => void;
   onSetDraft: (draft: boolean) => void;
   onUpdateBranch: (rebase: boolean) => void;
   onRerunCi: (failedOnly: boolean) => void;
@@ -300,8 +301,28 @@ function PrActionsMenu({
             actions.onSetAutoMerge(true);
           }
         };
+        const squashMerge = async () => {
+          close();
+          if (
+            await confirmDialog({
+              title: "Squash merge now",
+              message: `Squash-merge ${card.repo}#${card.number} "${card.title}" immediately and delete its branch?`,
+              confirmLabel: "Squash merge",
+            })
+          ) {
+            actions.onSquashMerge();
+          }
+        };
         return (
           <>
+            <button
+              role="menuitem"
+              disabled={!isOpen || card.is_draft}
+              title={!isOpen ? "PR is not open" : card.is_draft ? "Draft PRs can't be merged" : "Merge immediately, for repos without auto-merge"}
+              onClick={squashMerge}
+            >
+              Squash merge now
+            </button>
             <button
               role="menuitem"
               disabled={!isOpen || (card.is_draft && !card.auto_merge)}

@@ -236,6 +236,7 @@ export const api = {
   boardDiscard: (cardId: string) => invoke<void>("board_discard", { cardId }),
   boardPrSetAutoMerge: (cardId: string, enable: boolean) =>
     invoke<void>("board_pr_set_auto_merge", { cardId, enable }),
+  boardPrSquashMerge: (cardId: string) => invoke<void>("board_pr_squash_merge", { cardId }),
   boardPrSetDraft: (cardId: string, draft: boolean) => invoke<void>("board_pr_set_draft", { cardId, draft }),
   boardPrUpdateBranch: (cardId: string, rebase: boolean) =>
     invoke<void>("board_pr_update_branch", { cardId, rebase }),

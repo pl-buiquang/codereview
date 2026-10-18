@@ -434,6 +434,11 @@ pub async fn board_pr_set_auto_merge(card_id: String, enable: bool, db: State<'_
 }
 
 #[tauri::command]
+pub async fn board_pr_squash_merge(card_id: String, db: State<'_, Db>) -> AppResult<()> {
+    run_pr_action(&db, &card_id, &["merge", "--squash", "--delete-branch"])
+}
+
+#[tauri::command]
 pub async fn board_pr_set_draft(card_id: String, draft: bool, db: State<'_, Db>) -> AppResult<()> {
     let args: &[&str] = if draft { &["ready", "--undo"] } else { &["ready"] };
     run_pr_action(&db, &card_id, args)
