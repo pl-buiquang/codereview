@@ -91,5 +91,4 @@ Cycle all 6 themes in **Settings → General → Appearance** (direction cards �
 Each must render with no transparent backgrounds or default-black text, every `--tok-*` role
 visibly distinct on a code diff, and light-mode text ≥ 4.5:1 contrast on its background. `System`
 mode must follow an OS dark/light flip live, and the chosen direction+mode must persist across an
-app restart with no FOUC flash. Compare against
-`specs/design_handoff_codereview_redesign/reference/CodeReview Redesign.html`.
+app restart with no FOUC flash.
