@@ -15,7 +15,8 @@ export type DiffPreviewTarget =
       worktreePath: string | null;
       path: string;
       wipKind: WipKind;
-    };
+    }
+  | { kind: "stash"; repoId: number; worktreePath: string | null; index: number };
 
 export function DiffPreview({
   target,
@@ -38,21 +39,29 @@ export function DiffPreview({
     queryKey:
       target.kind === "commit"
         ? ["commitFileDiff", target.repoId, target.sha, target.file.path, target.file.old_path]
-        : ["worktreeFileDiff", target.repoId, target.worktreePath, target.path, target.wipKind],
-    queryFn: () =>
-      target.kind === "commit"
-        ? api.commitFileDiff({
+        : target.kind === "stash"
+          ? ["stashDiff", target.repoId, target.worktreePath, target.index]
+          : ["worktreeFileDiff", target.repoId, target.worktreePath, target.path, target.wipKind],
+    queryFn: () => {
+      switch (target.kind) {
+        case "commit":
+          return api.commitFileDiff({
             repoId: target.repoId,
             sha: target.sha,
             path: target.file.path,
             oldPath: target.file.old_path,
-          })
-        : api.worktreeFileDiff({
+          });
+        case "stash":
+          return api.gitStashDiff(target.repoId, target.worktreePath, target.index);
+        case "wip":
+          return api.worktreeFileDiff({
             repoId: target.repoId,
             worktreePath: target.worktreePath,
             path: target.path,
             kind: target.wipKind,
-          }),
+          });
+      }
+    },
   });
 
   useEffect(() => {
@@ -72,12 +81,14 @@ export function DiffPreview({
     onNavigate((((index + delta) % count) + count) % count);
   };
 
-  const title =
-    target.kind === "commit"
-      ? target.file.old_path
-        ? `${target.file.old_path} → ${target.file.path}`
-        : target.file.path
-      : target.path;
+  let title: string;
+  if (target.kind === "commit") {
+    title = target.file.old_path ? `${target.file.old_path} → ${target.file.path}` : target.file.path;
+  } else if (target.kind === "stash") {
+    title = `stash@{${target.index}}`;
+  } else {
+    title = target.path;
+  }
 
   return (
     <div className="diff-preview">

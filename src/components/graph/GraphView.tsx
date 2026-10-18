@@ -17,6 +17,8 @@ import { CommitReviewMenu } from "./CommitReviewMenu";
 import { DiffPreview, type DiffPreviewTarget } from "./DiffPreview";
 import { RepoSidebar } from "./RepoSidebar";
 import { BranchActionsMenu, type MenuAnchor } from "./BranchActionsMenu";
+import { CommitActionsMenu } from "./GitRefItems";
+import { GitOpsProvider, useGitOps } from "./GitOps";
 import "./GraphView.css";
 
 export const GRAPH_PAGE_SIZE = 400;
@@ -53,7 +55,9 @@ export function GraphView({ repo }: { repo: Repository }) {
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
   const [pendingScroll, setPendingScroll] = useState<string | null>(null);
   const [jumpedRef, setJumpedRef] = useState<RefInfo | null>(null);
-  const [pillMenu, setPillMenu] = useState<{ branch: string; anchor: MenuAnchor } | null>(null);
+  const [pillMenu, setPillMenu] = useState<{ ref: RefInfo; anchor: MenuAnchor } | null>(null);
+  const [commitMenu, setCommitMenu] = useState<{ sha: string; anchor: MenuAnchor } | null>(null);
+  const [stashPreview, setStashPreview] = useState<number | null>(null);
   const [leftWidth, setLeftWidth] = useState(240);
   const [rightWidth, setRightWidth] = useState(340);
   const hasClone = repo.local_path != null;
@@ -214,19 +218,27 @@ export function GraphView({ repo }: { repo: Repository }) {
       previewTarget = { kind: "commit", repoId: repo.id, sha: detail.sha, file: commitFiles[previewIndex] };
     }
   }
+  if (stashPreview != null) {
+    previewTarget = { kind: "stash", repoId: repo.id, worktreePath: ctx, index: stashPreview };
+  }
   const previewOpen = previewTarget != null;
 
-  const closePreview = useCallback(() => setPreviewIndex(null), []);
+  const closePreview = useCallback(() => {
+    setPreviewIndex(null);
+    setStashPreview(null);
+  }, []);
 
   const select = useCallback((sha: string) => {
     setSelected(sha);
     setPreviewIndex(null);
+    setStashPreview(null);
   }, []);
 
   const resetContext = useCallback((path: string | null) => {
     setCtx(path);
     setSelected(null);
     setPreviewIndex(null);
+    setStashPreview(null);
     setPendingScroll(null);
     setJumpedRef(null);
   }, []);
@@ -292,8 +304,11 @@ export function GraphView({ repo }: { repo: Repository }) {
   }, [graphQuery]);
 
   const onRefContextMenu = useCallback((ref: RefInfo, e: ReactMouseEvent) => {
-    if (ref.kind === "tag") return;
-    setPillMenu({ branch: ref.name, anchor: { x: e.clientX, y: e.clientY } });
+    setPillMenu({ ref, anchor: { x: e.clientX, y: e.clientY } });
+  }, []);
+
+  const onCommitContextMenu = useCallback((sha: string, e: ReactMouseEvent) => {
+    setCommitMenu({ sha, anchor: { x: e.clientX, y: e.clientY } });
   }, []);
 
   const onSelectWorktree = useCallback(
@@ -364,6 +379,7 @@ export function GraphView({ repo }: { repo: Repository }) {
         onSelect={select}
         onEndReached={onEndReached}
         onRefContextMenu={onRefContextMenu}
+        onCommitContextMenu={hasClone ? onCommitContextMenu : undefined}
       />
     );
   }
@@ -412,7 +428,7 @@ export function GraphView({ repo }: { repo: Repository }) {
     rightBody = <p className="muted gv-msg">Select a commit to see its details.</p>;
   }
 
-  return (
+  const body = (
     <div className="gv-root">
       <div className="gv-toolbar">
         <label className="gv-scope">
@@ -464,6 +480,7 @@ export function GraphView({ repo }: { repo: Repository }) {
               {fetchRepo.isPending ? <span className="spinner" /> : <Icon name="refresh" size={13} />}
               Fetch
             </button>
+            <PullPushButtons branch={ctxBranch ?? null} />
           </>
         )}
         <KebabMenu title="Graph actions">
@@ -493,6 +510,11 @@ export function GraphView({ repo }: { repo: Repository }) {
             onSelectWorktree={onSelectWorktree}
             onWorktreeRemoved={onWorktreeRemoved}
             selectedRefName={jumpedRef && jumpedRef.sha === selected ? jumpedRef.name : null}
+            onPreviewStash={(index) => {
+              setSelected(null);
+              setPreviewIndex(null);
+              setStashPreview(index);
+            }}
           />
         </div>
         <div className="resize-handle" onMouseDown={startResize("left")} />
@@ -503,8 +525,8 @@ export function GraphView({ repo }: { repo: Repository }) {
           {previewTarget && (
             <DiffPreview
               target={previewTarget}
-              files={previewList}
-              index={previewIndex!}
+              files={previewTarget.kind === "stash" ? [`stash@{${previewTarget.index}}`] : previewList}
+              index={previewTarget.kind === "stash" ? 0 : previewIndex!}
               onNavigate={setPreviewIndex}
               onClose={closePreview}
             />
@@ -519,11 +541,58 @@ export function GraphView({ repo }: { repo: Repository }) {
       {pillMenu && (
         <BranchActionsMenu
           repo={repo}
-          branch={pillMenu.branch}
+          branch={pillMenu.ref.name}
+          refInfo={pillMenu.ref}
           anchor={pillMenu.anchor}
           onClose={() => setPillMenu(null)}
         />
       )}
+      {commitMenu && (
+        <CommitActionsMenu
+          sha={commitMenu.sha}
+          anchor={commitMenu.anchor}
+          onClose={() => setCommitMenu(null)}
+        />
+      )}
     </div>
+  );
+
+  if (!hasClone) return body;
+  return (
+    <GitOpsProvider
+      repo={repo}
+      ctx={ctx}
+      refs={refs}
+      worktrees={worktrees}
+      onSwitchContext={onSelectWorktree}
+    >
+      {body}
+    </GitOpsProvider>
+  );
+}
+
+function PullPushButtons({ branch }: { branch: string | null }) {
+  const ops = useGitOps();
+  if (!ops) return null;
+  const title = branch ? undefined : "HEAD is detached";
+  return (
+    <>
+      <button
+        className="btn btn-sm"
+        title={title ?? `git pull --ff-only (${branch})`}
+        disabled={!branch || ops.busy}
+        onClick={ops.pull}
+      >
+        Pull
+      </button>
+      <button
+        className="btn btn-sm"
+        title={title ?? `git push (${branch})`}
+        disabled={!branch || ops.busy}
+        onClick={ops.push}
+      >
+        Push
+      </button>
+    </>
   );
 }

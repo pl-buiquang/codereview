@@ -1,8 +1,9 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import type { ChangeStatus, ChangedFile, CommitDetail, PrSummary, WipKind, WipStatus } from "../../lib/types";
 import { timeAgo } from "../../lib/timeAgo";
 import { toast } from "../../lib/toast";
 import { Icon } from "../icons";
+import { useGitOps } from "./GitOps";
 import "./CommitPanel.css";
 
 const STATUS_LABEL: Record<ChangeStatus, string> = {
@@ -58,6 +59,7 @@ function FileRow({
   deletions,
   active,
   onClick,
+  actions,
 }: {
   path: string;
   oldPath?: string | null;
@@ -66,9 +68,10 @@ function FileRow({
   deletions?: number | null;
   active?: boolean;
   onClick: () => void;
+  actions?: ReactNode;
 }) {
   return (
-    <li>
+    <li className={actions ? "cp-file-row" : undefined}>
       <button
         type="button"
         className={`cp-file${active ? " active" : ""}`}
@@ -84,6 +87,7 @@ function FileRow({
           </span>
         )}
       </button>
+      {actions}
     </li>
   );
 }
@@ -238,11 +242,26 @@ function WipGroup({
   onOpenWipFile: (path: string, kind: WipKind) => void;
   activePath?: string | null;
 }) {
+  const ops = useGitOps();
+  const busy = ops?.busy ?? false;
+  const allPaths = files.map((f) => f.path);
   return (
     <section className="cp-wip-group" aria-label={title}>
       <div className="cp-files-head">
         <span>{title}</span>
-        <span className="cp-group-count">{files.length}</span>
+        <span className="cp-group-actions">
+          {ops && files.length > 0 && (
+            <button
+              type="button"
+              className="btn btn-sm"
+              disabled={busy}
+              onClick={() => (kind === "staged" ? ops.unstage(allPaths) : ops.stage(allPaths))}
+            >
+              {kind === "staged" ? "Unstage all" : "Stage all"}
+            </button>
+          )}
+          <span className="cp-group-count">{files.length}</span>
+        </span>
       </div>
       {files.length === 0 ? (
         <p className="cp-muted cp-empty">None</p>
@@ -254,11 +273,83 @@ function WipGroup({
               {...f}
               active={activePath === f.path}
               onClick={() => onOpenWipFile(f.path, kind)}
+              actions={
+                ops && (
+                  <span className="cp-file-actions">
+                    <button
+                      type="button"
+                      className="btn-icon"
+                      disabled={busy}
+                      title={kind === "staged" ? "Unstage" : "Stage"}
+                      aria-label={`${kind === "staged" ? "Unstage" : "Stage"} ${f.path}`}
+                      onClick={() => (kind === "staged" ? ops.unstage([f.path]) : ops.stage([f.path]))}
+                    >
+                      {kind === "staged" ? "−" : "+"}
+                    </button>
+                    {kind !== "staged" && (
+                      <button
+                        type="button"
+                        className="btn-icon"
+                        disabled={busy}
+                        title="Discard"
+                        aria-label={`Discard ${f.path}`}
+                        onClick={() => ops.discard([f.path], kind)}
+                      >
+                        <Icon name="x" size={11} />
+                      </button>
+                    )}
+                  </span>
+                )
+              }
             />
           ))}
         </ul>
       )}
     </section>
+  );
+}
+
+function CommitBox({ stagedCount, hasChanges }: { stagedCount: number; hasChanges: boolean }) {
+  const ops = useGitOps();
+  const [message, setMessage] = useState("");
+  const [amend, setAmend] = useState(false);
+  if (!ops) return null;
+  const canCommit = !ops.busy && (amend || (stagedCount > 0 && message.trim() !== ""));
+  return (
+    <div className="cp-commit-box">
+      <textarea
+        className="input"
+        rows={3}
+        aria-label="Commit message"
+        placeholder={amend ? "Leave empty to keep the previous message" : "Commit message"}
+        value={message}
+        onChange={(e) => setMessage(e.target.value)}
+      />
+      <div className="cp-commit-actions">
+        <label className="check" title="Replace the last commit with the staged changes">
+          <input type="checkbox" checked={amend} onChange={(e) => setAmend(e.target.checked)} />
+          Amend
+        </label>
+        <span className="cr-spacer" />
+        <button type="button" className="btn btn-sm" disabled={ops.busy || !hasChanges} onClick={ops.stash}>
+          Stash…
+        </button>
+        <button
+          type="button"
+          className="btn btn-sm btn-primary"
+          disabled={!canCommit}
+          title={stagedCount === 0 && !amend ? "Nothing staged" : undefined}
+          onClick={async () => {
+            if (await ops.commit(message, amend)) {
+              setMessage("");
+              setAmend(false);
+            }
+          }}
+        >
+          {amend ? "Amend commit" : "Commit"}
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -288,6 +379,7 @@ function WipMode({
           {total} file{total === 1 ? "" : "s"} on top of {shortSha(wip.head_sha)}
         </div>
       </div>
+      <CommitBox stagedCount={wip.staged.length} hasChanges={total > 0} />
       <WipGroup
         title="Staged"
         kind="staged"

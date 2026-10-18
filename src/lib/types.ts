@@ -417,6 +417,15 @@ export interface WipStatus {
   untracked: string[];
 }
 
+export interface StashEntry {
+  /** Position in `git stash list`, the N of `stash@{N}`. */
+  index: number;
+  sha: string;
+  message: string;
+  /** Unix seconds. */
+  created_at: number;
+}
+
 // --- Focus review (spec 10) ---
 
 export type FocusLevel = "off" | "thorough" | "focus" | "critical";

@@ -344,3 +344,17 @@
   flex: 1;
   min-width: 0;
 }
+
+.rs-menu-sep {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--border);
+}
+
+.rvd-field .input {
+  flex: 1;
+  min-width: 0;
+}
+.rvd-field textarea.input {
+  resize: vertical;
+}

@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactNode } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import { toast } from "../../lib/toast";
 import { confirmDialog } from "../../lib/confirm";
@@ -13,6 +13,7 @@ import type {
 } from "../../lib/types";
 import { ancestorPaths, buildRefTree, type RefSort, type RefTreeNode } from "../../lib/refTree";
 import { BranchActionsMenu, type MenuAnchor } from "./BranchActionsMenu";
+import { useGitOps } from "./GitOps";
 import "./RepoSidebar.css";
 
 const SOURCE_LABELS: Record<WorktreeSource, string> = {
@@ -22,7 +23,7 @@ const SOURCE_LABELS: Record<WorktreeSource, string> = {
   manual: "manual",
 };
 
-type SectionId = "local" | "remote" | "worktrees" | "tags";
+type SectionId = "local" | "remote" | "worktrees" | "tags" | "stashes";
 
 export interface RepoSidebarProps {
   repo: Repository;
@@ -38,6 +39,8 @@ export interface RepoSidebarProps {
   openReview?: (reviewId: number) => void;
   /** Highlights the ref row matching this name (e.g. the selected graph ref). */
   selectedRefName?: string | null;
+  /** Shows the diff of `stash@{index}` in the graph's preview pane. */
+  onPreviewStash?: (index: number) => void;
 }
 
 function matches(text: string, filter: string): boolean {
@@ -54,21 +57,31 @@ export function RepoSidebar({
   onWorktreeRemoved,
   openReview,
   selectedRefName,
+  onPreviewStash,
 }: RepoSidebarProps) {
   const queryClient = useQueryClient();
+  const gitOps = useGitOps();
+  const stashesQuery = useQuery({
+    queryKey: ["stashes", repo.id, contextPath],
+    queryFn: () => api.gitStashList(repo.id, contextPath),
+    enabled: gitOps != null,
+  });
+  const stashes = stashesQuery.data ?? [];
   const [collapsed, setCollapsed] = useState<Record<SectionId, boolean>>({
     local: false,
     remote: true,
     worktrees: true,
     tags: true,
+    stashes: true,
   });
   const [filters, setFilters] = useState<Record<SectionId, string>>({
     local: "",
     remote: "",
     worktrees: "",
     tags: "",
+    stashes: "",
   });
-  const [menu, setMenu] = useState<{ branch: string; anchor: MenuAnchor } | null>(null);
+  const [menu, setMenu] = useState<{ ref: RefInfo; anchor: MenuAnchor } | null>(null);
   const [sort, setSort] = useState<RefSort>("updated");
   const [toggledFolders, setToggledFolders] = useState<ReadonlySet<string>>(() => new Set());
 
@@ -141,7 +154,7 @@ export function RepoSidebar({
   const toggle = (id: SectionId) => setCollapsed((c) => ({ ...c, [id]: !c[id] }));
   const setFilter = (id: SectionId, value: string) => setFilters((f) => ({ ...f, [id]: value }));
 
-  const openMenu = (branch: string, anchor: MenuAnchor) => setMenu({ branch, anchor });
+  const openMenu = (ref: RefInfo, anchor: MenuAnchor) => setMenu({ ref, anchor });
 
   const activeNames = useMemo(
     () => new Set([...refs.filter((r) => r.is_head).map((r) => r.name), ...(selectedRefName ? [selectedRefName] : [])]),
@@ -169,7 +182,7 @@ export function RepoSidebar({
             depth={depth}
             selected={selectedRefName === r.name}
             onJump={() => onJumpToRef(r)}
-            onOpenMenu={withActions ? (anchor) => openMenu(r.name, anchor) : undefined}
+            onOpenMenu={withActions ? (anchor) => openMenu(r, anchor) : undefined}
           />
         );
       }
@@ -310,13 +323,41 @@ export function RepoSidebar({
         onToggle={toggle}
         onFilter={setFilter}
       >
-        {renderRefs(tags, "tags", false)}
+        {renderRefs(tags, "tags", gitOps != null)}
       </Section>
+
+      {gitOps && (
+        <Section
+          id="stashes"
+          title="Stashes"
+          total={stashes.length}
+          shown={stashes.filter((st) => matches(st.message, filters.stashes)).length}
+          collapsed={collapsed.stashes}
+          filter={filters.stashes}
+          onToggle={toggle}
+          onFilter={setFilter}
+        >
+          {stashes
+            .filter((st) => matches(st.message, filters.stashes))
+            .map((st) => (
+              <StashRow
+                key={st.sha}
+                index={st.index}
+                message={st.message}
+                onPreview={() => onPreviewStash?.(st.index)}
+                onApply={() => gitOps.stashApply(st.index)}
+                onPop={() => gitOps.stashPop(st.index)}
+                onDrop={() => gitOps.stashDrop(st.index)}
+              />
+            ))}
+        </Section>
+      )}
 
       {menu && (
         <BranchActionsMenu
           repo={repo}
-          branch={menu.branch}
+          branch={menu.ref.name}
+          refInfo={menu.ref}
           anchor={menu.anchor}
           onClose={() => setMenu(null)}
           onReviewCreated={openReview}
@@ -438,6 +479,46 @@ function RefRow({
           ⋯
         </button>
       )}
+    </div>
+  );
+}
+
+function StashRow({
+  index,
+  message,
+  onPreview,
+  onApply,
+  onPop,
+  onDrop,
+}: {
+  index: number;
+  message: string;
+  onPreview: () => void;
+  onApply: () => void;
+  onPop: () => void;
+  onDrop: () => void;
+}) {
+  return (
+    <div className="rs-row">
+      <button
+        className="rs-row-main"
+        style={{ paddingLeft: 6 }}
+        onClick={onPreview}
+        title={`Preview stash@{${index}}`}
+        aria-label={`Preview stash ${index}`}
+      >
+        <Icon name="branch" size={12} />
+        <span className="rs-row-name mono">{message}</span>
+      </button>
+      <button className="btn-icon rs-row-more" title="Apply" aria-label={`Apply stash ${index}`} onClick={onApply}>
+        ↩
+      </button>
+      <button className="btn-icon rs-row-more" title="Pop" aria-label={`Pop stash ${index}`} onClick={onPop}>
+        ⤴
+      </button>
+      <button className="btn-icon rs-row-more" title="Drop" aria-label={`Drop stash ${index}`} onClick={onDrop}>
+        <Icon name="x" size={11} />
+      </button>
     </div>
   );
 }

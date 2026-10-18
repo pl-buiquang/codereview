@@ -430,7 +430,39 @@ pub fn worktree_open_terminal(
     tmux_session: String,
     db: State<Db>,
 ) -> AppResult<()> {
-    let path = resolve_checkout(&db, repo_id, Some(worktree_path))?;
+    let (path, repo, window_name) = terminal_target(&db, repo_id, Some(worktree_path))?;
+    crate::terminal::open_shell(host, tmux_target, &tmux_session, &repo, &window_name, &path)
+}
+
+/// Opens a new `claude` session (tmux window when available) in a checkout of the repo.
+#[tauri::command]
+pub fn checkout_open_claude(
+    repo_id: i64,
+    worktree_path: Option<String>,
+    host: crate::terminal::TerminalHost,
+    tmux_target: crate::terminal::TmuxTarget,
+    tmux_session: String,
+    db: State<Db>,
+) -> AppResult<()> {
+    let (path, repo, window_name) = terminal_target(&db, repo_id, worktree_path)?;
+    crate::terminal::open_session(
+        host,
+        tmux_target,
+        &tmux_session,
+        &repo,
+        &window_name,
+        &path,
+        &["claude".to_string()],
+    )
+}
+
+/// `(cwd, repo label, window name)` for a terminal opened in one of the repo's checkouts.
+fn terminal_target(
+    db: &Db,
+    repo_id: i64,
+    worktree_path: Option<String>,
+) -> AppResult<(String, String, String)> {
+    let path = resolve_checkout(db, repo_id, worktree_path)?;
     let repo_label = {
         let conn = db.0.lock().unwrap();
         conn.query_row(
@@ -441,19 +473,12 @@ pub fn worktree_open_terminal(
     };
     let repo = match repo_label {
         (Some(o), Some(n)) => format!("{o}/{n}"),
-        _ => repo_local_path(&db, repo_id)?,
+        _ => repo_local_path(db, repo_id)?,
     };
     let window_name = worktree::current_branch(&path).unwrap_or_else(|| {
         path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
     });
-    crate::terminal::open_shell(
-        host,
-        tmux_target,
-        &tmux_session,
-        &repo,
-        &window_name,
-        &path.to_string_lossy(),
-    )
+    Ok((path.to_string_lossy().into_owned(), repo, window_name))
 }
 
 #[tauri::command]

@@ -21,11 +21,14 @@ Built with **Tauri v2** (Rust) + **React/TypeScript**.
   (they open inside the Home tab and stay loaded, so switching is instant; ✕ closes one). Fold it
   to icons only, and hover the Home tab icon or the
   window's left edge to pop the menu from anywhere.
-- **Git graph** — a GitKraken-style, read-only view of the repo's history: a sidebar of local /
+- **Git graph** — a GitKraken-style view of the repo's history, with light git actions: a sidebar of local /
   remote branches, worktrees and tags (filterable; click to jump to the tip), a lane-drawn commit
   graph paged as you scroll (scope **Local** (default) / **All**), a `// WIP` row for uncommitted
   changes, and a commit panel with author/committer, parents and the changed files. Click a file
-  to preview its diff in place.
+  to preview its diff in place. Right-click a branch, tag or commit to check it out, create or
+  delete branches and tags, or open a terminal / Claude session on a checked-out branch; the
+  toolbar has **Pull** (fast-forward only) and **Push**, and the `// WIP` panel stages, unstages,
+  discards, commits (or amends) and stashes.
 - **Two diff sources, both first-class**
   - *Virtual PR*: start a review of any branch against the default branch (or any `base` via
     **Review vs…**) from the graph's branch menu; diff uses the merge-base (`base...head`,
@@ -158,7 +161,11 @@ of this.
      context checkout (HEAD marker, WIP row); the toolbar chip resets it to the main
      checkout. Worktree rows can also be opened in VS Code, removed, or pruned. Right-click a
      branch (sidebar row or graph pill), or use its `⋯` button, for **Review vs `<default>`** or
-     **Review vs…** to start a virtual-PR review.
+     **Review vs…** to start a virtual-PR review. The same menu (and tag / commit menus) has
+     checkout, create / rename / delete branch, create / delete tag, and **Open terminal** /
+     **New Claude session** for branches checked out in a worktree. Risky cases (unmerged
+     delete, rejected push, branch held by another worktree) show git's message with an
+     explicit escalation. Mutations always act on the context checkout.
    - **GitHub PRs** — lists open PRs (requires `gh auth`); click **Review** to start one.
 3. In a review: **click a line** to comment (shift-click to select a range), fill in the
    **summary** and **verdict**. Everything autosaves.

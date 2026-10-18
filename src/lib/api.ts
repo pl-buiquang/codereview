@@ -48,6 +48,7 @@ import type {
   UpdateReviewResult,
   WipKind,
   WipStatus,
+  StashEntry,
   WorktreeInfo,
 } from "./types";
 import type { TerminalHost, TmuxTarget } from "./settings";
@@ -353,6 +354,66 @@ export const api = {
     oldPath?: string | null;
   }) =>
     invoke<string>("commit_file_diff", { ...args, oldPath: args.oldPath ?? null }),
+  checkoutOpenClaude: (
+    repoId: number,
+    worktreePath: string | null,
+    host: TerminalHost,
+    tmuxTarget: TmuxTarget,
+    tmuxSession: string,
+  ) => invoke<void>("checkout_open_claude", { repoId, worktreePath, host, tmuxTarget, tmuxSession }),
+
+  // Graph mutations (spec 24); every call runs in the context checkout (`worktreePath`, null = main).
+  gitCheckoutBranch: (repoId: number, worktreePath: string | null, name: string) =>
+    invoke<void>("git_checkout_branch", { repoId, worktreePath, name }),
+  gitCheckoutRemoteBranch: (repoId: number, worktreePath: string | null, remoteRef: string) =>
+    invoke<void>("git_checkout_remote_branch", { repoId, worktreePath, remoteRef }),
+  gitCheckoutDetached: (repoId: number, worktreePath: string | null, rev: string) =>
+    invoke<void>("git_checkout_detached", { repoId, worktreePath, rev }),
+  gitCreateBranch: (repoId: number, worktreePath: string | null, name: string, at: string, switchTo: boolean) =>
+    invoke<void>("git_create_branch", { repoId, worktreePath, name, at, switch: switchTo }),
+  gitDeleteBranch: (repoId: number, worktreePath: string | null, name: string, force: boolean) =>
+    invoke<void>("git_delete_branch", { repoId, worktreePath, name, force }),
+  gitRenameBranch: (repoId: number, worktreePath: string | null, old: string, newName: string) =>
+    invoke<void>("git_rename_branch", { repoId, worktreePath, old, new: newName }),
+  gitCreateTag: (
+    repoId: number,
+    worktreePath: string | null,
+    name: string,
+    at: string,
+    message: string | null,
+    push: boolean,
+  ) => invoke<void>("git_create_tag", { repoId, worktreePath, name, at, message, push }),
+  gitDeleteTag: (repoId: number, worktreePath: string | null, name: string) =>
+    invoke<void>("git_delete_tag", { repoId, worktreePath, name }),
+  gitStage: (repoId: number, worktreePath: string | null, paths: string[]) =>
+    invoke<void>("git_stage", { repoId, worktreePath, paths }),
+  gitUnstage: (repoId: number, worktreePath: string | null, paths: string[]) =>
+    invoke<void>("git_unstage", { repoId, worktreePath, paths }),
+  gitDiscard: (repoId: number, worktreePath: string | null, paths: string[], kind: WipKind) =>
+    invoke<void>("git_discard", { repoId, worktreePath, paths, kind }),
+  gitCommit: (repoId: number, worktreePath: string | null, message: string, amend: boolean) =>
+    invoke<void>("git_commit", { repoId, worktreePath, message, amend }),
+  gitPull: (repoId: number, worktreePath: string | null) =>
+    invoke<string>("git_pull", { repoId, worktreePath }),
+  gitPush: (repoId: number, worktreePath: string | null, forceWithLease: boolean) =>
+    invoke<string>("git_push", { repoId, worktreePath, forceWithLease }),
+  gitStashPush: (
+    repoId: number,
+    worktreePath: string | null,
+    message: string | null,
+    includeUntracked: boolean,
+  ) => invoke<void>("git_stash_push", { repoId, worktreePath, message, includeUntracked }),
+  gitStashList: (repoId: number, worktreePath: string | null) =>
+    invoke<StashEntry[]>("git_stash_list", { repoId, worktreePath }),
+  gitStashApply: (repoId: number, worktreePath: string | null, index: number) =>
+    invoke<void>("git_stash_apply", { repoId, worktreePath, index }),
+  gitStashPop: (repoId: number, worktreePath: string | null, index: number) =>
+    invoke<void>("git_stash_pop", { repoId, worktreePath, index }),
+  gitStashDrop: (repoId: number, worktreePath: string | null, index: number) =>
+    invoke<void>("git_stash_drop", { repoId, worktreePath, index }),
+  gitStashDiff: (repoId: number, worktreePath: string | null, index: number) =>
+    invoke<string>("git_stash_diff", { repoId, worktreePath, index }),
+
   worktreeStatus: (repoId: number, worktreePath?: string | null) =>
     invoke<WipStatus>("worktree_status", { repoId, worktreePath: worktreePath ?? null }),
   worktreeFileDiff: (args: {

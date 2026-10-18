@@ -49,6 +49,7 @@ export interface CommitGraphProps {
   /** Fired once per `commits.length` when the viewport nears the end of the list. */
   onEndReached?: () => void;
   onRefContextMenu?: (ref: RefInfo, event: ReactMouseEvent) => void;
+  onCommitContextMenu?: (sha: string, event: ReactMouseEvent) => void;
 }
 
 type Pill =
@@ -88,6 +89,7 @@ export const CommitGraph = forwardRef<CommitGraphHandle, CommitGraphProps>(funct
     onSelect,
     onEndReached,
     onRefContextMenu,
+    onCommitContextMenu,
   },
   ref,
 ) {
@@ -261,6 +263,14 @@ export const CommitGraph = forwardRef<CommitGraphHandle, CommitGraphProps>(funct
         className={`cg-row${selected ? " is-selected" : ""}${isHead ? " is-head" : ""}`}
         style={{ top, height: ROW_HEIGHT }}
         onClick={() => onSelect(commit.sha)}
+        onContextMenu={
+          onCommitContextMenu
+            ? (e) => {
+                e.preventDefault();
+                onCommitContextMenu(commit.sha, e);
+              }
+            : undefined
+        }
       >
         <div className="cg-refs">{renderPills(pillsBySha.get(commit.sha))}</div>
         <svg className="cg-lanes" width={svgWidth} height={ROW_HEIGHT} aria-hidden>

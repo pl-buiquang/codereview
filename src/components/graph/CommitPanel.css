@@ -301,3 +301,37 @@
   gap: 4px;
   margin-top: 8px;
 }
+
+.cp-file-row {
+  display: flex;
+  align-items: center;
+}
+.cp-file-row .cp-file {
+  flex: 1;
+  min-width: 0;
+}
+.cp-file-actions {
+  display: inline-flex;
+  flex-shrink: 0;
+  gap: 2px;
+}
+
+.cp-group-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.cp-commit-box {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.cp-commit-box textarea {
+  resize: vertical;
+}
+.cp-commit-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}

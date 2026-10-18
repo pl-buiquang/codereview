@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useUIStore } from "../../store";
-import type { Repository } from "../../lib/types";
+import type { RefInfo, Repository } from "../../lib/types";
+import { GitRefItems } from "./GitRefItems";
 import { ReviewVsDialog, useStartReview } from "./ReviewVsDialog";
 import "./RepoSidebar.css";
 
@@ -15,6 +16,8 @@ export interface MenuAnchor {
 export interface BranchActionsMenuProps {
   repo: Repository;
   branch: string;
+  /** When set, adds git actions for this ref; tags get only those (no review items). */
+  refInfo?: RefInfo;
   anchor: MenuAnchor;
   onClose: () => void;
   onReviewCreated?: (reviewId: number) => void;
@@ -23,6 +26,7 @@ export interface BranchActionsMenuProps {
 export function BranchActionsMenu({
   repo,
   branch,
+  refInfo,
   anchor,
   onClose,
   onReviewCreated,
@@ -35,6 +39,7 @@ export function BranchActionsMenu({
     onClose();
   };
   const startReview = useStartReview(repo, openCreated);
+  const isTag = refInfo?.kind === "tag";
   const defaultBranch = repo.default_branch;
   const canReviewVsDefault = defaultBranch != null && defaultBranch !== branch;
 
@@ -75,27 +80,32 @@ export function BranchActionsMenu({
       onClick={(e) => e.stopPropagation()}
     >
       <div className="rs-menu-title mono">{branch}</div>
-      <button
-        className="rs-menu-item"
-        role="menuitem"
-        disabled={!canReviewVsDefault || startReview.isPending}
-        title={
-          defaultBranch == null
-            ? "Repository has no default branch"
-            : defaultBranch === branch
-              ? "This is the default branch"
-              : undefined
-        }
-        onClick={() => {
-          if (!defaultBranch) return;
-          startReview.mutate({ baseRef: defaultBranch, headRef: branch, threeDot: true });
-        }}
-      >
-        Review vs <span className="mono">{defaultBranch ?? "default branch"}</span>
-      </button>
-      <button className="rs-menu-item" role="menuitem" onClick={() => setDialogOpen(true)}>
-        Review vs…
-      </button>
+      {!isTag && (
+        <>
+          <button
+            className="rs-menu-item"
+            role="menuitem"
+            disabled={!canReviewVsDefault || startReview.isPending}
+            title={
+              defaultBranch == null
+                ? "Repository has no default branch"
+                : defaultBranch === branch
+                  ? "This is the default branch"
+                  : undefined
+            }
+            onClick={() => {
+              if (!defaultBranch) return;
+              startReview.mutate({ baseRef: defaultBranch, headRef: branch, threeDot: true });
+            }}
+          >
+            Review vs <span className="mono">{defaultBranch ?? "default branch"}</span>
+          </button>
+          <button className="rs-menu-item" role="menuitem" onClick={() => setDialogOpen(true)}>
+            Review vs…
+          </button>
+        </>
+      )}
+      {refInfo && <GitRefItems target={{ kind: "ref", ref: refInfo }} close={onClose} />}
     </div>,
     document.body,
   );

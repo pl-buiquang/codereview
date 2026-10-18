@@ -1,8 +1,9 @@
-//! Read-only git history for the Graph tab (spec 22). Types here are mirrored in `src/lib/types.ts`.
+//! Git history for the Graph tab (spec 22); mutations live in `ops` (spec 24). Types here are mirrored in `src/lib/types.ts`.
 
 pub mod branches;
 pub mod commit;
 pub mod log;
+pub mod ops;
 pub mod wip;
 
 use serde::{Deserialize, Serialize};
@@ -108,6 +109,15 @@ pub struct WipStatus {
     pub staged: Vec<ChangedFile>,
     pub unstaged: Vec<ChangedFile>,
     pub untracked: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct StashEntry {
+    /// Position in `git stash list`, i.e. the `N` of `stash@{N}`.
+    pub index: u32,
+    pub sha: String,
+    pub message: String,
+    pub created_at: i64,
 }
 
 #[cfg(test)]

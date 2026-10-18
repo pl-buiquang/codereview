@@ -48,7 +48,7 @@ pub fn worktree_file_diff(checkout: &Path, path: &str, kind: WipKind) -> AppResu
 }
 
 /// `--no-index` reads arbitrary filesystem paths, so keep it confined to relative paths in the checkout.
-fn ensure_inside_checkout(path: &str) -> AppResult<()> {
+pub(super) fn ensure_inside_checkout(path: &str) -> AppResult<()> {
     let p = Path::new(path);
     let escapes = path.is_empty()
         || p.components()

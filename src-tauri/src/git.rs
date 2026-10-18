@@ -7,11 +7,17 @@ use crate::error::{AppError, AppResult};
 
 /// Run a git command inside `repo` and return stdout on success.
 pub fn run_git(repo: &Path, args: &[&str]) -> AppResult<String> {
+    run_git_env(repo, args, &[])
+}
+
+/// [`run_git`] with extra environment variables for the child process.
+pub fn run_git_env(repo: &Path, args: &[&str], env: &[(&str, &str)]) -> AppResult<String> {
     // Reads must not write: `git status` would otherwise refresh the index,
     // which the repo watcher sees as a change and reacts to with another status.
     let started = std::time::Instant::now();
     let output = Command::new(crate::tools::git_bin())
         .env("GIT_OPTIONAL_LOCKS", "0")
+        .envs(env.iter().copied())
         .arg("-C")
         .arg(repo)
         .args(args)
