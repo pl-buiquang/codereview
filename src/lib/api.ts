@@ -194,8 +194,8 @@ export const api = {
     invoke<SyncReport>("sync_now", { scope, mode, visibleIds }),
   syncWindowState: (visible: boolean, focused: boolean) =>
     invoke<void>("sync_window_state", { visible, focused }),
-  syncConfigure: (autoSync: AutoSync, discoveryIntervalMin: number) =>
-    invoke<void>("sync_configure", { config: { autoSync, discoveryIntervalMin } }),
+  syncConfigure: (autoSync: AutoSync, discoveryIntervalMin: number, boardMonitor: boolean, boardMonitorIntervalMin: number) =>
+    invoke<void>("sync_configure", { config: { autoSync, discoveryIntervalMin, boardMonitor, boardMonitorIntervalMin } }),
   syncStatus: () => invoke<SyncStatus>("sync_status"),
   resetMirror: () => invoke<void>("reset_mirror"),
 
@@ -238,6 +238,7 @@ export const api = {
   boardPrSetDraft: (cardId: string, draft: boolean) => invoke<void>("board_pr_set_draft", { cardId, draft }),
   boardPrUpdateBranch: (cardId: string, rebase: boolean) =>
     invoke<void>("board_pr_update_branch", { cardId, rebase }),
+  boardPrRerunCi: (cardId: string, failedOnly: boolean) => invoke<number>("board_pr_rerun_ci", { cardId, failedOnly }),
   boardLinkPr: (issueId: string, prReference: string) =>
     invoke<void>("board_link_pr", { issueId, prReference }),
   boardUnlink: (issueId: string, prId: string) => invoke<void>("board_unlink", { issueId, prId }),

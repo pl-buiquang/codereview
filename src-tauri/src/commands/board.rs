@@ -87,7 +87,7 @@ fn card_row(conn: &Connection, card_id: &str) -> AppResult<BoardCardRow> {
 }
 
 /// `(owner, name, number)` for a tracked PR card, erroring on an issue card.
-fn pr_card_coords(db: &Db, card_id: &str) -> AppResult<(String, String, i64)> {
+pub(crate) fn pr_card_coords(db: &Db, card_id: &str) -> AppResult<(String, String, i64)> {
     let card = card_row(&db.0.lock().unwrap(), card_id)?;
     if card.typ != "pr" {
         return Err(AppError::Other("only PR cards have a review".into()));
@@ -417,7 +417,13 @@ fn run_pr_action(db: &Db, card_id: &str, args: &[&str]) -> AppResult<()> {
     full.extend_from_slice(&args[1..]);
     crate::gh::run_gh(&ctx, &full)?;
 
-    let node = mirror::fetch::resolve_pr(&owner, &name, number)?;
+    refetch_card(db, &owner, &name, number)
+}
+
+/// Re-read one PR from GitHub into the mirror so the board reflects a change
+/// just made through `gh`.
+pub(crate) fn refetch_card(db: &Db, owner: &str, name: &str, number: i64) -> AppResult<()> {
+    let node = mirror::fetch::resolve_pr(owner, name, number)?;
     let conn = db.0.lock().unwrap();
     mirror::store::upsert_node(&conn, &node, &now())
 }
@@ -437,6 +443,23 @@ pub async fn board_pr_set_draft(card_id: String, draft: bool, db: State<'_, Db>)
 pub async fn board_pr_update_branch(card_id: String, rebase: bool, db: State<'_, Db>) -> AppResult<()> {
     let args: &[&str] = if rebase { &["update-branch", "--rebase"] } else { &["update-branch"] };
     run_pr_action(&db, &card_id, args)
+}
+
+/// Rerun every workflow run of the PR's head commit that has a failing check
+/// (only its failed jobs when `failed_only`). Returns how many runs restarted.
+#[tauri::command]
+pub async fn board_pr_rerun_ci(card_id: String, failed_only: bool, db: State<'_, Db>) -> AppResult<u32> {
+    let (owner, name, number) = pr_card_coords(&db, &card_id)?;
+    let runs = crate::gh::failing_workflow_runs(&owner, &name, number)?;
+    if runs.is_empty() {
+        return Err(AppError::Other("no failed workflow runs".into()));
+    }
+    let repo = format!("{owner}/{name}");
+    for run in &runs {
+        crate::gh::rerun_run(&repo, run.run_id, failed_only)?;
+    }
+    refetch_card(&db, &owner, &name, number)?;
+    Ok(runs.len() as u32)
 }
 
 /// A card's id for `owner/repo#number`, but only if it's currently visible on

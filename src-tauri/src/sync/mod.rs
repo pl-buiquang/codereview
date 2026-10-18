@@ -90,3 +90,4 @@ pub struct MirrorUpdated {
 
 pub const MIRROR_UPDATED_EVENT: &str = "mirror-updated";
 pub const SYNC_STATUS_EVENT: &str = "sync-status";
+pub const BOARD_MONITOR_EVENT: &str = "board-monitor";

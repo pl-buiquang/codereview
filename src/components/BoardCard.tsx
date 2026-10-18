@@ -228,11 +228,31 @@ export function AddMetaForm({
   );
 }
 
+/** Open, behind its base, updatable by you and not part of a stack. */
+export function updateBranchDisabledReason(card: BoardCardT): string | null {
+  if (card.state !== "open") return "PR is not open";
+  if (card.stack_number != null) return "Stacked PR — rebase the stack instead";
+  if (card.merge_state_status !== "BEHIND") return "Branch is up to date";
+  if (!card.viewer_can_update_branch) return "You can't update this branch";
+  return null;
+}
+
+export function canEnableAutoMerge(card: BoardCardT): boolean {
+  return card.type === "pr" && card.state === "open" && !card.is_draft && card.auto_merge == null;
+}
+
+export function rerunCiDisabledReason(card: BoardCardT): string | null {
+  if (card.state !== "open") return "PR is not open";
+  if (card.ci_status !== "FAILURE" && card.ci_status !== "ERROR") return "CI isn't failing";
+  return null;
+}
+
 export interface PrActions {
   busy: boolean;
   onSetAutoMerge: (enable: boolean) => void;
   onSetDraft: (draft: boolean) => void;
   onUpdateBranch: (rebase: boolean) => void;
+  onRerunCi: (failedOnly: boolean) => void;
 }
 
 export interface TerminalAction {
@@ -254,17 +274,8 @@ function PrActionsMenu({
   terminal: TerminalAction | null;
 }) {
   const isOpen = card.state === "open";
-  const behind = card.merge_state_status === "BEHIND";
-  const stacked = card.stack_number != null;
-  const updateDisabledReason = !isOpen
-    ? "PR is not open"
-    : stacked
-      ? "Stacked PR — rebase the stack instead"
-      : !behind
-        ? "Branch is up to date"
-        : !card.viewer_can_update_branch
-          ? "You can't update this branch"
-          : null;
+  const updateDisabledReason = updateBranchDisabledReason(card);
+  const rerunDisabledReason = rerunCiDisabledReason(card);
 
   return (
     <KebabMenu title="PR actions" disabled={actions.busy} className="board-card-menu">
@@ -343,6 +354,22 @@ function PrActionsMenu({
               onClick={run(() => actions.onUpdateBranch(true))}
             >
               Update branch (rebase)
+            </button>
+            <button
+              role="menuitem"
+              disabled={rerunDisabledReason != null}
+              title={rerunDisabledReason ?? undefined}
+              onClick={run(() => actions.onRerunCi(true))}
+            >
+              Re-run failed jobs
+            </button>
+            <button
+              role="menuitem"
+              disabled={rerunDisabledReason != null}
+              title={rerunDisabledReason ?? undefined}
+              onClick={run(() => actions.onRerunCi(false))}
+            >
+              Re-run all jobs
             </button>
           </>
         );

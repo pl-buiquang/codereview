@@ -10,7 +10,10 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
 
-use super::{pipeline, Mode, Scope, SyncReport, SyncRequest, MIRROR_UPDATED_EVENT, SYNC_STATUS_EVENT};
+use super::{
+    pipeline, MirrorUpdated, Mode, Scope, SyncReport, SyncRequest, BOARD_MONITOR_EVENT, MIRROR_UPDATED_EVENT,
+    SYNC_STATUS_EVENT,
+};
 use crate::db::Db;
 use crate::error::AppResult;
 
@@ -42,12 +45,32 @@ pub struct SyncConfig {
     pub auto_sync: AutoSync,
     /// Minutes between discoveries while the app is visible; 0 = off.
     pub discovery_interval_min: u32,
+    /// Run the board auto-merge monitor, whatever `auto_sync` says.
+    #[serde(default)]
+    pub board_monitor: bool,
+    #[serde(default = "default_monitor_interval_min")]
+    pub board_monitor_interval_min: u32,
+}
+
+fn default_monitor_interval_min() -> u32 {
+    5
 }
 
 impl Default for SyncConfig {
     fn default() -> Self {
-        Self { auto_sync: AutoSync::Periodic, discovery_interval_min: 15 }
+        Self {
+            auto_sync: AutoSync::Periodic,
+            discovery_interval_min: 15,
+            board_monitor: false,
+            board_monitor_interval_min: default_monitor_interval_min(),
+        }
     }
+}
+
+#[derive(Clone, Serialize)]
+struct BoardMonitorPayload {
+    actions: Vec<crate::board_monitor::MonitorAction>,
+    error: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -83,6 +106,8 @@ struct State {
     last_discovery: Option<Instant>,
     running: Vec<Running>,
     last_error: Option<(String, String)>,
+    last_monitor: Option<Instant>,
+    monitoring: bool,
 }
 
 impl State {
@@ -103,6 +128,14 @@ impl State {
     fn discovery_due(&self) -> bool {
         self.discovery_interval()
             .is_some_and(|i| self.last_discovery.is_none_or(|t| t.elapsed() >= i))
+    }
+
+    fn monitor_due(&self) -> bool {
+        self.config.board_monitor
+            && !self.monitoring
+            && self.last_monitor.is_none_or(|t| {
+                t.elapsed() >= Duration::from_secs(u64::from(self.config.board_monitor_interval_min.max(1)) * 60)
+            })
     }
 
     fn overlaps(&self, scope: Scope) -> bool {
@@ -149,6 +182,8 @@ impl SyncEngine {
                     last_discovery,
                     running: Vec::new(),
                     last_error: None,
+                    last_monitor: None,
+                    monitoring: false,
                 }),
             }),
         };
@@ -169,7 +204,11 @@ impl SyncEngine {
 
     pub fn configure(&self, config: SyncConfig) {
         log::debug!(target: "sync", "configure {config:?}");
-        self.state().config = config;
+        let mut s = self.state();
+        if config.board_monitor && !s.config.board_monitor {
+            s.last_monitor = None;
+        }
+        s.config = config;
     }
 
     /// A view showing `scope` mounted (or changed what it shows), or went away
@@ -227,6 +266,7 @@ impl SyncEngine {
     }
 
     fn tick(&self) {
+        self.maybe_monitor();
         let (discover, scopes) = {
             let s = self.state();
             if !s.visible || s.config.auto_sync != AutoSync::Periodic {
@@ -240,6 +280,68 @@ impl SyncEngine {
             log::debug!(target: "sync", "tick: discover={discover}, due scopes={scopes:?}");
         }
         self.spawn_round(discover, scopes);
+    }
+
+    /// Start a monitor round if it is on and due. Unlike light syncs this
+    /// ignores window visibility, the active views and Auto Sync: turning the
+    /// monitor on is the opt-in.
+    fn maybe_monitor(&self) {
+        {
+            let mut s = self.state();
+            if !s.monitor_due() {
+                return;
+            }
+            s.monitoring = true;
+            s.last_monitor = Some(Instant::now());
+        }
+        let engine = self.clone();
+        let spawned = std::thread::Builder::new().name("board-monitor".into()).spawn(move || {
+            engine.monitor_round();
+            engine.state().monitoring = false;
+        });
+        if let Err(e) = spawned {
+            self.state().monitoring = false;
+            crate::logging::warn(&format!("[sync] could not start the board monitor: {e}"));
+        }
+    }
+
+    /// Refresh the board mirror, then act on what it shows.
+    fn monitor_round(&self) {
+        let req = SyncRequest::new(Scope::Board, Mode::Light);
+        if !self.begin(&req, true) {
+            log::debug!(target: "sync", "monitor: skipped, a board sync is running");
+            self.state().last_monitor = None;
+            return;
+        }
+        let mut error = self.execute(req).err().map(|e| e.to_string());
+        if error.is_none() {
+            let db = self.inner.app.state::<Db>();
+            match crate::board_monitor::run(&db) {
+                Ok(actions) => {
+                    log::info!("[sync] monitor: {} actions", actions.len());
+                    if !actions.is_empty() {
+                        let mut ids: Vec<String> = actions.iter().map(|a| a.card_id.clone()).collect();
+                        ids.dedup();
+                        let _ = self
+                            .inner
+                            .app
+                            .emit(MIRROR_UPDATED_EVENT, &MirrorUpdated { scopes: vec![Scope::Board], ids });
+                        let _ = self.inner.app.emit(BOARD_MONITOR_EVENT, BoardMonitorPayload { actions, error: None });
+                    }
+                    return;
+                }
+                Err(e) => {
+                    crate::logging::warn(&format!("[sync] monitor failed: {e}"));
+                    self.state().last_error = Some((e.to_string(), chrono::Utc::now().to_rfc3339()));
+                    self.emit_status();
+                    error = Some(e.to_string());
+                }
+            }
+        }
+        let _ = self
+            .inner
+            .app
+            .emit(BOARD_MONITOR_EVENT, BoardMonitorPayload { actions: Vec::new(), error });
     }
 
     /// Discovery covers every scope (it syncs Inbox + Board), so it replaces

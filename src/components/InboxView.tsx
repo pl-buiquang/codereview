@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { toast } from "../lib/toast";
@@ -72,13 +72,24 @@ export function InboxView() {
   const botLogins = useSettingsStore((s) => s.botLogins);
   const repoBasePaths = useSettingsStore((s) => s.repoBasePaths);
   const onHome = useUIStore((s) => s.activeTabId === "home" && s.homeRepoId == null);
-  const [active, setActive] = useState<BucketKey>("needs-you");
-  const [repoFilter, setRepoFilter] = useState<string | null>(null);
-  const [authorFilter, setAuthorFilter] = useState<string | null>(null);
-  const [typeFilter, setTypeFilter] = useState<string | null>(null);
-  const [reviewFilter, setReviewFilter] = useState<string | null>(null);
-  const [statusFilter, setStatusFilter] = useState<string | null>(null);
-  const [trackingFilter, setTrackingFilter] = useState<string | null>(null);
+  const filters = useUIStore((s) => s.inboxFilters);
+  const setInboxFilters = useUIStore((s) => s.setInboxFilters);
+  const {
+    repo: repoFilter,
+    author: authorFilter,
+    type: typeFilter,
+    review: reviewFilter,
+    status: statusFilter,
+    tracking: trackingFilter,
+  } = filters;
+  const active: BucketKey = TABS.find((t) => t.key === filters.bucket)?.key ?? "needs-you";
+  const setActive = (bucket: BucketKey) => setInboxFilters({ bucket });
+  const setRepoFilter = (repo: string | null) => setInboxFilters({ repo });
+  const setAuthorFilter = (author: string | null) => setInboxFilters({ author });
+  const setTypeFilter = (type: string | null) => setInboxFilters({ type });
+  const setReviewFilter = (review: string | null) => setInboxFilters({ review });
+  const setStatusFilter = (status: string | null) => setInboxFilters({ status });
+  const setTrackingFilter = (tracking: string | null) => setInboxFilters({ tracking });
 
   const inboxQuery = useQuery({ queryKey: ["inbox"], queryFn: api.listInbox });
   const closedQuery = useQuery({ queryKey: ["closed"], queryFn: api.listClosed });

@@ -803,6 +803,29 @@ struct ContextNode {
     state: Option<String>,
     #[serde(default)]
     target_url: Option<String>,
+    // CheckRun, only selected by `FAILING_RUNS_QUERY`
+    #[serde(default)]
+    check_suite: Option<CheckSuiteNode>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CheckSuiteNode {
+    #[serde(default)]
+    workflow_run: Option<WorkflowRunNode>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkflowRunNode {
+    database_id: i64,
+    #[serde(default)]
+    workflow: Option<WorkflowNode>,
+}
+
+#[derive(Debug, Deserialize)]
+struct WorkflowNode {
+    name: String,
 }
 
 fn map_pr_meta(pr: PrMetaPr) -> PrMeta {
@@ -956,6 +979,122 @@ pub fn update_pr_branch(owner: &str, name: &str, number: i64, rebase: bool) -> A
     let suffix = ctx.pr_args_suffix();
     args.extend(suffix.iter().map(String::as_str));
     run_gh(&ctx, &args)?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Failing workflow runs / rerun (board auto-merge monitor, card CI actions)
+// ---------------------------------------------------------------------------
+
+const FAILING_RUNS_QUERY: &str = r#"
+query FailingRuns($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      commits(last: 1) {
+        nodes {
+          commit {
+            statusCheckRollup {
+              contexts(first: 100) {
+                nodes {
+                  __typename
+                  ... on CheckRun {
+                    conclusion
+                    status
+                    checkSuite { workflowRun { databaseId workflow { name } } }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+"#;
+
+#[derive(Debug, Deserialize)]
+struct FailingRunsData {
+    repository: Option<FailingRunsRepo>,
+}
+
+#[derive(Debug, Deserialize)]
+struct FailingRunsRepo {
+    #[serde(rename = "pullRequest")]
+    pull_request: Option<FailingRunsPr>,
+}
+
+#[derive(Debug, Deserialize)]
+struct FailingRunsPr {
+    #[serde(default)]
+    commits: CommitMetaConn,
+}
+
+/// A workflow run of the PR's head commit with at least one failing check.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FailingRun {
+    pub run_id: i64,
+    pub workflow: String,
+}
+
+const FAILING_CONCLUSIONS: [&str; 4] = ["FAILURE", "TIMED_OUT", "CANCELLED", "STARTUP_FAILURE"];
+
+fn failing_runs_from(pr: FailingRunsPr) -> Vec<FailingRun> {
+    let mut out: Vec<FailingRun> = Vec::new();
+    let contexts = pr
+        .commits
+        .nodes
+        .into_iter()
+        .filter_map(|c| c.commit.status_check_rollup)
+        .flat_map(|r| r.contexts.nodes);
+    for node in contexts {
+        let failed = node.typename == "CheckRun"
+            && node.conclusion.as_deref().is_some_and(|c| FAILING_CONCLUSIONS.contains(&c));
+        let Some(run) = node.check_suite.and_then(|s| s.workflow_run).filter(|_| failed) else { continue };
+        if out.iter().all(|r| r.run_id != run.database_id) {
+            out.push(FailingRun {
+                run_id: run.database_id,
+                workflow: run.workflow.map(|w| w.name).unwrap_or_default(),
+            });
+        }
+    }
+    out
+}
+
+pub fn failing_workflow_runs(owner: &str, name: &str, number: i64) -> AppResult<Vec<FailingRun>> {
+    let data: FailingRunsData = graphql(
+        FAILING_RUNS_QUERY,
+        serde_json::json!({ "owner": owner, "name": name, "number": number }),
+    )?;
+    let pr = data
+        .repository
+        .and_then(|r| r.pull_request)
+        .ok_or_else(|| AppError::Gh(format!("{owner}/{name}#{number} not found")))?;
+    Ok(failing_runs_from(pr))
+}
+
+fn remote_ctx(repo: &str) -> GhRepo {
+    let (owner, name) = repo.split_once('/').unwrap_or((repo, ""));
+    GhRepo::Remote { owner: owner.to_string(), name: name.to_string() }
+}
+
+/// The run's attempt number (1 for the first run, +1 per rerun).
+pub fn run_attempt(repo: &str, run_id: i64) -> AppResult<i64> {
+    let id = run_id.to_string();
+    let out = run_gh(&remote_ctx(repo), &["run", "view", &id, "--repo", repo, "--json", "attempt"])?;
+    let v: serde_json::Value =
+        serde_json::from_str(&out).map_err(|e| AppError::Gh(format!("failed to parse gh run view: {e}")))?;
+    v["attempt"].as_i64().ok_or_else(|| AppError::Gh("gh run view returned no attempt".into()))
+}
+
+/// Rerun a workflow run: only its failed jobs when `failed_only`, else all jobs.
+pub fn rerun_run(repo: &str, run_id: i64, failed_only: bool) -> AppResult<()> {
+    let id = run_id.to_string();
+    let mut args = vec!["run", "rerun", id.as_str(), "--repo", repo];
+    if failed_only {
+        args.push("--failed");
+    }
+    run_gh(&remote_ctx(repo), &args)?;
     Ok(())
 }
 
@@ -1503,6 +1642,36 @@ mod tests {
         assert!(meta.reviews.is_empty());
         assert_eq!(meta.ci_state, None);
         assert!(meta.checks.is_empty());
+    }
+
+    #[test]
+    fn failing_runs_are_distinct_and_only_failed_check_runs() {
+        let json = r#"{
+          "repository": { "pullRequest": { "commits": { "nodes": [ { "commit": { "statusCheckRollup": {
+            "contexts": { "nodes": [
+              { "__typename": "CheckRun", "conclusion": "FAILURE", "status": "COMPLETED",
+                "checkSuite": { "workflowRun": { "databaseId": 11, "workflow": { "name": "CI" } } } },
+              { "__typename": "CheckRun", "conclusion": "TIMED_OUT", "status": "COMPLETED",
+                "checkSuite": { "workflowRun": { "databaseId": 11, "workflow": { "name": "CI" } } } },
+              { "__typename": "CheckRun", "conclusion": "SUCCESS", "status": "COMPLETED",
+                "checkSuite": { "workflowRun": { "databaseId": 12, "workflow": { "name": "Lint" } } } },
+              { "__typename": "CheckRun", "conclusion": "CANCELLED", "status": "COMPLETED",
+                "checkSuite": { "workflowRun": { "databaseId": 13, "workflow": { "name": "E2E" } } } },
+              { "__typename": "CheckRun", "conclusion": "FAILURE", "status": "COMPLETED",
+                "checkSuite": { "workflowRun": null } },
+              { "__typename": "StatusContext" }
+            ] }
+          } } } ] } } }
+        }"#;
+        let data: FailingRunsData = serde_json::from_str(json).expect("parses");
+        let runs = failing_runs_from(data.repository.unwrap().pull_request.unwrap());
+        assert_eq!(
+            runs,
+            vec![
+                FailingRun { run_id: 11, workflow: "CI".into() },
+                FailingRun { run_id: 13, workflow: "E2E".into() },
+            ]
+        );
     }
 
     const THREADS_FIXTURE: &str = r#"{

@@ -10,7 +10,19 @@ import { findRepoByFullName } from "../lib/repoLabel";
 import { useUIStore } from "../store";
 import { useRefetchOnActivate } from "../lib/useRefetchOnActivate";
 import type { BoardCard as BoardCardT, BoardLane, BoardMetaKind, ClaudeSession } from "../lib/types";
-import { BoardCard, cardTags, ciStatus, MERGE_FACET_LABEL, mergeFacets, prStatus, prStatusLabel } from "./BoardCard";
+import {
+  BoardCard,
+  canEnableAutoMerge,
+  cardTags,
+  ciStatus,
+  MERGE_FACET_LABEL,
+  mergeFacets,
+  prStatus,
+  prStatusLabel,
+  rerunCiDisabledReason,
+  updateBranchDisabledReason,
+} from "./BoardCard";
+import { KebabMenu } from "./KebabMenu";
 import { RepoName } from "./RepoName";
 import { TagFilter } from "./TagFilter";
 import { TrackPrDialog } from "./TrackPrDialog";
@@ -59,17 +71,24 @@ export function BoardView() {
   const defaultTerminal = useSettingsStore((s) => s.defaultTerminal);
   const tmuxTarget = useSettingsStore((s) => s.tmuxTarget);
   const tmuxSessionName = useSettingsStore((s) => s.tmuxSessionName);
-  const [repoFilter, setRepoFilter] = useState<string | null>(null);
-  const [statusFilter, setStatusFilter] = useState<string | null>(null);
-  const [ciFilter, setCiFilter] = useState<string | null>(null);
-  const [mergeFilter, setMergeFilter] = useState<string | null>(null);
-  const [tagFilter, setTagFilter] = useState<string[]>([]);
-  const [tagExclude, setTagExclude] = useState<string[]>([]);
+  const filters = useUIStore((s) => s.boardFilters);
+  const setBoardFilters = useUIStore((s) => s.setBoardFilters);
+  const { repo: repoFilter, status: statusFilter, ci: ciFilter, merge: mergeFilter, tags: tagFilter, excludeTags: tagExclude } = filters;
+  const setRepoFilter = (repo: string | null) => setBoardFilters({ repo });
+  const setStatusFilter = (status: string | null) => setBoardFilters({ status });
+  const setCiFilter = (ci: string | null) => setBoardFilters({ ci });
+  const setMergeFilter = (merge: string | null) => setBoardFilters({ merge });
+  const setTagFilter = (tags: string[]) => setBoardFilters({ tags });
+  const setTagExclude = (excludeTags: string[]) => setBoardFilters({ excludeTags });
   const [addingLane, setAddingLane] = useState<BoardLane | null>(null);
   const [addValue, setAddValue] = useState("");
   const [showTrackDialog, setShowTrackDialog] = useState(false);
   const overviewOpen = useSettingsStore((s) => s.boardOverviewOpen);
   const setOverviewOpen = useSettingsStore((s) => s.setBoardOverviewOpen);
+  const monitorOn = useSettingsStore((s) => s.boardMonitor);
+  const setMonitorOn = useSettingsStore((s) => s.setBoardMonitor);
+  const monitorIntervalMin = useSettingsStore((s) => s.boardMonitorIntervalMin);
+  const [batchPending, setBatchPending] = useState(false);
 
   const boardQuery = useQuery({ queryKey: ["board"], queryFn: api.boardList });
   const tagsQuery = useQuery({ queryKey: ["board-meta-tags"], queryFn: api.boardMetaTags });
@@ -134,10 +153,19 @@ export function BoardView() {
     },
     onError: (e) => toast.error(`Update branch failed:\n${String(e)}`),
   });
+  const prRerunCi = useMutation({
+    mutationFn: ({ cardId, failedOnly }: { cardId: string; failedOnly: boolean }) => api.boardPrRerunCi(cardId, failedOnly),
+    onSuccess: (n) => {
+      invalidate();
+      toast.success(`Re-ran ${n} workflow ${n === 1 ? "run" : "runs"}`);
+    },
+    onError: (e) => toast.error(`Re-run failed:\n${String(e)}`),
+  });
   const prActionCardId =
     (prSetAutoMerge.isPending && prSetAutoMerge.variables?.cardId) ||
     (prSetDraft.isPending && prSetDraft.variables?.cardId) ||
     (prUpdateBranch.isPending && prUpdateBranch.variables?.cardId) ||
+    (prRerunCi.isPending && prRerunCi.variables?.cardId) ||
     null;
   const linkPr = useMutation({
     mutationFn: ({ issueId, reference }: { issueId: string; reference: string }) => api.boardLinkPr(issueId, reference),
@@ -292,6 +320,56 @@ export function BoardView() {
     setAddingLane(null);
   };
 
+  const batchCards = filtered.filter((c) => c.type === "pr" && c.state === "open");
+  const ref = (c: BoardCardT) => `${c.repo}#${c.number}`;
+
+  const runBatch = async (cards: BoardCardT[], fn: (c: BoardCardT) => Promise<unknown>, label: string) => {
+    if (cards.length === 0 || batchPending) return;
+    const ok = await confirmDialog({
+      title: label,
+      message: `${label} on ${cards.length} of ${batchCards.length} filtered PRs?\n\n${cards.map(ref).join("\n")}`,
+      confirmLabel: label,
+    });
+    if (!ok) return;
+    setBatchPending(true);
+    const failures: string[] = [];
+    for (const c of cards) {
+      try {
+        await fn(c);
+      } catch (e) {
+        failures.push(`${ref(c)} — ${String(e)}`);
+      }
+    }
+    setBatchPending(false);
+    invalidate();
+    const done = cards.length - failures.length;
+    if (failures.length === 0) toast.success(`${label}: ${done}/${cards.length}`);
+    else toast.error(`${label}: ${done}/${cards.length} · ${failures.length} failed:\n${failures.join("\n")}`);
+  };
+
+  const batchItems = [
+    {
+      label: "Update branch",
+      cards: batchCards.filter((c) => updateBranchDisabledReason(c) == null),
+      fn: (c: BoardCardT) => api.boardPrUpdateBranch(c.id, false),
+    },
+    {
+      label: "Enable auto-merge",
+      cards: batchCards.filter(canEnableAutoMerge),
+      fn: (c: BoardCardT) => api.boardPrSetAutoMerge(c.id, true),
+    },
+    {
+      label: "Re-run failed jobs",
+      cards: batchCards.filter((c) => rerunCiDisabledReason(c) == null),
+      fn: (c: BoardCardT) => api.boardPrRerunCi(c.id, true),
+    },
+    {
+      label: "Re-run all jobs",
+      cards: batchCards.filter((c) => rerunCiDisabledReason(c) == null),
+      fn: (c: BoardCardT) => api.boardPrRerunCi(c.id, false),
+    },
+  ];
+
   const confirmArchive = async () => {
     if (
       await confirmDialog({
@@ -320,6 +398,39 @@ export function BoardView() {
             >
               <Icon name="bot" size={13} /> AI Overview
             </button>
+            <button
+              className={`btn${monitorOn ? " active" : ""}`}
+              onClick={() => setMonitorOn(!monitorOn)}
+              title={
+                monitorOn
+                  ? `Auto-merge monitor on — every ${monitorIntervalMin} min it updates BEHIND branches and reruns failed CI on approved PRs with auto-merge. Click to turn off.`
+                  : "Turn on the auto-merge monitor: updates BEHIND branches and reruns failed CI on approved PRs with auto-merge."
+              }
+            >
+              <Icon name="refresh" size={13} /> Auto-merge monitor
+            </button>
+            <KebabMenu
+              title="Act on the PRs matching the current filters"
+              label={`Batch (${batchCards.length})`}
+              disabled={batchPending || batchCards.length === 0}
+            >
+              {(close) =>
+                batchItems.map((item) => (
+                  <button
+                    key={item.label}
+                    role="menuitem"
+                    disabled={item.cards.length === 0}
+                    title={item.cards.length === 0 ? "No filtered PR is eligible" : undefined}
+                    onClick={() => {
+                      close();
+                      runBatch(item.cards, item.fn, item.label);
+                    }}
+                  >
+                    {item.label} ({item.cards.length})
+                  </button>
+                ))
+              }
+            </KebabMenu>
             <button className="btn" onClick={() => setShowTrackDialog(true)}>
               <Icon name="plus" size={13} /> Track
             </button>
@@ -465,6 +576,7 @@ export function BoardView() {
                               onSetAutoMerge: (enable) => prSetAutoMerge.mutate({ cardId: card.id, enable }),
                               onSetDraft: (draft) => prSetDraft.mutate({ cardId: card.id, draft }),
                               onUpdateBranch: (rebase) => prUpdateBranch.mutate({ cardId: card.id, rebase }),
+                              onRerunCi: (failedOnly) => prRerunCi.mutate({ cardId: card.id, failedOnly }),
                             }
                           : null
                       }

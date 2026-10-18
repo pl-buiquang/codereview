@@ -23,6 +23,44 @@ export interface Tab {
 const HOME_TAB: Tab = { id: "home", kind: "home" };
 const reviewTabId = (reviewId: number) => `review-${reviewId}`;
 
+export interface BoardFilters {
+  repo: string | null;
+  status: string | null;
+  ci: string | null;
+  merge: string | null;
+  tags: string[];
+  excludeTags: string[];
+}
+
+export const EMPTY_BOARD_FILTERS: BoardFilters = {
+  repo: null,
+  status: null,
+  ci: null,
+  merge: null,
+  tags: [],
+  excludeTags: [],
+};
+
+export interface InboxFilters {
+  bucket: string | null;
+  repo: string | null;
+  author: string | null;
+  type: string | null;
+  review: string | null;
+  status: string | null;
+  tracking: string | null;
+}
+
+export const EMPTY_INBOX_FILTERS: InboxFilters = {
+  bucket: null,
+  repo: null,
+  author: null,
+  type: null,
+  review: null,
+  status: null,
+  tracking: null,
+};
+
 interface UIState {
   tabs: Tab[];
   activeTabId: string;
@@ -34,6 +72,10 @@ interface UIState {
   sidebarCollapsed: boolean;
   /** Board lanes collapsed to a slim column, by lane key. */
   collapsedLanes: string[];
+  boardFilters: BoardFilters;
+  setBoardFilters: (patch: Partial<BoardFilters>) => void;
+  inboxFilters: InboxFilters;
+  setInboxFilters: (patch: Partial<InboxFilters>) => void;
   /** Board card to scroll to and flash once the Board renders (not persisted). */
   boardHighlightCardId: string | null;
   showBoardCard: (cardId: string) => void;
@@ -62,6 +104,8 @@ type Persisted = Pick<
   | "openRepoIds"
   | "sidebarCollapsed"
   | "collapsedLanes"
+  | "boardFilters"
+  | "inboxFilters"
 >;
 
 function upsertTab(tabs: Tab[], tab: Tab): Tab[] {
@@ -78,6 +122,8 @@ export const useUIStore = create<UIState>()(
       openRepoIds: [],
       sidebarCollapsed: false,
       collapsedLanes: [],
+      boardFilters: EMPTY_BOARD_FILTERS,
+      inboxFilters: EMPTY_INBOX_FILTERS,
       boardHighlightCardId: null,
 
       openRepo: (repoId) =>
@@ -149,6 +195,9 @@ export const useUIStore = create<UIState>()(
 
       toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
 
+      setInboxFilters: (patch) => set((s) => ({ inboxFilters: { ...s.inboxFilters, ...patch } })),
+      setBoardFilters: (patch) => set((s) => ({ boardFilters: { ...s.boardFilters, ...patch } })),
+
       toggleLane: (lane) =>
         set((s) => ({
           collapsedLanes: s.collapsedLanes.includes(lane)
@@ -176,7 +225,7 @@ export const useUIStore = create<UIState>()(
     }),
     {
       name: "codereview-ui",
-      version: 3,
+      version: 4,
       partialize: (s): Persisted => ({
         tabs: s.tabs,
         activeTabId: s.activeTabId,
@@ -185,10 +234,14 @@ export const useUIStore = create<UIState>()(
         openRepoIds: s.openRepoIds,
         sidebarCollapsed: s.sidebarCollapsed,
         collapsedLanes: s.collapsedLanes,
+        boardFilters: s.boardFilters,
+        inboxFilters: s.inboxFilters,
       }),
       migrate: (persisted, version) => migratePersisted(persisted, version),
       merge: (persisted, current) => {
         const next = { ...current, ...(persisted as Partial<UIState>) };
+        next.boardFilters = { ...EMPTY_BOARD_FILTERS, ...next.boardFilters };
+        next.inboxFilters = { ...EMPTY_INBOX_FILTERS, ...next.inboxFilters };
         const openRepoIds = next.openRepoIds ?? [];
         if (next.homeRepoId != null && !openRepoIds.includes(next.homeRepoId)) {
           openRepoIds.push(next.homeRepoId);

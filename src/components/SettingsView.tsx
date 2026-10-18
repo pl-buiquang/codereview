@@ -6,6 +6,7 @@ import {
   AUTO_FETCH_OPTIONS,
   AUTO_SYNC_OPTIONS,
   LOG_LEVEL_OPTIONS,
+  BOARD_MONITOR_OPTIONS,
   DISCOVERY_INTERVAL_OPTIONS,
   effectiveTheme,
   exportSettings,
@@ -249,6 +250,8 @@ function GeneralSection() {
   const setAutoSync = useSettingsStore((s) => s.setAutoSync);
   const discoveryIntervalMin = useSettingsStore((s) => s.discoveryIntervalMin);
   const setDiscoveryIntervalMin = useSettingsStore((s) => s.setDiscoveryIntervalMin);
+  const boardMonitorIntervalMin = useSettingsStore((s) => s.boardMonitorIntervalMin);
+  const setBoardMonitorIntervalMin = useSettingsStore((s) => s.setBoardMonitorIntervalMin);
   const autoFetchMinutes = useSettingsStore((s) => s.autoFetchMinutes);
   const setAutoFetchMinutes = useSettingsStore((s) => s.setAutoFetchMinutes);
   const fileTestPatterns = useSettingsStore((s) => s.fileTestPatterns);
@@ -464,6 +467,23 @@ function GeneralSection() {
             onChange={(e) => setDiscoveryIntervalMin(Number(e.target.value))}
           >
             {DISCOVERY_INTERVAL_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label
+          className="settings-row"
+          title="How often the Board's Auto-merge monitor runs. It updates BEHIND branches and reruns failed CI (up to 3 attempts) on approved PRs with auto-merge on. It runs while the app is open, even in the background, once switched on from the Board."
+        >
+          <span>Auto-merge monitor every</span>
+          <select
+            className="select"
+            value={boardMonitorIntervalMin}
+            onChange={(e) => setBoardMonitorIntervalMin(Number(e.target.value))}
+          >
+            {BOARD_MONITOR_OPTIONS.map((o) => (
               <option key={o.value} value={o.value}>
                 {o.label}
               </option>

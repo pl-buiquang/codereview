@@ -125,6 +125,12 @@ describe("useUIStore", () => {
     expect(useUIStore.getState().sidebarCollapsed).toBe(false);
   });
 
+  it("setBoardFilters merges a patch into the filters", () => {
+    useUIStore.getState().setBoardFilters({ repo: "o/r", tags: ["a"] });
+    useUIStore.getState().setBoardFilters({ ci: "failure" });
+    expect(useUIStore.getState().boardFilters).toMatchObject({ repo: "o/r", ci: "failure", tags: ["a"], status: null });
+  });
+
   it("openSettingsTab creates/focuses a single settings tab", () => {
     useUIStore.getState().openSettingsTab();
     useUIStore.getState().setActiveTab("home");

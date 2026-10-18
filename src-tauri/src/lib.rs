@@ -1,6 +1,7 @@
 mod anchor;
 mod avatar;
 pub mod board;
+pub mod board_monitor;
 pub mod claude_sessions;
 pub mod commands;
 mod cr_install;
@@ -301,6 +302,7 @@ pub fn run() {
             commands::board::board_pr_set_auto_merge,
             commands::board::board_pr_set_draft,
             commands::board::board_pr_update_branch,
+            commands::board::board_pr_rerun_ci,
             commands::board::board_link_pr,
             commands::board::board_unlink,
             commands::board::board_archive_done,

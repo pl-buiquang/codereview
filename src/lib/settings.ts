@@ -58,6 +58,15 @@ export const DISCOVERY_INTERVAL_OPTIONS: { label: string; value: number }[] = [
   { label: "60 min", value: 60 },
 ];
 
+/** Board auto-merge monitor round interval choices, in minutes. */
+export const BOARD_MONITOR_OPTIONS: { label: string; value: number }[] = [
+  { label: "2 min", value: 2 },
+  { label: "5 min", value: 5 },
+  { label: "10 min", value: 10 },
+  { label: "15 min", value: 15 },
+  { label: "30 min", value: 30 },
+];
+
 /** Background Fetch choices, in minutes; 0 = off (the default). */
 export const AUTO_FETCH_OPTIONS: { label: string; value: number }[] = [
   { label: "off", value: 0 },
@@ -84,6 +93,8 @@ type PersistedSettings = Pick<
   | "chatModel"
   | "overviewModel"
   | "boardOverviewOpen"
+  | "boardMonitor"
+  | "boardMonitorIntervalMin"
   | "markEdits"
   | "largeDiffMaxLines"
   | "fileTestPatterns"
@@ -113,6 +124,8 @@ const DEFAULTS: PersistedSettings = {
   chatModel: "",
   overviewModel: "sonnet",
   boardOverviewOpen: false,
+  boardMonitor: false,
+  boardMonitorIntervalMin: 5,
   markEdits: false,
   largeDiffMaxLines: 3000,
   fileTestPatterns: DEFAULT_TEST_PATTERNS,
@@ -162,6 +175,9 @@ interface SettingsState {
   /** Model for the board AI overview; empty = same resolution as chat. */
   overviewModel: string;
   boardOverviewOpen: boolean;
+  /** Keep approved auto-merge PRs mergeable: update BEHIND branches, rerun failed CI. */
+  boardMonitor: boolean;
+  boardMonitorIntervalMin: number;
   /** Newline-separated globs classifying changed files as tests (checked first). */
   fileTestPatterns: string;
   /** Newline-separated globs classifying changed files as config/docs. */
@@ -204,6 +220,8 @@ interface SettingsState {
   setSessionSummaryDir: (s: string) => void;
   setOverviewModel: (m: string) => void;
   setBoardOverviewOpen: (open: boolean) => void;
+  setBoardMonitor: (on: boolean) => void;
+  setBoardMonitorIntervalMin: (min: number) => void;
 }
 
 const ENUMS: Partial<Record<keyof PersistedSettings, readonly string[]>> = {
@@ -277,6 +295,8 @@ export const useSettingsStore = create<SettingsState>()(
       setSessionSummaryDir: (sessionSummaryDir) => set({ sessionSummaryDir }),
       setOverviewModel: (overviewModel) => set({ overviewModel }),
       setBoardOverviewOpen: (boardOverviewOpen) => set({ boardOverviewOpen }),
+      setBoardMonitor: (boardMonitor) => set({ boardMonitor }),
+      setBoardMonitorIntervalMin: (boardMonitorIntervalMin) => set({ boardMonitorIntervalMin }),
     }),
     {
       name: "codereview-settings",

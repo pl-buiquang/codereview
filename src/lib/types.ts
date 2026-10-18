@@ -296,6 +296,19 @@ export interface SyncStatus {
   lastErrorAt: string | null;
 }
 
+export interface MonitorAction {
+  card_id: string;
+  repo: string;
+  number: number;
+  kind: "updated" | "reran" | "gave_up" | "error";
+  detail: string;
+}
+
+export interface BoardMonitorPayload {
+  actions: MonitorAction[];
+  error: string | null;
+}
+
 export interface MirrorUpdatedPayload {
   scopes: SyncScope[];
   ids: string[];

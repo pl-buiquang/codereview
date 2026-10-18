@@ -5,11 +5,14 @@ import { isWaiting } from "./SessionsView";
 
 export function KebabMenu({
   title,
+  label,
   disabled = false,
   className,
   children,
 }: {
   title: string;
+  /** Renders a labelled button instead of the icon-only kebab. */
+  label?: ReactNode;
   disabled?: boolean;
   className?: string;
   children: (close: () => void) => ReactNode;
@@ -28,9 +31,15 @@ export function KebabMenu({
 
   return (
     <div ref={ref} className={`kebab-menu${className ? ` ${className}` : ""}`}>
-      <button className="btn-icon" title={title} aria-label={title} disabled={disabled} onClick={() => setOpen((v) => !v)}>
-        <Icon name="kebab" size={14} />
-      </button>
+      {label != null ? (
+        <button className="btn" title={title} disabled={disabled} onClick={() => setOpen((v) => !v)}>
+          {label}
+        </button>
+      ) : (
+        <button className="btn-icon" title={title} aria-label={title} disabled={disabled} onClick={() => setOpen((v) => !v)}>
+          <Icon name="kebab" size={14} />
+        </button>
+      )}
       {open && (
         <div className="btn-split-menu card" role="menu">
           {children(() => setOpen(false))}
