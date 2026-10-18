@@ -1,4 +1,5 @@
-//! Terminator support. Focus is best-effort and X11-only (`wmctrl`); untested on real hardware.
+//! Terminator support. Focus is best-effort and X11-only (`wmctrl`, plus `xdotool` to re-map a
+//! window that was hidden by unmapping it, which drops it from the window manager's list).
 
 use std::collections::HashSet;
 use std::process::Command;
@@ -34,6 +35,21 @@ fn host_pid(tty: &str) -> Option<i64> {
     rows.iter().map(|r| r.1).find(|ppid| !on_tty.contains(ppid))
 }
 
+fn is_normal_window(xprop_type: &str) -> bool {
+    xprop_type.contains("_NET_WM_WINDOW_TYPE_NORMAL")
+}
+
+/// Re-maps and returns the (hex id of the) main window of a process whose window was hidden by
+/// unmapping, e.g. with `xdotool windowunmap`.
+fn unmapped_window(pid: i64) -> Option<String> {
+    let ids = stdout(Command::new("xdotool").args(["search", "--pid", &pid.to_string()]))?;
+    let id = ids.split_whitespace().find(|id| {
+        stdout(Command::new("xprop").args(["-id", id, "_NET_WM_WINDOW_TYPE"])).is_some_and(|t| is_normal_window(&t))
+    })?;
+    stdout(Command::new("xdotool").args(["windowmap", "--sync", id]))?;
+    Some(format!("0x{:x}", id.parse::<u64>().ok()?))
+}
+
 pub fn focus_tty(tty: &str) -> AppResult<()> {
     let pid = host_pid(tty).ok_or_else(|| AppError::Other(format!("no terminal process found for {tty}")))?;
     let windows = stdout(Command::new("wmctrl").arg("-lp"))
@@ -46,8 +62,21 @@ pub fn focus_tty(tty: &str) -> AppResult<()> {
             let _desktop = it.next()?;
             (it.next()?.parse::<i64>().ok()? == pid).then(|| id.to_string())
         })
-        .ok_or_else(|| AppError::Other("terminal window not found".into()))?;
+        .or_else(|| unmapped_window(pid))
+        .ok_or_else(|| AppError::Other("terminal window not found (hidden windows need xdotool)".into()))?;
     stdout(Command::new("wmctrl").args(["-ia", &window]))
         .map(|_| ())
         .ok_or_else(|| AppError::Other("wmctrl failed to activate the window".into()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn detects_normal_windows() {
+        assert!(is_normal_window("_NET_WM_WINDOW_TYPE(ATOM) = _NET_WM_WINDOW_TYPE_NORMAL"));
+        assert!(!is_normal_window("_NET_WM_WINDOW_TYPE(ATOM) = _NET_WM_WINDOW_TYPE_POPUP_MENU"));
+        assert!(!is_normal_window("_NET_WM_WINDOW_TYPE:  not found."));
+    }
 }
