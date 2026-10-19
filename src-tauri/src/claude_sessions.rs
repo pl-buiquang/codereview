@@ -318,7 +318,7 @@ fn claude_clients() -> Clients {
     parse_clients(&String::from_utf8_lossy(&out.stdout))
 }
 
-fn find_transcript(projects: &Path, session_id: &str) -> Option<PathBuf> {
+pub(crate) fn find_transcript(projects: &Path, session_id: &str) -> Option<PathBuf> {
     let name = format!("{session_id}.jsonl");
     fs::read_dir(projects).ok()?.flatten().map(|d| d.path().join(&name)).find(|p| p.exists())
 }
@@ -585,6 +585,23 @@ fn transcript_info(path: &Path, mtime: SystemTime) -> Option<TranscriptInfo> {
     Some(info)
 }
 
+pub(crate) fn transcript_path(session_id: &str) -> Option<PathBuf> {
+    find_transcript(&claude_dir()?.join("projects"), session_id)
+}
+
+/// Attach app-generated summaries to sessions the SessionEnd hook wrote none for; a generated
+/// title replaces the session's name.
+pub fn apply_generated_summaries(sessions: &mut [ClaudeSession], generated: &HashMap<String, SessionSummary>) {
+    for s in sessions.iter_mut().filter(|s| s.summaries.is_empty()) {
+        let Some(g) = generated.get(&s.session_id) else { continue };
+        if let Some(title) = &g.title {
+            s.original_name = s.name.take().filter(|n| n != title);
+            s.name = Some(title.clone());
+        }
+        s.summaries = vec![g.clone()];
+    }
+}
+
 /// Non-live sessions whose transcript was written within the last `days` days.
 pub fn history_sessions(
     days: u32,
@@ -650,6 +667,53 @@ pub fn history_sessions(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn generated_summaries_fill_in_only_when_the_hook_wrote_none() {
+        let gen = |title: Option<&str>| SessionSummary {
+            date: None,
+            title: title.map(Into::into),
+            body: "generated".into(),
+            generated: true,
+        };
+        let mut hooked = SessionSummary { generated: false, ..gen(Some("Hook title")) };
+        hooked.body = "hook".into();
+        let session = |id: &str, name: &str, summaries: Vec<SessionSummary>| ClaudeSession {
+            session_id: id.into(),
+            pid: None,
+            live: false,
+            status: None,
+            kind: None,
+            attached: false,
+            job_id: None,
+            waiting_for: None,
+            agent_view: None,
+            name: Some(name.into()),
+            cwd: "/x".into(),
+            git_branch: None,
+            repo: None,
+            tmux: None,
+            tty: None,
+            updated_at: 0,
+            focus: FocusState::NotLive,
+            summaries,
+            original_name: None,
+        };
+        let mut sessions = vec![session("a", "Old", vec![]), session("b", "Kept", vec![hooked]), session("c", "Same", vec![])];
+        let generated = HashMap::from([
+            ("a".to_string(), gen(Some("New title"))),
+            ("b".to_string(), gen(Some("Ignored"))),
+            ("c".to_string(), gen(Some("Same"))),
+        ]);
+        apply_generated_summaries(&mut sessions, &generated);
+        assert_eq!(sessions[0].name.as_deref(), Some("New title"));
+        assert_eq!(sessions[0].original_name.as_deref(), Some("Old"));
+        assert_eq!(sessions[0].summaries[0].body, "generated");
+        assert_eq!(sessions[1].name.as_deref(), Some("Kept"));
+        assert_eq!(sessions[1].summaries[0].body, "hook");
+        assert_eq!(sessions[2].name.as_deref(), Some("Same"));
+        assert_eq!(sessions[2].original_name, None);
+    }
 
     #[test]
     fn head_mtime_follows_main_and_linked_worktree_checkouts() {

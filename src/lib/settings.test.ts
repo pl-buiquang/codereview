@@ -94,6 +94,7 @@ describe("useSettingsStore", () => {
         "repoStripPrefixes",
         "sessionHistoryDays",
         "sessionSummaryDir",
+        "sessionSummaryFork",
         "tmuxSessionName",
         "tmuxTarget",
       ].sort(),
@@ -115,7 +116,7 @@ describe("exportSettings / importSettings", () => {
     s.setFileTestPatterns("");
     const applied = importSettings(json);
     const n = useSettingsStore.getState();
-    expect(applied).toBe(28);
+    expect(applied).toBe(29);
     expect(n.mode).toBe("light");
     expect(n.diffFontSize).toBe(15);
     expect(n.fileTestPatterns).toBe("*.spec.rb");

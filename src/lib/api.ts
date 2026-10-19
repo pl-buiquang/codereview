@@ -38,6 +38,7 @@ import type {
   ReviewDetail,
   ReviewEvent,
   ReviewSummary,
+  SessionSummary,
   Side,
   SyncMode,
   SyncReport,
@@ -269,6 +270,8 @@ export const api = {
     invoke<void>("review_open_agent", { reviewId, host, tmuxTarget, tmuxSession }),
   listClaudeSessions: (historyDays: number, summaryDir: string) =>
     invoke<SessionsSnapshot>("list_claude_sessions", { historyDays, summaryDir }),
+  generateLiveSessionSummary: (sessionId: string, fork: boolean) =>
+    invoke<SessionSummary>("generate_live_session_summary", { sessionId, fork }),
   focusClaudeSession: (sessionId: string) => invoke<void>("focus_claude_session", { sessionId }),
   resumeClaudeSession: (
     sessionId: string,

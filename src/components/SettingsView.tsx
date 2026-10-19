@@ -266,6 +266,8 @@ function GeneralSection() {
   const setSessionHistoryDays = useSettingsStore((s) => s.setSessionHistoryDays);
   const sessionSummaryDir = useSettingsStore((s) => s.sessionSummaryDir);
   const setSessionSummaryDir = useSettingsStore((s) => s.setSessionSummaryDir);
+  const sessionSummaryFork = useSettingsStore((s) => s.sessionSummaryFork);
+  const setSessionSummaryFork = useSettingsStore((s) => s.setSessionSummaryFork);
   const setFileTestPatterns = useSettingsStore((s) => s.setFileTestPatterns);
   const setFileConfigPatterns = useSettingsStore((s) => s.setFileConfigPatterns);
 
@@ -584,6 +586,17 @@ function GeneralSection() {
             value={sessionSummaryDir}
             placeholder="~/Nextcloud/Notes/_work/sessions"
             onChange={(e) => setSessionSummaryDir(e.target.value)}
+          />
+        </label>
+        <label
+          className="settings-row"
+          title="Generate live-session summaries by forking the session when it was active in the last 5 minutes, reusing its prompt cache. Cache hits vary: a miss is billed at the session's own model price. Off = a cheap haiku run over a transcript extract."
+        >
+          <span>Summarize live sessions by forking</span>
+          <input
+            type="checkbox"
+            checked={sessionSummaryFork}
+            onChange={(e) => setSessionSummaryFork(e.target.checked)}
           />
         </label>
       </section>

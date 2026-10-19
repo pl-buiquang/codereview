@@ -7,7 +7,7 @@ use tauri::State;
 use crate::claude_sessions::{self, ClaudeSession};
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
-use crate::session_summaries;
+use crate::session_summaries::{self, SessionSummary};
 use crate::terminal;
 
 #[derive(Debug, Serialize)]
@@ -24,9 +24,9 @@ pub async fn list_claude_sessions(
     summary_dir: Option<String>,
     db: State<'_, Db>,
 ) -> AppResult<SessionsSnapshot> {
-    let (cards, meta) = {
+    let ((cards, meta), generated) = {
         let conn = db.0.lock().unwrap();
-        load_pr_cards(&conn)?
+        (load_pr_cards(&conn)?, load_generated_summaries(&conn)?)
     };
     let agents = claude_sessions::agents();
     let (mut sessions, mut exclude) = claude_sessions::live_sessions_and_hidden(&agents);
@@ -38,7 +38,109 @@ pub async fn list_claude_sessions(
         .map(|d| session_summaries::load(std::path::Path::new(&crate::commands::repo::expand_home(&d))))
         .unwrap_or_default();
     sessions.extend(claude_sessions::history_sessions(history_days, &exclude, &mut summaries));
+    claude_sessions::apply_generated_summaries(&mut sessions, &generated);
     Ok(SessionsSnapshot { sessions, card_sessions })
+}
+
+fn load_generated_summaries(conn: &Connection) -> AppResult<HashMap<String, SessionSummary>> {
+    let mut stmt = conn.prepare("SELECT session_id, title, body, generated_at FROM live_session_summary")?;
+    let rows = stmt
+        .query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                SessionSummary { title: r.get(1)?, body: r.get(2)?, date: Some(r.get(3)?), generated: true },
+            ))
+        })?
+        .collect::<Result<_, _>>()?;
+    Ok(rows)
+}
+
+/// Forking reuses the live session's prompt cache only while it is still warm.
+const FORK_MAX_AGE_MS: i64 = 5 * 60 * 1000;
+const EXTRACT_MAX_BYTES: usize = 400_000;
+const EXTRACT_MODEL: &str = "haiku";
+
+fn run_fork_summary(session: &ClaudeSession, instructions: &str) -> AppResult<crate::commands::chat::TurnResult> {
+    let mut cmd = std::process::Command::new(crate::tools::claude_bin());
+    cmd.current_dir(&session.cwd)
+        .args(["-p", "--output-format", "json", "--resume", &session.session_id])
+        .args(["--fork-session", "--no-session-persistence", "--max-turns", "1"])
+        .env("CLAUDE_SUMMARY_RUNNING", "1");
+    let prompt = format!("{instructions}\n\nSummarize this conversation so far. Do not call any tools.");
+    crate::commands::chat::run_command(cmd, &prompt)
+}
+
+fn run_extract_summary(
+    session: &ClaudeSession,
+    instructions: &str,
+) -> AppResult<crate::commands::chat::TurnResult> {
+    let transcript = claude_sessions::transcript_path(&session.session_id)
+        .and_then(|p| session_summaries::transcript_extract(&p, EXTRACT_MAX_BYTES))
+        .ok_or_else(|| AppError::Other("no conversation to summarize yet".into()))?;
+    let cwd = std::env::temp_dir().join("codereview_live_summary");
+    std::fs::create_dir_all(&cwd)?;
+    let prompt = format!("<transcript>\n{transcript}</transcript>\nSummarize the transcript above.");
+    crate::commands::chat::run_claude(crate::commands::chat::ClaudeRun {
+        model: EXTRACT_MODEL,
+        allowed_tools: &[],
+        permission_mode: "default",
+        system_prompt: Some(instructions),
+        prompt_file_tag: &format!("live_summary_{}", session.session_id),
+        cwd: &cwd,
+        extra_dirs: &[],
+        session: None,
+        env: vec![("CLAUDE_SUMMARY_RUNNING".into(), "1".into())],
+        extra_args: &["--tools", "", "--effort", "low"],
+        replace_system_prompt: true,
+        prompt: &prompt,
+    })
+}
+
+/// Summarize a running session and store it apart from the hook-written summaries. By default a
+/// haiku run reads a text extract of the transcript. With `fork`, a recently active session is
+/// forked instead to reuse its prompt cache; that is billed at the session's model, so a cache
+/// miss costs far more than the extract.
+#[tauri::command]
+pub async fn generate_live_session_summary(
+    session_id: String,
+    fork: bool,
+    db: State<'_, Db>,
+) -> AppResult<SessionSummary> {
+    if crate::tools::claude_path().is_none() {
+        return Err(AppError::Other("the `claude` CLI was not found on PATH".into()));
+    }
+    let instructions = {
+        let conn = db.0.lock().unwrap();
+        crate::prompts::resolve(&conn, crate::prompts::SESSION_LIVE_SUMMARY)?
+    };
+    let (turn, mode, session_id) = tauri::async_runtime::spawn_blocking(move || {
+        let session = claude_sessions::live_sessions()
+            .into_iter()
+            .find(|s| s.session_id == session_id)
+            .ok_or_else(|| AppError::Other("this session is not running".into()))?;
+        let warm = chrono::Utc::now().timestamp_millis() - session.updated_at < FORK_MAX_AGE_MS;
+        if fork && warm {
+            if let Ok(turn) = run_fork_summary(&session, &instructions) {
+                return Ok((turn, "fork", session.session_id));
+            }
+        }
+        run_extract_summary(&session, &instructions).map(|turn| (turn, "extract", session.session_id))
+    })
+    .await
+    .map_err(|e| AppError::Other(format!("summary task failed: {e}")))??;
+    let (title, body) = session_summaries::split_title(&turn.text);
+    let generated_at = chrono::Utc::now().to_rfc3339();
+    let model = (mode == "extract").then(|| EXTRACT_MODEL.to_string());
+    let conn = db.0.lock().unwrap();
+    conn.execute(
+        "INSERT INTO live_session_summary (session_id, title, body, generated_at, model, mode, input_tokens, output_tokens, cost_usd)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+         ON CONFLICT(session_id) DO UPDATE SET title = excluded.title, body = excluded.body,
+           generated_at = excluded.generated_at, model = excluded.model, mode = excluded.mode,
+           input_tokens = excluded.input_tokens, output_tokens = excluded.output_tokens, cost_usd = excluded.cost_usd",
+        params![session_id, title, body, generated_at, model, mode, turn.input_tokens, turn.output_tokens, turn.cost_usd],
+    )?;
+    Ok(SessionSummary { date: Some(generated_at), title, body, generated: true })
 }
 
 #[tauri::command]

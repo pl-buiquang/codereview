@@ -556,7 +556,7 @@ export interface ClaudeSession {
   tty: string | null;
   updated_at: number; // epoch ms
   focus: SessionFocusState;
-  summaries: SessionSummary[]; // newest first, history sessions only
+  summaries: SessionSummary[]; // newest first; live sessions only carry an app-generated one
   original_name: string | null; // transcript name when a summary title replaced it
 }
 
@@ -564,6 +564,7 @@ export interface SessionSummary {
   date: string | null;
   title: string | null;
   body: string;
+  generated: boolean; // made by the app's Generate button, not the SessionEnd hook
 }
 
 /** A live session matched to a PR card (via claude_session meta or head-branch checkout). */

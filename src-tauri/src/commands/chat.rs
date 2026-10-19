@@ -190,8 +190,16 @@ pub(crate) fn run_claude(run: ClaudeRun) -> AppResult<TurnResult> {
         }
         None => None,
     };
-    let text = run.prompt;
+    let result = run_command(cmd, run.prompt);
+    if let Some(p) = system_prompt_path {
+        let _ = std::fs::remove_file(p);
+    }
+    result
+}
 
+/// Spawn a prepared `claude -p --output-format json` command, feed it `text` on stdin, and parse
+/// the JSON envelope.
+pub(crate) fn run_command(mut cmd: Command, text: &str) -> AppResult<TurnResult> {
     let mut child = cmd
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -208,11 +216,6 @@ pub(crate) fn run_claude(run: ClaudeRun) -> AppResult<TurnResult> {
     let output = child
         .wait_with_output()
         .map_err(|e| AppError::Chat(format!("claude process error: {e}")))?;
-
-    // Clean up temp system prompt file.
-    if let Some(p) = system_prompt_path {
-        let _ = std::fs::remove_file(p);
-    }
 
     // Even on non-zero exit, claude may have written a JSON envelope with a
     // human-readable `result` — parse it first for a clean error message.

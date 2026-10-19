@@ -7,11 +7,13 @@ import type { CardSession, ClaudeSession, SessionsSnapshot } from "../lib/types"
 const listClaudeSessions = vi.fn();
 const focusClaudeSession = vi.fn();
 const resumeClaudeSession = vi.fn();
+const generateLiveSessionSummary = vi.fn();
 vi.mock("../lib/api", () => ({
   api: {
     listClaudeSessions: (d: number, dir: string) => listClaudeSessions(d, dir),
     focusClaudeSession: (id: string) => focusClaudeSession(id),
     resumeClaudeSession: (...args: unknown[]) => resumeClaudeSession(...args),
+    generateLiveSessionSummary: (id: string, fork: boolean) => generateLiveSessionSummary(id, fork),
   },
 }));
 
@@ -128,8 +130,8 @@ describe("SessionsView", () => {
         tmux: null,
         focus: "not_live",
         summaries: [
-          { date: "2026-10-16 11:00", title: "Add summaries", body: "## Goal\nSecond run" },
-          { date: "2026-10-16 10:00", title: null, body: "## Goal\nFirst run" },
+          { date: "2026-10-16 11:00", title: "Add summaries", body: "## Goal\nSecond run", generated: false },
+          { date: "2026-10-16 10:00", title: null, body: "## Goal\nFirst run", generated: false },
         ],
       }),
       session({ session_id: "h2", name: "plain", live: false, pid: null, tmux: null, focus: "not_live" }),
@@ -142,6 +144,46 @@ describe("SessionsView", () => {
     expect(screen.getByText("Second run")).toBeInTheDocument();
     expect(screen.getByText("First run")).toBeInTheDocument();
     expect(screen.getByText("2026-10-16 11:00")).toBeInTheDocument();
+  });
+
+  it("generates a summary for a live session and retitles it", async () => {
+    const live = session({ session_id: "l1", name: "live one" });
+    listClaudeSessions.mockResolvedValueOnce(snapshot([live]));
+    listClaudeSessions.mockResolvedValue(snapshot([
+      {
+        ...live,
+        name: "Fix the flaky test",
+        original_name: "live one",
+        summaries: [{ date: new Date().toISOString(), title: "Fix the flaky test", body: "## Goal\nStabilise CI", generated: true }],
+      },
+    ]));
+    generateLiveSessionSummary.mockResolvedValue({});
+    renderView();
+    await userEvent.click(await screen.findByRole("button", { name: /show summary/i }));
+    await userEvent.click(screen.getByRole("button", { name: "Generate summary" }));
+    expect(generateLiveSessionSummary).toHaveBeenCalledWith("l1", false);
+    expect(await screen.findByText("Fix the flaky test")).toBeInTheDocument();
+    expect(screen.getByText("Stabilise CI")).toBeInTheDocument();
+    expect(screen.getByText(/App summary/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Regenerate summary" })).toBeInTheDocument();
+  });
+
+  it("labels an app-generated summary on a history session, without a generate button", async () => {
+    listClaudeSessions.mockResolvedValue(snapshot([
+      session({
+        session_id: "h3",
+        name: "Gen title",
+        live: false,
+        pid: null,
+        tmux: null,
+        focus: "not_live",
+        summaries: [{ date: new Date().toISOString(), title: "Gen title", body: "## Goal\nKept", generated: true }],
+      }),
+    ]));
+    renderView();
+    await userEvent.click(await screen.findByRole("button", { name: /show summary/i }));
+    expect(screen.getByText(/App summary/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /generate summary|regenerate summary/i })).not.toBeInTheDocument();
   });
 });
 

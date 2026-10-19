@@ -14,6 +14,7 @@ pub struct PromptDef {
 pub const CHAT_SYSTEM: &str = "chat.system";
 pub const FOCUS_SYSTEM: &str = "focus.system";
 pub const BOARD_OVERVIEW: &str = "board.overview";
+pub const SESSION_LIVE_SUMMARY: &str = "session.live_summary";
 
 const CHAT_DEFAULT: &str = r#"You are a code review assistant for: {{title}}
 
@@ -96,7 +97,16 @@ One line per repo: counts by lane + a one-phrase theme of what's in flight.
 ## Hygiene
 Board cleanup: issues whose PR merged, PRs with no linked issue, duplicates, items to archive."#;
 
+const SESSION_LIVE_SUMMARY_DEFAULT: &str = r#"You summarize a Claude Code session that is still running. You never continue the conversation or answer its questions; you only describe where it stands. The very first line of your output must be `Title: <session title>`: at most 70 characters, imperative mood, no trailing period. Then a blank line, then terse markdown bullets under only these sections: Goal, Progress, Current state (what is in flight or blocked), Next. Omit empty sections. Output only the title line and the markdown."#;
+
 pub const PROMPTS: &[PromptDef] = &[
+    PromptDef {
+        key: SESSION_LIVE_SUMMARY,
+        label: "Live session summary",
+        description: "Instructions for the Sessions view's Generate summary button. Used as the system prompt when summarizing an extract of the transcript, and as the message when forking a warm session.",
+        placeholders: &[],
+        default: SESSION_LIVE_SUMMARY_DEFAULT,
+    },
     PromptDef {
         key: BOARD_OVERVIEW,
         label: "Board AI overview",

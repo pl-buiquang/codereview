@@ -14,6 +14,8 @@ pub struct SessionSummary {
     pub date: Option<String>,
     pub title: Option<String>,
     pub body: String,
+    /// Written by the app's Generate button rather than the user's SessionEnd hook.
+    pub generated: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -95,8 +97,63 @@ fn parse(content: &str) -> Option<ParsedSummary> {
             date: fields.remove("date").filter(|s| !s.is_empty()),
             title: fields.remove("title").filter(|s| !s.is_empty()),
             body,
+            generated: false,
         },
     })
+}
+
+/// Split the `Title: …` first line (as the SessionEnd hook does) from the markdown body.
+pub fn split_title(output: &str) -> (Option<String>, String) {
+    let output = output.trim_start();
+    let (first, rest) = output.split_once('\n').unwrap_or((output, ""));
+    match first.trim().strip_prefix("Title:").map(str::trim).filter(|t| !t.is_empty()) {
+        Some(title) => (Some(title.to_string()), rest.trim().to_string()),
+        None => (None, output.trim().to_string()),
+    }
+}
+
+/// The conversation as `USER: …` / `ASSISTANT: …` text blocks (meta, sidechain and empty turns
+/// dropped), cut to its last `max_bytes`.
+pub fn transcript_extract(path: &Path, max_bytes: usize) -> Option<String> {
+    let content = fs::read_to_string(path).ok()?;
+    let mut out = String::new();
+    for line in content.lines().filter(|l| l.contains("\"message\"")) {
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else { continue };
+        let role = match v.get("type").and_then(|t| t.as_str()) {
+            Some("user") => "USER",
+            Some("assistant") => "ASSISTANT",
+            _ => continue,
+        };
+        let flag = |k: &str| v.get(k).and_then(|x| x.as_bool()).unwrap_or(false);
+        if flag("isMeta") || flag("isSidechain") {
+            continue;
+        }
+        let text = match v.pointer("/message/content") {
+            Some(serde_json::Value::String(s)) => s.clone(),
+            Some(serde_json::Value::Array(parts)) => parts
+                .iter()
+                .filter(|p| p.get("type").and_then(|t| t.as_str()) == Some("text"))
+                .filter_map(|p| p.get("text").and_then(|t| t.as_str()))
+                .collect::<Vec<_>>()
+                .join("\n"),
+            _ => continue,
+        };
+        if text.is_empty() {
+            continue;
+        }
+        out.push_str(&format!("{role}: {text}\n\n"));
+    }
+    if out.is_empty() {
+        return None;
+    }
+    if out.len() > max_bytes {
+        let mut cut = out.len() - max_bytes;
+        while !out.is_char_boundary(cut) {
+            cut += 1;
+        }
+        out = out[cut..].to_string();
+    }
+    Some(out)
 }
 
 #[cfg(test)]
@@ -145,5 +202,36 @@ mod tests {
         assert_eq!(map.len(), 1);
         let bodies: Vec<_> = map["s1"].iter().map(|s| s.body.as_str()).collect();
         assert_eq!(bodies, ["new", "old"]);
+    }
+
+    #[test]
+    fn splits_title_line() {
+        assert_eq!(
+            split_title("Title: Fix the thing\n\n## Goal\nDo it.\n"),
+            (Some("Fix the thing".into()), "## Goal\nDo it.".into())
+        );
+        assert_eq!(split_title("## Goal\nDo it."), (None, "## Goal\nDo it.".into()));
+        assert_eq!(split_title("Title:\nbody"), (None, "Title:\nbody".into()));
+    }
+
+    #[test]
+    fn extracts_conversation_text_only() {
+        let dir = std::env::temp_dir().join(format!("cr-extract-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("s.jsonl");
+        let lines = [
+            r#"{"type":"user","message":{"content":"hello"}}"#,
+            r#"{"type":"assistant","message":{"content":[{"type":"text","text":"hi"},{"type":"tool_use","name":"x"},{"type":"text","text":"there"}]}}"#,
+            r#"{"type":"user","isMeta":true,"message":{"content":"meta"}}"#,
+            r#"{"type":"assistant","isSidechain":true,"message":{"content":"side"}}"#,
+            r#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"x"}]}}"#,
+            r#"{"type":"last-prompt","lastPrompt":"x"}"#,
+        ];
+        fs::write(&path, lines.join("\n")).unwrap();
+        let full = transcript_extract(&path, 1000).unwrap();
+        let tail = transcript_extract(&path, 8).unwrap();
+        fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(full, "USER: hello\n\nASSISTANT: hi\nthere\n\n");
+        assert_eq!(tail, "\nthere\n\n");
     }
 }

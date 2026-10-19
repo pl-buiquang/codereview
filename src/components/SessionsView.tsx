@@ -259,14 +259,22 @@ function SessionRow({
 }) {
   const status = statusClass(s);
   const [expanded, setExpanded] = useState(false);
-  const summaries = s.live ? [] : (s.summaries ?? []);
+  const queryClient = useQueryClient();
+  const fork = useSettingsStore((st) => st.sessionSummaryFork);
+  const summaries = s.summaries ?? [];
+  const canExpand = s.live || summaries.length > 0;
+  const generate = useMutation({
+    mutationFn: () => api.generateLiveSessionSummary(s.session_id, fork),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["claude-sessions"] }),
+    onError: (e) => toast.error(`Could not summarize session:\n${String(e)}`),
+  });
   return (
     <div className="card sessions-card">
       <div className="sessions-row-head">
         <span className={`sessions-dot sessions-dot-${status}`} title={status} />
         <div className="sessions-main">
           <div className="sessions-title">
-            {summaries.length > 0 ? (
+            {canExpand ? (
               <button
                 className="sessions-name-toggle"
                 aria-expanded={expanded}
@@ -328,10 +336,24 @@ function SessionRow({
         <div className="sessions-summaries">
           {summaries.map((sum, i) => (
             <div key={i} className="sessions-summary">
-              {summaries.length > 1 && sum.date && <div className="sessions-summary-date">{sum.date}</div>}
+              {sum.generated && sum.date ? (
+                <div className="sessions-summary-date">App summary · {timeAgo(sum.date)}</div>
+              ) : (
+                summaries.length > 1 && sum.date && <div className="sessions-summary-date">{sum.date}</div>
+              )}
               <Markdown source={sum.body} />
             </div>
           ))}
+          {s.live && (
+            <button
+              className="btn btn-sm"
+              disabled={generate.isPending}
+              title="Summarize this session so far; stored separately from the end-of-session summaries"
+              onClick={() => generate.mutate()}
+            >
+              {generate.isPending ? "Summarizing…" : summaries.length > 0 ? "Regenerate summary" : "Generate summary"}
+            </button>
+          )}
         </div>
       )}
     </div>

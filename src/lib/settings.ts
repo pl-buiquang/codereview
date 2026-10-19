@@ -105,6 +105,7 @@ type PersistedSettings = Pick<
   | "tmuxSessionName"
   | "sessionHistoryDays"
   | "sessionSummaryDir"
+  | "sessionSummaryFork"
 >;
 
 const DEFAULTS: PersistedSettings = {
@@ -136,6 +137,7 @@ const DEFAULTS: PersistedSettings = {
   tmuxSessionName: "codereview",
   sessionHistoryDays: 3,
   sessionSummaryDir: "",
+  sessionSummaryFork: false,
 };
 
 const PERSISTED_KEYS = Object.keys(DEFAULTS) as (keyof PersistedSettings)[];
@@ -194,6 +196,8 @@ interface SettingsState {
   sessionHistoryDays: number;
   /** Directory of hook-written session summaries (markdown + frontmatter); empty = off. */
   sessionSummaryDir: string;
+  /** Summarize live sessions by forking them (reuses the prompt cache when warm; cost varies). */
+  sessionSummaryFork: boolean;
   setDirection: (d: Direction) => void;
   setMode: (m: ThemeMode) => void;
   setDiffFontSize: (n: number) => void;
@@ -218,6 +222,7 @@ interface SettingsState {
   setTmuxSessionName: (s: string) => void;
   setSessionHistoryDays: (days: number) => void;
   setSessionSummaryDir: (s: string) => void;
+  setSessionSummaryFork: (on: boolean) => void;
   setOverviewModel: (m: string) => void;
   setBoardOverviewOpen: (open: boolean) => void;
   setBoardMonitor: (on: boolean) => void;
@@ -293,6 +298,7 @@ export const useSettingsStore = create<SettingsState>()(
       setTmuxSessionName: (tmuxSessionName) => set({ tmuxSessionName }),
       setSessionHistoryDays: (sessionHistoryDays) => set({ sessionHistoryDays }),
       setSessionSummaryDir: (sessionSummaryDir) => set({ sessionSummaryDir }),
+      setSessionSummaryFork: (sessionSummaryFork) => set({ sessionSummaryFork }),
       setOverviewModel: (overviewModel) => set({ overviewModel }),
       setBoardOverviewOpen: (boardOverviewOpen) => set({ boardOverviewOpen }),
       setBoardMonitor: (boardMonitor) => set({ boardMonitor }),
