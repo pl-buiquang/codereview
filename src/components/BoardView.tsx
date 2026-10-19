@@ -246,9 +246,13 @@ export function BoardView() {
     const tag = new Map<string, number>();
     const merge = new Map<string, number>();
     const stack = new Map<string, number>();
+    const activeStacks = new Set<string>();
     for (const c of allCards) {
       const sk = stackKey(c);
-      if (sk) stack.set(sk, (stack.get(sk) ?? 0) + 1);
+      if (sk) {
+        stack.set(sk, (stack.get(sk) ?? 0) + 1);
+        if (c.lane !== "done") activeStacks.add(sk);
+      }
       for (const f of mergeFacets(c)) merge.set(f, (merge.get(f) ?? 0) + 1);
       repo.set(c.repo, (repo.get(c.repo) ?? 0) + 1);
       const s = prStatus(c);
@@ -269,7 +273,7 @@ export function BoardView() {
       mergeEntries: Object.keys(MERGE_FACET_LABEL)
         .filter((k) => merge.has(k))
         .map((k): [string, number] => [k, merge.get(k)!]),
-      stackEntries: [...stack.entries()].sort(byCount),
+      stackEntries: [...stack.entries()].filter(([k]) => activeStacks.has(k)).sort(byCount),
       tagEntries: [...tag.entries()].sort(byCount),
     };
   }, [allCards]);
@@ -278,7 +282,7 @@ export function BoardView() {
   const effStatus = statusFilter && allCards.some((c) => prStatus(c) === statusFilter) ? statusFilter : null;
   const effCi = ciFilter && allCards.some((c) => ciStatus(c) === ciFilter) ? ciFilter : null;
   const effMerge = mergeFilter && allCards.some((c) => mergeFacets(c).includes(mergeFilter)) ? mergeFilter : null;
-  const effStack = stackFilter && allCards.some((c) => stackKey(c) === stackFilter) ? stackFilter : null;
+  const effStack = stackFilter && stackEntries.some(([k]) => k === stackFilter) ? stackFilter : null;
   const availableTags = new Set(tagEntries.map(([t]) => t));
   const effTags = tagFilter.filter((t) => availableTags.has(t));
   const effExcludeTags = tagExclude.filter((t) => availableTags.has(t));
