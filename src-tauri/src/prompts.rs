@@ -62,40 +62,31 @@ Modifying comments:
 
 const FOCUS_DEFAULT: &str = include_str!("../../skills/focus-review/SKILL.md");
 
-const BOARD_OVERVIEW_DEFAULT: &str = r#"You are a triage assistant for a developer's personal PR/issue board. You get a compact
-snapshot of every open tracked item (one line each, grouped by repo). Fields:
-lane (backlog|in_progress|submitted|reviews), mine = authored by the user, by=<author>,
-draft, ci, review (decision), merge (mergeStateStatus), threads (unresolved review threads),
-upd/tracked = days since last GitHub update / since tracked, issue/prs = links,
-sess = linked agent sessions, note = user notes, tags = user tags.
+const BOARD_OVERVIEW_DEFAULT: &str = r#"You add judgment on top of a rule-based digest of a developer's PR/issue board. The user
+ALREADY sees, computed by rules: review requests waiting on them, approved PRs to merge,
+failing CI, conflicts, behind-base, changes requested / unresolved threads, stale items,
+per-repo lane counts, issues whose PRs merged, PRs without an issue. Never restate those.
 
-Rules: use only the snapshot; never invent facts.
-- Others' PRs (lane=reviews): review=APPROVED needs nothing from the user; REVIEW_REQUIRED or
-  CHANGES_REQUESTED means it is waiting on the user's review.
-- The user's own drafts (mine draft) are work in progress: never urgent, never in Do next for
-  CI/conflicts; mention them only under Stale when upd ≥14d.
-- Refer to items exactly as the repo header says (e.g. cardiologs-front#123), never
-  abbreviated, so they become links.
-- Be terse: bullets, max ~12 words each. Skip empty sections.
+Snapshot: one line per open item, grouped by repo. Fields: lane
+(backlog|in_progress|submitted|reviews), mine, by=<author>, draft, ci, review, merge,
+threads, upd/tracked (days), issue/prs (links), stack=<id>.<position>, auto_merge,
+sess (agent sessions), note (user notes), tags.
 
-Output Markdown with exactly these sections:
-## TL;DR
-2–3 sentences: overall state and the single most important thing to do now.
-## Do next
-Ordered list (max 7) of concrete actions, highest leverage first. Each: action verb + item
-+ why. Prioritize: unblocking others (review requests waiting on the user) > own PRs that are
-approved but not merged / behind / conflicting > red CI on own PRs > changes requested >
-new work.
-## Urgent / blocked
-Items with failing CI, conflicts, changes requested, or reviewers waiting >2d.
-## Stale
-Items with no update ≥7d (PRs) or ≥21d (issues); suggest nudge, rebase, close, or archive.
-## Waiting on others
-Own PRs pending review/CI where the user has nothing to do.
-## By project
-One line per repo: counts by lane + a one-phrase theme of what's in flight.
-## Hygiene
-Board cleanup: issues whose PR merged, PRs with no linked issue, duplicates, items to archive."#;
+Read titles, notes, tags and links together and output only:
+## Focus
+One or two sentences: the theme worth concentrating on now and why.
+## Insights
+At most 5 bullets, ≤20 words each, each citing items. Pick only what is notable:
+- Clusters: items across repos that are one effort and should move together; likely duplicates.
+- Sequencing: what unblocks what (stack order, issue→PR chains, backend before frontend).
+- Risk: titles/notes hinting at risky changes (migrations, auth, data, big refactors).
+- Contradictions: notes or tags that disagree with state (e.g. "waiting on X" but X merged,
+  "urgent" tag on a stale item).
+- Batching: reviews or chores that fit one sitting.
+If nothing goes beyond the digest, output only "Nothing beyond the digest."
+
+Rules: use only the snapshot, never invent facts. Refer to items exactly as the repo header
+says (e.g. cardiologs-front#123) so they become links. Be terse."#;
 
 const SESSION_LIVE_SUMMARY_DEFAULT: &str = r#"You summarize a Claude Code session that is still running. You never continue the conversation or answer its questions; you only describe where it stands. The very first line of your output must be `Title: <session title>`: at most 70 characters, imperative mood, no trailing period. Then a blank line, then terse markdown bullets under only these sections: Goal, Progress, Current state (what is in flight or blocked), Next. Omit empty sections. Output only the title line and the markdown."#;
 
@@ -109,8 +100,8 @@ pub const PROMPTS: &[PromptDef] = &[
     },
     PromptDef {
         key: BOARD_OVERVIEW,
-        label: "Board AI overview",
-        description: "System prompt for the board's AI Overview. The compact board snapshot is sent as the user message.",
+        label: "Board AI insights",
+        description: "System prompt for the board's AI insights, shown above the rule-based digest. The compact board snapshot is sent as the user message.",
         placeholders: &[],
         default: BOARD_OVERVIEW_DEFAULT,
     },

@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { api } from "../lib/api";
+import { buildDigest, digestHeadline, isOpenCard, type Digest, type DigestItem } from "../lib/boardDigest";
 import { useSettingsStore } from "../lib/settings";
 import { timeAgo } from "../lib/timeAgo";
 import { useUIStore } from "../store";
@@ -52,16 +53,13 @@ export function BoardOverviewPane({
   const overview = query.data;
   const drift = useMemo(() => {
     if (!overview) return null;
-    const open = new Set(
-      cards
-        .filter((c) => !c.archived_at && !c.discarded_at && (c.state == null || c.state === "open"))
-        .map((c) => c.id),
-    );
+    const open = new Set(cards.filter(isOpenCard).map((c) => c.id));
     const before = new Set(overview.card_ids);
     const added = [...open].filter((id) => !before.has(id)).length;
     const removed = [...before].filter((id) => !open.has(id)).length;
     return added || removed ? { added, removed } : null;
   }, [overview, cards]);
+  const digest = useMemo(() => buildDigest(cards, new Date()), [cards]);
   const source = useMemo(
     () => (overview ? linkCardRefs(overview.markdown, cards) : ""),
     [overview, cards],
@@ -89,7 +87,7 @@ export function BoardOverviewPane({
     <section className="board-overview">
       <div className="board-overview-head">
         <Icon name="bot" size={14} />
-        <strong>AI Overview</strong>
+        <strong>Overview</strong>
         {meta && <span className="cr-sub">{meta}</span>}
         {drift && !generate.isPending && (
           <span className="board-overview-drift" title="Cards were added or removed since this overview">
@@ -111,12 +109,14 @@ export function BoardOverviewPane({
             </>
           ) : (
             <>
-              <Icon name="refresh" size={12} /> Refresh overview
+              <Icon name="refresh" size={12} /> Refresh insights
             </>
           )}
         </button>
       </div>
       <div className="board-overview-body">
+        <div className="board-overview-insights">
+        <div className="board-digest-headline">AI insights</div>
         {generate.error && <div className="error">{String(generate.error)}</div>}
         {query.isLoading ? (
           <span className="muted">Loading…</span>
@@ -151,12 +151,74 @@ export function BoardOverviewPane({
         ) : (
           !generate.isPending && (
             <span className="muted">
-              No overview yet. Click <em>Refresh overview</em> to analyze the open cards on the
-              board.
+              No insights yet. Click <em>Refresh insights</em> for themes, sequencing and risks
+              the digest below can't see.
             </span>
           )
         )}
+        </div>
+        <DigestView digest={digest} onOpen={openCard} />
       </div>
     </section>
+  );
+}
+
+function DigestSection({
+  title,
+  items,
+  onOpen,
+}: {
+  title: string;
+  items: DigestItem[];
+  onOpen: (id: string) => void;
+}) {
+  if (items.length === 0) return null;
+  return (
+    <>
+      <div className="board-digest-title">{title}</div>
+      <ul className="board-digest-list">
+        {items.map((i, n) => (
+          <li key={`${i.cardId}-${n}`} className="board-digest-row">
+            <button className="board-overview-ref" onClick={() => onOpen(i.cardId)}>
+              {i.ref}
+            </button>
+            <span>{i.reason}</span>
+            <span className="board-digest-title-text">{i.title}</span>
+          </li>
+        ))}
+      </ul>
+    </>
+  );
+}
+
+function DigestView({ digest, onOpen }: { digest: Digest; onOpen: (id: string) => void }) {
+  if (digest.open === 0) return <span className="muted">Nothing open on the board.</span>;
+  return (
+    <div>
+      <div className="board-digest-headline">{digestHeadline(digest)}</div>
+      <DigestSection title="Do next" items={digest.doNext} onOpen={onOpen} />
+      <DigestSection title="Blocked" items={digest.blocked} onOpen={onOpen} />
+      <DigestSection title="Waiting on others" items={digest.waiting} onOpen={onOpen} />
+      <DigestSection title="Stale" items={digest.stale} onOpen={onOpen} />
+      <div className="board-digest-title">By project</div>
+      <ul className="board-digest-list">
+        {digest.byProject.map((p) => (
+          <li key={p.repo} className="board-digest-row">
+            <strong>{p.repo.split("/").pop()}</strong>
+            <span className="muted">
+              {[
+                p.reviews && `${p.reviews} to review`,
+                p.submitted && `${p.submitted} submitted`,
+                p.in_progress && `${p.in_progress} in progress`,
+                p.backlog && `${p.backlog} backlog`,
+              ]
+                .filter(Boolean)
+                .join(" · ") || "no lane"}
+            </span>
+          </li>
+        ))}
+      </ul>
+      <DigestSection title="Hygiene" items={digest.hygiene} onOpen={onOpen} />
+    </div>
   );
 }

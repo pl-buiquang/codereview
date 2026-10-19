@@ -88,6 +88,12 @@ pub fn build_snapshot(cards: &[BoardCardWithExtras], now: DateTime<Utc>) -> (Str
                 Some("CLEAN") | Some("UNKNOWN") | None => {}
                 Some(m) => f.push(format!("merge={m}")),
             }
+            if let (Some(n), Some(pos)) = (card.stack_number, card.stack_position) {
+                f.push(format!("stack={n}.{pos}"));
+            }
+            if card.auto_merge.is_some() {
+                f.push("auto_merge".into());
+            }
             if card.mergeable.as_deref() == Some("CONFLICTING") && card.merge_state_status.as_deref() != Some("DIRTY") {
                 f.push("conflicts".into());
             }
