@@ -28,6 +28,7 @@ export interface BoardFilters {
   status: string | null;
   ci: string | null;
   merge: string | null;
+  stack: string | null;
   tags: string[];
   excludeTags: string[];
 }
@@ -37,6 +38,7 @@ export const EMPTY_BOARD_FILTERS: BoardFilters = {
   status: null,
   ci: null,
   merge: null,
+  stack: null,
   tags: [],
   excludeTags: [],
 };

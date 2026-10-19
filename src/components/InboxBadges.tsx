@@ -71,6 +71,38 @@ export function MergeStateBadge({ state, stacked }: { state: string | null; stac
   );
 }
 
+/** Marks a PR that belongs to a native GitHub stack. Clickable when `onClick` is given. */
+export function StackBadge({
+  number,
+  position,
+  onClick,
+}: {
+  number: number | null;
+  position: number | null;
+  onClick?: () => void;
+}) {
+  if (number == null) return null;
+  const label = `stack #${number}${position != null ? ` · ${position}` : ""}`;
+  const title = `Part of GitHub stack #${number}${position != null ? ` (position ${position})` : ""}`;
+  const content = (
+    <>
+      <Icon name="branch" size={11} /> {label}
+    </>
+  );
+  if (!onClick) {
+    return (
+      <span className="chip" title={title}>
+        {content}
+      </span>
+    );
+  }
+  return (
+    <button type="button" className="chip" title={`${title} — filter to this stack`} onClick={onClick}>
+      {content}
+    </button>
+  );
+}
+
 /** Only shown when GitHub auto-merge is enabled on the PR. */
 export function AutoMergeBadge({ method, enabledBy }: { method: string | null | undefined; enabledBy?: string | null }) {
   if (!method) return null;

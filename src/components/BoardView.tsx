@@ -73,11 +73,12 @@ export function BoardView() {
   const tmuxSessionName = useSettingsStore((s) => s.tmuxSessionName);
   const filters = useUIStore((s) => s.boardFilters);
   const setBoardFilters = useUIStore((s) => s.setBoardFilters);
-  const { repo: repoFilter, status: statusFilter, ci: ciFilter, merge: mergeFilter, tags: tagFilter, excludeTags: tagExclude } = filters;
+  const { repo: repoFilter, status: statusFilter, ci: ciFilter, merge: mergeFilter, stack: stackFilter, tags: tagFilter, excludeTags: tagExclude } = filters;
   const setRepoFilter = (repo: string | null) => setBoardFilters({ repo });
   const setStatusFilter = (status: string | null) => setBoardFilters({ status });
   const setCiFilter = (ci: string | null) => setBoardFilters({ ci });
   const setMergeFilter = (merge: string | null) => setBoardFilters({ merge });
+  const setStackFilter = (stack: string | null) => setBoardFilters({ stack });
   const setTagFilter = (tags: string[]) => setBoardFilters({ tags });
   const setTagExclude = (excludeTags: string[]) => setBoardFilters({ excludeTags });
   const [addingLane, setAddingLane] = useState<BoardLane | null>(null);
@@ -238,13 +239,16 @@ export function BoardView() {
 
   const allCards = useMemo(() => (boardQuery.data ?? []).filter((c) => c.lane != null), [boardQuery.data]);
 
-  const { repoEntries, statusEntries, ciEntries, mergeEntries, tagEntries } = useMemo(() => {
+  const { repoEntries, statusEntries, ciEntries, mergeEntries, stackEntries, tagEntries } = useMemo(() => {
     const repo = new Map<string, number>();
     const status = new Map<string, number>();
     const ci = new Map<string, number>();
     const tag = new Map<string, number>();
     const merge = new Map<string, number>();
+    const stack = new Map<string, number>();
     for (const c of allCards) {
+      const sk = stackKey(c);
+      if (sk) stack.set(sk, (stack.get(sk) ?? 0) + 1);
       for (const f of mergeFacets(c)) merge.set(f, (merge.get(f) ?? 0) + 1);
       repo.set(c.repo, (repo.get(c.repo) ?? 0) + 1);
       const s = prStatus(c);
@@ -265,6 +269,7 @@ export function BoardView() {
       mergeEntries: Object.keys(MERGE_FACET_LABEL)
         .filter((k) => merge.has(k))
         .map((k): [string, number] => [k, merge.get(k)!]),
+      stackEntries: [...stack.entries()].sort(byCount),
       tagEntries: [...tag.entries()].sort(byCount),
     };
   }, [allCards]);
@@ -273,15 +278,17 @@ export function BoardView() {
   const effStatus = statusFilter && allCards.some((c) => prStatus(c) === statusFilter) ? statusFilter : null;
   const effCi = ciFilter && allCards.some((c) => ciStatus(c) === ciFilter) ? ciFilter : null;
   const effMerge = mergeFilter && allCards.some((c) => mergeFacets(c).includes(mergeFilter)) ? mergeFilter : null;
+  const effStack = stackFilter && allCards.some((c) => stackKey(c) === stackFilter) ? stackFilter : null;
   const availableTags = new Set(tagEntries.map(([t]) => t));
   const effTags = tagFilter.filter((t) => availableTags.has(t));
   const effExcludeTags = tagExclude.filter((t) => availableTags.has(t));
 
-  const matches = (c: BoardCardT, skip?: "repo" | "status" | "ci" | "merge" | "tags") => {
+  const matches = (c: BoardCardT, skip?: "repo" | "status" | "ci" | "merge" | "stack" | "tags") => {
     if (skip !== "repo" && effRepo && c.repo !== effRepo) return false;
     if (skip !== "status" && effStatus && c.type === "pr" && prStatus(c) !== effStatus) return false;
     if (skip !== "ci" && effCi && ciStatus(c) !== effCi) return false;
     if (skip !== "merge" && effMerge && !mergeFacets(c).includes(effMerge)) return false;
+    if (skip !== "stack" && effStack && stackKey(c) !== effStack) return false;
     if (skip !== "tags" && effTags.length > 0 && !cardTags(c).some((t) => effTags.includes(t))) return false;
     if (effExcludeTags.length > 0 && cardTags(c).some((t) => effExcludeTags.includes(t))) return false;
     return true;
@@ -292,7 +299,7 @@ export function BoardView() {
   useSyncScope("board", onHome, visibleIdList);
 
   // Each facet counts cards matching every other active filter, so its own options stay comparable.
-  const facetCounts = (skip: "repo" | "status" | "ci" | "merge" | "tags", keysOf: (c: BoardCardT) => (string | null | undefined)[]) => {
+  const facetCounts = (skip: "repo" | "status" | "ci" | "merge" | "stack" | "tags", keysOf: (c: BoardCardT) => (string | null | undefined)[]) => {
     const m = new Map<string, number>();
     for (const c of allCards) {
       if (!matches(c, skip)) continue;
@@ -306,6 +313,7 @@ export function BoardView() {
   const statusShown = withCounts(statusEntries, facetCounts("status", (c) => [prStatus(c)]));
   const ciShown = withCounts(ciEntries, facetCounts("ci", (c) => [ciStatus(c)]));
   const mergeShown = withCounts(mergeEntries, facetCounts("merge", mergeFacets));
+  const stackShown = withCounts(stackEntries, facetCounts("stack", (c) => [stackKey(c)]));
   const tagsShown = withCounts(tagEntries, facetCounts("tags", cardTags));
 
   const byLane = useMemo(() => {
@@ -314,9 +322,12 @@ export function BoardView() {
     for (const c of filtered) {
       if (c.lane) m.get(c.lane as BoardLane)?.push(c);
     }
-    for (const list of m.values()) list.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+    const byRecent = (a: BoardCardT, b: BoardCardT) => b.updated_at.localeCompare(a.updated_at);
+    const byStackPosition = (a: BoardCardT, b: BoardCardT) =>
+      (a.stack_position ?? 0) - (b.stack_position ?? 0) || byRecent(a, b);
+    for (const list of m.values()) list.sort(effStack ? byStackPosition : byRecent);
     return m;
-  }, [filtered]);
+  }, [filtered, effStack]);
 
   const busy = track.isPending || discard.isPending || linkPr.isPending || unlink.isPending || metaAdd.isPending || metaDelete.isPending;
   const tags = tagsQuery.data ?? [];
@@ -480,6 +491,20 @@ export function BoardView() {
             renderLabel={(k) => <span className="lbl">{MERGE_FACET_LABEL[k] ?? k}</span>}
           />
           <FilterList
+            title="Stacks"
+            entries={stackShown}
+            selected={effStack}
+            onSelect={setStackFilter}
+            renderLabel={(k) => {
+              const i = k.lastIndexOf("#");
+              return (
+                <span className="lbl">
+                  <RepoName className="mono" name={k.slice(0, i)} /> #{k.slice(i + 1)}
+                </span>
+              );
+            }}
+          />
+          <FilterList
             title="Repositories"
             entries={repoShown}
             selected={effRepo}
@@ -583,6 +608,7 @@ export function BoardView() {
                       }
                       onAddMeta={(args) => metaAdd.mutate({ cardId: card.id, ...args })}
                       onDeleteMeta={(id) => metaDelete.mutate(id)}
+                      onFilterStack={stackKey(card) ? () => setStackFilter(stackKey(card)) : undefined}
                       prActions={
                         card.type === "pr"
                           ? {
@@ -607,6 +633,11 @@ export function BoardView() {
       {showTrackDialog && <TrackPrDialog onClose={() => setShowTrackDialog(false)} />}
     </section>
   );
+}
+
+/** Stacks are scoped to a repo, so the repo is part of the key. */
+export function stackKey(c: BoardCardT): string | null {
+  return c.stack_number != null ? `${c.repo}#${c.stack_number}` : null;
 }
 
 function FilterList({

@@ -7,7 +7,7 @@ import { timeAgo } from "../lib/timeAgo";
 import { useSettingsStore, type BoardBorderSide } from "../lib/settings";
 import { useUIStore } from "../store";
 import { RepoName } from "./RepoName";
-import { AutoMergeBadge, CiBadge, CommentsBadge, MergeStateBadge, MergeableBadge } from "./InboxBadges";
+import { AutoMergeBadge, CiBadge, CommentsBadge, MergeStateBadge, MergeableBadge, StackBadge } from "./InboxBadges";
 import { Icon } from "./icons";
 import { AgentSessionItems, KebabMenu } from "./KebabMenu";
 
@@ -416,6 +416,7 @@ export function BoardCard({
   onAddMeta,
   onDeleteMeta,
   prActions,
+  onFilterStack,
 }: {
   card: BoardCardT;
   tags: string[];
@@ -433,6 +434,7 @@ export function BoardCard({
   onAddMeta: (args: { kind: BoardMetaKind; value: string; tag: string | null; label: string | null }) => void;
   onDeleteMeta: (id: number) => void;
   prActions: PrActions | null;
+  onFilterStack?: () => void;
 }) {
   const [metaExpanded, setMetaExpanded] = useState(false);
   const [adding, setAdding] = useState(false);
@@ -538,6 +540,7 @@ export function BoardCard({
         <div className="board-card-badge-row">
           <CiBadge state={card.ci_status ? card.ci_status.toLowerCase() : null} />
           <MergeableBadge mergeable={card.mergeable} />
+          <StackBadge number={card.stack_number} position={card.stack_position} onClick={onFilterStack} />
           <MergeStateBadge state={card.merge_state_status} stacked={card.stack_number != null} />
           <AutoMergeBadge method={card.auto_merge} />
           <CommentsBadge count={card.pending_threads} />
