@@ -72,6 +72,7 @@ describe("useSettingsStore", () => {
         "autoSync",
         "boardMonitor",
         "boardMonitorIntervalMin",
+        "boardArchiveDays",
         "boardOverviewOpen",
         "boardStatusBorderSide",
         "botLogins",

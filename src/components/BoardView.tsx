@@ -86,6 +86,8 @@ export function BoardView() {
   const [showTrackDialog, setShowTrackDialog] = useState(false);
   const overviewOpen = useSettingsStore((s) => s.boardOverviewOpen);
   const setOverviewOpen = useSettingsStore((s) => s.setBoardOverviewOpen);
+  const archiveDays = useSettingsStore((s) => s.boardArchiveDays);
+  const archiveAgeLabel = archiveDays === 1 ? "1 day" : `${archiveDays} days`;
   const monitorOn = useSettingsStore((s) => s.boardMonitor);
   const setMonitorOn = useSettingsStore((s) => s.setBoardMonitor);
   const monitorIntervalMin = useSettingsStore((s) => s.boardMonitorIntervalMin);
@@ -188,7 +190,7 @@ export function BoardView() {
     onError: onErr,
   });
   const archiveDone = useMutation({
-    mutationFn: () => api.boardArchiveDone(30),
+    mutationFn: () => api.boardArchiveDone(archiveDays),
     onSuccess: (n) => {
       invalidate();
       toast.success(n === 1 ? "Archived 1 card" : `Archived ${n} cards`);
@@ -403,7 +405,7 @@ export function BoardView() {
     if (
       await confirmDialog({
         title: "Archive done cards",
-        message: "Permanently archive Done cards whose PR closed or merged more than a month ago?",
+        message: `Permanently archive Done cards whose PR closed or merged more than ${archiveAgeLabel} ago?`,
         confirmLabel: "Archive",
       })
     ) {
@@ -562,7 +564,7 @@ export function BoardView() {
                     </button>
                   )}
                   {lane.key === "done" && cards.length > 0 && (
-                    <button className="btn-icon" title="Archive cards older than 1 month" onClick={confirmArchive}>
+                    <button className="btn-icon" title={`Archive cards done more than ${archiveAgeLabel} ago`} onClick={confirmArchive}>
                       <Icon name="archive" size={12} />
                     </button>
                   )}

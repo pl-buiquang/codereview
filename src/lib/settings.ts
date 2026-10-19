@@ -95,6 +95,7 @@ type PersistedSettings = Pick<
   | "boardOverviewOpen"
   | "boardMonitor"
   | "boardMonitorIntervalMin"
+  | "boardArchiveDays"
   | "markEdits"
   | "largeDiffMaxLines"
   | "fileTestPatterns"
@@ -127,6 +128,7 @@ const DEFAULTS: PersistedSettings = {
   boardOverviewOpen: false,
   boardMonitor: false,
   boardMonitorIntervalMin: 5,
+  boardArchiveDays: 7,
   markEdits: false,
   largeDiffMaxLines: 3000,
   fileTestPatterns: DEFAULT_TEST_PATTERNS,
@@ -180,6 +182,7 @@ interface SettingsState {
   /** Keep approved auto-merge PRs mergeable: update BEHIND branches, rerun failed CI. */
   boardMonitor: boolean;
   boardMonitorIntervalMin: number;
+  boardArchiveDays: number;
   /** Newline-separated globs classifying changed files as tests (checked first). */
   fileTestPatterns: string;
   /** Newline-separated globs classifying changed files as config/docs. */
@@ -227,6 +230,7 @@ interface SettingsState {
   setBoardOverviewOpen: (open: boolean) => void;
   setBoardMonitor: (on: boolean) => void;
   setBoardMonitorIntervalMin: (min: number) => void;
+  setBoardArchiveDays: (days: number) => void;
 }
 
 const ENUMS: Partial<Record<keyof PersistedSettings, readonly string[]>> = {
@@ -303,6 +307,7 @@ export const useSettingsStore = create<SettingsState>()(
       setBoardOverviewOpen: (boardOverviewOpen) => set({ boardOverviewOpen }),
       setBoardMonitor: (boardMonitor) => set({ boardMonitor }),
       setBoardMonitorIntervalMin: (boardMonitorIntervalMin) => set({ boardMonitorIntervalMin }),
+      setBoardArchiveDays: (boardArchiveDays) => set({ boardArchiveDays }),
     }),
     {
       name: "codereview-settings",

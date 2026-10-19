@@ -250,6 +250,8 @@ function GeneralSection() {
   const setAutoSync = useSettingsStore((s) => s.setAutoSync);
   const discoveryIntervalMin = useSettingsStore((s) => s.discoveryIntervalMin);
   const setDiscoveryIntervalMin = useSettingsStore((s) => s.setDiscoveryIntervalMin);
+  const boardArchiveDays = useSettingsStore((s) => s.boardArchiveDays);
+  const setBoardArchiveDays = useSettingsStore((s) => s.setBoardArchiveDays);
   const boardMonitorIntervalMin = useSettingsStore((s) => s.boardMonitorIntervalMin);
   const setBoardMonitorIntervalMin = useSettingsStore((s) => s.setBoardMonitorIntervalMin);
   const autoFetchMinutes = useSettingsStore((s) => s.autoFetchMinutes);
@@ -440,6 +442,23 @@ function GeneralSection() {
             <option value="bottom">Bottom</option>
             <option value="left">Left</option>
           </select>
+        </label>
+        <label
+          className="settings-row"
+          title="The Done column's archive button permanently archives cards whose PR was closed or merged more than this many days ago."
+        >
+          <span>Archive done cards after (days)</span>
+          <input
+            type="number"
+            className="input"
+            min={1}
+            max={365}
+            value={boardArchiveDays}
+            onChange={(e) => {
+              const n = Number(e.target.value);
+              if (Number.isFinite(n)) setBoardArchiveDays(Math.max(1, Math.min(365, Math.round(n))));
+            }}
+          />
         </label>
       </section>
 
