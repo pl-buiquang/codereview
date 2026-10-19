@@ -307,6 +307,7 @@ pub fn run() {
             commands::board::board_link_pr,
             commands::board::board_unlink,
             commands::board::board_archive_done,
+            commands::board::board_monitor_log,
             commands::board::board_open_review,
             commands::board::board_open_vscode,
             commands::board::board_open_shell,

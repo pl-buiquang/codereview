@@ -148,6 +148,7 @@ export function useSyncBridge() {
   useTauriListener<SyncStatus>(SYNC_STATUS_EVENT, (status) => queryClient.setQueryData(["sync-status"], status));
 
   useTauriListener<BoardMonitorPayload>(BOARD_MONITOR_EVENT, (payload) => {
+    queryClient.invalidateQueries({ queryKey: ["board-monitor-log"] });
     const summary = monitorSummary(payload);
     if (!summary) return;
     if (summary.isError) toast.error(summary.text);

@@ -304,6 +304,16 @@ export interface MonitorAction {
   detail: string;
 }
 
+export interface MonitorLogEntry {
+  id: number;
+  at: string;
+  card_id: string;
+  repo: string;
+  number: number;
+  kind: MonitorAction["kind"];
+  detail: string;
+}
+
 export interface BoardMonitorPayload {
   actions: MonitorAction[];
   error: string | null;

@@ -94,6 +94,7 @@ type PersistedSettings = Pick<
   | "overviewModel"
   | "boardOverviewOpen"
   | "boardMonitor"
+  | "boardMonitorLogOpen"
   | "boardMonitorIntervalMin"
   | "boardArchiveDays"
   | "markEdits"
@@ -127,6 +128,7 @@ const DEFAULTS: PersistedSettings = {
   overviewModel: "sonnet",
   boardOverviewOpen: false,
   boardMonitor: false,
+  boardMonitorLogOpen: false,
   boardMonitorIntervalMin: 5,
   boardArchiveDays: 7,
   markEdits: false,
@@ -181,6 +183,7 @@ interface SettingsState {
   boardOverviewOpen: boolean;
   /** Keep approved auto-merge PRs mergeable: update BEHIND branches, rerun failed CI. */
   boardMonitor: boolean;
+  boardMonitorLogOpen: boolean;
   boardMonitorIntervalMin: number;
   boardArchiveDays: number;
   /** Newline-separated globs classifying changed files as tests (checked first). */
@@ -229,6 +232,7 @@ interface SettingsState {
   setOverviewModel: (m: string) => void;
   setBoardOverviewOpen: (open: boolean) => void;
   setBoardMonitor: (on: boolean) => void;
+  setBoardMonitorLogOpen: (open: boolean) => void;
   setBoardMonitorIntervalMin: (min: number) => void;
   setBoardArchiveDays: (days: number) => void;
 }
@@ -306,6 +310,7 @@ export const useSettingsStore = create<SettingsState>()(
       setOverviewModel: (overviewModel) => set({ overviewModel }),
       setBoardOverviewOpen: (boardOverviewOpen) => set({ boardOverviewOpen }),
       setBoardMonitor: (boardMonitor) => set({ boardMonitor }),
+      setBoardMonitorLogOpen: (boardMonitorLogOpen) => set({ boardMonitorLogOpen }),
       setBoardMonitorIntervalMin: (boardMonitorIntervalMin) => set({ boardMonitorIntervalMin }),
       setBoardArchiveDays: (boardArchiveDays) => set({ boardArchiveDays }),
     }),

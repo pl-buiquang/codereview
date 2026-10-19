@@ -6,6 +6,7 @@ import type {
   WorktreeGcReport,
   BoardCard,
   BoardOverview,
+  MonitorLogEntry,
   PromptInfo,
   BoardMeta,
   BoardMetaKind,
@@ -247,6 +248,7 @@ export const api = {
   boardUnlink: (issueId: string, prId: string) => invoke<void>("board_unlink", { issueId, prId }),
   boardArchiveDone: (olderThanDays: number) =>
     invoke<number>("board_archive_done", { olderThanDays }),
+  boardMonitorLog: (limit: number) => invoke<MonitorLogEntry[]>("board_monitor_log", { limit }),
   boardOpenReview: (cardId: string, basePaths: string[] = []) =>
     invoke<Review>("board_open_review", { cardId, basePaths }),
   boardOpenVscode: (cardId: string, basePaths: string[] = []) =>

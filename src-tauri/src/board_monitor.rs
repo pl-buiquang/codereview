@@ -3,7 +3,8 @@
 //! rerunning failed CI (GitHub does the merge itself). Free of Tauri so the
 //! scheduler and a future `cr` one-shot can both drive it.
 
-use rusqlite::Connection;
+use chrono::Utc;
+use rusqlite::{params, Connection};
 use serde::Serialize;
 
 use crate::commands::board::{refetch_card, CARD_VIEW};
@@ -14,6 +15,9 @@ use crate::gh;
 
 /// Automatic reruns stop once a workflow run has been attempted this many times.
 const MAX_ATTEMPTS: i64 = 3;
+
+/// Newest log rows kept; older ones are pruned on each write.
+const LOG_KEEP: i64 = 500;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Candidate {
@@ -34,6 +38,17 @@ pub enum ActionKind {
     Reran,
     GaveUp,
     Error,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MonitorLogEntry {
+    pub id: i64,
+    pub at: String,
+    pub card_id: String,
+    pub repo: String,
+    pub number: i64,
+    pub kind: String,
+    pub detail: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -70,6 +85,55 @@ pub fn candidates(conn: &Connection) -> AppResult<Vec<Candidate>> {
             })
         })
         .collect())
+}
+
+impl ActionKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            ActionKind::Updated => "updated",
+            ActionKind::Reran => "reran",
+            ActionKind::GaveUp => "gave_up",
+            ActionKind::Error => "error",
+        }
+    }
+}
+
+/// Append a round's actions to the persisted log, keeping the newest `LOG_KEEP`.
+pub fn record(conn: &Connection, actions: &[MonitorAction]) -> AppResult<()> {
+    if actions.is_empty() {
+        return Ok(());
+    }
+    let at = Utc::now().to_rfc3339();
+    for a in actions {
+        conn.execute(
+            "INSERT INTO board_monitor_log (at, card_id, repo, number, kind, detail) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![at, a.card_id, a.repo, a.number, a.kind.as_str(), a.detail],
+        )?;
+    }
+    conn.execute(
+        "DELETE FROM board_monitor_log WHERE id <= (SELECT MAX(id) FROM board_monitor_log) - ?1",
+        params![LOG_KEEP],
+    )?;
+    Ok(())
+}
+
+/// Newest first.
+pub fn recent(conn: &Connection, limit: i64) -> AppResult<Vec<MonitorLogEntry>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, at, card_id, repo, number, kind, detail FROM board_monitor_log ORDER BY id DESC LIMIT ?1",
+    )?;
+    let rows = stmt.query_map(params![limit], |r| {
+        Ok(MonitorLogEntry {
+            id: r.get(0)?,
+            at: r.get(1)?,
+            card_id: r.get(2)?,
+            repo: r.get(3)?,
+            number: r.get(4)?,
+            kind: r.get(5)?,
+            detail: r.get(6)?,
+        })
+    })?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
 fn ci_failing(c: &Candidate) -> bool {
@@ -126,6 +190,7 @@ pub fn run(db: &Db) -> AppResult<Vec<MonitorAction>> {
             Err(e) => actions.push(act(c, ActionKind::Error, e.to_string())),
         }
     }
+    record(&db.0.lock().unwrap(), &actions)?;
     Ok(actions)
 }
 
@@ -182,6 +247,30 @@ mod tests {
         conn.execute("UPDATE gh_pr SET review_decision = 'REVIEW_REQUIRED' WHERE node_id = 'unapproved'", []).unwrap();
         seed_pr(&conn, "ok", 1);
         assert_eq!(ids(&conn), vec!["ok".to_string()]);
+    }
+
+    fn action(n: i64) -> MonitorAction {
+        MonitorAction {
+            card_id: format!("c{n}"),
+            repo: "owner/repo".into(),
+            number: n,
+            kind: ActionKind::Reran,
+            detail: format!("ci (attempt {n})"),
+        }
+    }
+
+    #[test]
+    fn log_returns_newest_first_and_prunes() {
+        let conn = open_memory();
+        record(&conn, &[]).unwrap();
+        assert!(recent(&conn, 10).unwrap().is_empty());
+        let batch: Vec<_> = (1..=LOG_KEEP + 5).map(action).collect();
+        record(&conn, &batch).unwrap();
+        let all = recent(&conn, 1000).unwrap();
+        assert_eq!(all.len() as i64, LOG_KEEP);
+        assert_eq!(all[0].number, LOG_KEEP + 5);
+        assert_eq!((all[0].kind.as_str(), all[0].detail.as_str()), ("reran", "ci (attempt 505)"));
+        assert_eq!(recent(&conn, 3).unwrap().len(), 3);
     }
 
     #[test]

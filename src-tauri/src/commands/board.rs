@@ -607,6 +607,12 @@ pub fn board_archive_done(older_than_days: i64, db: State<Db>) -> AppResult<usiz
     board_archive_done_impl(&conn, older_than_days)
 }
 
+#[tauri::command]
+pub fn board_monitor_log(limit: i64, db: State<Db>) -> AppResult<Vec<crate::board_monitor::MonitorLogEntry>> {
+    let conn = db.0.lock().unwrap();
+    crate::board_monitor::recent(&conn, limit)
+}
+
 // ---------------------------------------------------------------------------
 // Review / VSCode actions
 // ---------------------------------------------------------------------------

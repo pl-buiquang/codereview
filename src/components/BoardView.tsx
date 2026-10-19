@@ -27,6 +27,7 @@ import { RepoName } from "./RepoName";
 import { TagFilter } from "./TagFilter";
 import { TrackPrDialog } from "./TrackPrDialog";
 import { BoardOverviewPane } from "./BoardOverviewPane";
+import { BoardMonitorPane } from "./BoardMonitorPane";
 import { Icon } from "./icons";
 import { SyncButton } from "./SyncButton";
 
@@ -89,6 +90,8 @@ export function BoardView() {
   const archiveDays = useSettingsStore((s) => s.boardArchiveDays);
   const archiveAgeLabel = archiveDays === 1 ? "1 day" : `${archiveDays} days`;
   const monitorOn = useSettingsStore((s) => s.boardMonitor);
+  const monitorLogOpen = useSettingsStore((s) => s.boardMonitorLogOpen);
+  const setMonitorLogOpen = useSettingsStore((s) => s.setBoardMonitorLogOpen);
   const setMonitorOn = useSettingsStore((s) => s.setBoardMonitor);
   const monitorIntervalMin = useSettingsStore((s) => s.boardMonitorIntervalMin);
   const [batchPending, setBatchPending] = useState(false);
@@ -440,6 +443,14 @@ export function BoardView() {
             >
               <Icon name="refresh" size={13} /> Auto-merge monitor
             </button>
+            <button
+              className={`btn btn-icon${monitorLogOpen ? " active" : ""}`}
+              onClick={() => setMonitorLogOpen(!monitorLogOpen)}
+              title={monitorLogOpen ? "Hide monitor log" : "Show what the monitor has done"}
+              aria-expanded={monitorLogOpen}
+            >
+              <Icon name="chev" size={13} style={{ transform: monitorLogOpen ? "rotate(180deg)" : undefined }} />
+            </button>
             <KebabMenu
               title="Act on the PRs matching the current filters"
               label={`Batch (${batchCards.length})`}
@@ -472,6 +483,7 @@ export function BoardView() {
       </header>
 
       {overviewOpen && <BoardOverviewPane cards={boardQuery.data ?? []} visibleIds={visibleIds} />}
+      {monitorLogOpen && <BoardMonitorPane cards={boardQuery.data ?? []} visibleIds={visibleIds} />}
 
       <div className="inbox-layout">
         <aside className="cr-rail">

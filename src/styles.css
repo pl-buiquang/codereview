@@ -5392,3 +5392,26 @@ button.board-overview-ref {
   font-size: 12px;
   line-height: 1.45;
 }
+
+.board-monitor-time {
+  margin: 0;
+  min-width: 64px;
+}
+.board-monitor-kind {
+  font-size: 11px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.board-monitor-kind.ok {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.board-monitor-kind.warn {
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+.board-monitor-kind.bad {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
