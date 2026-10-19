@@ -491,20 +491,6 @@ export function BoardView() {
             renderLabel={(k) => <span className="lbl">{MERGE_FACET_LABEL[k] ?? k}</span>}
           />
           <FilterList
-            title="Stacks"
-            entries={stackShown}
-            selected={effStack}
-            onSelect={setStackFilter}
-            renderLabel={(k) => {
-              const i = k.lastIndexOf("#");
-              return (
-                <span className="lbl">
-                  <RepoName className="mono" name={k.slice(0, i)} /> #{k.slice(i + 1)}
-                </span>
-              );
-            }}
-          />
-          <FilterList
             title="Repositories"
             entries={repoShown}
             selected={effRepo}
@@ -520,6 +506,20 @@ export function BoardView() {
             title="Exclude tags"
             placeholder="Exclude tag…"
             variant="exclude"
+          />
+          <FilterList
+            title="Stacks"
+            entries={stackShown}
+            selected={effStack}
+            onSelect={setStackFilter}
+            renderLabel={(k) => {
+              const i = k.lastIndexOf("#");
+              return (
+                <span className="lbl">
+                  <RepoName className="mono" name={k.slice(0, i)} /> #{k.slice(i + 1)}
+                </span>
+              );
+            }}
           />
         </aside>
 
