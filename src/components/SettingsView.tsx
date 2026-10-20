@@ -30,12 +30,14 @@ import { invalidateMirrorQueries } from "../lib/sync";
 import type { AutoSync, ToolEnv } from "../lib/types";
 import { Icon, type IconName } from "./icons";
 import { AiSection } from "./SettingsAiSection";
+import { UsageSection } from "./SettingsUsageSection";
 
-type SettingsSection = "general" | "ai" | "logs";
+type SettingsSection = "general" | "ai" | "usage" | "logs";
 
 const SECTIONS: { key: SettingsSection; label: string; icon: IconName }[] = [
   { key: "general", label: "General", icon: "gear" },
   { key: "ai", label: "AI", icon: "bot" },
+  { key: "usage", label: "Usage", icon: "flame" },
   { key: "logs", label: "Logs", icon: "file" },
 ];
 
@@ -775,6 +777,7 @@ export function SettingsView() {
         <div className="settings-content">
           {section === "general" && <GeneralSection />}
           {section === "ai" && <AiSection />}
+          {section === "usage" && <UsageSection />}
           {section === "logs" && <LogsSection />}
         </div>
       </div>

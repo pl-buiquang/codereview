@@ -29,6 +29,59 @@ export interface AiReviewUpdated {
   summary: string | null;
 }
 
+export type UsageRange = "today" | "7d" | "30d" | "all";
+
+export interface UsageTotals {
+  runs: number;
+  errors: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_creation_tokens: number;
+  cost_usd: number;
+  duration_ms: number;
+}
+
+export interface FeatureUsage extends UsageTotals {
+  feature: string;
+  variant: string | null;
+}
+
+export interface ModelUsageRow extends UsageTotals {
+  model: string;
+}
+
+export interface AiUsageSummary {
+  totals: UsageTotals;
+  by_feature: FeatureUsage[];
+  by_model: ModelUsageRow[];
+}
+
+export interface AiRun {
+  id: number;
+  started_at: string;
+  duration_ms: number;
+  feature: string;
+  variant: string | null;
+  /** Set only while the review still exists. */
+  review_id: number | null;
+  label: string;
+  requested_model: string;
+  models: string[];
+  status: "ok" | "error";
+  error: string | null;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_creation_tokens: number;
+  cost_usd: number;
+  repo: string | null;
+  pr_number: number | null;
+  target_title: string | null;
+  base_ref: string | null;
+  head_ref: string | null;
+}
+
 export interface Target {
   id: number;
   repo_id: number;

@@ -27,6 +27,7 @@ import type { AiReviewUpdated } from "./lib/types";
 const CLOSE_ACTIVE_TAB_EVENT = "close-active-tab";
 const FOCUS_UPDATED_EVENT = "focus-updated";
 const AI_REVIEW_UPDATED_EVENT = "ai-review-updated";
+const AI_RUN_RECORDED_EVENT = "ai-run-recorded";
 
 function closeActiveTab() {
   const { activeTabId, closeTab } = useUIStore.getState();
@@ -97,6 +98,22 @@ function App() {
         else unlisten = dispose;
       })
       .catch((e) => console.warn("Could not register AI review listener", e));
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    listen(AI_RUN_RECORDED_EVENT, () => queryClient.invalidateQueries({ queryKey: ["ai-usage"] }))
+      .then((dispose) => {
+        if (disposed) dispose();
+        else unlisten = dispose;
+      })
+      .catch((e) => console.warn("Could not register AI usage listener", e));
     return () => {
       disposed = true;
       unlisten?.();

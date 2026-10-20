@@ -10,6 +10,9 @@ import type {
   MonitorLogEntry,
   PromptInfo,
   AiReviewLayer,
+  AiRun,
+  AiUsageSummary,
+  UsageRange,
   BoardMeta,
   BoardMetaKind,
   Branch,
@@ -106,6 +109,11 @@ export const api = {
   runAiReview: (reviewId: number, layer: AiReviewLayer, model?: string) =>
     invoke<void>("run_ai_review", { reviewId, layer, model: model || null }),
   aiReviewStatus: (reviewId: number) => invoke<AiReviewLayer | null>("ai_review_status", { reviewId }),
+
+  // AI usage log
+  aiUsageSummary: (range: UsageRange) => invoke<AiUsageSummary>("ai_usage_summary", { range }),
+  aiUsageRuns: (range: UsageRange, feature: string | null, limit = 50) =>
+    invoke<AiRun[]>("ai_usage_runs", { range, feature, limit }),
 
   // Chat
   crInstallNote: () => invoke<string | null>("cr_install_note"),
