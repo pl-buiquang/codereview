@@ -8,6 +8,7 @@ use std::sync::Mutex;
 use serde::Serialize;
 use tauri::{Emitter, Manager, State};
 
+use crate::ai_usage::RunTag;
 use crate::commands::chat::{resolve_model, run_claude, ClaudeRun};
 use crate::commands::focus::{child_path, review_local_path};
 use crate::commands::review::ensure_draft;
@@ -116,6 +117,7 @@ fn run(layer: &str, review_id: i64, model: &str, local_path: Option<String>, db_
         extra_args: &[],
         replace_system_prompt: false,
         prompt: &prompt,
+        tag: RunTag::new("ai_review").variant(layer).review(review_id),
     });
     match &result {
         Ok(t) => {

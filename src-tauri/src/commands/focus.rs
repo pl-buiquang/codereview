@@ -1036,6 +1036,7 @@ fn run_generation(
         extra_args: &[],
         replace_system_prompt: false,
         prompt: &format!("Generate the focus for review {review_id}."),
+        tag: crate::ai_usage::RunTag::new("focus").review(review_id),
     });
     let _ = std::fs::remove_dir_all(&scratch);
     result.map(|_| ())

@@ -1,3 +1,4 @@
+pub mod ai_usage;
 mod anchor;
 mod avatar;
 pub mod board;
@@ -171,6 +172,7 @@ pub fn run() {
             let conn = db::open(&db_path)?;
             commands::focus::fail_interrupted(&conn)?;
             app.manage(Db(Mutex::new(conn)));
+            ai_usage::init(app.handle().clone());
             app.manage(db::DbPath(db_path.clone()));
             app.manage(sync::SyncEngine::start(app.handle().clone()));
 
@@ -207,6 +209,8 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(traced(tauri::generate_handler![
+            ai_usage::ai_usage_summary,
+            ai_usage::ai_usage_runs,
             log_path,
             read_app_log,
             get_log_level,

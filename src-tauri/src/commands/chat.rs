@@ -8,6 +8,7 @@ use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
+use crate::ai_usage::{self, ModelTokens, RunTag, RunUsage};
 use crate::db::models::{Chat, ChatMessage, Target};
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
@@ -45,6 +46,11 @@ struct ClaudeEnvelope {
     #[serde(default)]
     total_cost_usd: f64,
     usage: Option<ClaudeUsage>,
+    #[serde(default)]
+    num_turns: i64,
+    session_id: Option<String>,
+    #[serde(default, rename = "modelUsage")]
+    model_usage: std::collections::HashMap<String, ClaudeModelUsage>,
 }
 
 #[derive(Deserialize, Default)]
@@ -53,8 +59,53 @@ struct ClaudeUsage {
     input_tokens: i64,
     #[serde(default)]
     output_tokens: i64,
+    #[serde(default)]
+    cache_read_input_tokens: i64,
+    #[serde(default)]
+    cache_creation_input_tokens: i64,
 }
 
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+struct ClaudeModelUsage {
+    input_tokens: i64,
+    output_tokens: i64,
+    cache_read_input_tokens: i64,
+    cache_creation_input_tokens: i64,
+    #[serde(rename = "costUSD")]
+    cost_usd: f64,
+}
+
+impl ClaudeEnvelope {
+    fn run_usage(&self) -> RunUsage {
+        let usage = self.usage.as_ref();
+        let mut models: Vec<ModelTokens> = self
+            .model_usage
+            .iter()
+            .map(|(model, m)| ModelTokens {
+                model: model.clone(),
+                input_tokens: m.input_tokens,
+                output_tokens: m.output_tokens,
+                cache_read_tokens: m.cache_read_input_tokens,
+                cache_creation_tokens: m.cache_creation_input_tokens,
+                cost_usd: m.cost_usd,
+            })
+            .collect();
+        models.sort_by(|a, b| a.model.cmp(&b.model));
+        RunUsage {
+            num_turns: self.num_turns,
+            input_tokens: usage.map_or(0, |u| u.input_tokens),
+            output_tokens: usage.map_or(0, |u| u.output_tokens),
+            cache_read_tokens: usage.map_or(0, |u| u.cache_read_input_tokens),
+            cache_creation_tokens: usage.map_or(0, |u| u.cache_creation_input_tokens),
+            cost_usd: self.total_cost_usd,
+            session_id: self.session_id.clone(),
+            models,
+        }
+    }
+}
+
+#[derive(Debug)]
 pub(crate) struct TurnResult {
     pub text: String,
     pub input_tokens: i64,
@@ -89,12 +140,15 @@ pub(crate) struct ClaudeRun<'a> {
     /// Replace Claude Code's default system prompt instead of appending to it.
     pub replace_system_prompt: bool,
     pub prompt: &'a str,
+    /// What this run is for; recorded in the usage log.
+    pub tag: RunTag,
 }
 
 /// Call `claude -p` for one conversation turn. On the first turn (no session)
 /// establishes a new session with `--session-id`; on subsequent turns resumes
 /// with `--resume`. The system prompt is only sent on the first turn.
 fn call_claude_turn(
+    review_id: i64,
     session_id: &str,
     is_first_turn: bool,
     model: &str,
@@ -117,6 +171,7 @@ fn call_claude_turn(
         extra_args: &[],
         replace_system_prompt: false,
         prompt: text,
+        tag: RunTag::new("chat").review(review_id),
     })
 }
 
@@ -198,7 +253,9 @@ pub(crate) fn run_claude(run: ClaudeRun) -> AppResult<TurnResult> {
         run.cwd.display()
     );
     let started = std::time::Instant::now();
-    let result = run_command(cmd, run.prompt);
+    let mut usage_tag = run.tag.clone();
+    usage_tag.model = run.model.to_string();
+    let result = run_command(cmd, run.prompt, &usage_tag);
     if let Some(p) = system_prompt_path {
         let _ = std::fs::remove_file(p);
     }
@@ -220,52 +277,72 @@ pub(crate) fn run_claude(run: ClaudeRun) -> AppResult<TurnResult> {
 }
 
 /// Spawn a prepared `claude -p --output-format json` command, feed it `text` on stdin, and parse
-/// the JSON envelope.
-pub(crate) fn run_command(mut cmd: Command, text: &str) -> AppResult<TurnResult> {
-    let mut child = cmd
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| AppError::Chat(format!("failed to spawn claude: {e}")))?;
+/// the JSON envelope. Every run, failed ones included, lands in the usage log under `tag`.
+pub(crate) fn run_command(cmd: Command, text: &str, tag: &RunTag) -> AppResult<TurnResult> {
+    let started_at = ai_usage::now_stamp();
+    let started = std::time::Instant::now();
+    let (result, usage) = execute(cmd, text);
+    let error = result.as_ref().err().map(|e| e.to_string());
+    ai_usage::record(tag, &started_at, started.elapsed().as_millis() as i64, &usage, error.as_deref());
+    result
+}
+
+fn execute(mut cmd: Command, text: &str) -> (AppResult<TurnResult>, RunUsage) {
+    let mut child = match cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn() {
+        Ok(child) => child,
+        Err(e) => return (Err(AppError::Chat(format!("failed to spawn claude: {e}"))), RunUsage::default()),
+    };
 
     if let Some(mut stdin) = child.stdin.take() {
-        stdin
-            .write_all(text.as_bytes())
-            .map_err(|e| AppError::Chat(format!("failed to write prompt: {e}")))?;
+        if let Err(e) = stdin.write_all(text.as_bytes()) {
+            return (Err(AppError::Chat(format!("failed to write prompt: {e}"))), RunUsage::default());
+        }
     }
 
-    let output = child
-        .wait_with_output()
-        .map_err(|e| AppError::Chat(format!("claude process error: {e}")))?;
+    let output = match child.wait_with_output() {
+        Ok(output) => output,
+        Err(e) => return (Err(AppError::Chat(format!("claude process error: {e}"))), RunUsage::default()),
+    };
+    interpret(
+        &output.stdout,
+        &String::from_utf8_lossy(&output.stderr),
+        output.status.success(),
+        output.status.code().unwrap_or(-1),
+    )
+}
 
+/// Turn a finished process' output into the run result plus whatever usage it reported.
+fn interpret(stdout: &[u8], stderr: &str, success: bool, exit_code: i32) -> (AppResult<TurnResult>, RunUsage) {
     // Even on non-zero exit, claude may have written a JSON envelope with a
     // human-readable `result` — parse it first for a clean error message.
-    let raw = String::from_utf8_lossy(&output.stdout);
-    if let Ok(envelope) = serde_json::from_str::<ClaudeEnvelope>(&raw) {
+    let raw = String::from_utf8_lossy(stdout);
+    let parsed = serde_json::from_str::<ClaudeEnvelope>(&raw);
+    let usage = parsed.as_ref().map(ClaudeEnvelope::run_usage).unwrap_or_default();
+
+    if let Ok(envelope) = &parsed {
         if envelope.is_error {
             let detail = envelope
                 .result
+                .clone()
                 .map(|v| match v {
                     serde_json::Value::String(s) => s,
                     other => other.to_string(),
                 })
                 .unwrap_or_else(|| "unknown error".to_string());
-            return Err(AppError::Chat(detail));
+            return (Err(AppError::Chat(detail)), usage);
         }
     }
 
-    if !output.status.success() || output.stdout.is_empty() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        return Err(AppError::Chat(if stderr.is_empty() {
-            format!("claude exited {}", output.status.code().unwrap_or(-1))
-        } else {
-            stderr
-        }));
+    if !success || stdout.is_empty() {
+        let stderr = stderr.trim();
+        let message = if stderr.is_empty() { format!("claude exited {exit_code}") } else { stderr.to_string() };
+        return (Err(AppError::Chat(message)), usage);
     }
 
-    let envelope: ClaudeEnvelope = serde_json::from_str(&raw)
-        .map_err(|e| AppError::Chat(format!("failed to parse claude response: {e}")))?;
+    let envelope = match parsed {
+        Ok(envelope) => envelope,
+        Err(e) => return (Err(AppError::Chat(format!("failed to parse claude response: {e}"))), usage),
+    };
 
     let text_out = envelope
         .result
@@ -275,13 +352,13 @@ pub(crate) fn run_command(mut cmd: Command, text: &str) -> AppResult<TurnResult>
         })
         .unwrap_or_default();
 
-    let usage = envelope.usage.unwrap_or_default();
-    Ok(TurnResult {
+    let turn = TurnResult {
         text: text_out,
         input_tokens: usage.input_tokens,
         output_tokens: usage.output_tokens,
-        cost_usd: envelope.total_cost_usd,
-    })
+        cost_usd: usage.cost_usd,
+    };
+    (Ok(turn), usage)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -487,6 +564,7 @@ pub async fn chat_send(
 
     // --- Phase 3: call claude CLI (no DB lock) ---
     let turn = call_claude_turn(
+        review_id,
         &session_id,
         is_first_turn,
         &model,
@@ -714,4 +792,45 @@ pub fn set_chat_collapsed(review_id: i64, collapsed: bool, db: State<Db>) -> App
         params![collapsed as i64, review_id],
     )?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const OK: &str = r#"{"type":"result","is_error":false,"result":"hi","num_turns":2,"session_id":"s1",
+        "total_cost_usd":1.5,
+        "usage":{"input_tokens":3,"output_tokens":4,"cache_read_input_tokens":5,"cache_creation_input_tokens":6},
+        "modelUsage":{"opus":{"inputTokens":2,"outputTokens":3,"cacheReadInputTokens":5,"cacheCreationInputTokens":6,"costUSD":1.4},
+                      "haiku":{"inputTokens":1,"outputTokens":1,"costUSD":0.1}}}"#;
+
+    #[test]
+    fn success_reports_text_and_per_model_usage() {
+        let (result, usage) = interpret(OK.as_bytes(), "", true, 0);
+        let turn = result.unwrap();
+        assert_eq!((turn.text.as_str(), turn.input_tokens, turn.output_tokens, turn.cost_usd), ("hi", 3, 4, 1.5));
+        assert_eq!((usage.num_turns, usage.cache_read_tokens, usage.cache_creation_tokens), (2, 5, 6));
+        assert_eq!(usage.session_id.as_deref(), Some("s1"));
+        let models: Vec<_> = usage.models.iter().map(|m| (m.model.as_str(), m.cost_usd)).collect();
+        assert_eq!(models, vec![("haiku", 0.1), ("opus", 1.4)]);
+    }
+
+    #[test]
+    fn error_envelope_still_reports_usage() {
+        let raw = r#"{"is_error":true,"result":"rate limited","total_cost_usd":0.25,"usage":{"input_tokens":9}}"#;
+        let (result, usage) = interpret(raw.as_bytes(), "", false, 1);
+        assert_eq!(result.unwrap_err().to_string(), AppError::Chat("rate limited".into()).to_string());
+        assert_eq!((usage.cost_usd, usage.input_tokens), (0.25, 9));
+    }
+
+    #[test]
+    fn crash_and_garbage_have_no_usage() {
+        let (result, usage) = interpret(b"", "boom\n", false, 2);
+        assert_eq!(result.unwrap_err().to_string(), AppError::Chat("boom".into()).to_string());
+        assert_eq!(usage.cost_usd, 0.0);
+
+        let (result, usage) = interpret(b"not json", "", true, 0);
+        assert!(result.is_err());
+        assert!(usage.models.is_empty());
+    }
 }

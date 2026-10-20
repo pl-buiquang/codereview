@@ -60,6 +60,12 @@ const FORK_MAX_AGE_MS: i64 = 5 * 60 * 1000;
 const EXTRACT_MAX_BYTES: usize = 400_000;
 const EXTRACT_MODEL: &str = "haiku";
 
+fn session_tag(variant: &str, session: &ClaudeSession) -> crate::ai_usage::RunTag {
+    let project = session.cwd.trim_end_matches('/').rsplit('/').next().unwrap_or("");
+    let short: String = session.session_id.chars().take(8).collect();
+    crate::ai_usage::RunTag::new("session_summary").variant(variant).label(format!("{project} ({short})"))
+}
+
 fn run_fork_summary(session: &ClaudeSession, instructions: &str) -> AppResult<crate::commands::chat::TurnResult> {
     let mut cmd = std::process::Command::new(crate::tools::claude_bin());
     cmd.current_dir(&session.cwd)
@@ -67,7 +73,7 @@ fn run_fork_summary(session: &ClaudeSession, instructions: &str) -> AppResult<cr
         .args(["--fork-session", "--no-session-persistence", "--max-turns", "1"])
         .env("CLAUDE_SUMMARY_RUNNING", "1");
     let prompt = format!("{instructions}\n\nSummarize this conversation so far. Do not call any tools.");
-    crate::commands::chat::run_command(cmd, &prompt)
+    crate::commands::chat::run_command(cmd, &prompt, &session_tag("fork", session))
 }
 
 fn run_extract_summary(
@@ -93,6 +99,7 @@ fn run_extract_summary(
         extra_args: &["--tools", "", "--effort", "low"],
         replace_system_prompt: true,
         prompt: &prompt,
+        tag: session_tag("extract", session),
     })
 }
 

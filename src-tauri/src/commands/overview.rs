@@ -213,6 +213,7 @@ pub async fn board_overview_generate(model: Option<String>, db: State<'_, Db>) -
             extra_args: &["--tools", "", "--effort", "low"],
             replace_system_prompt: true,
             prompt: &snapshot,
+            tag: crate::ai_usage::RunTag::new("board_overview").label("Board overview"),
         })
     })
     .await
