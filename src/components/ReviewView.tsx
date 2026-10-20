@@ -87,6 +87,13 @@ import {
   type JumpListHandle,
 } from "../lib/keyboard";
 import { groupThreads, isDraftReply, type CommentThread } from "../lib/threads";
+import {
+  DEFAULT_COMMENT_FILTER,
+  githubThreadItem,
+  localCommentItem,
+  matchesCommentFilter,
+  type CommentFilter,
+} from "../lib/commentFilter";
 import { anchorPin, isCommentOutdated } from "../lib/staleness";
 import { summaryLine } from "../lib/text";
 import { AI_SUBTAGS, isAiTag, tagLabel, tagTitle, type CommentTag } from "../lib/commentTag";
@@ -119,6 +126,7 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
   const [rightWidth, setRightWidth] = useState(360);
   const [pendingChatMessage, setPendingChatMessage] = useState<string | null>(null);
   const [typeFilter, setTypeFilter] = useState<"all" | FileCategory>("all");
+  const [commentFilter, setCommentFilter] = useState<CommentFilter>(DEFAULT_COMMENT_FILTER);
   const diffAreaRef = useRef<HTMLDivElement>(null);
   const summaryBodyRef = useRef<string | null>(null);
 
@@ -271,6 +279,10 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
     staleTime: 30_000,
     ...autoSyncRefetch(autoSync, 3 * 60_000),
   });
+  const diffThreads = useMemo(
+    () => (threadsQuery.data ?? []).filter((t) => matchesCommentFilter(githubThreadItem(t), commentFilter)),
+    [threadsQuery.data, commentFilter],
+  );
 
   // n/p: stateless, DOM-query based. Collect rendered thread blocks inside the
   // scroll container (skipping a .line-widget that holds only an open composer),
@@ -602,6 +614,8 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
           hiddenPaths={focusHiddenPaths}
           typeFilter={typeFilter}
           onTypeFilterChange={setTypeFilter}
+          commentFilter={commentFilter}
+          onCommentFilterChange={setCommentFilter}
           prContext={target?.kind === "github_pr" && owner && name && prNumber != null ? { owner, name, number: prNumber } : null}
         />
         {!sidebarCollapsed && <div className="resize-handle" onMouseDown={startResize("left")} />}
@@ -671,7 +685,8 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
               visibleFileIdx={visibleFileIdx}
               viewType={viewType}
               detail={detail}
-              threads={threadsQuery.data ?? []}
+              threads={diffThreads}
+              commentFilter={commentFilter}
               readOnly={readOnly}
               kbHandles={fileKbRef}
               searchKeysByFile={matchKeysByFile}
@@ -1574,6 +1589,7 @@ function ReviewDiff({
   viewType,
   detail,
   threads,
+  commentFilter,
   readOnly,
   kbHandles,
   searchKeysByFile,
@@ -1594,6 +1610,7 @@ function ReviewDiff({
   viewType: ViewType;
   detail: ReviewDetail;
   threads: PrThread[];
+  commentFilter: CommentFilter;
   readOnly: boolean;
   kbHandles: MutableRefObject<Map<number, FileKbHandle>>;
   searchKeysByFile: Map<number, Set<string>>;
@@ -1620,6 +1637,7 @@ function ReviewDiff({
             viewType={viewType}
             detail={detail}
             threads={threads}
+            commentFilter={commentFilter}
             readOnly={readOnly}
             kbHandles={kbHandles}
             searchKeys={searchKeysByFile.get(index)}
@@ -1655,6 +1673,7 @@ function FileReview({
   viewType,
   detail,
   threads,
+  commentFilter,
   readOnly,
   kbHandles,
   searchKeys,
@@ -1674,6 +1693,7 @@ function FileReview({
   viewType: ViewType;
   detail: ReviewDetail;
   threads: PrThread[];
+  commentFilter: CommentFilter;
   readOnly: boolean;
   kbHandles: MutableRefObject<Map<number, FileKbHandle>>;
   searchKeys: Set<string> | undefined;
@@ -1935,8 +1955,8 @@ function FileReview({
     () =>
       groupThreads(
         detail.comments.filter((c) => c.file_path === path && c.subject_type === "file"),
-      ),
-    [detail.comments, path],
+      ).filter((t) => matchesCommentFilter(localCommentItem(t.root), commentFilter)),
+    [detail.comments, path, commentFilter],
   );
 
   // Group this file's line comments into threads, then key each thread by the
@@ -1952,6 +1972,7 @@ function FileReview({
         !isDraftReply(c), // rendered inside its GitHub thread instead
     );
     for (const thread of groupThreads(lineComments)) {
+      if (!matchesCommentFilter(localCommentItem(thread.root), commentFilter)) continue;
       const key = keyByAnchor.get(`${thread.root.side}:${thread.root.line}`);
       if (!key) {
         orphan.push(thread);
@@ -1962,7 +1983,7 @@ function FileReview({
       byKey.set(key, arr);
     }
     return { commentsByKey: byKey, orphans: orphan };
-  }, [detail.comments, path, keyByAnchor]);
+  }, [detail.comments, path, keyByAnchor, commentFilter]);
 
   // Existing GitHub review threads on this file: anchored ones become inline
   // widgets, the rest (outdated, file-level, or off the current diff) drop into

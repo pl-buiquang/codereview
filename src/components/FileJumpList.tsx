@@ -24,7 +24,15 @@ import { summaryLine } from "../lib/text";
 import { timeAgo } from "../lib/timeAgo";
 import type { JumpListHandle } from "../lib/keyboard";
 import type { PrThread } from "../lib/types";
-import { AI_SUBTAGS, isAiTag, tagLabel, type AiSubtag, type CommentTag } from "../lib/commentTag";
+import { AI_SUBTAGS, isAiTag, tagLabel, type CommentTag } from "../lib/commentTag";
+import {
+  DEFAULT_COMMENT_FILTER,
+  isCommentFilterActive,
+  matchesCommentFilter,
+  type CommentFilter,
+  type ResolutionFilter,
+  type SourceFilter,
+} from "../lib/commentFilter";
 import { ContextPane } from "./ContextPane";
 import { Icon } from "./icons";
 
@@ -109,8 +117,6 @@ function Chevron({ open }: { open: boolean }) {
   );
 }
 
-type ResolutionFilter = "all" | "unresolved" | "resolved";
-type SourceFilter = "all" | "draft" | "published" | "github" | "ai" | AiSubtag | "local";
 type SortMode = "file" | "time";
 
 interface ReplyEntry {
@@ -147,6 +153,8 @@ export function FileJumpList({
   hiddenPaths,
   typeFilter,
   onTypeFilterChange,
+  commentFilter,
+  onCommentFilterChange,
   prContext,
 }: {
   reviewId: number;
@@ -159,6 +167,9 @@ export function FileJumpList({
   hiddenPaths?: Set<string>;
   typeFilter: "all" | FileCategory;
   onTypeFilterChange: (filter: "all" | FileCategory) => void;
+  /** Comment filters; owned by the review so the diff applies them too. */
+  commentFilter: CommentFilter;
+  onCommentFilterChange: (filter: CommentFilter) => void;
   /** GitHub PR coordinates for the Context tab; null hides that tab (local reviews). */
   prContext?: { owner: string; name: string; number: number } | null;
 }) {
@@ -381,8 +392,11 @@ export function FileJumpList({
   const [activeTab, setActiveTab] = useState<"files" | "comments" | "context">(
     leftPaneTab === "context" && prContext ? "context" : "files",
   );
-  const [resolutionFilter, setResolutionFilter] = useState<ResolutionFilter>("all");
-  const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
+  const resolutionFilter = commentFilter.resolution;
+  const sourceFilter = commentFilter.source;
+  const setResolutionFilter = (resolution: ResolutionFilter) =>
+    onCommentFilterChange({ ...commentFilter, resolution });
+  const setSourceFilter = (source: SourceFilter) => onCommentFilterChange({ ...commentFilter, source });
   const [sortMode, setSortMode] = useState<SortMode>("file");
 
   const allComments = detail?.comments ?? [];
@@ -459,21 +473,8 @@ export function FileJumpList({
   }, [allComments, threads]);
 
   const filteredItems = useMemo(() => {
-    return displayItems.filter((item) => {
-      if (resolutionFilter === "unresolved" && item.isResolved) return false;
-      if (resolutionFilter === "resolved" && !item.isResolved) return false;
-      if (sourceFilter === "ai") {
-        if (!isAiTag(item.tag)) return false;
-      } else if (sourceFilter === "local" || isAiTag(sourceFilter as CommentTag)) {
-        if (item.tag !== sourceFilter) return false;
-      } else if (sourceFilter === "draft") {
-        if (item.source !== "draft" || item.tag != null) return false;
-      } else if (sourceFilter !== "all" && item.source !== sourceFilter) {
-        return false;
-      }
-      return true;
-    });
-  }, [displayItems, resolutionFilter, sourceFilter]);
+    return displayItems.filter((item) => matchesCommentFilter(item, commentFilter));
+  }, [displayItems, commentFilter]);
 
   const scrollToItem = (item: DisplayItem) => {
     const root = scrollRootRef.current;
@@ -674,6 +675,18 @@ export function FileJumpList({
                 {!!hiddenPaths?.size && (
                   <p className="muted focus-hidden-count">
                     {hiddenPaths.size} {hiddenPaths.size === 1 ? "file" : "files"} hidden by focus
+                  </p>
+                )}
+                {isCommentFilterActive(commentFilter) && (
+                  <p className="muted focus-hidden-count">
+                    Comments filtered in the diff ·{" "}
+                    <button
+                      type="button"
+                      className="comment-filter-btn"
+                      onClick={() => onCommentFilterChange(DEFAULT_COMMENT_FILTER)}
+                    >
+                      Reset
+                    </button>
                   </p>
                 )}
               </div>
