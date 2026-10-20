@@ -1,3 +1,4 @@
+pub mod ai_review;
 pub mod board;
 pub mod chat;
 pub mod editor;

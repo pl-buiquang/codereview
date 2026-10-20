@@ -22,9 +22,11 @@ import { GIT_CHANGED_EVENT, gitChangedQueryKeys, type GitChangedPayload } from "
 import { useSyncBridge } from "./lib/sync";
 import { brief, log } from "./lib/log";
 import { useUIStore, type Tab } from "./store";
+import type { AiReviewUpdated } from "./lib/types";
 
 const CLOSE_ACTIVE_TAB_EVENT = "close-active-tab";
 const FOCUS_UPDATED_EVENT = "focus-updated";
+const AI_REVIEW_UPDATED_EVENT = "ai-review-updated";
 
 function closeActiveTab() {
   const { activeTabId, closeTab } = useUIStore.getState();
@@ -69,6 +71,32 @@ function App() {
         else unlisten = dispose;
       })
       .catch((e) => console.warn("Could not register focus listener", e));
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    listen<AiReviewUpdated>(AI_REVIEW_UPDATED_EVENT, ({ payload }) => {
+      queryClient.invalidateQueries({ queryKey: ["ai-review-status", payload.review_id] });
+      if (payload.status === "running") return;
+      queryClient.invalidateQueries({ queryKey: ["review", payload.review_id] });
+      queryClient.invalidateQueries({ queryKey: ["reviews"] });
+      if (payload.status === "failed") {
+        toast.error(`AI review (${payload.layer}) failed:\n${payload.error ?? "unknown error"}`);
+      } else {
+        toast.success(`AI review (${payload.layer}) finished${payload.summary ? `:\n${payload.summary}` : ""}`);
+      }
+    })
+      .then((dispose) => {
+        if (disposed) dispose();
+        else unlisten = dispose;
+      })
+      .catch((e) => console.warn("Could not register AI review listener", e));
     return () => {
       disposed = true;
       unlisten?.();

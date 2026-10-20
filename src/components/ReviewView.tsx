@@ -91,6 +91,7 @@ import { anchorPin, isCommentOutdated } from "../lib/staleness";
 import { summaryLine } from "../lib/text";
 import { AI_SUBTAGS, isAiTag, tagLabel, tagTitle, type CommentTag } from "../lib/commentTag";
 import type {
+  AiReviewLayer,
   Comment,
   FocusView,
   FreshnessResult,
@@ -888,6 +889,21 @@ function ReviewHeader({
   const chatModel = useSettingsStore((s) => s.chatModel);
   const focusGenerating = focusView?.focus.status === "generating" || generateFocus.isPending;
   const hasFocus = focusView?.focus.planned_at != null;
+  const aiReviewStatus = useQuery({
+    queryKey: ["ai-review-status", detail.review.id],
+    queryFn: () => api.aiReviewStatus(detail.review.id),
+  });
+  const aiReviewRunning = aiReviewStatus.data ?? null;
+  const runAiReview = useMutation({
+    mutationFn: (layer: AiReviewLayer) => api.runAiReview(detail.review.id, layer, chatModel || undefined),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["ai-review-status", detail.review.id] }),
+    onError: (e) => toast.error(`Could not start AI review:\n${String(e)}`),
+  });
+  const aiReviewItems: { layer: AiReviewLayer; label: string; hint: string; needsClone?: boolean }[] = [
+    { layer: "explain", label: "AI review: explain changes", hint: "Add an explanatory comment per change" },
+    { layer: "critique", label: "AI review: critique (Standards + Spec)", hint: "Check coding standards and the originating spec" },
+    { layer: "codex", label: "AI review: Codex adversarial", hint: "Challenge the approach with the Codex reviewer", needsClone: true },
+  ];
 
   const deleteReview = useMutation({
     mutationFn: () => api.deleteReview(review.id),
@@ -1431,6 +1447,28 @@ function ReviewHeader({
                     Regenerate AI focus
                   </button>
                 )}
+                {aiReviewItems.map((item) => {
+                  const disabledReason = !claudeAvailable
+                    ? "Claude CLI not found"
+                    : readOnly
+                      ? "Published reviews cannot be edited"
+                      : aiReviewRunning
+                        ? `AI review (${aiReviewRunning}) running…`
+                        : item.needsClone
+                          ? noCloneReason
+                          : null;
+                  return (
+                    <button
+                      key={item.layer}
+                      role="menuitem"
+                      disabled={disabledReason != null || runAiReview.isPending}
+                      title={disabledReason ?? item.hint}
+                      onClick={run(() => runAiReview.mutate(item.layer))}
+                    >
+                      {item.label}
+                    </button>
+                  );
+                })}
                 <button
                   role="menuitem"
                   disabled={readOnly || !anchorsStale || reanchorComments.isPending}

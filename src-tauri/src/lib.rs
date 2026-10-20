@@ -150,6 +150,7 @@ pub fn run() {
         })
         .manage(CrNote(Mutex::new(cr_note)))
         .manage(watch::Watchers::default())
+        .manage(commands::ai_review::AiReviewJobs::default())
         .setup(move |app| {
             // Ensure ~/.codereview/ exists for worktrees and future per-user data.
             if let Some(home) = dirs::home_dir() {
@@ -227,6 +228,8 @@ pub fn run() {
             commands::focus::set_file_override,
             commands::focus::clear_focus,
             commands::focus::generate_focus,
+            commands::ai_review::run_ai_review,
+            commands::ai_review::ai_review_status,
             commands::review::create_review,
             commands::review::list_reviews,
             commands::review::list_target_reviews,

@@ -349,7 +349,7 @@ fn apply_generated(hunks: &mut [DiffHunk], generated: &HashSet<String>) {
     }
 }
 
-fn review_local_path(conn: &Connection, review_id: i64) -> AppResult<Option<String>> {
+pub(crate) fn review_local_path(conn: &Connection, review_id: i64) -> AppResult<Option<String>> {
     conn.query_row(
         "SELECT repo.local_path FROM review r
          JOIN target t ON t.id = r.target_id
@@ -979,7 +979,7 @@ fn app_mode_prompt(skill: &str, review_id: i64, plan_path: &Path) -> String {
 }
 
 /// PATH for the child with the app's bundled `cr` sidecar first, when present.
-fn child_path() -> Option<std::ffi::OsString> {
+pub(crate) fn child_path() -> Option<std::ffi::OsString> {
     let exe_dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
     let cr = exe_dir.join(if cfg!(windows) { "cr.exe" } else { "cr" });
     if !cr.exists() {

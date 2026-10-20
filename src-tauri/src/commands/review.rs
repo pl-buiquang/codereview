@@ -140,7 +140,7 @@ fn review_status(conn: &Connection, review_id: i64) -> AppResult<String> {
     .map_err(Into::into)
 }
 
-fn ensure_draft(conn: &Connection, review_id: i64) -> AppResult<()> {
+pub(crate) fn ensure_draft(conn: &Connection, review_id: i64) -> AppResult<()> {
     match review_status(conn, review_id)?.as_str() {
         "draft" => Ok(()),
         "published_pending" => Err(AppError::Other(

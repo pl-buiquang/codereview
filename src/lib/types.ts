@@ -20,6 +20,14 @@ export interface Branch {
 
 export type ReviewEvent = "comment" | "approve" | "request_changes";
 export type Side = "LEFT" | "RIGHT";
+export type AiReviewLayer = "explain" | "critique" | "codex";
+export interface AiReviewUpdated {
+  review_id: number;
+  layer: AiReviewLayer;
+  status: "running" | "done" | "failed";
+  error: string | null;
+  summary: string | null;
+}
 
 export interface Target {
   id: number;

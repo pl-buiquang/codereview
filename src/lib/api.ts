@@ -9,6 +9,7 @@ import type {
   BoardOverview,
   MonitorLogEntry,
   PromptInfo,
+  AiReviewLayer,
   BoardMeta,
   BoardMetaKind,
   Branch,
@@ -100,6 +101,11 @@ export const api = {
   clearFocus: (reviewId: number) => invoke<void>("clear_focus", { reviewId }),
   generateFocus: (reviewId: number, model?: string) =>
     invoke<void>("generate_focus", { reviewId, model: model || null }),
+
+  // AI review (headless /local-review)
+  runAiReview: (reviewId: number, layer: AiReviewLayer, model?: string) =>
+    invoke<void>("run_ai_review", { reviewId, layer, model: model || null }),
+  aiReviewStatus: (reviewId: number) => invoke<AiReviewLayer | null>("ai_review_status", { reviewId }),
 
   // Chat
   crInstallNote: () => invoke<string | null>("cr_install_note"),
