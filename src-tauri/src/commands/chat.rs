@@ -190,9 +190,31 @@ pub(crate) fn run_claude(run: ClaudeRun) -> AppResult<TurnResult> {
         }
         None => None,
     };
+    let tag = run.prompt_file_tag;
+    log::info!(
+        target: "claude",
+        "{tag}: starting claude -p (model {:?}, cwd {})",
+        run.model,
+        run.cwd.display()
+    );
+    let started = std::time::Instant::now();
     let result = run_command(cmd, run.prompt);
     if let Some(p) = system_prompt_path {
         let _ = std::fs::remove_file(p);
+    }
+    let secs = started.elapsed().as_secs();
+    match &result {
+        Ok(t) => {
+            log::info!(target: "claude", "{tag}: finished in {secs}s");
+            log::debug!(
+                target: "claude",
+                "{tag}: {} in / {} out tokens, ${:.2}",
+                t.input_tokens,
+                t.output_tokens,
+                t.cost_usd
+            );
+        }
+        Err(e) => log::warn!(target: "claude", "{tag}: failed after {secs}s: {e}"),
     }
     result
 }

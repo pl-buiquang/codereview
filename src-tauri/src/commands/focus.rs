@@ -1071,6 +1071,10 @@ pub fn generate_focus(
     let _ = app.emit("focus-updated", FocusUpdated { review_id });
     tauri::async_runtime::spawn_blocking(move || {
         let result = run_generation(&skill, review_id, &model, local_path, &db_path);
+        match &result {
+            Ok(()) => log::info!(target: "focus", "review {review_id}: generation finished"),
+            Err(e) => log::warn!(target: "focus", "review {review_id}: generation failed: {e}"),
+        }
         {
             let db = app.state::<Db>();
             let conn = db.0.lock().unwrap();

@@ -101,7 +101,8 @@ fn run(layer: &str, review_id: i64, model: &str, local_path: Option<String>, db_
     let extra: Vec<&Path> = extra_dirs.iter().map(|p| p.as_path()).collect();
     let prompt = prompt_for(layer, review_id)?;
     let sys = system_prompt(review_id);
-    run_claude(ClaudeRun {
+    log::info!(target: "ai_review", "review {review_id}: started `{prompt}`");
+    let result = run_claude(ClaudeRun {
         model,
         allowed_tools: TOOLS,
         // Explicit so the user's own settings (e.g. `defaultMode: plan`) never leak in.
@@ -115,8 +116,15 @@ fn run(layer: &str, review_id: i64, model: &str, local_path: Option<String>, db_
         extra_args: &[],
         replace_system_prompt: false,
         prompt: &prompt,
-    })
-    .map(|t| t.text)
+    });
+    match &result {
+        Ok(t) => {
+            log::info!(target: "ai_review", "review {review_id} {layer}: finished");
+            log::debug!(target: "ai_review", "review {review_id} {layer}: summary: {}", t.text);
+        }
+        Err(e) => log::warn!(target: "ai_review", "review {review_id} {layer}: failed: {e}"),
+    }
+    result.map(|t| t.text)
 }
 
 /// Start a background `/local-review` run (`layer`: explain | critique | codex).

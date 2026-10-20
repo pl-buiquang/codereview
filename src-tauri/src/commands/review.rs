@@ -1613,6 +1613,7 @@ pub async fn publish_review(review_id: i64, db: State<'_, Db>) -> AppResult<Revi
     let payload = build_publish_payload(&detail);
 
     let gh_id = provider_for().post_review(&owner, &name, number, &payload.to_string())?;
+    log::info!(target: "publish", "review {review_id}: published to {owner}/{name}#{number} (github review {gh_id})");
 
     let ts = now();
     conn.execute(
@@ -1626,7 +1627,7 @@ pub async fn publish_review(review_id: i64, db: State<'_, Db>) -> AppResult<Revi
     // fails the publish — the review is already locked at this point.
     match capture_github_comment_ids(&conn, &detail, &owner, &name, number, gh_id) {
         Ok(n) => {
-            eprintln!("[publish.capture_ids] stored {n} github comment ids for review {review_id}")
+            log::debug!(target: "publish", "stored {n} github comment ids for review {review_id}")
         }
         Err(e) => crate::logging::warn(&format!(
             "[publish.capture_ids] best-effort capture failed for review {review_id}: {e}"
@@ -1692,6 +1693,7 @@ pub fn publish_review_pending(review_id: i64, db: State<Db>) -> AppResult<Review
     let gh_id = provider_for()
         .post_review(&owner, &name, number, &payload.to_string())
         .map_err(map_pending_conflict)?;
+    log::info!(target: "publish", "review {review_id}: pending review {gh_id} created on {owner}/{name}#{number}");
     let ts = now();
     conn.execute(
         "UPDATE review SET status = 'published_pending', github_review_id = ?1, updated_at = ?2
@@ -1715,6 +1717,7 @@ pub fn submit_pending_review(review_id: i64, db: State<Db>) -> AppResult<Review>
         .ok_or_else(|| AppError::Other("PR target missing number".into()))?;
     let (owner, name) = pr_remote(&conn, detail.target.repo_id)?;
     provider_for().submit_pending_review(&owner, &name, number, gh_id, event)?;
+    log::info!(target: "publish", "review {review_id}: pending review {gh_id} submitted on {owner}/{name}#{number}");
     mark_submitted(&conn, review_id)?;
     get_review_row(&conn, review_id)
 }
@@ -1731,6 +1734,7 @@ pub fn discard_pending_review(review_id: i64, db: State<Db>) -> AppResult<Review
         .ok_or_else(|| AppError::Other("PR target missing number".into()))?;
     let (owner, name) = pr_remote(&conn, detail.target.repo_id)?;
     provider_for().delete_pending_review(&owner, &name, number, gh_id)?;
+    log::info!(target: "publish", "review {review_id}: pending review {gh_id} discarded on {owner}/{name}#{number}");
     mark_discarded(&conn, review_id)?;
     get_review_row(&conn, review_id)
 }
