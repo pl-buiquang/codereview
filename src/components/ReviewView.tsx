@@ -1285,26 +1285,6 @@ function ReviewHeader({
             </span>
           </span>
         )}
-        <button
-          className="btn"
-          disabled={readOnly || refreshReview.isPending}
-          title={
-            readOnly
-              ? "Published reviews cannot be synced"
-              : "Sync the PR and check the branch for new commits (the review stays on its commits until you update it)"
-          }
-          onClick={() => refreshReview.mutate()}
-        >
-          {refreshReview.isPending ? (
-            <>
-              <span className="spinner" /> Syncing…
-            </>
-          ) : (
-            <>
-              <Icon name="refresh" size={13} /> Sync
-            </>
-          )}
-        </button>
         {isPr && draftReplyCount > 0 && (
           <button
             className="btn btn-primary"
@@ -1420,6 +1400,18 @@ function ReviewHeader({
             };
             return (
               <>
+                <button
+                  role="menuitem"
+                  disabled={readOnly || refreshReview.isPending}
+                  title={
+                    readOnly
+                      ? "Published reviews cannot be synced"
+                      : "Sync the PR and check the branch for new commits (the review stays on its commits until you update it)"
+                  }
+                  onClick={run(() => refreshReview.mutate())}
+                >
+                  {refreshReview.isPending ? "Syncing…" : "Sync now"}
+                </button>
                 {isPr && (
                   <>
                     <button
