@@ -1374,6 +1374,11 @@ function ReviewHeader({
             </button>
           </>
         )}
+        {aiReviewRunning && (
+          <span className="muted" title={`AI review (${aiReviewRunning}) running in the background`}>
+            <span className="spinner" /> AI review…
+          </span>
+        )}
         <KebabMenu title="Review actions">
           {(close) => {
             const run = (fn: () => void) => () => {
@@ -1480,7 +1485,13 @@ function ReviewHeader({
                       title={disabledReason ?? item.hint}
                       onClick={run(() => runAiReview.mutate(item.layer))}
                     >
-                      {item.label}
+                      {aiReviewRunning === item.layer ? (
+                        <>
+                          <span className="spinner" /> {item.label}…
+                        </>
+                      ) : (
+                        item.label
+                      )}
                     </button>
                   );
                 })}
