@@ -75,8 +75,8 @@ export function InboxView() {
   const filters = useUIStore((s) => s.inboxFilters);
   const setInboxFilters = useUIStore((s) => s.setInboxFilters);
   const {
-    repo: repoFilter,
-    author: authorFilter,
+    repos: repoFilter,
+    authors: authorFilter,
     type: typeFilter,
     review: reviewFilter,
     status: statusFilter,
@@ -84,8 +84,8 @@ export function InboxView() {
   } = filters;
   const active: BucketKey = TABS.find((t) => t.key === filters.bucket)?.key ?? "needs-you";
   const setActive = (bucket: BucketKey) => setInboxFilters({ bucket });
-  const setRepoFilter = (repo: string | null) => setInboxFilters({ repo });
-  const setAuthorFilter = (author: string | null) => setInboxFilters({ author });
+  const setRepoFilter = (repos: string[]) => setInboxFilters({ repos });
+  const setAuthorFilter = (authors: string[]) => setInboxFilters({ authors });
   const setTypeFilter = (type: string | null) => setInboxFilters({ type });
   const setReviewFilter = (review: string | null) => setInboxFilters({ review });
   const setStatusFilter = (status: string | null) => setInboxFilters({ status });
@@ -198,15 +198,15 @@ export function InboxView() {
     };
   }, [tabItems, trackedIds]);
 
-  const effRepo = repoFilter && tabItems.some((i) => i.repo === repoFilter) ? repoFilter : null;
-  const effAuthor = authorFilter && tabItems.some((i) => i.author_login === authorFilter) ? authorFilter : null;
+  const effRepos = repoFilter.filter((r) => tabItems.some((i) => i.repo === r));
+  const effAuthors = authorFilter.filter((a) => tabItems.some((i) => i.author_login === a));
   const effType = typeFilter && tabItems.some((i) => i.type === typeFilter) ? typeFilter : null;
   const effReview = reviewFilter && tabItems.some((i) => i.review_decision === reviewFilter) ? reviewFilter : null;
   const effStatus = statusFilter && tabItems.some((i) => statusKey(i) === statusFilter) ? statusFilter : null;
 
   const items = tabItems.filter((i) => {
-    if (effRepo && i.repo !== effRepo) return false;
-    if (effAuthor && i.author_login !== effAuthor) return false;
+    if (effRepos.length > 0 && !effRepos.includes(i.repo)) return false;
+    if (effAuthors.length > 0 && !effAuthors.includes(i.author_login ?? "")) return false;
     if (effType && i.type !== effType) return false;
     if (effReview && i.review_decision !== effReview) return false;
     if (effStatus && statusKey(i) !== effStatus) return false;
@@ -269,14 +269,14 @@ export function InboxView() {
             onSelect={setReviewFilter}
             renderLabel={(key) => <span className="lbl">{reviewLabel(key)}</span>}
           />
-          <FilterList
+          <MultiFilterList
             title="Repositories"
             entries={repoEntries}
-            selected={effRepo}
-            onSelect={setRepoFilter}
+            selected={effRepos}
+            onChange={setRepoFilter}
             renderLabel={(key) => <RepoName className="lbl mono" name={key} />}
           />
-          <FilterList title="Users" entries={authorEntries} selected={effAuthor} onSelect={setAuthorFilter} />
+          <MultiFilterList title="Users" entries={authorEntries} selected={effAuthors} onChange={setAuthorFilter} />
         </aside>
 
         <div className="cr-list">
@@ -318,6 +318,48 @@ export function InboxView() {
         </div>
       </div>
     </section>
+  );
+}
+
+function MultiFilterList({
+  title,
+  entries,
+  selected,
+  onChange,
+  renderLabel,
+}: {
+  title: string;
+  entries: [string, number][];
+  selected: string[];
+  onChange: (next: string[]) => void;
+  renderLabel?: (key: string) => React.ReactNode;
+}) {
+  if (entries.length === 0) return null;
+  return (
+    <div className="cr-rail-group">
+      <div className="cr-rail-h">
+        <span>{title}</span>
+        {selected.length > 0 && (
+          <button className="cr-rail-clear" onClick={() => onChange([])}>
+            clear
+          </button>
+        )}
+      </div>
+      {entries.map(([key, count]) => {
+        const on = selected.includes(key);
+        return (
+          <button
+            key={key}
+            className={`cr-rail-item${on ? " on" : ""}`}
+            aria-pressed={on}
+            onClick={() => onChange(on ? selected.filter((k) => k !== key) : [...selected, key])}
+          >
+            {renderLabel ? renderLabel(key) : <span className="lbl">{key}</span>}
+            <span className="count">{count}</span>
+          </button>
+        );
+      })}
+    </div>
   );
 }
 

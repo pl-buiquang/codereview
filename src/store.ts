@@ -33,7 +33,7 @@ export interface GraphFocus {
 let graphFocusNonce = 0;
 
 export interface BoardFilters {
-  repo: string | null;
+  repos: string[];
   status: string | null;
   ci: string | null;
   merge: string | null;
@@ -43,7 +43,7 @@ export interface BoardFilters {
 }
 
 export const EMPTY_BOARD_FILTERS: BoardFilters = {
-  repo: null,
+  repos: [],
   status: null,
   ci: null,
   merge: null,
@@ -54,8 +54,8 @@ export const EMPTY_BOARD_FILTERS: BoardFilters = {
 
 export interface InboxFilters {
   bucket: string | null;
-  repo: string | null;
-  author: string | null;
+  repos: string[];
+  authors: string[];
   type: string | null;
   review: string | null;
   status: string | null;
@@ -64,8 +64,8 @@ export interface InboxFilters {
 
 export const EMPTY_INBOX_FILTERS: InboxFilters = {
   bucket: null,
-  repo: null,
-  author: null,
+  repos: [],
+  authors: [],
   type: null,
   review: null,
   status: null,
@@ -281,8 +281,8 @@ export const useUIStore = create<UIState>()(
       migrate: (persisted, version) => migratePersisted(persisted, version),
       merge: (persisted, current) => {
         const next = { ...current, ...(persisted as Partial<UIState>) };
-        next.boardFilters = { ...EMPTY_BOARD_FILTERS, ...next.boardFilters };
-        next.inboxFilters = { ...EMPTY_INBOX_FILTERS, ...next.inboxFilters };
+        next.boardFilters = upgradeFilters(EMPTY_BOARD_FILTERS, next.boardFilters, { repo: "repos" });
+        next.inboxFilters = upgradeFilters(EMPTY_INBOX_FILTERS, next.inboxFilters, { repo: "repos", author: "authors" });
         const openRepoIds = next.openRepoIds ?? [];
         if (next.homeRepoId != null && !openRepoIds.includes(next.homeRepoId)) {
           openRepoIds.push(next.homeRepoId);
@@ -292,6 +292,25 @@ export const useUIStore = create<UIState>()(
     },
   ),
 );
+
+/** Merge persisted filters over the defaults, turning legacy single-select keys
+ *  (`repo: "o/r"`) into their multi-select list (`repos: ["o/r"]`). */
+export function upgradeFilters<T extends object>(
+  empty: T,
+  persisted: unknown,
+  legacy: Record<string, keyof T & string>,
+): T {
+  const out = { ...empty, ...(persisted as Partial<T>) } as Record<string, unknown>;
+  for (const [oldKey, newKey] of Object.entries(legacy)) {
+    const old = out[oldKey];
+    delete out[oldKey];
+    const cur = out[newKey];
+    if (!Array.isArray(cur) || (cur.length === 0 && typeof old === "string" && old)) {
+      out[newKey] = typeof old === "string" && old ? [old] : [];
+    }
+  }
+  return out as T;
+}
 
 // Legacy tab shape: before v3 repositories had their own tabs.
 interface LegacyTab {

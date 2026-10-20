@@ -74,8 +74,8 @@ export function BoardView() {
   const tmuxSessionName = useSettingsStore((s) => s.tmuxSessionName);
   const filters = useUIStore((s) => s.boardFilters);
   const setBoardFilters = useUIStore((s) => s.setBoardFilters);
-  const { repo: repoFilter, status: statusFilter, ci: ciFilter, merge: mergeFilter, stack: stackFilter, tags: tagFilter, excludeTags: tagExclude } = filters;
-  const setRepoFilter = (repo: string | null) => setBoardFilters({ repo });
+  const { repos: repoFilter, status: statusFilter, ci: ciFilter, merge: mergeFilter, stack: stackFilter, tags: tagFilter, excludeTags: tagExclude } = filters;
+  const setRepoFilter = (repos: string[]) => setBoardFilters({ repos });
   const setStatusFilter = (status: string | null) => setBoardFilters({ status });
   const setCiFilter = (ci: string | null) => setBoardFilters({ ci });
   const setMergeFilter = (merge: string | null) => setBoardFilters({ merge });
@@ -283,7 +283,7 @@ export function BoardView() {
     };
   }, [allCards]);
 
-  const effRepo = repoFilter && allCards.some((c) => c.repo === repoFilter) ? repoFilter : null;
+  const effRepos = repoFilter.filter((r) => allCards.some((c) => c.repo === r));
   const effStatus = statusFilter && allCards.some((c) => prStatus(c) === statusFilter) ? statusFilter : null;
   const effCi = ciFilter && allCards.some((c) => ciStatus(c) === ciFilter) ? ciFilter : null;
   const effMerge = mergeFilter && allCards.some((c) => mergeFacets(c).includes(mergeFilter)) ? mergeFilter : null;
@@ -293,7 +293,7 @@ export function BoardView() {
   const effExcludeTags = tagExclude.filter((t) => availableTags.has(t));
 
   const matches = (c: BoardCardT, skip?: "repo" | "status" | "ci" | "merge" | "stack" | "tags") => {
-    if (skip !== "repo" && effRepo && c.repo !== effRepo) return false;
+    if (skip !== "repo" && effRepos.length > 0 && !effRepos.includes(c.repo)) return false;
     if (skip !== "status" && effStatus && c.type === "pr" && prStatus(c) !== effStatus) return false;
     if (skip !== "ci" && effCi && ciStatus(c) !== effCi) return false;
     if (skip !== "merge" && effMerge && !mergeFacets(c).includes(effMerge)) return false;
@@ -508,11 +508,11 @@ export function BoardView() {
             onSelect={setMergeFilter}
             renderLabel={(k) => <span className="lbl">{MERGE_FACET_LABEL[k] ?? k}</span>}
           />
-          <FilterList
+          <MultiFilterList
             title="Repositories"
             entries={repoShown}
-            selected={effRepo}
-            onSelect={setRepoFilter}
+            selected={effRepos}
+            onChange={setRepoFilter}
             renderLabel={(k) => <RepoName className="lbl mono" name={k} />}
           />
           <TagFilter tags={tagsShown} selected={effTags} onChange={setTagFilter} unavailable={effExcludeTags} />
@@ -656,6 +656,48 @@ export function BoardView() {
 /** Stacks are scoped to a repo, so the repo is part of the key. */
 export function stackKey(c: BoardCardT): string | null {
   return c.stack_number != null ? `${c.repo}#${c.stack_number}` : null;
+}
+
+function MultiFilterList({
+  title,
+  entries,
+  selected,
+  onChange,
+  renderLabel,
+}: {
+  title: string;
+  entries: [string, number][];
+  selected: string[];
+  onChange: (next: string[]) => void;
+  renderLabel?: (key: string) => React.ReactNode;
+}) {
+  if (entries.length === 0) return null;
+  return (
+    <div className="cr-rail-group">
+      <div className="cr-rail-h">
+        <span>{title}</span>
+        {selected.length > 0 && (
+          <button className="cr-rail-clear" onClick={() => onChange([])}>
+            clear
+          </button>
+        )}
+      </div>
+      {entries.map(([key, count]) => {
+        const on = selected.includes(key);
+        return (
+          <button
+            key={key}
+            className={`cr-rail-item${on ? " on" : ""}`}
+            aria-pressed={on}
+            onClick={() => onChange(on ? selected.filter((k) => k !== key) : [...selected, key])}
+          >
+            {renderLabel ? renderLabel(key) : <span className="lbl">{key}</span>}
+            <span className="count">{count}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
 }
 
 function FilterList({

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { migratePersisted, useUIStore } from "./store";
+import { EMPTY_BOARD_FILTERS, EMPTY_INBOX_FILTERS, migratePersisted, upgradeFilters, useUIStore } from "./store";
 
 const reset = () =>
   useUIStore.setState({
@@ -126,9 +126,25 @@ describe("useUIStore", () => {
   });
 
   it("setBoardFilters merges a patch into the filters", () => {
-    useUIStore.getState().setBoardFilters({ repo: "o/r", tags: ["a"] });
+    useUIStore.getState().setBoardFilters({ repos: ["o/r", "o/s"], tags: ["a"] });
     useUIStore.getState().setBoardFilters({ ci: "failure" });
-    expect(useUIStore.getState().boardFilters).toMatchObject({ repo: "o/r", ci: "failure", tags: ["a"], status: null });
+    expect(useUIStore.getState().boardFilters).toMatchObject({
+      repos: ["o/r", "o/s"],
+      ci: "failure",
+      tags: ["a"],
+      status: null,
+    });
+  });
+
+  it("upgradeFilters turns legacy single-select keys into lists", () => {
+    expect(upgradeFilters(EMPTY_INBOX_FILTERS, { repo: "o/r", author: "me", type: "pr" }, { repo: "repos", author: "authors" })).toEqual({
+      ...EMPTY_INBOX_FILTERS,
+      repos: ["o/r"],
+      authors: ["me"],
+      type: "pr",
+    });
+    expect(upgradeFilters(EMPTY_BOARD_FILTERS, { repo: null, repos: ["a", "b"] }, { repo: "repos" }).repos).toEqual(["a", "b"]);
+    expect(upgradeFilters(EMPTY_BOARD_FILTERS, undefined, { repo: "repos" })).toEqual(EMPTY_BOARD_FILTERS);
   });
 
   it("openSettingsTab creates/focuses a single settings tab", () => {
