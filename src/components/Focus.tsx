@@ -56,7 +56,7 @@ export function FocusGenerate({
         title={
           claudeAvailable
             ? "Tier every hunk with AI and hide the noise"
-            : "Install the `claude` CLI to generate a focus here (the /focus-review skill also works from the terminal)"
+            : "Install the `claude` CLI to generate a focus here (`/local-review --focus` also works from the terminal)"
         }
         onClick={() => setOpen((o) => !o)}
       >

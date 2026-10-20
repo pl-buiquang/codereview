@@ -197,12 +197,15 @@ Under the hood this is the deep link `codereview://repo/<repo_id>[?ref=<name>][&
 **Focus** is an AI-assisted lens over a review. Every hunk is tiered `critical` / `review` / `skim` / `trivial`.
 Lower tiers collapse into one-click bars, and a digest lists what was hidden and why. Focus content is never published.
 
-- **From the terminal** — install the Claude Code skill once:
+- **From the terminal** — install the Claude Code skill once (a symlink keeps it in sync with the repo):
   ```bash
-  cp -r skills/focus-review ~/.claude/skills/
+  ln -s "$PWD/skills/local-review" ~/.claude/skills/local-review
   ```
-  then run `/focus-review <pr-url | owner/repo#N | branch <head> | review-id>`. Re-copy after
-  updating the repo: the app embeds its own copy of the prompt at build time.
+  then run `/local-review <pr-url | owner/repo#N | branch <head> | review-id> --focus`. The app embeds
+  its own copy of `skills/local-review/focus.md` at build time.
+  The same skill has two more optional layers: `--critique` (Standards and Spec sub-agents, with a
+  code-smell baseline) and `--codex` (the Codex plugin's adversarial review of the PR's checkout, via
+  `cr worktree`). Without flags it writes one explanatory comment per change.
 - **In the app** — **Generate focus** in the review header (needs the `claude` CLI). Pick a level
   and a model; the run happens in the background. Then switch levels, hide or show hunks and files,
   **Adopt** an AI note as a draft comment, or **Copy into summary** to paste the digest.
