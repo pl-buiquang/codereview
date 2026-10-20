@@ -3609,6 +3609,10 @@ input[type="range"] {
   gap: 6px;
 }
 .repo-title-edit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
   color: var(--text-3);
 }
 .repo-title-edit:hover {

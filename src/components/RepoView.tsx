@@ -37,14 +37,15 @@ export function RepoView({ repo }: { repo: Repository }) {
   const fullName = repoLabel(repo);
 
   const startEditingName = () => {
-    setNameDraft(repo.friendly_name ?? "");
+    setNameDraft(repoDisplayName(repo));
     setEditingName(true);
   };
 
   const commitName = () => {
     setEditingName(false);
     const trimmed = nameDraft.trim() || null;
-    if (trimmed !== (repo.friendly_name ?? null)) setFriendlyName.mutate(trimmed);
+    if (trimmed === repoDisplayName(repo)) return;
+    setFriendlyName.mutate(trimmed);
   };
 
   const reviewsQuery = useQuery({
