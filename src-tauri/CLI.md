@@ -41,7 +41,8 @@ cr update <review-id> --body "Refactors the handler layer to separate concerns."
 # 6. Open the desktop app — the review is ready to browse
 ```
 
-The `/local-review` Claude Code skill automates steps 1–5.
+The `/local-review` Claude Code skill automates steps 1–5. Its flags add more: `--focus` (hunk triage),
+`--critique` (spec and standards sub-agents) and `--codex` (Codex review of the PR's worktree).
 
 ## Command reference
 
@@ -58,6 +59,7 @@ The `/local-review` Claude Code skill automates steps 1–5.
 cr list [--repo <id>]              # List reviews, optionally filtered by repo
 cr show <review-id>                # Show review detail + comments
 cr diff <review-id>                # Print the unified diff
+cr worktree <review-id>            # Path of a checkout of the head branch (reuses one, else creates a worktree)
 cr create local <repo-id> <base> <head> [--three-dot]  # Review a local diff
 cr create pr <owner> <name> <number>                    # Review a GitHub PR
 cr update <review-id> [--body <text>] [--verdict approve|comment|request_changes]

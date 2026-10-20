@@ -48,6 +48,10 @@ enum Cmd {
     Diff {
         review_id: i64,
     },
+    /// Print the path of a checkout of the review's head branch, creating a worktree if none holds it
+    Worktree {
+        review_id: i64,
+    },
     /// Create a new review
     Create {
         #[command(subcommand)]
@@ -691,6 +695,26 @@ fn run(cmd: Cmd, json: bool, db: &Db) -> AppResult<()> {
             let conn = db.0.lock().unwrap();
             let diff = review::review_diff_impl(&conn, review_id)?;
             print!("{diff}");
+        }
+
+        Cmd::Worktree { review_id } => {
+            let detail = {
+                let conn = db.0.lock().unwrap();
+                review::load_detail(&conn, review_id)?
+            };
+            let local_path = detail.local_path.as_deref().ok_or_else(|| {
+                AppError::Other("this review's repo has no local clone; link one in the app".into())
+            })?;
+            let path = codereview_lib::worktree::ensure_branch_worktree(
+                std::path::Path::new(local_path),
+                &detail.target,
+                detail.review.head_sha.as_deref(),
+            )?;
+            if json {
+                println!("{}", serde_json::json!({ "path": path.display().to_string() }));
+            } else {
+                println!("{}", path.display());
+            }
         }
 
         Cmd::Create { target } => match target {
