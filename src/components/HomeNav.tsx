@@ -41,6 +41,7 @@ export function HomeNav({
   const toggleSidebar = useUIStore((s) => s.toggleSidebar);
   const openSettingsTab = useUIStore((s) => s.openSettingsTab);
   const onHome = activeTabId === "home";
+  const versionQuery = useQuery({ queryKey: ["appVersion"], queryFn: api.appVersion, staleTime: Infinity });
 
   const { data: repos } = useQuery({
     queryKey: ["repositories"],
@@ -165,6 +166,11 @@ export function HomeNav({
           <Icon name="gear" size={15} />
           {!collapsed && "Settings"}
         </button>
+        {!collapsed && versionQuery.data && (
+          <div className="cr-side-version" title={`CodeReview ${versionQuery.data}`}>
+            {versionQuery.data}
+          </div>
+        )}
       </div>
     </nav>
   );
