@@ -19,6 +19,7 @@ function CommandPaletteInner() {
   const hide = useCommandPaletteStore((s) => s.hide);
   const openReview = useUIStore((s) => s.openReview);
   const showBoardCard = useUIStore((s) => s.showBoardCard);
+  const openRepo = useUIStore((s) => s.openRepo);
   const queryClient = useQueryClient();
   const repoBasePaths = useSettingsStore((s) => s.repoBasePaths);
 
@@ -72,6 +73,11 @@ function CommandPaletteInner() {
       showBoardCard(result.cardId);
       return;
     }
+    if (result.kind === "repo") {
+      hide();
+      openRepo(result.repoId);
+      return;
+    }
     if (result.kind === "review") {
       hide();
       openReview(result.reviewId, result.repoId);
@@ -116,11 +122,13 @@ function CommandPaletteInner() {
   }
 
   const boardItems = results.filter((r): r is Extract<PaletteResult, { kind: "board-card" }> => r.kind === "board-card");
+  const repoItems = results.filter((r): r is Extract<PaletteResult, { kind: "repo" }> => r.kind === "repo");
   const reviewItems = results.filter((r): r is Extract<PaletteResult, { kind: "review" }> => r.kind === "review");
   const createItems = results.filter((r): r is Extract<PaletteResult, { kind: "create-pr" }> => r.kind === "create-pr");
 
   const boardOffset = 0;
-  const reviewOffset = boardItems.length;
+  const repoOffset = boardItems.length;
+  const reviewOffset = repoOffset + repoItems.length;
   const createOffset = reviewOffset + reviewItems.length;
 
   return (
@@ -132,7 +140,7 @@ function CommandPaletteInner() {
             ref={inputRef}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search reviews, type 'repo 123', or paste a GitHub PR/issue URL…"
+            placeholder="Search reviews and repositories, type 'repo 123', or paste a GitHub PR/issue URL…"
             disabled={pending}
           />
         </div>
@@ -155,6 +163,25 @@ function CommandPaletteInner() {
                     <span className="meta">
                       {r.repoLabel.split("/")[1] ?? r.repoLabel} #{r.number}
                     </span>
+                  </button>
+                ))}
+              </>
+            )}
+
+            {repoItems.length > 0 && (
+              <>
+                <div className="command-palette-section">Repositories</div>
+                {repoItems.map((r, i) => (
+                  <button
+                    key={r.repoId}
+                    ref={repoOffset + i === activeIndex ? activeItemRef : undefined}
+                    className={`command-palette-item action${repoOffset + i === activeIndex ? " active" : ""}`}
+                    onClick={() => execute(r)}
+                    onMouseEnter={() => setActiveIndex(repoOffset + i)}
+                  >
+                    <Icon name="repo" size={13} style={{ flex: "none", color: "var(--accent)" }} />
+                    <span className="title">Open repository: {r.title}</span>
+                    {r.title !== r.repoLabel && <span className="meta">{r.repoLabel}</span>}
                   </button>
                 ))}
               </>

@@ -1,3 +1,4 @@
+import { repoDisplayName, repoLabel } from "./repoLabel";
 import type { BoardCard, Repository, ReviewSummary } from "./types";
 
 export interface PaletteReviewResult {
@@ -28,10 +29,18 @@ export interface PaletteBoardResult {
   type: "pr" | "issue";
 }
 
-export type PaletteResult = PaletteBoardResult | PaletteReviewResult | PaletteCreateResult;
+export interface PaletteRepoResult {
+  kind: "repo";
+  repoId: number;
+  title: string;
+  repoLabel: string;
+}
+
+export type PaletteResult = PaletteBoardResult | PaletteRepoResult | PaletteReviewResult | PaletteCreateResult;
 
 const MAX_REVIEWS = 10;
 const MAX_CREATES = 3;
+const MAX_REPOS = 5;
 const DEFAULT_RECENT = 5;
 
 // "cardiologs-front" → "front"; "front" → "front"
@@ -50,6 +59,20 @@ function buildSearchText(s: ReviewSummary): string {
     parts.push(shortName(repoName));
   }
   return parts.join(" ").toLowerCase();
+}
+
+function matchRepos(tokens: string[], repos: Repository[]): PaletteRepoResult[] {
+  const out: PaletteRepoResult[] = [];
+  for (const repo of repos) {
+    const label = repoLabel(repo);
+    const parts = [label, repoDisplayName(repo)];
+    if (repo.remote_name) parts.push(shortName(repo.remote_name));
+    const text = parts.join(" ").toLowerCase();
+    if (!tokens.every((t) => text.includes(t))) continue;
+    out.push({ kind: "repo", repoId: repo.id, title: repoDisplayName(repo), repoLabel: label });
+    if (out.length >= MAX_REPOS) break;
+  }
+  return out;
 }
 
 const WORD_NUMBER_RE = /^(\S+)\s+(\d+)$/;
@@ -186,5 +209,5 @@ export function searchPalette(
     }
   }
 
-  return [...boardResults, ...reviewResults, ...createResults];
+  return [...boardResults, ...matchRepos(tokens, repos), ...reviewResults, ...createResults];
 }

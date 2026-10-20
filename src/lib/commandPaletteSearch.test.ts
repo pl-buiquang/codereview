@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { BoardCard, ReviewSummary } from "./types";
+import type { BoardCard, Repository, ReviewSummary } from "./types";
 import { searchPalette } from "./commandPaletteSearch";
 
 const review = (id: number, repo: string, pr: number) =>
@@ -13,6 +13,11 @@ const review = (id: number, repo: string, pr: number) =>
 
 const card = (id: string, repo: string, number: number, type: "pr" | "issue" = "pr") =>
   ({ id, repo, number, type, title: `T${number}`, archived_at: null, discarded_at: null }) as BoardCard;
+
+const repo = (id: number, owner: string, name: string, friendly: string | null = null) =>
+  ({ id, remote_owner: owner, remote_name: name, local_path: `/p/${name}`, friendly_name: friendly }) as Repository;
+
+const repos = [repo(1, "acme", "cardiologs-front"), repo(2, "acme", "back", "Backend")];
 
 const reviews = [review(1, "acme/front", 12), review(2, "acme/back", 12)];
 const cards = [card("C1", "acme/front", 12), card("C2", "acme/back", 40, "issue")];
@@ -36,5 +41,19 @@ describe("searchPalette", () => {
   it("offers to open an untracked PR URL", () => {
     const r = searchPalette("https://github.com/acme/other/pull/3", reviews, [], cards);
     expect(r).toEqual([expect.objectContaining({ kind: "create-pr", owner: "acme", name: "other", prNumber: 3 })]);
+  });
+
+  it("offers repositories matching a name, short name or friendly name", () => {
+    const kinds = (q: string) =>
+      searchPalette(q, [], repos).filter((x) => x.kind === "repo").map((x) => x.kind === "repo" && x.repoId);
+    expect(kinds("front")).toEqual([1]);
+    expect(kinds("acme/back")).toEqual([2]);
+    expect(kinds("backend")).toEqual([2]);
+    expect(kinds("nope")).toEqual([]);
+  });
+
+  it("does not list repositories for an empty query or a 'name number' query", () => {
+    expect(searchPalette("", reviews, repos).some((x) => x.kind === "repo")).toBe(false);
+    expect(searchPalette("front 12", reviews, repos).some((x) => x.kind === "repo")).toBe(false);
   });
 });
