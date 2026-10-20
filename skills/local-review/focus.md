@@ -7,7 +7,7 @@ write is published to GitHub. Tiers, summary and notes are only a reading aid.
 All data goes through the `cr` CLI. Always put flags such as `--json` **after**
 the subcommand (`cr focus hunks 12 --json`): in app mode only commands starting
 with `cr focus`, `cr diff` or `cr show` are permitted. Notes you write are added
-as `ai`-tagged draft comments — never published to GitHub unless the user removes
+as `ai:explain`-tagged draft comments — never published to GitHub unless the user removes
 the tag or edits them.
 
 The review already exists. Its id is `RID` (the id given to you, or the one the caller created).
@@ -72,7 +72,7 @@ or `review`.
   Keep it short and lowercase, without hunk-specific details.
 - `note`: only on visible tiers (`critical`/`review`), and only when it says something concrete to
   check ("`timeout` is now seconds, callers pass ms"). Skip generic praise or restating the diff. Most hunks need no note.
-  `cr focus set` turns each one into an `ai`-tagged draft comment on that hunk — you never call
+  `cr focus set` turns each one into an `ai:explain`-tagged draft comment on that hunk — you never call
   `cr comment add` yourself for this.
 - List every hunk you tiered. Omitted hunks fall back to their rule tier, else `review`.
 - Use only ids from Step 1. Unknown ids make the whole plan fail.

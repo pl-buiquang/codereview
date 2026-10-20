@@ -2,21 +2,36 @@
 name: local-review
 description: >
   Analyze a GitHub PR (or a local branch diff) and create a local review in the
-  CodeReview app. Default: one explanatory comment per meaningful change. Optional
-  layers: --focus (tier every hunk critical/review/skim/trivial so the app hides the
-  noise), --critique (Standards + Spec sub-agents), --codex (Codex adversarial
-  review of the PR's checkout). Also drafts local replies to a PR's existing GitHub
-  review threads. Use when asked to "review PR", "explain PR", "local review of PR",
+  CodeReview app. With no layer flags it auto-detects the mode from the PR's size and
+  author: small PR = one explanatory comment per change; bigger PR = --focus (tier every
+  hunk so the app hides the noise); big PR of yours = --focus + --codex (Codex adversarial
+  review), plus --critique when it closes an issue. Explicit layers: --focus, --critique
+  (Standards + Spec sub-agents), --codex, --plain. All analysis runs in fresh-context
+  agents, never in the caller's context. Also drafts local replies to a PR's existing
+  GitHub review threads. Use when asked to "review PR", "explain PR", "local review of PR",
   "focus review", "triage PR hunks", "filter the noise in PR", "critique PR",
   "codex review of PR", "review branch <name>", or "reply to PR comments/threads".
 ---
 
 # Local Review Skill
 
-Fetches a GitHub PR's diff (or a local branch diff), analyzes it, and populates a
-local review in the CodeReview desktop app (via the `cr` CLI) so you can browse the
-annotated diff in the GUI. Everything written is tagged `ai` and stays local: nothing
-is published to GitHub unless the user removes the tag or edits the comment in the app.
+Fetches a GitHub PR's diff (or a local branch diff), has fresh-context agents analyze it, and populates a
+local review in the CodeReview desktop app (via the `cr` CLI) so you can browse the annotated diff in the
+GUI. Everything written is tagged `ai:explain`, `ai:review` or `ai:codex` and stays local: nothing is
+published to GitHub unless the user removes the tag or edits the comment in the app.
+
+## You are an orchestrator
+
+This skill often runs right after the caller wrote the PR. The analysis must not share the caller's
+context, so **every piece of analysis runs in a fresh `general-purpose` agent** that gets only a
+self-contained brief. In the main context:
+
+- Never read the diff, the hunks or the findings (no `cr diff`, no `cr focus hunk`, no full
+  `cr focus hunks`). Only counts and metadata, via `jq`.
+- Never write comments, plans or the summary yourself. Agents do, and return a short report.
+- Do the setup, the fan-out and the final report. Nothing else.
+
+Subagents cannot spawn subagents, so all fan-out happens from here.
 
 ## Arguments
 
@@ -26,18 +41,21 @@ is published to GitHub unless the user removes the tag or edits the comment in t
 - `branch <head> [--base <base>] [--repo /path/to/repo]` — diff `<base>...<head>` (base defaults to `main`, repo to the cwd)
 - `<review-id>` — an existing review (`cr show <id> --json` to check it exists)
 
-**Layers** (all optional, combinable; none = the plain explanatory review):
+**Layers** (all optional, combinable). None given = auto mode (Step 1b):
 
+- `--plain` — force the plain explanatory review (no auto, no layers)
 - `--focus [--level focus|thorough|critical]` — tier every hunk; see `focus.md`
-- `--critique` — Standards + Spec sub-agents; see `critique.md`
+- `--critique` — Standards + Spec agents; see `critique.md`
 - `--codex[=adversarial|native] ["focus text"]` — Codex review of the checkout; see `codex.md`
-- `--with-replies` — also draft thread replies (see Reply mode)
+- `--with-replies` — also draft thread replies (see Reply mode). Never auto-enabled.
+
+Any of `--plain`/`--focus`/`--critique`/`--codex` disables auto: use exactly what was given.
 
 **Reply mode** (draft replies to a PR's existing GitHub review threads, GitHub PR only):
 
 - `/local-review reply owner/repo#123`
 
-If no arguments are provided, ask the user which target and layers they want.
+If no arguments are provided, ask the user (AskUserQuestion) which target and layers they want.
 
 ## Prerequisites
 
@@ -46,8 +64,9 @@ The `cr` binary must be installed. If `cr` is not found on PATH:
 cargo install --path ~/projects/codereview/src-tauri --bin cr
 ```
 
-Read the layer files only for the flags in use. They live next to this file
-(`focus.md`, `critique.md`, `codex.md`).
+The instruction files live next to this file. Agents read them, you do not (except `codex.md` §1–3):
+`explain.md`, `focus.md`, `critique.md`, `codex.md`, `merge.md`, `reply.md`. Pass the skill directory
+(the directory of this SKILL.md) in every brief.
 
 ## Workflow
 
@@ -60,168 +79,123 @@ cr repo add <repo-path> --json     # capture the repo id
 ```
 Confirm both refs resolve (`git rev-parse`). Fail here, not inside parallel agents.
 
-### Step 1: Create (or reuse) the review
+### Step 1: Pick the mode, create (or reuse) the review
 
+**1a. Metadata (auto mode only, before creating).**
+```bash
+gh pr view <n> -R <owner>/<repo> --json additions,deletions,changedFiles,author,closingIssuesReferences
+gh api user --jq .login
+```
+Branch mode: always "mine", no linked issue, size from `git -C <repo> diff --shortstat <base>...<head>`.
+`<review-id>` target: skip auto (plain, unless layers were given).
+
+**1b. Auto mode** (no layer flag). Size is *effective* lines (additions + deletions) and files.
+
+| Size | Layers |
+|---|---|
+| Small: < 150 lines **and** ≤ 5 files | plain explain |
+| Medium | `--focus` |
+| Large: > 600 lines **or** > 20 files | `--focus`; add `--codex` (adversarial) if the PR is mine; add `--critique` if it has a closing issue |
+
+The raw gh numbers pick the tier before creation (so `--reuse-draft` is right). After Step 1c, recompute
+the effective size without lockfiles/generated files and only ever **lower** the tier:
+```bash
+cr focus hunks RID --json | jq '[.[] | select(.rule_tier == null)] | {lines: (map(.additions + .deletions) | add // 0), files: (map(.file_path) | unique | length)}'
+```
+Announce one line and proceed without asking, e.g. `Auto: 420 lines / 14 files, yours → --focus --codex`.
+
+**1c. Create.**
 ```bash
 cr create pr <owner> <name> <number> [--reuse-draft] --json
 cr create local <repo-id> <base-ref> <head-ref> --three-dot [--reuse-draft] --json
 ```
+Pass `--reuse-draft` when `--focus` is on (given or auto), so the focus lands next to comments the user
+already wrote. For a `<review-id>` target skip creation. Capture the review id `RID` (`id` field). If
+creation errors with "gh: not found" or similar, tell the user to run `gh auth login`.
 
-Pass `--reuse-draft` when `--focus` is set, so the focus lands next to comments the user already
-wrote. For a `<review-id>` target skip creation. Capture the review id `RID` (`id` field). If creation
-errors with "gh: not found" or similar, tell the user to run `gh auth login`.
-
-Read the diff once:
+**1d. Size guard.**
 ```bash
-cr diff RID
+cr focus hunks RID --json | jq '[.[].file_path] | unique | length'
 ```
-If it is empty, report that and stop. If it is very large (>200 files), warn the user and ask
-whether to proceed or focus on specific paths.
+`0`: report an empty diff and stop. `> 200`: AskUserQuestion whether to proceed or limit to specific paths
+(the only prompt left in the auto path).
 
-### Step 2: Launch the optional layers (before the main pass)
-
-Start everything slow first, so it runs while you read the diff:
-
-- `--codex`: follow `codex.md` §1–3 (Bash with `run_in_background: true`).
-- `--critique`: follow `critique.md` §1–2 (two `Agent` calls in a single message).
-
-They return findings in the common shape (`file, line, side, title, body, kind, ref, fix`).
-
-### Step 3: Main pass (Claude)
-
-**Without `--focus`: explain each change.** Parse the diff into per-file hunks. For each file with
-meaningful changes, compose a clear, concise comment on **what changed and why it matters**.
-
-- One comment per file is the default for simple changes. Otherwise explain each hunk removed/added.
-- Focus on the *purpose*: "Adds retry logic for transient S3 errors" beats "Adds a try/catch block".
-- Renames/moves with no logic change: one file-level comment, or skip.
-- Test files: the scenario covered, not the assertions.
-- Config/infra: the operational impact.
-- Skip tiny related one-liners (import reordering, formatting) or group them.
-- 1–3 sentences each. Dense, not verbose.
-
-Pick the most relevant line (usually the first line of the key change) and post it:
-```bash
-# Line-level comment (RIGHT = new/changed lines; LEFT only for deleted code that matters)
-cr comment add RID --file <path> --line <n> --side RIGHT --body "explanation..." --tag ai
-# File-level comment
-cr comment add-file RID --file <path> --body "explanation..." --tag ai
-```
-Always pass `--tag ai`: it keeps the comment local until the user removes the tag or edits it.
-
-**With `--focus`: tier every hunk, and let the notes carry the explanation.** Follow `focus.md`
-to gather and tier the hunks and build the plan, with these overrides:
-
-- A visible hunk's (`critical`/`review`) `note` is its explanation: 1–3 sentences on what changed and
-  why, then `Check: …` when there is something concrete to verify. A visible hunk with nothing worth
-  saying gets no note. `skim`/`trivial` hunks get only a `reason`.
-- Do not post explanation comments with `cr comment add`; `cr focus set` creates them and owns them, so a
-  rerun replaces them instead of piling up.
-- Do not submit the plan yet if layers are running. Merge their findings first (Step 4).
-- Submit with `cr focus set RID [--level <level>] --file <plan.json>` as `focus.md` Step 4 says.
-
-### Step 4: Merge layer findings (`--critique`, `--codex`)
-
-Wait for the background Codex run and both critique agents. Skipped or failed layers are noted in the report.
-
-**Anchor each finding.** Take hunks from `cr focus hunks RID --json` (it works without `--focus`
-too). A hunk covers new-file lines `new_start` … `new_start + d - 1`, where `+c,d` is read from its `header`.
-A finding whose `file` and `line` fall inside a hunk's range is line-anchored (side RIGHT).
-Otherwise it becomes a file comment, with `L<start>-<end>` in the body when it has a range.
-Findings with no `file` (a missing requirement) go only into the review body.
-
-**Prefix the body** so each comment says where it came from, then the body and `**Fix:** …`:
-
-- `**[codex · high]**` (the severity), `**[spec · missing]**`, `**[spec · scope-creep]**`, `**[spec · wrong]**`
-- `**[standards · CLAUDE.md: <rule>]**` for documented rules, `**[smell? · Feature Envy]**` for baseline smells
-
-**Post them:**
-
-- Without `--focus`: `cr comment add RID … --tag ai` (or `add-file`), one per finding.
-- With `--focus`: append each anchored finding to its hunk's `note` and raise that hunk's tier. Any finding
-  makes it at least `review`; `codex-critical`, `codex-high` or spec `wrong` makes it `critical`. Findings
-  that don't land on a hunk still go in as file comments with `cr comment add-file … --tag ai`. Then submit
-  the plan. Those file comments are not owned by the focus, so a rerun does not replace them.
-
-Keep the layers separate. Never merge or rerank findings across axes.
-
-### Step 5: Set the review summary
-
-2–4 sentences on the whole change (with `--focus`, reuse the plan's `summary`). With layers, append a
-section per layer that ran, each with the finding count and the worst finding in that layer only:
-
-```
-## Standards   — N findings. Worst: …          (or "skipped: …")
-## Spec        — N findings. Worst: …          (or "no spec available")
-## Codex       — verdict needs-attention|approve. <Codex summary>
-```
+### Step 2: Prepare the fan-out
 
 ```bash
-cr update RID --body "…" --verdict comment
+mkdir -p /tmp/cr-RID
+cr worktree RID --json        # {"path": "..."}  → WT
 ```
-Use `--verdict comment`. Never `approve` or `request_changes`: this is an aid, not an approval gate.
+If `cr worktree` fails (no local clone), WT is empty: agents work from `cr diff RID` only and the
+checkout-bound layers (`--codex`, the Standards agent's file reads) say so in their reports.
 
-### Step 6: Open the app and report
+If `--codex`: do `codex.md` §1–2 now. On a skip, write the reason to `/tmp/cr-RID/codex-skipped.txt`.
+
+### Step 3: Fan out (one message, everything in parallel)
+
+Send **one message** containing all of:
+
+- `--codex` (not skipped): `codex.md` §3, a background Bash call writing `/tmp/cr-RID/codex.json`.
+- The **Explain agent** (always).
+- `--critique`: the **Standards agent** and the **Spec agent**.
+- `--with-replies`: the **Reply agent**.
+
+Every agent is `Agent` with `subagent_type: general-purpose` and a self-contained brief. Common header
+for all briefs:
+
+> Review id: RID. Checkout: WT (empty = none; use `cr diff RID`). Scratch dir: /tmp/cr-RID/. Skill
+> directory: <dir>. Flags: <the resolved layer flags>. You run non-interactively: don't ask the user, don't
+> open the app, don't publish anything. Finish with a report of at most 150 words.
+
+Then per agent:
+
+- **Explain agent**: "Read `<dir>/explain.md`" (and `<dir>/focus.md` if `--focus`). "Layers running: <list or
+  none>." It writes and reports as `explain.md` says.
+- **Standards agent** / **Spec agent**: "Read `<dir>/critique.md`; you are the Standards (Spec) agent." It
+  gathers its own sources, writes `/tmp/cr-RID/standards.json` (`spec.json`), and reports only the finding
+  count and its worst finding.
+- **Reply agent**: "Read `<dir>/reply.md`." Target: `<owner> <name> <number>`.
+
+### Step 4: Merge (only if a layer ran)
+
+Wait for the background Codex run (you are notified; non-zero exit → write `codex failed: <first line of
+stderr>` to `/tmp/cr-RID/codex-skipped.txt`) and for the agents. Then launch one fresh **Merge agent**
+(common header, plus the flags and which of `plan.json`, `summary.md`, `standards.json`, `spec.json`,
+`codex.json`, `codex-skipped.txt` exist): "Read `<dir>/merge.md`." It returns a report of at most 150 words.
+
+No layer: skip this step. The Explain agent already set the summary (and submitted the plan with `--focus`).
+
+### Step 5: Open the app and report
 
 ```bash
 cr open review RID
 ```
 If it fails (older build), fall back to `open "codereview://review/RID"`.
 
-Tell the user: the review id; comments added per layer; with `--focus`, the tier counts printed by
-`cr focus set` and the `critical` hunks; any layer skipped or failed and why; that the app is open
-on the review; and the summary you wrote.
+Tell the user, from the agents' reports only: the review id and the mode used (and why, if auto); comments
+added per tag (`ai:explain`, `ai:review`, `ai:codex`); with `--focus`, the tier counts and the `critical`
+hunks; any layer skipped or failed and why; that the app is open on the review; and the summary written.
+
+Verdict is always `comment`. Never `approve` or `request_changes`: this is an aid, not an approval gate.
 
 ## Reply mode: draft replies to existing GitHub threads
 
 Composes local, unpublished replies to a PR's *existing* GitHub review-thread comments (other reviewers,
 bots, etc.), not the explanatory comments above. GitHub PR only; branch-diff reviews have no threads.
-Runs standalone (`/local-review reply owner/repo#123`) or with `--with-replies` after Step 1 using the
-same `RID`.
+Runs standalone (`/local-review reply owner/repo#123`) or with `--with-replies` in the Step 3 fan-out
+(same `RID`).
 
-### R1: Ensure a review exists
-
-If not created in this run, create or reuse it:
-```bash
-cr create pr <owner> <name> <number> --json
-```
-Draft replies attach to this review but are independent of its status; they can be drafted and published
-even on an already-published review.
-
-### R2: Fetch existing GitHub threads
-
-```bash
-cr threads <owner> <name> <number> --json
-```
-Returns an array of threads with `id`, `isResolved`, `path`, `line`, `diffSide`, and `comments` (each with
-`databaseId`, `author.login`, `body`, `createdAt`). The **root** comment is `comments[0]`. Skip resolved
-threads unless the user asked to revisit them.
-
-### R3: Decide a response per open thread
-
-Read the full chain (including existing replies) and choose:
-- **Accept** — valid; acknowledge and say what will change (or that it's already addressed).
-- **Challenge** — push back with a concrete technical reason; don't be contrarian for its own sake.
-- **Question** — ask for clarification when ambiguous.
-- **Nit ack** — brief acknowledgment for minor/style comments.
-
-Skip threads that need no response (a plain "LGTM"). Format: `**Accept** — <1-3 sentence rationale>`.
-
-### R4: Create the draft reply
-
-Use the thread root's `databaseId` and the thread's own anchor (`path`, `line`, `diffSide`). Don't recompute from the diff:
-```bash
-cr comment draft-reply RID \
-  --thread-comment-id <root-databaseId> \
-  --file <path> --line <line> --side <diffSide> \
-  --body "**Accept** — rationale..."
-```
-
-### R5: Report
-
-Tell the user how many drafts were created (and how many threads skipped/resolved); that drafts are **not
-yet posted to GitHub** and must be reviewed (edit/delete) in the app, then published with "Publish N draft
-replies" (or `cr comment publish-replies RID`); and open the review (`cr open review RID`).
+1. **Ensure a review exists** (skip if created in this run):
+   ```bash
+   cr create pr <owner> <name> <number> --json
+   ```
+   Draft replies attach to this review but are independent of its status; they can be drafted and
+   published even on an already-published review.
+2. **Launch one fresh Reply agent** (common header + target): "Read `<dir>/reply.md`." It does the
+   fetch, decide and draft steps and reports counts.
+3. **Report**: how many drafts were created (and how many threads skipped/resolved); that drafts are **not
+   yet posted to GitHub** and must be reviewed (edit/delete) in the app, then published with "Publish N
+   draft replies" (or `cr comment publish-replies RID`); then `cr open review RID`.
 
 ## Error handling
 
@@ -230,3 +204,5 @@ replies" (or `cr comment publish-replies RID`); and open the review (`cr open re
 - Empty diff: skip commenting and report it.
 - `cr repo add` fails because the path is not a git repo: tell the user.
 - A layer fails (Codex missing, no spec, no checkout): continue with the others and say what was skipped.
+- An agent returns an error or an empty report: say which one, continue with the rest, and do not redo its
+  analysis in the main context.

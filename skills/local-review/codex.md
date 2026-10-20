@@ -1,8 +1,11 @@
 # Codex layer (`--codex`)
 
-Runs the OpenAI Codex plugin's reviewer on the PR's checkout and imports its findings. The plugin's
-slash commands (`/codex:review`, `/codex:adversarial-review`) can't be invoked from a skill, so call its
-companion script directly. It reviews a **local checkout** (`base...HEAD`), not a PR number.
+Runs the OpenAI Codex plugin's reviewer on the PR's checkout; the merge agent (`merge.md`) imports its
+findings as `ai:codex` comments. The plugin's slash commands (`/codex:review`, `/codex:adversarial-review`)
+can't be invoked from a skill, so call its companion script directly. It reviews a **local checkout**
+(`base...HEAD`), not a PR number.
+
+§1–3 run in the main context (cheap, no analysis). Parsing the result is the merge agent's job.
 
 - `--codex` or `--codex=adversarial`: `adversarial-review`. Challenges the approach, assumptions and failure
   modes. Returns structured findings. Takes optional focus text (the quoted text after the flag).
@@ -15,8 +18,8 @@ companion script directly. It reviews a **local checkout** (`base...HEAD`), not 
 ls -d ~/.claude/plugins/cache/openai-codex/codex/*/scripts/codex-companion.mjs 2>/dev/null | sort -V | tail -1
 ```
 
-If nothing is found, tell the user to install/run `/codex:setup`, record "codex skipped: plugin not
-installed" for the report, and continue without this layer. Don't fail the review.
+If nothing is found, tell the user to install/run `/codex:setup`, write "codex skipped: plugin not
+installed" to `/tmp/cr-RID/codex-skipped.txt`, and continue without this layer. Don't fail the review.
 
 ## 2. Get the checkout and base
 
@@ -27,41 +30,20 @@ git -C <path> rev-parse HEAD    # must equal head_sha
 ```
 
 If `cr worktree` fails (no local clone), or HEAD differs from the review's `head_sha` (a reused worktree
-that is stale or on another commit), skip the layer and record why. Never review the wrong commit.
+that is stale or on another commit), skip the layer: write the reason to `/tmp/cr-RID/codex-skipped.txt`.
+Never review the wrong commit.
 
 ## 3. Run it in the background
 
-Start it as soon as the review exists; it is the slowest layer. Use Bash with `run_in_background: true`:
+Start it in the same message as the agents; it is the slowest layer. Use Bash with `run_in_background: true`
+and send stdout to the scratch dir:
 
 ```bash
-node <companion.mjs> adversarial-review --cwd <worktree> --base <base_sha> --json "<optional focus text>"
+node <companion.mjs> adversarial-review --cwd <worktree> --base <base_sha> --json "<optional focus text>" > /tmp/cr-RID/codex.json 2> /tmp/cr-RID/codex.err
 # native:
-node <companion.mjs> review --cwd <worktree> --base <base_sha> --json
+node <companion.mjs> review --cwd <worktree> --base <base_sha> --json > /tmp/cr-RID/codex.json 2> /tmp/cr-RID/codex.err
 ```
 
-Don't poll. You are notified when it finishes; collect stdout then. If it exits non-zero, record
-"codex failed: <first line of stderr>" and continue without it.
-
-## 4. Parse the result
-
-stdout is one JSON payload.
-
-**Adversarial**: the review is `payload.result` (`verdict`: `approve` | `needs-attention`, `summary`,
-`findings`, `next_steps`). If `payload.result` is null (see `payload.parseError`), record
-"codex returned unparseable output" and put `payload.rawOutput` in the review body under `## Codex`
-instead of making comments. Each finding has `severity` (critical|high|medium|low), `title`, `body`,
-`file`, `line_start`, `line_end`, `confidence` (0–1) and `recommendation`.
-
-Convert each finding to the common shape in critique.md section 3:
-
-```
-file = file, line = line_start, side = RIGHT, title = title, body = body,
-kind = "codex-<severity>", ref = "confidence <n>", fix = recommendation
-```
-
-Drop findings with `confidence < 0.3`. Keep `line_end` to write `L<start>-<end>` in file-level comments.
-Keep `verdict` and `summary` for the review body (`## Codex`). `next_steps` are optional extra bullets
-there; they are not comments.
-
-**Native**: the text is `payload.codex.stdout`. Put it in the review body under `## Codex (native)`,
-trimmed to its findings. No comments.
+Don't poll. You are notified when it finishes. If it exits non-zero, write "codex failed: <first line of
+`/tmp/cr-RID/codex.err`>" to `/tmp/cr-RID/codex-skipped.txt` and continue without it. Do not read
+`codex.json`: the merge agent parses it (payload shape and finding conversion are in `merge.md` §1).
