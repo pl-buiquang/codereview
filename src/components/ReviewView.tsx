@@ -89,6 +89,7 @@ import {
 import { groupThreads, isDraftReply, type CommentThread } from "../lib/threads";
 import { anchorPin, isCommentOutdated } from "../lib/staleness";
 import { summaryLine } from "../lib/text";
+import { AI_SUBTAGS, isAiTag, tagLabel, tagTitle, type CommentTag } from "../lib/commentTag";
 import type {
   Comment,
   FocusView,
@@ -321,7 +322,7 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
   const focusAnchors = useMemo<Anchor[]>(() => {
     const out: Anchor[] = [];
     for (const c of detailQuery.data?.comments ?? []) {
-      if (c.origin === "file_view" || isDraftReply(c) || c.parent_id != null || c.tag === "ai")
+      if (c.origin === "file_view" || isDraftReply(c) || c.parent_id != null || isAiTag(c.tag))
         continue;
       if (c.subject_type === "file") {
         out.push({ path: c.file_path, side: "FILE", line: -1 });
@@ -2752,18 +2753,14 @@ function CommentTagPill({ comment, readOnly }: { comment: Comment; readOnly: boo
 
   if (readOnly) {
     if (!comment.tag) return null;
-    return comment.tag === "ai" ? (
-      <span className="ai-pill" title="Written by AI; not published">
-        AI
-      </span>
-    ) : (
-      <span className="local-pill" title="Local only; never published">
-        Local
+    return (
+      <span className={isAiTag(comment.tag) ? "ai-pill" : "local-pill"} title={tagTitle(comment.tag)}>
+        {tagLabel(comment.tag)}
       </span>
     );
   }
 
-  const setTag = (tag: "ai" | "local" | null) => {
+  const setTag = (tag: CommentTag | null) => {
     setOpen(false);
     const key = ["review", comment.review_id];
     queryClient.setQueriesData<ReviewDetail>({ queryKey: key }, (old) =>
@@ -2782,36 +2779,25 @@ function CommentTagPill({ comment, readOnly }: { comment: Comment; readOnly: boo
       <button
         type="button"
         className={
-          comment.tag === "ai" ? "ai-pill" : comment.tag === "local" ? "local-pill" : "expand-btn"
+          isAiTag(comment.tag) ? "ai-pill" : comment.tag === "local" ? "local-pill" : "expand-btn"
         }
         title="Tag: ai/local comments are never published to GitHub"
         onClick={() => setOpen((o) => !o)}
       >
-        {comment.tag === "ai" ? "AI" : comment.tag === "local" ? "Local" : "+ tag"}
+        {comment.tag ? tagLabel(comment.tag) : "+ tag"}
       </button>
       {open && (
         <span className="comment-tag-pop" role="menu">
-          <button
-            type="button"
-            className={comment.tag == null ? "active" : ""}
-            onClick={() => setTag(null)}
-          >
-            None
-          </button>
-          <button
-            type="button"
-            className={comment.tag === "ai" ? "active" : ""}
-            onClick={() => setTag("ai")}
-          >
-            AI
-          </button>
-          <button
-            type="button"
-            className={comment.tag === "local" ? "active" : ""}
-            onClick={() => setTag("local")}
-          >
-            Local
-          </button>
+          {([null, "ai", ...AI_SUBTAGS, "local"] as (CommentTag | null)[]).map((t) => (
+            <button
+              key={t ?? "none"}
+              type="button"
+              className={comment.tag === t ? "active" : ""}
+              onClick={() => setTag(t)}
+            >
+              {t ? tagLabel(t) : "None"}
+            </button>
+          ))}
         </span>
       )}
     </span>

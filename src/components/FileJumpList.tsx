@@ -24,6 +24,7 @@ import { summaryLine } from "../lib/text";
 import { timeAgo } from "../lib/timeAgo";
 import type { JumpListHandle } from "../lib/keyboard";
 import type { PrThread } from "../lib/types";
+import { AI_SUBTAGS, isAiTag, tagLabel, type AiSubtag, type CommentTag } from "../lib/commentTag";
 import { ContextPane } from "./ContextPane";
 import { Icon } from "./icons";
 
@@ -109,7 +110,7 @@ function Chevron({ open }: { open: boolean }) {
 }
 
 type ResolutionFilter = "all" | "unresolved" | "resolved";
-type SourceFilter = "all" | "draft" | "published" | "github" | "ai" | "local";
+type SourceFilter = "all" | "draft" | "published" | "github" | "ai" | AiSubtag | "local";
 type SortMode = "file" | "time";
 
 interface ReplyEntry {
@@ -130,7 +131,7 @@ interface DisplayItem {
   createdAt: string;
   source: "draft" | "published" | "github";
   /** `ai`/`local`/none, for local comments only (GitHub threads are untagged). */
-  tag: "ai" | "local" | null;
+  tag: CommentTag | null;
   scrollId: string;
   scrollAttr: "comment-id" | "thread-id";
   replies: ReplyEntry[];
@@ -461,7 +462,9 @@ export function FileJumpList({
     return displayItems.filter((item) => {
       if (resolutionFilter === "unresolved" && item.isResolved) return false;
       if (resolutionFilter === "resolved" && !item.isResolved) return false;
-      if (sourceFilter === "ai" || sourceFilter === "local") {
+      if (sourceFilter === "ai") {
+        if (!isAiTag(item.tag)) return false;
+      } else if (sourceFilter === "local" || isAiTag(sourceFilter as CommentTag)) {
         if (item.tag !== sourceFilter) return false;
       } else if (sourceFilter === "draft") {
         if (item.source !== "draft" || item.tag != null) return false;
@@ -510,8 +513,9 @@ export function FileJumpList({
             {item.source === "github" && (
               <span className="comment-list-source-gh">GH</span>
             )}
-            {item.tag === "ai" && <span className="ai-pill">AI</span>}
-            {item.tag === "local" && <span className="local-pill">Local</span>}
+            {item.tag && (
+              <span className={isAiTag(item.tag) ? "ai-pill" : "local-pill"}>{tagLabel(item.tag)}</span>
+            )}
             {item.isResolved && (
               <Icon name="check" size={11} className="comment-list-resolved-icon" />
             )}
@@ -588,7 +592,8 @@ export function FileJumpList({
   };
 
   const hasGithubThreads = threads.length > 0;
-  const hasAiComments = displayItems.some((i) => i.tag === "ai");
+  const hasAiComments = displayItems.some((i) => isAiTag(i.tag));
+  const presentAiSubtags = AI_SUBTAGS.filter((t) => displayItems.some((i) => i.tag === t));
   const hasLocalComments = displayItems.some((i) => i.tag === "local");
   const hasTaggedComments = hasAiComments || hasLocalComments;
 
@@ -704,6 +709,7 @@ export function FileJumpList({
                         "published",
                         ...(hasGithubThreads ? (["github"] as const) : []),
                         ...(hasAiComments ? (["ai"] as const) : []),
+                        ...presentAiSubtags,
                         ...(hasLocalComments ? (["local"] as const) : []),
                       ] as SourceFilter[]
                     ).map((s) => (
@@ -721,9 +727,7 @@ export function FileJumpList({
                               ? "Pub"
                               : s === "github"
                                 ? "GH"
-                                : s === "ai"
-                                  ? "AI"
-                                  : "Local"}
+                                : tagLabel(s)}
                       </button>
                     ))}
                   </div>

@@ -1,6 +1,7 @@
 import { invoke } from "./tracedInvoke";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import type { LogLevel } from "./log";
+import type { CommentTag } from "./commentTag";
 import type {
   ChatWorktree,
   WorktreeGcReport,
@@ -471,7 +472,7 @@ export const api = {
   }) => invoke<Comment>("add_file_view_comment", args),
   updateComment: (commentId: number, body: string) =>
     invoke<void>("update_comment", { commentId, body }),
-  setCommentTag: (commentId: number, tag: "ai" | "local" | null) =>
+  setCommentTag: (commentId: number, tag: CommentTag | null) =>
     invoke<void>("set_comment_tag", { commentId, tag }),
   deleteComment: (commentId: number) =>
     invoke<void>("delete_comment", { commentId }),

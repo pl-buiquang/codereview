@@ -260,7 +260,7 @@ enum FocusAction {
 
 const FOCUS_HUNK_WARN: usize = 500;
 
-/// `--tag` values map "none" to no tag; `ai`/`local` pass through as-is
+/// `--tag` values map "none" to no tag; `ai`/`ai:*`/`local` pass through as-is
 /// (validated downstream by `add_comment_impl`/`set_comment_tag_impl`).
 fn parse_tag(tag: &str) -> Option<&str> {
     (tag != "none").then_some(tag)
@@ -283,7 +283,7 @@ enum CommentAction {
         /// Comment body text
         #[arg(long)]
         body: String,
-        /// ai, local, or none. Tagged comments are never published. Defaults
+        /// ai, ai:explain, ai:review, ai:codex, local, or none. Tagged comments are never published. Defaults
         /// to local: a comment made from the CLI stays off GitHub until you
         /// untag it or edit it in the app.
         #[arg(long, default_value = "local")]
@@ -298,7 +298,7 @@ enum CommentAction {
         /// Comment body text
         #[arg(long)]
         body: String,
-        /// ai, local, or none. See `comment add --tag`.
+        /// ai, ai:explain, ai:review, ai:codex, local, or none. See `comment add --tag`.
         #[arg(long, default_value = "local")]
         tag: String,
     },
@@ -312,7 +312,7 @@ enum CommentAction {
     /// Set or clear a comment's tag
     Tag {
         comment_id: i64,
-        /// ai, local, or none
+        /// ai, ai:explain, ai:review, ai:codex, local, or none
         #[arg(long)]
         tag: String,
     },
@@ -337,7 +337,7 @@ enum CommentAction {
         /// Reply body text
         #[arg(long)]
         body: String,
-        /// ai, local, or none. See `comment add --tag`.
+        /// ai, ai:explain, ai:review, ai:codex, local, or none. See `comment add --tag`.
         #[arg(long, default_value = "local")]
         tag: String,
     },

@@ -1,3 +1,5 @@
+import type { CommentTag } from "./commentTag";
+
 export interface Repository {
   id: number;
   local_path: string | null;
@@ -71,9 +73,9 @@ export interface Comment {
   resolved_at: string | null;
   /** databaseId of the GitHub thread's root comment this draft reply targets. */
   github_thread_root_id: number | null;
-  /** `ai`/`local`/none. Tagged comments are never published and don't pin a
-   *  focus-hidden hunk/file visible. Editing an `ai` comment clears the tag. */
-  tag: "ai" | "local" | null;
+  /** `ai`/`ai:*`/`local`/none. Tagged comments are never published and don't pin a
+   *  focus-hidden hunk/file visible. Editing an AI comment clears the tag. */
+  tag: CommentTag | null;
   created_at: string;
   updated_at: string;
 }

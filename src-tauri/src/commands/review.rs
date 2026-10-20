@@ -152,16 +152,19 @@ fn ensure_draft(conn: &Connection, review_id: i64) -> AppResult<()> {
     }
 }
 
-/// `ai` or `local`, or none. Tagged comments are never published and don't pin
+/// `ai`, `ai:explain`, `ai:review`, `ai:codex` or `local`, or none. Tagged comments are never published and don't pin
 /// a focus-hidden hunk/file visible.
 fn validate_tag(tag: Option<&str>) -> AppResult<()> {
     match tag {
-        None | Some("ai") | Some("local") => Ok(()),
+        None | Some("ai" | "ai:explain" | "ai:review" | "ai:codex" | "local") => Ok(()),
         Some(t) => Err(AppError::Other(format!(
-            "invalid tag '{t}' (expected ai or local)"
+            "invalid tag '{t}' (expected ai, ai:explain, ai:review, ai:codex or local)"
         ))),
     }
 }
+
+/// SQL predicate: the comment's `tag` is any AI tag (`ai` or `ai:*`).
+pub(crate) const AI_TAG_SQL: &str = "(tag = 'ai' OR tag LIKE 'ai:%')";
 
 /// Map the stored verdict to a GitHub review event. None/'comment' => COMMENT.
 fn gh_event(event: Option<&str>) -> &'static str {
@@ -2031,9 +2034,11 @@ pub fn update_comment_impl(conn: &Connection, comment_id: i64, body: String) -> 
     // publishes like any other comment. A `local` tag is a deliberate choice
     // and survives edits.
     conn.execute(
-        "UPDATE comment SET body = ?1, updated_at = ?2,
-            tag = CASE WHEN tag = 'ai' THEN NULL ELSE tag END
-         WHERE id = ?3",
+        &format!(
+            "UPDATE comment SET body = ?1, updated_at = ?2,
+                tag = CASE WHEN {AI_TAG_SQL} THEN NULL ELSE tag END
+             WHERE id = ?3"
+        ),
         params![body, now(), comment_id],
     )?;
     Ok(())
@@ -2648,6 +2653,30 @@ mod tests {
         let second = new_review_on_target_impl(&conn, target.id, &LiveShas::default()).unwrap();
         assert_ne!(second.id, first.id);
         assert_eq!(second.status, "draft");
+    }
+
+    #[test]
+    fn ai_subtags_are_valid_and_cleared_on_edit_but_local_survives() {
+        let conn = open_memory();
+        let repo = seed_repo(&conn, None, None);
+        let target =
+            get_or_create_local_target(&conn, repo, "/nope", "main", "feature", true).unwrap().0;
+        let review = new_review_for_target(&conn, target.id, &LiveShas::default()).unwrap();
+
+        for tag in ["ai", "ai:explain", "ai:review", "ai:codex"] {
+            let id = seed_comment(&conn, review.id, "a.rs", "RIGHT", 1, None, "x");
+            set_comment_tag_impl(&conn, id, Some(tag)).unwrap();
+            assert_eq!(get_comment(&conn, id).unwrap().tag.as_deref(), Some(tag));
+            update_comment_impl(&conn, id, "edited".into()).unwrap();
+            assert_eq!(get_comment(&conn, id).unwrap().tag, None, "{tag} cleared on edit");
+        }
+
+        let local = seed_comment(&conn, review.id, "a.rs", "RIGHT", 2, None, "y");
+        set_comment_tag_impl(&conn, local, Some("local")).unwrap();
+        update_comment_impl(&conn, local, "edited".into()).unwrap();
+        assert_eq!(get_comment(&conn, local).unwrap().tag.as_deref(), Some("local"));
+
+        assert!(set_comment_tag_impl(&conn, local, Some("ai:bogus")).is_err());
     }
 
     #[test]

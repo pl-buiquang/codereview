@@ -679,7 +679,7 @@ pub fn set_focus_plan_from(
         let mut stmt = tx.prepare(
             "SELECT fc.comment_id FROM focus_comment fc
              JOIN comment c ON c.id = fc.comment_id
-             WHERE fc.focus_id = ?1 AND c.tag = 'ai'",
+             WHERE fc.focus_id = ?1 AND (c.tag = 'ai' OR c.tag LIKE 'ai:%')",
         )?;
         let ai_ids: Vec<i64> = stmt
             .query_map(params![fid], |r| r.get(0))?
@@ -792,7 +792,7 @@ pub fn clear_focus_impl(conn: &Connection, review_id: i64) -> AppResult<()> {
         let mut stmt = conn.prepare(
             "SELECT fc.comment_id FROM focus_comment fc
              JOIN comment c ON c.id = fc.comment_id
-             WHERE fc.focus_id = ?1 AND c.tag = 'ai'",
+             WHERE fc.focus_id = ?1 AND (c.tag = 'ai' OR c.tag LIKE 'ai:%')",
         )?;
         let ai_ids: Vec<i64> = stmt
             .query_map(params![fid], |r| r.get(0))?
@@ -843,7 +843,7 @@ fn first_changed_line(h: &DiffHunk) -> Option<(&'static str, i64, usize)> {
 fn note_comment(conn: &Connection, review_id: i64, h: &DiffHunk, note: &str) -> AppResult<i64> {
     let comment = match first_changed_line(h) {
         None => {
-            add_file_comment_impl(conn, review_id, h.file_path.clone(), note.into(), Some("ai"))?
+            add_file_comment_impl(conn, review_id, h.file_path.clone(), note.into(), Some("ai:explain"))?
         }
         Some((side, line, idx)) => {
             let lo = idx.saturating_sub(SNIPPET_CONTEXT);
@@ -864,7 +864,7 @@ fn note_comment(conn: &Connection, review_id: i64, h: &DiffHunk, note: &str) -> 
                 note.into(),
                 head,
                 None,
-                Some("ai"),
+                Some("ai:explain"),
             )?
         }
     };
@@ -1282,7 +1282,7 @@ mod tests {
         let notes = focus_comments_impl(&conn, rid).unwrap();
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].body, "check");
-        assert_eq!(notes[0].tag.as_deref(), Some("ai"));
+        assert_eq!(notes[0].tag.as_deref(), Some("ai:explain"));
         assert_eq!(e(&app[1].hunk_id).tier, "review");
         assert_eq!(e(&app[1].hunk_id).source.as_deref(), Some("default"));
         let lock = by_file(&hunks, "Cargo.lock")[0];
@@ -1344,7 +1344,7 @@ mod tests {
         let add_note = notes.iter().find(|c| c.body == "add?").unwrap();
         assert_eq!((add_note.side.as_str(), add_note.line), ("RIGHT", 2));
         assert_eq!(add_note.anchored_head_sha.as_deref(), Some("head1"));
-        assert_eq!(add_note.tag.as_deref(), Some("ai"));
+        assert_eq!(add_note.tag.as_deref(), Some("ai:explain"));
         assert!(add_note.diff_hunk.as_deref().unwrap().starts_with("@@ -1,3 +1,4 @@"));
         let del_note = notes.iter().find(|c| c.body == "del?").unwrap();
         assert_eq!((del_note.side.as_str(), del_note.line), ("LEFT", 1));

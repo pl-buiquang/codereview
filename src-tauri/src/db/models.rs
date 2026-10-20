@@ -192,7 +192,7 @@ pub struct Comment {
     /// databaseId of the GitHub thread's root comment this draft reply targets.
     /// NULL for normal local comments.
     pub github_thread_root_id: Option<i64>,
-    /// 'ai' or 'local', or NULL. Tagged comments are never published and don't
+    /// 'ai', 'ai:explain', 'ai:review', 'ai:codex' or 'local', or NULL. Tagged comments are never published and don't
     /// pin a focus-hidden hunk/file visible.
     pub tag: Option<String>,
     pub created_at: String,
