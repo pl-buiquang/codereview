@@ -108,6 +108,7 @@ interface UIState {
   toggleSidebar: () => void;
   toggleLane: (lane: string) => void;
   moveTab: (fromId: string, toId: string) => void;
+  moveOpenRepo: (fromId: number, toId: number) => void;
 }
 
 type Persisted = Pick<
@@ -249,6 +250,18 @@ export const useUIStore = create<UIState>()(
           const target = tabs.findIndex((t) => t.id === toId);
           tabs.splice(from < to ? target + 1 : target, 0, moved);
           return { tabs };
+        }),
+      // Same drop semantics as moveTab: rightward lands after the target, leftward before.
+      moveOpenRepo: (fromId, toId) =>
+        set((s) => {
+          const from = s.openRepoIds.indexOf(fromId);
+          const to = s.openRepoIds.indexOf(toId);
+          if (fromId === toId || from === -1 || to === -1) return {};
+          const ids = [...s.openRepoIds];
+          ids.splice(from, 1);
+          const target = ids.indexOf(toId);
+          ids.splice(from < to ? target + 1 : target, 0, fromId);
+          return { openRepoIds: ids };
         }),
     }),
     {

@@ -212,6 +212,28 @@ describe("useUIStore", () => {
     });
   });
 
+  describe("moveOpenRepo", () => {
+    const order = () => useUIStore.getState().openRepoIds;
+    beforeEach(() => useUIStore.setState({ openRepoIds: [1, 2, 3, 4] }));
+
+    it("moves a repo upward, before the drop target", () => {
+      useUIStore.getState().moveOpenRepo(4, 2);
+      expect(order()).toEqual([1, 4, 2, 3]);
+    });
+
+    it("moves a repo downward, after the drop target", () => {
+      useUIStore.getState().moveOpenRepo(1, 3);
+      expect(order()).toEqual([2, 3, 1, 4]);
+    });
+
+    it("ignores no-op and unknown ids", () => {
+      useUIStore.getState().moveOpenRepo(2, 2);
+      useUIStore.getState().moveOpenRepo(9, 2);
+      useUIStore.getState().moveOpenRepo(2, 9);
+      expect(order()).toEqual([1, 2, 3, 4]);
+    });
+  });
+
   describe("migratePersisted", () => {
     it("v2 → v3 turns repo tabs into open repos and shows the active one in home", () => {
       const out = migratePersisted(

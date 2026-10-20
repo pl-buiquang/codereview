@@ -519,6 +519,9 @@ button:disabled,
 .tab:hover {
   color: var(--text);
 }
+.cr-open-repo.drag-over {
+  box-shadow: inset 0 2px 0 var(--accent);
+}
 .tab.drag-over {
   box-shadow: inset 2px 0 0 var(--accent);
 }

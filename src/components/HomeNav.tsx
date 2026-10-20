@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { identicon } from "../lib/avatar";
@@ -6,6 +7,8 @@ import { useUIStore, type HomeSection } from "../store";
 import { Icon, type IconName } from "./icons";
 import { Tooltip } from "./Tooltip";
 import { SyncIndicator } from "./SyncIndicator";
+
+const REPO_DRAG_MIME = "application/x-cr-repo";
 
 const NAV: { key: HomeSection; label: string; icon: IconName }[] = [
   { key: "sessions", label: "Sessions", icon: "terminal" },
@@ -33,6 +36,8 @@ export function HomeNav({
   const setSection = useUIStore((s) => s.setHomeSection);
   const openRepo = useUIStore((s) => s.openRepo);
   const closeRepo = useUIStore((s) => s.closeRepo);
+  const moveOpenRepo = useUIStore((s) => s.moveOpenRepo);
+  const [dragOverId, setDragOverId] = useState<number | null>(null);
   const toggleSidebar = useUIStore((s) => s.toggleSidebar);
   const openSettingsTab = useUIStore((s) => s.openSettingsTab);
   const onHome = activeTabId === "home";
@@ -89,7 +94,28 @@ export function HomeNav({
               <div
                 role="button"
                 tabIndex={0}
-                className={`cr-nav-item cr-open-repo${onHome && homeRepoId === repo.id ? " active" : ""}`}
+                className={`cr-nav-item cr-open-repo${onHome && homeRepoId === repo.id ? " active" : ""}${
+                  dragOverId === repo.id ? " drag-over" : ""
+                }`}
+                draggable
+                onDragStart={(e) => {
+                  e.dataTransfer.setData(REPO_DRAG_MIME, String(repo.id));
+                  e.dataTransfer.effectAllowed = "move";
+                }}
+                onDragOver={(e) => {
+                  if (!e.dataTransfer.types.includes(REPO_DRAG_MIME)) return;
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = "move";
+                  setDragOverId(repo.id);
+                }}
+                onDragLeave={() => setDragOverId((id) => (id === repo.id ? null : id))}
+                onDragEnd={() => setDragOverId(null)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setDragOverId(null);
+                  const fromId = Number(e.dataTransfer.getData(REPO_DRAG_MIME));
+                  if (fromId) moveOpenRepo(fromId, repo.id);
+                }}
                 onClick={go(() => openRepo(repo.id))}
                 onMouseDown={(e) => {
                   if (e.button === 1) e.preventDefault();
