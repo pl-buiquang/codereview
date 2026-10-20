@@ -401,6 +401,21 @@ enum OpenTarget {
         #[arg(long)]
         three_dot: bool,
     },
+    /// Open a repo's commit graph, focused on a branch/tag (default: current branch of PATH or cwd)
+    #[command(alias = "tree")]
+    Graph {
+        /// Directory inside the repo or worktree (default: cwd)
+        path: Option<String>,
+        /// Branch, remote branch or tag to focus (default: current branch)
+        #[arg(long = "ref", conflicts_with = "no_ref")]
+        ref_name: Option<String>,
+        /// Open the graph without focusing any ref
+        #[arg(long)]
+        no_ref: bool,
+        /// Registered repository ID (skips detection from PATH)
+        #[arg(long)]
+        repo: Option<i64>,
+    },
     /// Navigate to the home tab
     Home {
         /// Section: inbox, reviews, archive, repositories
@@ -457,6 +472,70 @@ fn resolve_here() -> AppResult<String> {
     Err(AppError::Other(format!(
         "branch '{branch}' has no open PR and doesn't follow the issue-<n> naming convention"
     )))
+}
+
+struct GraphTarget {
+    repo_id: i64,
+    ref_name: Option<String>,
+    worktree: Option<String>,
+}
+
+/// Resolve which registered repo / worktree / ref `cr open graph` should show.
+fn resolve_graph_target(
+    db: &Db,
+    path: Option<String>,
+    ref_name: Option<String>,
+    no_ref: bool,
+    repo_id: Option<i64>,
+    json: bool,
+) -> AppResult<GraphTarget> {
+    let dir = match path {
+        Some(p) => std::path::PathBuf::from(p),
+        None => std::env::current_dir().map_err(|e| AppError::Other(format!("cannot read cwd: {e}")))?,
+    };
+    let not_repo = || AppError::NotARepo(dir.display().to_string());
+    let git = |args: &[&str]| codereview_lib::git::run_git(&dir, args).map(|s| s.trim().to_string());
+
+    let toplevel = std::path::PathBuf::from(git(&["rev-parse", "--show-toplevel"]).map_err(|_| not_repo())?);
+    let worktrees = codereview_lib::worktree::list_worktrees(&toplevel)?;
+    let main_path = worktrees
+        .iter()
+        .find(|w| w.is_main)
+        .map(|w| w.path.clone())
+        .ok_or_else(not_repo)?;
+    let worktree = (toplevel != std::path::Path::new(&main_path)).then(|| toplevel.display().to_string());
+
+    let repo_id = match repo_id {
+        Some(id) => id,
+        None => {
+            let conn = db.0.lock().unwrap();
+            let known = repo::list_repositories_impl(&conn)?
+                .into_iter()
+                .find(|r| r.local_path.as_deref() == Some(main_path.as_str()));
+            match known {
+                Some(r) => r.id,
+                None => {
+                    let r = repo::add_repository_impl(&conn, &main_path)?;
+                    if !json {
+                        eprintln!("Registered repository #{} ({main_path})", r.id);
+                    }
+                    r.id
+                }
+            }
+        }
+    };
+
+    let ref_name = if no_ref {
+        None
+    } else if ref_name.is_some() {
+        ref_name
+    } else {
+        codereview_lib::worktree::current_branch(&toplevel).or_else(|| {
+            git(&["describe", "--tags", "--exact-match"]).ok().filter(|t| !t.is_empty())
+        })
+    };
+
+    Ok(GraphTarget { repo_id, ref_name, worktree })
 }
 
 fn resolve_reference(reference: Option<String>, here: bool) -> AppResult<String> {
@@ -932,6 +1011,35 @@ fn run(cmd: Cmd, json: bool, db: &Db) -> AppResult<()> {
                 OpenTarget::Diff { repo_id, base_ref, head_ref, three_dot } => format!(
                     "codereview://diff?repo={repo_id}&base={base_ref}&head={head_ref}&three_dot={three_dot}"
                 ),
+                OpenTarget::Graph { path, ref_name, no_ref, repo } => {
+                    let t = resolve_graph_target(db, path, ref_name, no_ref, repo, json)?;
+                    let mut url = url::Url::parse(&format!("codereview://repo/{}", t.repo_id))
+                        .map_err(|e| AppError::Other(format!("bad URL: {e}")))?;
+                    {
+                        let mut q = url.query_pairs_mut();
+                        if let Some(r) = &t.ref_name {
+                            q.append_pair("ref", r);
+                        }
+                        if let Some(w) = &t.worktree {
+                            q.append_pair("worktree", w);
+                        }
+                    }
+                    if url.query() == Some("") {
+                        url.set_query(None);
+                    }
+                    if json {
+                        println!(
+                            "{}",
+                            serde_json::json!({
+                                "url": url.as_str(),
+                                "repo_id": t.repo_id,
+                                "ref": t.ref_name,
+                                "worktree": t.worktree,
+                            })
+                        );
+                    }
+                    url.to_string()
+                }
                 OpenTarget::Home { section } => match section {
                     Some(s) => format!("codereview://home/{s}"),
                     None => "codereview://home".to_string(),

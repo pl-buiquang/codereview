@@ -299,6 +299,44 @@ export function GraphView({ repo }: { repo: Repository }) {
     [jumpToSha, scope],
   );
 
+  const graphFocus = useUIStore((s) => (s.graphFocus?.repoId === repo.id ? s.graphFocus : null));
+  const clearGraphFocus = useUIStore((s) => s.clearGraphFocus);
+  const graphLoaded = graphQuery.data != null && !graphQuery.isFetching;
+  useEffect(() => {
+    if (!graphFocus) return;
+    if (graphFocus.worktree !== ctx) {
+      resetContext(graphFocus.worktree);
+      return;
+    }
+    if (!graphFocus.ref) {
+      clearGraphFocus();
+      return;
+    }
+    if (refsQuery.isError) {
+      toast.error(`Could not load refs:\n${String(refsQuery.error)}`);
+      clearGraphFocus();
+      return;
+    }
+    if (refsQuery.data == null || refsQuery.isFetching) return;
+    const name = graphFocus.ref;
+    const ref =
+      (["local", "tag", "remote"] as const)
+        .map((kind) => refsQuery.data.find((r) => r.kind === kind && r.name === name))
+        .find((r) => r != null) ?? null;
+    if (!ref) {
+      toast.error(`Ref ${name} not found`);
+      clearGraphFocus();
+      return;
+    }
+    if (ref.kind === "remote" && scope !== "all") {
+      setScope("all");
+      return;
+    }
+    if (!graphLoaded) return;
+    onJumpToRef(ref);
+    clearGraphFocus();
+  }, [graphFocus, ctx, scope, refsQuery.data, refsQuery.isFetching, refsQuery.isError, refsQuery.error, graphLoaded, resetContext, onJumpToRef, clearGraphFocus]);
+
   const onEndReached = useCallback(() => {
     if (graphQuery.hasNextPage && !graphQuery.isFetchingNextPage) void graphQuery.fetchNextPage();
   }, [graphQuery]);

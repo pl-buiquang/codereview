@@ -17,6 +17,11 @@ pub enum DeepLinkAction {
         head_ref: String,
         three_dot: bool,
     },
+    OpenRepo {
+        repo_id: i64,
+        ref_name: Option<String>,
+        worktree: Option<String>,
+    },
     NavigateHome {
         section: Option<String>,
     },
@@ -72,12 +77,39 @@ pub fn parse_deep_link(raw: &str) -> Result<DeepLinkAction, String> {
         }
         // diff uses query params because paths can contain slashes
         ["diff"] => parse_diff_params(&url),
+        ["repo", id] => {
+            let repo_id = id
+                .parse::<i64>()
+                .map_err(|_| format!("invalid repo id: {id}"))?;
+            parse_repo_params(&url, repo_id)
+        }
         ["home"] => Ok(DeepLinkAction::NavigateHome { section: None }),
         ["home", section] => Ok(DeepLinkAction::NavigateHome {
             section: Some((*section).to_string()),
         }),
         _ => Err(format!("unknown path: {}", segments.join("/"))),
     }
+}
+
+fn parse_repo_params(url: &url::Url, repo_id: i64) -> Result<DeepLinkAction, String> {
+    let pairs: std::collections::HashMap<std::borrow::Cow<str>, std::borrow::Cow<str>> =
+        url.query_pairs().collect();
+    let ref_name = pairs
+        .get("ref")
+        .filter(|v| !v.is_empty())
+        .map(|v| v.to_string());
+    if let Some(r) = &ref_name {
+        crate::git::validate_commit_ref(r).map_err(|e| e.to_string())?;
+    }
+    let worktree = pairs
+        .get("worktree")
+        .filter(|v| !v.is_empty())
+        .map(|v| v.to_string());
+    Ok(DeepLinkAction::OpenRepo {
+        repo_id,
+        ref_name,
+        worktree,
+    })
 }
 
 fn parse_diff_params(url: &url::Url) -> Result<DeepLinkAction, String> {
@@ -188,6 +220,46 @@ mod tests {
             panic!("expected OpenDiff");
         };
         assert!(three_dot);
+    }
+
+    #[test]
+    fn parse_repo_plain() {
+        let a = parse_deep_link("codereview://repo/7").unwrap();
+        let DeepLinkAction::OpenRepo { repo_id, ref_name, worktree } = a else {
+            panic!("expected OpenRepo, got {a:?}");
+        };
+        assert_eq!(repo_id, 7);
+        assert!(ref_name.is_none());
+        assert!(worktree.is_none());
+    }
+
+    #[test]
+    fn parse_repo_with_ref_and_worktree() {
+        let mut url = url::Url::parse("codereview://repo/7").unwrap();
+        url.query_pairs_mut()
+            .append_pair("ref", "feature/x")
+            .append_pair("worktree", "/tmp/my wt");
+        let a = parse_deep_link(url.as_str()).unwrap();
+        let DeepLinkAction::OpenRepo { ref_name, worktree, .. } = a else {
+            panic!("expected OpenRepo, got {a:?}");
+        };
+        assert_eq!(ref_name.as_deref(), Some("feature/x"));
+        assert_eq!(worktree.as_deref(), Some("/tmp/my wt"));
+    }
+
+    #[test]
+    fn parse_repo_empty_ref_is_none() {
+        let a = parse_deep_link("codereview://repo/7?ref=").unwrap();
+        let DeepLinkAction::OpenRepo { ref_name, .. } = a else {
+            panic!("expected OpenRepo, got {a:?}");
+        };
+        assert!(ref_name.is_none());
+    }
+
+    #[test]
+    fn repo_rejects_bad_id_and_unsafe_ref() {
+        assert!(parse_deep_link("codereview://repo/abc").is_err());
+        assert!(parse_deep_link("codereview://repo/1?ref=--output%3D%2F").is_err());
     }
 
     #[test]

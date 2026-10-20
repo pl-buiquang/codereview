@@ -11,8 +11,13 @@ const ghAuthStatus = vi.fn();
 const listPrs = vi.fn();
 const createReviewForPr = vi.fn();
 const graphLog = vi.fn();
+const openUrl = vi.fn();
 vi.mock("../lib/api", () => ({
   api: {
+    openUrl: (url: string) => {
+      openUrl(url);
+      return Promise.resolve();
+    },
     listReviews: (id: number | null) => listReviews(id),
     listBranches: (id: number) => listBranches(id),
     graphLog: (args: unknown) => graphLog(args),
@@ -74,6 +79,20 @@ beforeEach(() => {
   ghAuthStatus.mockResolvedValue(true);
   listPrs.mockResolvedValue([pr]);
   graphLog.mockResolvedValue([]);
+});
+
+describe("RepoView GitHub link", () => {
+  it("opens the repo on GitHub when it has a GitHub remote", async () => {
+    const user = userEvent.setup();
+    renderRepo();
+    await user.click(screen.getByRole("button", { name: /GitHub$/ }));
+    expect(openUrl).toHaveBeenCalledWith("https://github.com/acme/widget");
+  });
+
+  it("hides the link for a repo without a remote", () => {
+    renderRepo({ ...repo, remote_owner: null, remote_name: null });
+    expect(screen.queryByTitle(/on GitHub$/)).toBeNull();
+  });
 });
 
 describe("RepoView tabs", () => {

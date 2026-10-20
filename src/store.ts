@@ -23,6 +23,15 @@ export interface Tab {
 const HOME_TAB: Tab = { id: "home", kind: "home" };
 const reviewTabId = (reviewId: number) => `review-${reviewId}`;
 
+export interface GraphFocus {
+  repoId: number;
+  ref: string | null;
+  worktree: string | null;
+  nonce: number;
+}
+
+let graphFocusNonce = 0;
+
 export interface BoardFilters {
   repo: string | null;
   status: string | null;
@@ -82,6 +91,10 @@ interface UIState {
   boardHighlightCardId: string | null;
   showBoardCard: (cardId: string) => void;
   clearBoardHighlight: () => void;
+  /** Pending request to open a repo's Graph on a ref/worktree (not persisted). */
+  graphFocus: GraphFocus | null;
+  focusGraph: (focus: Omit<GraphFocus, "nonce">) => void;
+  clearGraphFocus: () => void;
   openRepo: (repoId: number) => void;
   openSettingsTab: () => void;
   openReview: (reviewId: number, repoId?: number) => void;
@@ -127,6 +140,19 @@ export const useUIStore = create<UIState>()(
       boardFilters: EMPTY_BOARD_FILTERS,
       inboxFilters: EMPTY_INBOX_FILTERS,
       boardHighlightCardId: null,
+      graphFocus: null,
+
+      focusGraph: (focus) =>
+        set((s) => ({
+          activeTabId: HOME_TAB.id,
+          homeRepoId: focus.repoId,
+          openRepoIds: s.openRepoIds.includes(focus.repoId)
+            ? s.openRepoIds
+            : [...s.openRepoIds, focus.repoId],
+          graphFocus: { ...focus, nonce: ++graphFocusNonce },
+        })),
+
+      clearGraphFocus: () => set({ graphFocus: null }),
 
       openRepo: (repoId) =>
         set((s) => ({

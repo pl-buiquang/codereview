@@ -173,7 +173,24 @@ of this.
    reviews only; locks the review).
 
 The **Reviews** tab shows every saved review for the repo — open to resume,
-or ✕ to delete.
+or ✕ to delete. Repos with a GitHub remote have a **GitHub** link in the header that opens the
+repo in the browser.
+
+### Open the graph from a terminal
+
+`cr open graph` (alias `cr open tree`) opens the app on the Graph of the repo containing the
+current directory, focused on the checked-out branch (or exact tag when detached). Inside a linked
+worktree it also selects that worktree as the graph's context. A repo that isn't registered yet is
+added automatically.
+
+```bash
+cr open graph                    # current repo, current branch
+cr open graph --ref v1.2.0       # a specific branch, remote branch (origin/x) or tag
+cr open graph --no-ref           # just the repo's Graph
+cr open graph ~/projects/foo     # another repo/worktree path
+```
+
+Under the hood this is the deep link `codereview://repo/<repo_id>[?ref=<name>][&worktree=<path>]`.
 
 ### Focus review
 

@@ -11,6 +11,7 @@ type DeepLinkAction =
   | { kind: "openReview"; review_id: number }
   | { kind: "openPr"; owner: string; name: string; number: number }
   | { kind: "openDiff"; repo_id: number; base_ref: string; head_ref: string; three_dot: boolean }
+  | { kind: "openRepo"; repo_id: number; ref_name: string | null; worktree: string | null }
   | { kind: "navigateHome"; section: string | null }
   | { kind: "showBoardCard"; owner: string; name: string; number: number };
 
@@ -52,6 +53,25 @@ export async function handleDeepLinkAction(action: DeepLinkAction): Promise<void
         threeDot: action.three_dot,
       });
       openReview(review.id, action.repo_id);
+      break;
+    }
+
+    case "openRepo": {
+      const repos = await api.listRepositories();
+      const repo = repos.find((r) => r.id === action.repo_id);
+      if (!repo) {
+        toast.error(`Repository #${action.repo_id} not found`);
+        return;
+      }
+      if (!repo.local_path) {
+        toast.error(`Repository #${action.repo_id} has no local clone; cannot show its graph`);
+        return;
+      }
+      useUIStore.getState().focusGraph({
+        repoId: repo.id,
+        ref: action.ref_name,
+        worktree: action.worktree,
+      });
       break;
     }
 

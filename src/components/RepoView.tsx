@@ -23,6 +23,10 @@ export function RepoView({ repo }: { repo: Repository }) {
   const [tab, setTab] = useState<Tab>(repo.local_path ? "graph" : "prs");
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
+  const graphFocusNonce = useUIStore((s) => (s.graphFocus?.repoId === repo.id ? s.graphFocus.nonce : null));
+  useEffect(() => {
+    if (graphFocusNonce != null && repo.local_path) setTab("graph");
+  }, [graphFocusNonce, repo.local_path]);
 
   const setFriendlyName = useMutation({
     mutationFn: (friendlyName: string | null) => api.setRepositoryFriendlyName(repo.id, friendlyName),
@@ -79,6 +83,19 @@ export function RepoView({ repo }: { repo: Repository }) {
               <Icon name="edit" size={13} />
             </button>
           </h1>
+        )}
+        {repo.remote_owner && repo.remote_name && (
+          <button
+            className="btn-icon repo-github-link"
+            title={`${repo.remote_owner}/${repo.remote_name} on GitHub`}
+            onClick={() =>
+              api
+                .openUrl(`https://github.com/${repo.remote_owner}/${repo.remote_name}`)
+                .catch((e) => toast.error(`Could not open GitHub:\n${String(e)}`))
+            }
+          >
+            <Icon name="ext" size={13} /> GitHub
+          </button>
         )}
       </header>
 
