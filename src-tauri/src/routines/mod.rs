@@ -3,6 +3,7 @@
 //! `context` turns a launch reference into prompt variables and a working directory.
 
 pub mod context;
+pub mod handlers;
 pub mod manager;
 
 use rusqlite::{params, Connection, Row};
@@ -84,8 +85,14 @@ pub struct Defaults {
     pub context_type: &'static str,
     pub prompt_template: &'static str,
     pub system_prompt: &'static str,
+    pub system_prompt_mode: &'static str,
     pub needs_worktree: bool,
+    pub permission_mode: &'static str,
+    pub allowed_tools: &'static [&'static str],
+    pub extra_args: &'static [&'static str],
     pub timeout_min: i64,
+    /// Rust post-processing of the run (`handlers`); `None` for plain routines.
+    pub handler: Option<&'static str>,
 }
 
 const BABYSIT_PROMPT: &str = "/goal PR {{repo}}#{{number}} has every required check passing on its latest head and its branch is not behind {{base_ref}}, or you have stopped and reported NEEDS_ATTENTION";
@@ -110,16 +117,89 @@ message (no body), and `git push` (never a plain `--force`). Then go back to ste
 Stop when the goal holds, or when you cannot make progress without a human (a failure you cannot fix, a decision only the \
 author can take, repeated reruns of the same failure). In that last case finish with `NEEDS_ATTENTION: <one-sentence diagnosis>`.";
 
-pub const DEFAULTS: &[Defaults] = &[Defaults {
-    key: BABYSIT_KEY,
-    name: "Babysit",
-    description: "Keep a PR's CI green: wait for checks, rerun flaky jobs, update the branch, fix real failures and push.",
-    context_type: "pr",
-    prompt_template: BABYSIT_PROMPT,
-    system_prompt: BABYSIT_SYSTEM,
-    needs_worktree: true,
-    timeout_min: 240,
-}];
+const AI_REVIEW_SYSTEM: &str = "\
+Headless app mode. Review id = {{review_id}} already exists: do not create or open reviews. \
+The `cr` CLI on PATH already points at the app's database. Nobody can answer questions, so \
+never use AskUserQuestion; pick sensible defaults. This session ends when you stop, so it \
+cannot wait for background notifications: run the Codex companion in the foreground, never as \
+a background Bash call. Finish with a summary of at most 5 lines.";
+
+const fn ai_review(
+    key: &'static str,
+    name: &'static str,
+    description: &'static str,
+    prompt_template: &'static str,
+) -> Defaults {
+    Defaults {
+        key,
+        name,
+        description,
+        context_type: "review",
+        prompt_template,
+        system_prompt: AI_REVIEW_SYSTEM,
+        system_prompt_mode: "append",
+        needs_worktree: false,
+        // Explicit so the user's own settings (e.g. `defaultMode: plan`) never leak in.
+        permission_mode: "acceptEdits",
+        allowed_tools: crate::commands::ai_review::TOOLS,
+        extra_args: &[],
+        timeout_min: 90,
+        handler: Some("ai_review"),
+    }
+}
+
+/// The system prompt of `board_overview` and `focus` is empty: they use the prompt of the same
+/// name in Settings → Prompts (`prompts.rs`), so existing overrides keep applying.
+pub const DEFAULTS: &[Defaults] = &[
+    Defaults {
+        key: BABYSIT_KEY,
+        name: "Babysit",
+        description: "Keep a PR's CI green: wait for checks, rerun flaky jobs, update the branch, fix real failures and push.",
+        context_type: "pr",
+        prompt_template: BABYSIT_PROMPT,
+        system_prompt: BABYSIT_SYSTEM,
+        system_prompt_mode: "append",
+        needs_worktree: true,
+        permission_mode: "bypassPermissions",
+        allowed_tools: &[],
+        extra_args: &[],
+        timeout_min: 240,
+        handler: None,
+    },
+    Defaults {
+        key: "board_overview",
+        name: "Board overview",
+        description: "AI insights shown above the board digest. The board snapshot is the prompt; the system prompt is Settings → Prompts → Board AI insights while this field is empty.",
+        context_type: "board",
+        prompt_template: "{{snapshot}}",
+        system_prompt: "",
+        system_prompt_mode: "replace",
+        needs_worktree: false,
+        permission_mode: "default",
+        allowed_tools: &[],
+        extra_args: &["--tools", "", "--effort", "low"],
+        timeout_min: 10,
+        handler: Some("overview"),
+    },
+    Defaults {
+        key: "focus",
+        name: "Focus",
+        description: "Triage a review's hunks into focus tiers. The system prompt is Settings → Prompts → Focus mode while this field is empty; the app-mode suffix is always appended.",
+        context_type: "review",
+        prompt_template: "Generate the focus for review {{review_id}}.",
+        system_prompt: "",
+        system_prompt_mode: "append",
+        needs_worktree: false,
+        permission_mode: "default",
+        allowed_tools: crate::commands::focus::FOCUS_TOOLS,
+        extra_args: &[],
+        timeout_min: 30,
+        handler: Some("focus"),
+    },
+    ai_review("ai_review_explain", "AI review: explain", "Headless `/local-review`: one explanatory comment per change.", "/local-review {{review_id}}"),
+    ai_review("ai_review_critique", "AI review: critique", "Headless `/local-review --critique` (Standards + Spec sub-agents).", "/local-review {{review_id}} --critique"),
+    ai_review("ai_review_codex", "AI review: codex", "Headless `/local-review --codex` (Codex adversarial review).", "/local-review {{review_id}} --codex"),
+];
 
 /// Insert the built-in routines that don't exist yet. Existing rows (possibly edited) are left alone.
 pub fn seed(conn: &Connection) -> AppResult<()> {
@@ -128,8 +208,9 @@ pub fn seed(conn: &Connection) -> AppResult<()> {
         conn.execute(
             "INSERT OR IGNORE INTO routine
                (key, name, description, context_type, prompt_template, system_prompt, system_prompt_mode,
-                needs_worktree, permission_mode, timeout_min, builtin, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'append', ?7, 'bypassPermissions', ?8, 1, ?9, ?9)",
+                needs_worktree, permission_mode, allowed_tools, extra_args, timeout_min, handler, builtin,
+                created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 1, ?14, ?14)",
             params![
                 d.key,
                 d.name,
@@ -137,8 +218,13 @@ pub fn seed(conn: &Connection) -> AppResult<()> {
                 d.context_type,
                 d.prompt_template,
                 d.system_prompt,
+                d.system_prompt_mode,
                 d.needs_worktree as i64,
+                d.permission_mode,
+                serde_json::to_string(d.allowed_tools).unwrap_or_else(|_| "[]".into()),
+                serde_json::to_string(d.extra_args).unwrap_or_else(|_| "[]".into()),
                 d.timeout_min,
+                d.handler,
                 now
             ],
         )?;
@@ -146,7 +232,7 @@ pub fn seed(conn: &Connection) -> AppResult<()> {
     Ok(())
 }
 
-/// Put a built-in back to its shipped prompt, worktree flag and timeout.
+/// Put a built-in back to its shipped prompts, permissions, tools, arguments and timeout.
 pub fn reset(conn: &Connection, id: i64) -> AppResult<Routine> {
     let routine = get(conn, id)?;
     let d = DEFAULTS
@@ -155,8 +241,8 @@ pub fn reset(conn: &Connection, id: i64) -> AppResult<Routine> {
         .ok_or_else(|| AppError::Other("only built-in routines can be reset".into()))?;
     conn.execute(
         "UPDATE routine SET name = ?2, description = ?3, prompt_template = ?4, system_prompt = ?5,
-                system_prompt_mode = 'append', needs_worktree = ?6, permission_mode = 'bypassPermissions',
-                allowed_tools = '[]', extra_args = '[]', model = '', timeout_min = ?7, enabled = 1, updated_at = ?8
+                system_prompt_mode = ?6, needs_worktree = ?7, permission_mode = ?8, allowed_tools = ?9,
+                extra_args = ?10, model = '', timeout_min = ?11, enabled = 1, updated_at = ?12
          WHERE id = ?1",
         params![
             id,
@@ -164,7 +250,11 @@ pub fn reset(conn: &Connection, id: i64) -> AppResult<Routine> {
             d.description,
             d.prompt_template,
             d.system_prompt,
+            d.system_prompt_mode,
             d.needs_worktree as i64,
+            d.permission_mode,
+            serde_json::to_string(d.allowed_tools).unwrap_or_else(|_| "[]".into()),
+            serde_json::to_string(d.extra_args).unwrap_or_else(|_| "[]".into()),
             d.timeout_min,
             chrono::Utc::now().to_rfc3339()
         ],
@@ -378,6 +468,27 @@ mod tests {
         seed(&conn).unwrap();
         assert_eq!(get(&conn, babysit.id).unwrap().timeout_min, 5);
         assert_eq!(reset(&conn, babysit.id).unwrap().timeout_min, 240);
+    }
+
+    #[test]
+    fn feature_builtins_are_seeded_with_their_handlers_and_tools() {
+        let conn = open_memory();
+        seed(&conn).unwrap();
+        let all = list(&conn).unwrap();
+        let get_key = |k: &str| all.iter().find(|r| r.key == k).unwrap();
+        let overview = get_key("board_overview");
+        assert_eq!((overview.handler.as_deref(), overview.context_type.as_str()), (Some("overview"), "board"));
+        assert_eq!(overview.system_prompt_mode, "replace");
+        assert_eq!(overview.extra_args, ["--tools", "", "--effort", "low"]);
+        let focus = get_key("focus");
+        assert_eq!((focus.permission_mode.as_str(), focus.allowed_tools.len()), ("default", 8));
+        let codex = get_key("ai_review_codex");
+        assert_eq!(codex.prompt_template, "/local-review {{review_id}} --codex");
+        assert_eq!(codex.permission_mode, "acceptEdits");
+        assert!(codex.allowed_tools.contains(&"Bash(cr:*)".to_string()));
+        // Reset restores the shipped tools and arguments.
+        conn.execute("UPDATE routine SET allowed_tools = '[]' WHERE id = ?1", params![codex.id]).unwrap();
+        assert!(!reset(&conn, codex.id).unwrap().allowed_tools.is_empty());
     }
 
     #[test]

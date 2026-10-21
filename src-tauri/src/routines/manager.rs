@@ -16,9 +16,10 @@ use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_notification::NotificationExt;
 
 use super::context::{self, ContextRef, Light};
+use super::handlers;
 use super::{get as get_routine, Routine};
-use crate::ai_usage::{self, RunTag, RunUsage};
-use crate::commands::chat::{new_session_id, resolve_model, ClaudeEnvelope};
+use crate::ai_usage::{self, RunUsage};
+use crate::commands::chat::{new_session_id, ClaudeEnvelope};
 use crate::commands::focus::child_path;
 use crate::db::{Db, DbPath};
 use crate::error::{AppError, AppResult};
@@ -383,6 +384,7 @@ impl RoutineManager {
         )?;
         if dropped > 0 {
             emit_updated(app, run_id, "killed");
+            handlers::finish_dropped(app, run_id);
             return Ok(());
         }
         let running: bool = db
@@ -468,19 +470,18 @@ fn execute(app: AppHandle, run_id: i64) {
     let (run, routine) = match loaded {
         Ok(x) => x,
         Err(e) => {
-            finalize(&app, run_id, None, &Outcome { failure: Some(e.to_string()), ..Outcome::default() }, "");
+            finalize(&app, run_id, None, None, &Outcome { failure: Some(e.to_string()), ..Outcome::default() });
             return;
         }
     };
     let outcome = run_process(&app, &run, &routine);
-    let label = format!("{} · {}", routine.name, run.context_label);
-    let status = finalize(&app, run_id, Some(&routine), &outcome, &run.context_label);
+    let status = finalize(&app, run_id, Some(&routine), Some(&run), &outcome);
     let usage_error = match status.as_str() {
         "ok" | "needs_attention" => None,
         "error" => Some(outcome.failure.clone().unwrap_or_else(|| "error".into())),
         other => Some(other.to_string()),
     };
-    let mut tag = RunTag::new("routine").variant(routine.key.clone()).label(label);
+    let mut tag = handlers::usage_tag(&routine, &run);
     tag.model = if run.model.is_empty() { routine.model.clone() } else { run.model.clone() };
     ai_usage::record(&tag, &started_at, started.elapsed().as_millis() as i64, &outcome.usage, usage_error.as_deref());
     app.state::<RoutineManager>().pump(&app);
@@ -498,32 +499,47 @@ fn run_process(app: &AppHandle, run: &RoutineRun, routine: &Routine) -> Outcome 
         return Outcome::default();
     }
 
-    let vars: Vec<(&str, &str)> = resolved.vars.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+    let prep = match handlers::prepare(app, routine, run) {
+        Ok(p) => p,
+        Err(e) => return fail(e.to_string()),
+    };
+    let cleanup = || prep.cleanup.iter().for_each(|d| drop(std::fs::remove_dir_all(d)));
+    let cwd = prep.cwd.clone().unwrap_or_else(|| resolved.cwd.clone());
+    let vars: Vec<(&str, &str)> =
+        resolved.vars.iter().chain(&prep.vars).map(|(k, v)| (k.as_str(), v.as_str())).collect();
     let prompt = prompts::render(&routine.prompt_template, &vars);
-    let mut system = prompts::render(&routine.system_prompt, &vars);
-    if !system.is_empty() {
-        system.push_str("\n\n");
+    let mut system = prep.system.clone().unwrap_or_else(|| prompts::render(&routine.system_prompt, &vars));
+    system.push_str(&prep.system_suffix);
+    // Handler routines feed app features and keep exactly the prompt they always had.
+    if routine.handler.is_none() {
+        if !system.is_empty() {
+            system.push_str("\n\n");
+        }
+        system.push_str(&resolved.block);
     }
-    system.push_str(&resolved.block);
     if !run.note.trim().is_empty() {
         system.push_str(&format!("\n\n## Extra instructions for this run\n{}", run.note.trim()));
     }
     let prompt_path = std::env::temp_dir().join(format!("codereview_routine_{}.txt", run.id));
     if let Err(e) = std::fs::write(&prompt_path, &system) {
+        cleanup();
         return fail(format!("failed to write system prompt: {e}"));
     }
 
     let session_id = new_session_id();
-    let model = resolve_model(Some(if run.model.is_empty() { routine.model.clone() } else { run.model.clone() }));
+    let model = handlers::effective_model(run, routine);
     let mut cmd = Command::new(crate::tools::claude_bin());
-    cmd.current_dir(&resolved.cwd)
+    cmd.current_dir(&cwd)
         .args(["-p", "--output-format", "stream-json", "--verbose", "--strict-mcp-config"])
         .arg("--permission-mode")
         .arg(&routine.permission_mode)
         .arg("--add-dir")
-        .arg(&resolved.cwd);
-    if !routine.allowed_tools.is_empty() {
-        cmd.arg("--allowedTools").args(&routine.allowed_tools);
+        .arg(&cwd);
+    for dir in &prep.extra_dirs {
+        cmd.arg("--add-dir").arg(dir);
+    }
+    if !routine.allowed_tools.is_empty() || !prep.extra_tools.is_empty() {
+        cmd.arg("--allowedTools").args(routine.allowed_tools.iter().chain(&prep.extra_tools));
     }
     if !model.is_empty() {
         cmd.arg("--model").arg(&model);
@@ -551,6 +567,7 @@ fn run_process(app: &AppHandle, run: &RoutineRun, routine: &Routine) -> Outcome 
         Ok(c) => c,
         Err(e) => {
             let _ = std::fs::remove_file(&prompt_path);
+            cleanup();
             return fail(format!("failed to spawn claude: {e}"));
         }
     };
@@ -569,7 +586,7 @@ fn run_process(app: &AppHandle, run: &RoutineRun, routine: &Routine) -> Outcome 
         let conn = db.0.lock().unwrap();
         let _ = conn.execute(
             "UPDATE routine_run SET pid = ?2, cwd = ?3, session_id = ?4 WHERE id = ?1",
-            params![run.id, pid, resolved.cwd.to_string_lossy(), session_id],
+            params![run.id, pid, cwd.to_string_lossy(), session_id],
         );
     }
 
@@ -605,6 +622,7 @@ fn run_process(app: &AppHandle, run: &RoutineRun, routine: &Routine) -> Outcome 
     let status = child.wait();
     manager.inner.lock().unwrap().live.remove(&run.id);
     let _ = std::fs::remove_file(&prompt_path);
+    cleanup();
     let stderr = stderr_handle.and_then(|h| h.join().ok()).unwrap_or_default();
 
     let usage = result
@@ -672,7 +690,7 @@ fn final_status(stop: Option<&'static str>, result: Option<&Value>, text: &str) 
 }
 
 /// Write the final state, notify, prune old runs. Returns the status it settled on.
-fn finalize(app: &AppHandle, run_id: i64, routine: Option<&Routine>, outcome: &Outcome, label: &str) -> String {
+fn finalize(app: &AppHandle, run_id: i64, routine: Option<&Routine>, run: Option<&RoutineRun>, outcome: &Outcome) -> String {
     let manager = app.state::<RoutineManager>();
     let (stop, shutting_down) = {
         let mut inner = manager.inner.lock().unwrap();
@@ -713,9 +731,18 @@ fn finalize(app: &AppHandle, run_id: i64, routine: Option<&Routine>, outcome: &O
     }
     log::info!(target: "routines", "run {run_id}: {status}");
     if !shutting_down {
+        if let (Some(routine), Some(run)) = (routine, run) {
+            handlers::finish(app, routine, run, status, &text, error.as_deref(), &outcome.usage);
+        }
         emit_updated(app, run_id, status);
-        if let (Some(routine), true) = (routine, matches!(status, "ok" | "needs_attention" | "error" | "timeout")) {
-            notify(app, routine, label, status, &text, error.as_deref());
+        if let (Some(routine), Some(run), true) =
+            (routine, run, matches!(status, "ok" | "needs_attention" | "error" | "timeout"))
+        {
+            // The board overview is a refresh button, not a task worth a banner.
+            if routine.handler.as_deref() == Some("overview") && status == "ok" {
+                return status.to_string();
+            }
+            notify(app, routine, &run.context_label, status, &text, error.as_deref());
         }
     }
     status.to_string()

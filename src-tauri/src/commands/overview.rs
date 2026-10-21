@@ -4,11 +4,10 @@
 use std::collections::{BTreeMap, HashMap};
 
 use chrono::{DateTime, Utc};
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension};
 use serde::Serialize;
-use tauri::State;
+use tauri::{Manager, State};
 
-use crate::commands::board::board_list_impl;
 use crate::db::models::BoardCardWithExtras;
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
@@ -181,71 +180,32 @@ pub fn board_overview_get(db: State<Db>) -> AppResult<Option<BoardOverview>> {
     load(&conn)
 }
 
+/// Generate the overview as the built-in `board_overview` routine and wait for it to land.
 #[tauri::command]
-pub async fn board_overview_generate(model: Option<String>, db: State<'_, Db>) -> AppResult<BoardOverview> {
-    if crate::tools::claude_path().is_none() {
-        return Err(AppError::Other("the `claude` CLI was not found on PATH".into()));
-    }
-    let (snapshot, card_ids, system_prompt) = {
-        let conn = db.0.lock().unwrap();
-        let cards = board_list_impl(&conn)?;
-        let (snapshot, card_ids) = build_snapshot(&cards, Utc::now());
-        (snapshot, card_ids, crate::prompts::resolve(&conn, crate::prompts::BOARD_OVERVIEW)?)
-    };
-    if card_ids.is_empty() {
-        return Err(AppError::Other("no open cards on the board".into()));
-    }
-    let model = crate::commands::chat::resolve_model(model);
-    let run_model = model.clone();
-    let turn = tauri::async_runtime::spawn_blocking(move || {
-        let cwd = std::env::temp_dir().join("codereview_overview");
-        std::fs::create_dir_all(&cwd)?;
-        crate::commands::chat::run_claude(crate::commands::chat::ClaudeRun {
-            model: &run_model,
-            allowed_tools: &[],
-            permission_mode: "default",
-            system_prompt: Some(&system_prompt),
-            prompt_file_tag: "board_overview",
-            cwd: &cwd,
-            extra_dirs: &[],
-            session: None,
-            env: Vec::new(),
-            extra_args: &["--tools", "", "--effort", "low"],
-            replace_system_prompt: true,
-            prompt: &snapshot,
-            tag: crate::ai_usage::RunTag::new("board_overview").label("Board overview"),
-        })
+pub async fn board_overview_generate(
+    model: Option<String>,
+    app: tauri::AppHandle,
+    db: State<'_, Db>,
+) -> AppResult<BoardOverview> {
+    let routine = crate::commands::routines::builtin(&db, "board_overview")?;
+    let ctx = crate::routines::context::ContextRef { kind: "board".into(), id: String::new(), base_paths: vec![] };
+    let run = crate::commands::routines::launch(&app, &routine, &ctx, "", model.as_deref().unwrap_or(""))?;
+    let run = tauri::async_runtime::spawn_blocking({
+        let app = app.clone();
+        move || loop {
+            let current = crate::routines::manager::get_run(&app.state::<Db>().0.lock().unwrap(), run.id)?;
+            if !matches!(current.status.as_str(), "queued" | "running") {
+                return Ok::<_, AppError>(current);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(400));
+        }
     })
     .await
     .map_err(|e| AppError::Other(format!("overview task failed: {e}")))??;
-
-    let overview = BoardOverview {
-        markdown: turn.text,
-        generated_at: Utc::now().to_rfc3339(),
-        model: (!model.is_empty()).then_some(model),
-        card_count: card_ids.len() as i64,
-        card_ids,
-        input_tokens: Some(turn.input_tokens),
-        output_tokens: Some(turn.output_tokens),
-        cost_usd: Some(turn.cost_usd),
-    };
-    let conn = db.0.lock().unwrap();
-    conn.execute(
-        "INSERT INTO board_overview (id, markdown, generated_at, model, card_count, input_tokens, output_tokens, cost_usd, card_ids)
-         VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
-         ON CONFLICT(id) DO UPDATE SET markdown = excluded.markdown, generated_at = excluded.generated_at,
-           model = excluded.model, card_count = excluded.card_count, input_tokens = excluded.input_tokens,
-           output_tokens = excluded.output_tokens, cost_usd = excluded.cost_usd, card_ids = excluded.card_ids",
-        params![
-            overview.markdown,
-            overview.generated_at,
-            overview.model,
-            overview.card_count,
-            overview.input_tokens,
-            overview.output_tokens,
-            overview.cost_usd,
-            serde_json::to_string(&overview.card_ids)?
-        ],
-    )?;
-    Ok(overview)
+    if !matches!(run.status.as_str(), "ok" | "needs_attention") {
+        return Err(AppError::Other(
+            run.error.unwrap_or_else(|| format!("the overview run ended: {}", run.status)),
+        ));
+    }
+    load(&db.0.lock().unwrap())?.ok_or_else(|| AppError::Other("the overview run produced nothing".into()))
 }

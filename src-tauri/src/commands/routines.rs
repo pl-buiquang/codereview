@@ -2,11 +2,12 @@
 //! run list / transcript (Routines tab).
 
 use serde::Serialize;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
 use crate::routines::context::{self, ContextRef};
+use crate::routines::handlers;
 use crate::routines::manager::{self, RoutineManager, RoutineRun, RunEvent, RunFilter};
 use crate::routines::{self, Routine, RoutineInput};
 
@@ -53,6 +54,37 @@ pub fn routine_list_for_context(context: ContextRef, db: State<Db>) -> AppResult
     Ok(out)
 }
 
+/// Launch `routine` on `context`: eligibility, the handler's checks, then the manager's queue.
+/// Also the entry point of the features that run on routines (overview, focus, AI review).
+pub fn launch(
+    app: &AppHandle,
+    routine: &Routine,
+    context: &ContextRef,
+    note: &str,
+    model: &str,
+) -> AppResult<RoutineRun> {
+    if crate::tools::claude_path().is_none() {
+        return Err(AppError::Other("the `claude` CLI was not found on PATH".into()));
+    }
+    let db = app.state::<Db>();
+    let light = context::light(&db, context)?;
+    if !context::eligible(routine, &light) {
+        return Err(AppError::Other(format!("“{}” can't run on {}", routine.name, light.label)));
+    }
+    handlers::pre_launch(app, routine, context, &light, model)?;
+    app.state::<RoutineManager>()
+        .launch(app, routine, context, &light, note.trim(), model.trim())
+        .inspect_err(|e| handlers::rollback(app, routine, context, &e.to_string()))
+}
+
+/// The built-in routine with this key.
+pub fn builtin(db: &Db, key: &str) -> AppResult<Routine> {
+    routines::list(&db.0.lock().unwrap())?
+        .into_iter()
+        .find(|r| r.key == key)
+        .ok_or_else(|| AppError::Other(format!("routine `{key}` not found")))
+}
+
 #[tauri::command]
 pub fn routine_launch(
     routine_id: i64,
@@ -61,24 +93,9 @@ pub fn routine_launch(
     model: Option<String>,
     app: AppHandle,
     db: State<Db>,
-    manager: State<RoutineManager>,
 ) -> AppResult<RoutineRun> {
-    if crate::tools::claude_path().is_none() {
-        return Err(AppError::Other("the `claude` CLI was not found on PATH".into()));
-    }
     let routine = routines::get(&db.0.lock().unwrap(), routine_id)?;
-    let light = context::light(&db, &context)?;
-    if !context::eligible(&routine, &light) {
-        return Err(AppError::Other(format!("“{}” can't run on {}", routine.name, light.label)));
-    }
-    manager.launch(
-        &app,
-        &routine,
-        &context,
-        &light,
-        note.as_deref().unwrap_or("").trim(),
-        model.as_deref().unwrap_or("").trim(),
-    )
+    launch(&app, &routine, &context, note.as_deref().unwrap_or(""), model.as_deref().unwrap_or(""))
 }
 
 #[tauri::command]
@@ -98,14 +115,9 @@ pub fn routine_run_stop(run_id: i64, app: AppHandle, manager: State<RoutineManag
 
 /// Launch the same routine on the same context again, with the same note and model.
 #[tauri::command]
-pub fn routine_run_relaunch(
-    run_id: i64,
-    app: AppHandle,
-    db: State<Db>,
-    manager: State<RoutineManager>,
-) -> AppResult<RoutineRun> {
+pub fn routine_run_relaunch(run_id: i64, app: AppHandle, db: State<Db>) -> AppResult<RoutineRun> {
     let run = manager::get_run(&db.0.lock().unwrap(), run_id)?;
-    routine_launch(run.routine_id, run.context, Some(run.note), Some(run.model), app, db, manager)
+    routine_launch(run.routine_id, run.context, Some(run.note), Some(run.model), app, db)
 }
 
 #[tauri::command]

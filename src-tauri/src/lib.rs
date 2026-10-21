@@ -153,7 +153,6 @@ pub fn run() {
         })
         .manage(CrNote(Mutex::new(cr_note)))
         .manage(watch::Watchers::default())
-        .manage(commands::ai_review::AiReviewJobs::default())
         .manage(routines::manager::RoutineManager::default())
         .setup(move |app| {
             // Ensure ~/.codereview/ exists for worktrees and future per-user data.
