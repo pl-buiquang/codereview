@@ -114,6 +114,13 @@ type SaveState = "idle" | "saving" | "saved";
 
 const EXPAND_CHUNK = 20;
 
+/** Scroll an element to the middle of its scroller and flash it briefly. */
+function scrollToAndFlash(el: HTMLElement) {
+  el.scrollIntoView({ behavior: "smooth", block: "center" });
+  el.classList.add("kb-flash");
+  setTimeout(() => el.classList.remove("kb-flash"), 900);
+}
+
 export function ReviewView({ reviewId }: { reviewId: number }) {
   const queryClient = useQueryClient();
   const defaultViewType = useSettingsStore((s) => s.defaultViewType);
@@ -306,10 +313,7 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
     );
     const idx = pickThread(tops, root.scrollTop, dir);
     if (idx == null) return;
-    const el = els[idx];
-    el.scrollIntoView({ behavior: "smooth", block: "center" });
-    el.classList.add("kb-flash");
-    setTimeout(() => el.classList.remove("kb-flash"), 900);
+    scrollToAndFlash(els[idx]);
   }, []);
 
   // Parsed diff lifted here so search can scan every file (ReviewDiff renders it).
@@ -444,6 +448,77 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
   // Scroll the current match into view; if its file is collapsed, expand it first
   // (the un-view changes viewedSig, re-running this effect to do the scroll).
   const viewedSig = (detailQuery.data?.viewed_files ?? []).join("\n");
+
+  // Inbox "Open in review": scroll to a GitHub thread once it can render. Each
+  // step that hides the thread (comment filter, type filter, a viewed file)
+  // is undone first, which re-runs this effect.
+  const threadJump = useUIStore((s) => s.threadJump);
+  const clearThreadJump = useUIStore((s) => s.clearThreadJump);
+  useEffect(() => {
+    if (!threadJump || !isActiveTab || !owner || !name || prNumber == null) return;
+    if (
+      owner.toLowerCase() !== threadJump.owner.toLowerCase() ||
+      name.toLowerCase() !== threadJump.name.toLowerCase() ||
+      prNumber !== threadJump.number
+    ) {
+      return;
+    }
+    if (!threadsQuery.data || diffQuery.isLoading) return;
+    const thread = threadsQuery.data.find((t) => t.id === threadJump.threadId);
+    if (!thread) {
+      if (threadsQuery.isFetching) return;
+      toast.error("That thread is no longer on this PR");
+      clearThreadJump();
+      return;
+    }
+    const path = thread.path;
+    if (!matchesCommentFilter(githubThreadItem(thread), commentFilter)) {
+      setCommentFilter(DEFAULT_COMMENT_FILTER);
+      return;
+    }
+    if (path && typeFilter !== "all" && categorize(path, categoryRules) !== typeFilter) {
+      setTypeFilter("all");
+      return;
+    }
+    if (path && (detailQuery.data?.viewed_files ?? []).includes(path)) {
+      expandForSearch.mutate(path);
+      return;
+    }
+    let frames = 0;
+    let raf = 0;
+    const find = () => {
+      const el = diffAreaRef.current?.querySelector<HTMLElement>(`[data-thread-id="${CSS.escape(thread.id)}"]`);
+      if (el) {
+        scrollToAndFlash(el);
+        clearThreadJump();
+        return;
+      }
+      if (++frames > 60) {
+        const fi = files.findIndex((f) => fileDisplayPath(f) === path);
+        if (fi >= 0) jumpToFile(fi);
+        toast.error("That thread isn't shown in the diff");
+        clearThreadJump();
+        return;
+      }
+      raf = requestAnimationFrame(find);
+    };
+    raf = requestAnimationFrame(find);
+    return () => cancelAnimationFrame(raf);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    threadJump,
+    isActiveTab,
+    owner,
+    name,
+    prNumber,
+    threadsQuery.data,
+    threadsQuery.isFetching,
+    diffQuery.isLoading,
+    commentFilter,
+    typeFilter,
+    viewedSig,
+    files,
+  ]);
   useEffect(() => {
     if (!searchOpen || !curMatch) return;
     const file = files[curMatch.fileIndex];

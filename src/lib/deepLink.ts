@@ -9,7 +9,7 @@ import { findBoardCard } from "./commandPaletteSearch";
 
 type DeepLinkAction =
   | { kind: "openReview"; review_id: number }
-  | { kind: "openPr"; owner: string; name: string; number: number }
+  | { kind: "openPr"; owner: string; name: string; number: number; thread?: string | null }
   | { kind: "openDiff"; repo_id: number; base_ref: string; head_ref: string; three_dot: boolean }
   | { kind: "openRepo"; repo_id: number; ref_name: string | null; worktree: string | null }
   | { kind: "navigateHome"; section: string | null }
@@ -31,6 +31,11 @@ export async function handleDeepLinkAction(action: DeepLinkAction): Promise<void
     case "openPr": {
       const basePaths = parseRepoBasePaths(useSettingsStore.getState().repoBasePaths);
       const review = await api.createReviewForPr(action.owner, action.name, action.number, basePaths);
+      if (action.thread) {
+        useUIStore
+          .getState()
+          .requestThreadJump({ owner: action.owner, name: action.name, number: action.number, threadId: action.thread });
+      }
       openReview(review.id);
       break;
     }

@@ -10,6 +10,8 @@ pub enum DeepLinkAction {
         owner: String,
         name: String,
         number: i64,
+        /// A review thread node id to scroll to (`?thread=`).
+        thread: Option<String>,
     },
     OpenDiff {
         repo_id: i64,
@@ -59,10 +61,15 @@ pub fn parse_deep_link(raw: &str) -> Result<DeepLinkAction, String> {
             let number = number
                 .parse::<i64>()
                 .map_err(|_| format!("invalid PR number: {number}"))?;
+            let thread = url
+                .query_pairs()
+                .find(|(k, v)| k == "thread" && !v.is_empty())
+                .map(|(_, v)| v.to_string());
             Ok(DeepLinkAction::OpenPr {
                 owner: (*owner).to_string(),
                 name: (*name).to_string(),
                 number,
+                thread,
             })
         }
         ["board", owner, name, number] => {
@@ -185,6 +192,7 @@ mod tests {
             owner,
             name,
             number,
+            thread,
         } = a
         else {
             panic!("expected OpenPr, got {a:?}");
@@ -192,6 +200,16 @@ mod tests {
         assert_eq!(owner, "acme");
         assert_eq!(name, "widget");
         assert_eq!(number, 99);
+        assert_eq!(thread, None);
+    }
+
+    #[test]
+    fn parse_pr_with_thread() {
+        let a = parse_deep_link("codereview://pr/acme/widget/99?thread=PRRT_abc").unwrap();
+        let DeepLinkAction::OpenPr { thread, .. } = a else {
+            panic!("expected OpenPr, got {a:?}");
+        };
+        assert_eq!(thread.as_deref(), Some("PRRT_abc"));
     }
 
     #[test]
