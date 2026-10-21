@@ -1,4 +1,4 @@
-# CONTEXT
+# Glossary
 
 Glossary of domain terms used in this app.
 

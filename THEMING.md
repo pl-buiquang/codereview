@@ -1,6 +1,6 @@
 # Theming
 
-CodeReview ships **3 design directions × 2 modes = 6 fixed themes**, all driven by one
+CodeReview ships **4 design directions × 2 modes = 8 fixed themes**, all driven by one
 CSS-custom-property contract. There are no user-editable themes.
 
 ## How it works
@@ -9,25 +9,25 @@ CSS-custom-property contract. There are no user-editable themes.
   roles is a CSS variable defined in [`src/styles/tokens.css`](src/styles/tokens.css). No
   component may hardcode a color, font, or radius — always `var(--token)`.
 - **Theme = classes on `<html>`.** The active theme is the pair of classes
-  `cr cr-{a|b|c} {dark|light}` on `document.documentElement` (plus `style.colorScheme`). The
+  `cr cr-{a|b|c|d} {dark|light}` on `document.documentElement` (plus `style.colorScheme`). The
   `.cr-{dir}` class supplies fonts/radii; the `.cr-{dir}.{mode}` block supplies the full palette.
 - **Applied by [`src/lib/useApplySettings.ts`](src/lib/useApplySettings.ts).** It reads
   `direction` + `mode` from the settings store and writes the root classes, re-resolving live when
   `mode === "system"` (a `matchMedia` listener follows OS scheme flips). It also sets the single
   inline style var `--diff-font-size`.
-- **Persisted** in `localStorage["codereview-settings"]` (zustand persist, **version 2**). The
-  axes are `direction: "a"|"b"|"c"` (default `a`) and `mode: "dark"|"light"|"system"` (default
-  `system`). See [`src/lib/settings.ts`](src/lib/settings.ts) for the v0/v1 → v2 migration.
+- **Persisted** in `localStorage["codereview-settings"]` (zustand persist, versioned). The
+  axes are `direction: "a"|"b"|"c"|"d"` (default `a`) and `mode: "dark"|"light"|"system"` (default
+  `system`). See [`src/lib/settings.ts`](src/lib/settings.ts) for the migrations.
 - **FOUC guard.** An inline `<script>` in [`index.html`](index.html) reads the persisted settings
   and sets the root classes *before first paint*, so the app never flashes an unthemed frame.
   `useApplySettings` reconciles on mount.
 
-The 6 themes are registered in [`src/lib/themes.ts`](src/lib/themes.ts) (`DIRECTIONS`); the mode
+The 8 themes are registered in [`src/lib/themes.ts`](src/lib/themes.ts) (`DIRECTIONS`); the mode
 axis is generic across directions.
 
 ## Token reference
 
-The contract is identical across all 6 theme combinations (values differ; names don't).
+The contract is identical across all 8 theme combinations (values differ; names don't).
 
 | Token | Role |
 |---|---|
@@ -41,7 +41,7 @@ The contract is identical across all 6 theme combinations (values differ; names 
 | `--diff-add-bg`, `--diff-add-strong`, `--diff-del-bg`, `--diff-del-strong` | Diff line + gutter backgrounds |
 | `--shadow-card`, `--shadow-pop` | Card and popover elevation |
 | `--titlebar`, `--scrim` | Window chrome bg; modal scrim |
-| `--radius-s/m/l` | Per-direction: A 4/6/8 · B 6/10/14 · C 2/4/6 |
+| `--radius-s/m/l` | Per-direction: A 4/6/8 · B 6/10/14 · C 2/4/6 · D 6/6/8 |
 | `--sp-1…--sp-6` | Spacing scale 4/8/12/16/20/24px |
 | `--font-ui`, `--font-display`, `--font-mono` | Font roles |
 
@@ -87,7 +87,7 @@ all derive from `DIRECTIONS`/the class scheme.
 
 ## Verifying
 
-Cycle all 6 themes in **Settings → General → Appearance** (direction cards × mode segmented).
+Cycle all 8 themes in **Settings → General → Appearance** (direction cards × mode segmented).
 Each must render with no transparent backgrounds or default-black text, every `--tok-*` role
 visibly distinct on a code diff, and light-mode text ≥ 4.5:1 contrast on its background. `System`
 mode must follow an OS dark/light flip live, and the chosen direction+mode must persist across an
