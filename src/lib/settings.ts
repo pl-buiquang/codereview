@@ -97,6 +97,7 @@ type PersistedSettings = Pick<
   | "boardMonitorLogOpen"
   | "boardMonitorIntervalMin"
   | "boardArchiveDays"
+  | "boardCountDone"
   | "markEdits"
   | "largeDiffMaxLines"
   | "fileTestPatterns"
@@ -131,6 +132,7 @@ const DEFAULTS: PersistedSettings = {
   boardMonitorLogOpen: false,
   boardMonitorIntervalMin: 5,
   boardArchiveDays: 7,
+  boardCountDone: true,
   markEdits: false,
   largeDiffMaxLines: 3000,
   fileTestPatterns: DEFAULT_TEST_PATTERNS,
@@ -186,6 +188,8 @@ interface SettingsState {
   boardMonitorLogOpen: boolean;
   boardMonitorIntervalMin: number;
   boardArchiveDays: number;
+  /** Include Done-lane cards in the Board filter counts. */
+  boardCountDone: boolean;
   /** Newline-separated globs classifying changed files as tests (checked first). */
   fileTestPatterns: string;
   /** Newline-separated globs classifying changed files as config/docs. */
@@ -235,6 +239,7 @@ interface SettingsState {
   setBoardMonitorLogOpen: (open: boolean) => void;
   setBoardMonitorIntervalMin: (min: number) => void;
   setBoardArchiveDays: (days: number) => void;
+  setBoardCountDone: (on: boolean) => void;
 }
 
 const ENUMS: Partial<Record<keyof PersistedSettings, readonly string[]>> = {
@@ -313,6 +318,7 @@ export const useSettingsStore = create<SettingsState>()(
       setBoardMonitorLogOpen: (boardMonitorLogOpen) => set({ boardMonitorLogOpen }),
       setBoardMonitorIntervalMin: (boardMonitorIntervalMin) => set({ boardMonitorIntervalMin }),
       setBoardArchiveDays: (boardArchiveDays) => set({ boardArchiveDays }),
+      setBoardCountDone: (boardCountDone) => set({ boardCountDone }),
     }),
     {
       name: "codereview-settings",

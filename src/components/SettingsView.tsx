@@ -254,6 +254,8 @@ function GeneralSection() {
   const setDiscoveryIntervalMin = useSettingsStore((s) => s.setDiscoveryIntervalMin);
   const boardArchiveDays = useSettingsStore((s) => s.boardArchiveDays);
   const setBoardArchiveDays = useSettingsStore((s) => s.setBoardArchiveDays);
+  const boardCountDone = useSettingsStore((s) => s.boardCountDone);
+  const setBoardCountDone = useSettingsStore((s) => s.setBoardCountDone);
   const boardMonitorIntervalMin = useSettingsStore((s) => s.boardMonitorIntervalMin);
   const setBoardMonitorIntervalMin = useSettingsStore((s) => s.setBoardMonitorIntervalMin);
   const autoFetchMinutes = useSettingsStore((s) => s.autoFetchMinutes);
@@ -460,6 +462,17 @@ function GeneralSection() {
               const n = Number(e.target.value);
               if (Number.isFinite(n)) setBoardArchiveDays(Math.max(1, Math.min(365, Math.round(n))));
             }}
+          />
+        </label>
+        <label
+          className="settings-row"
+          title="Whether cards in the Done lane are included in the numbers next to the Board's filter options. The Done lane itself is unchanged."
+        >
+          <span>Count Done cards in filter counts</span>
+          <input
+            type="checkbox"
+            checked={boardCountDone}
+            onChange={(e) => setBoardCountDone(e.target.checked)}
           />
         </label>
       </section>

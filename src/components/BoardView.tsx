@@ -88,6 +88,7 @@ export function BoardView() {
   const overviewOpen = useSettingsStore((s) => s.boardOverviewOpen);
   const setOverviewOpen = useSettingsStore((s) => s.setBoardOverviewOpen);
   const archiveDays = useSettingsStore((s) => s.boardArchiveDays);
+  const countDone = useSettingsStore((s) => s.boardCountDone);
   const archiveAgeLabel = archiveDays === 1 ? "1 day" : `${archiveDays} days`;
   const monitorOn = useSettingsStore((s) => s.boardMonitor);
   const monitorLogOpen = useSettingsStore((s) => s.boardMonitorLogOpen);
@@ -311,6 +312,7 @@ export function BoardView() {
   const facetCounts = (skip: "repo" | "status" | "ci" | "merge" | "stack" | "tags", keysOf: (c: BoardCardT) => (string | null | undefined)[]) => {
     const m = new Map<string, number>();
     for (const c of allCards) {
+      if (!countDone && c.lane === "done") continue;
       if (!matches(c, skip)) continue;
       for (const k of keysOf(c)) if (k) m.set(k, (m.get(k) ?? 0) + 1);
     }

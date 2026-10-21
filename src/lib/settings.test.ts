@@ -74,6 +74,7 @@ describe("useSettingsStore", () => {
         "boardMonitorLogOpen",
         "boardMonitorIntervalMin",
         "boardArchiveDays",
+        "boardCountDone",
         "boardOverviewOpen",
         "boardStatusBorderSide",
         "botLogins",
@@ -118,7 +119,7 @@ describe("exportSettings / importSettings", () => {
     s.setFileTestPatterns("");
     const applied = importSettings(json);
     const n = useSettingsStore.getState();
-    expect(applied).toBe(31);
+    expect(applied).toBe(32);
     expect(n.mode).toBe("light");
     expect(n.diffFontSize).toBe(15);
     expect(n.fileTestPatterns).toBe("*.spec.rb");
