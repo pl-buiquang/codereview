@@ -968,7 +968,12 @@ function ReviewHeader({
   const { review, target } = detail;
   const isActiveTab = useUIStore((s) => s.activeTabId === `review-${review.id}`);
   const [showExport, setShowExport] = useState(false);
-  const [collapsed, setCollapsed] = useState(true);
+  const [collapsed, setCollapsed] = useState(review.pr_details_collapsed);
+  const togglePrDetails = () => {
+    const next = !collapsed;
+    setCollapsed(next);
+    api.setPrDetailsCollapsed(review.id, next).catch((e) => toast.error(`Could not save PR details state: ${String(e)}`));
+  };
   const [openingWorktree, setOpeningWorktree] = useState(false);
   const openChatWorktreeInVscode = async () => {
     if (openingWorktree) return;
@@ -1273,7 +1278,7 @@ function ReviewHeader({
           <button
             className="btn btn-ghost"
             title={collapsed ? "Show PR details" : "Hide PR details"}
-            onClick={() => setCollapsed((c) => !c)}
+            onClick={togglePrDetails}
           >
             <Icon name="chev" size={13} /> {collapsed ? "Expand" : "Collapse"}
           </button>

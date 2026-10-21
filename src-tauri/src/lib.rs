@@ -242,6 +242,7 @@ pub fn run() {
             commands::review::set_file_viewed,
             commands::review::set_panel_widths,
             commands::review::set_sidebar_collapsed,
+            commands::review::set_pr_details_collapsed,
             commands::review::update_review,
             commands::review::delete_review,
             commands::review::find_closed_pr_reviews,

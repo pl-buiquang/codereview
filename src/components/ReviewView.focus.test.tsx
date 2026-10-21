@@ -93,6 +93,7 @@ function detail(comments: Comment[] = []): ReviewDetail {
       updated_at: "now",
       sidebar_collapsed: true,
       chat_collapsed: true,
+      pr_details_collapsed: false,
       left_panel_width: 248,
       right_panel_width: 360,
     },

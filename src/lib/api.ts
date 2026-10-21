@@ -91,6 +91,8 @@ export const api = {
     invoke<void>("set_file_viewed", { reviewId, filePath, viewed }),
   setSidebarCollapsed: (reviewId: number, collapsed: boolean) =>
     invoke<void>("set_sidebar_collapsed", { reviewId, collapsed }),
+  setPrDetailsCollapsed: (reviewId: number, collapsed: boolean) =>
+    invoke<void>("set_pr_details_collapsed", { reviewId, collapsed }),
   setChatCollapsed: (reviewId: number, collapsed: boolean) =>
     invoke<void>("set_chat_collapsed", { reviewId, collapsed }),
   setPanelWidths: (reviewId: number, leftPanelWidth: number, rightPanelWidth: number) =>

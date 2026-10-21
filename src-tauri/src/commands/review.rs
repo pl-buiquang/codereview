@@ -1154,6 +1154,17 @@ pub fn set_sidebar_collapsed(review_id: i64, collapsed: bool, db: State<Db>) -> 
     Ok(())
 }
 
+/// Persist whether the PR details panel is collapsed. UI state — allowed on published reviews.
+#[tauri::command]
+pub fn set_pr_details_collapsed(review_id: i64, collapsed: bool, db: State<Db>) -> AppResult<()> {
+    let conn = db.0.lock().unwrap();
+    conn.execute(
+        "UPDATE review SET pr_details_collapsed = ?1 WHERE id = ?2",
+        params![collapsed as i64, review_id],
+    )?;
+    Ok(())
+}
+
 /// Autosave the review summary and/or verdict. Pass `event = ""` to clear the verdict.
 pub fn update_review_impl(
     conn: &Connection,
@@ -3423,6 +3434,7 @@ mod tests {
                 updated_at: "now".into(),
                 sidebar_collapsed: false,
                 chat_collapsed: true,
+                pr_details_collapsed: false,
                 left_panel_width: 248,
                 right_panel_width: 360,
             },

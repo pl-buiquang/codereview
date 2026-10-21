@@ -290,6 +290,7 @@ mod tests {
             updated_at: "2026-01-01T00:00:00Z".into(),
             sidebar_collapsed: false,
             chat_collapsed: true,
+            pr_details_collapsed: false,
             left_panel_width: 248,
             right_panel_width: 360,
         }
