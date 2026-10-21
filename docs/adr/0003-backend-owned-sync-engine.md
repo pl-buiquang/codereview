@@ -7,5 +7,5 @@ The `cr` CLI shares the database but not the app process. It runs the same sync 
 ## Consequences
 
 - Background `git fetch` is a separate, opt-in concern ("Fetch"), not part of Sync.
-- The GitHub notifications `If-Modified-Since` gate for Discovery is deferred (ROADMAP).
+- The GitHub notifications `If-Modified-Since` gate for Discovery is deferred.
 - Exception: the open Review tab's PR facets (header/checks and threads) and the repo PR list are still React Query fetches, gated by the same Auto Sync setting. They are per-tab, already write through the mirror (and emit `mirror-updated`), and "always fresh while the Review tab is active" is exactly what a query on the active tab gives.

@@ -7,8 +7,8 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 A Tauri v2 desktop app for reviewing code locally, GitHub-PR style. It diffs either a real
 GitHub PR (via the `gh` CLI) or a "virtual PR" between two local branches, lets you leave inline
 comments + a verdict (all autosaved to SQLite), then either **exports** the review as Markdown/JSON
-or **publishes** it to GitHub. Read `README.md` for the user-facing feature tour and `ROADMAP.md`
-for known gaps and the planned-but-unbuilt work (e.g. threaded replies, re-anchoring, settings).
+or **publishes** it to GitHub. Read `README.md` for the feature tour (detail in `docs/features/`)
+and `docs/adr/` for the design decisions.
 
 ## Commands
 
@@ -21,11 +21,12 @@ pnpm tauri build                                 # release binary + macOS .app/.
 pnpm build                                       # frontend only: tsc && vite build (fast TS-error check)
 pnpm exec tsc --noEmit                           # typecheck the frontend without emitting
 cargo clippy --manifest-path src-tauri/Cargo.toml
-cargo test   --manifest-path src-tauri/Cargo.toml [test_name]   # NOTE: no tests exist yet (see ROADMAP §9)
+pnpm test                                        # frontend tests (vitest)
+cargo test   --manifest-path src-tauri/Cargo.toml [test_name]   # Rust tests
 ```
 
-There is **no JS linter/formatter configured** and **no test suite** in either layer — `tsc` and
-`cargo clippy`/`cargo build` are the only automated checks today. The GitHub features require `gh`
+There is **no JS linter/formatter configured**; `tsc`, `cargo clippy`, `pnpm test` and `cargo test`
+are the automated checks (CI runs all four). The GitHub features require `gh`
 authenticated (`gh auth login`); local virtual-PR review needs only `git`.
 
 ## Architecture
@@ -62,7 +63,7 @@ places and must stay consistent:
 2. The DB `comment` row stores `side`/`line`/`start_line`/`diff_hunk`/`anchored_head_sha`.
 3. `publish_review` translates those into the GitHub reviews API payload (`path`/`side`/`line`,
    plus `start_line`/`start_side` for ranges). The multi-line publish path is **not yet verified
-   live** (ROADMAP §3).
+   live**.
 
 ## Conventions & gotchas
 

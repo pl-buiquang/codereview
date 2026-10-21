@@ -1,4 +1,4 @@
-//! Forge-provider seam (ROADMAP §3). One trait covering exactly the GitHub
+//! Forge-provider seam. One trait covering exactly the GitHub
 //! surface the command layer uses; `GithubProvider` delegates 1:1 to `gh.rs`.
 //! See the "Adding a provider" recipe at the bottom of this file.
 
