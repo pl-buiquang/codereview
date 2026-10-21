@@ -192,7 +192,7 @@ export function RoutinesConfigTab() {
             Prompt <span className="muted">— placeholders: {"{{repo}} {{number}} {{url}} {{title}} {{head_ref}} {{base_ref}} {{worktree}} {{review_id}}"}</span>
             <textarea
               className="input mono"
-              rows={12}
+              rows={4}
               value={draft.prompt_template}
               onChange={(e) => patch({ prompt_template: e.target.value })}
               required
@@ -202,7 +202,7 @@ export function RoutinesConfigTab() {
             System prompt
             <textarea
               className="input mono"
-              rows={24}
+              rows={10}
               value={draft.system_prompt}
               onChange={(e) => patch({ system_prompt: e.target.value })}
             />
@@ -233,7 +233,7 @@ export function RoutinesConfigTab() {
               Allowed tools <span className="muted">(one per line, empty = unrestricted)</span>
               <textarea
                 className="input mono"
-                rows={12}
+                rows={3}
                 value={toolsText}
                 onChange={(e) => setToolsText(e.target.value)}
               />
@@ -242,7 +242,7 @@ export function RoutinesConfigTab() {
               Extra claude args <span className="muted">(one per line)</span>
               <textarea
                 className="input mono"
-                rows={12}
+                rows={3}
                 value={argsText}
                 onChange={(e) => setArgsText(e.target.value)}
               />

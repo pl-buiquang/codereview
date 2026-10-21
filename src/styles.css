@@ -5948,3 +5948,10 @@ button.board-overview-ref {
   font-family: var(--font-mono);
   font-size: 12px;
 }
+.routines-config-form textarea.input {
+  height: auto;
+  padding: 6px 10px;
+  display: block;
+  resize: vertical;
+  line-height: 1.45;
+}
