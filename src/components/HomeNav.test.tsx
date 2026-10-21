@@ -20,6 +20,7 @@ vi.mock("../lib/api", () => ({
 
 import { HomeNav } from "./HomeNav";
 import { useUIStore } from "../store";
+import { useSettingsStore } from "../lib/settings";
 
 function renderNav(collapsed: boolean, onNavigate?: () => void) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -121,6 +122,24 @@ describe("HomeNav", () => {
     ]);
     renderNav(false);
 
+    expect(await screen.findByTitle("1 card needs your action")).toHaveTextContent("1");
+  });
+
+  it("leaves snoozed cards and disabled kinds out of the Board badge", async () => {
+    const base = {
+      type: "pr", repo: "acme/back", title: "t", state: "open", is_draft: false, is_mine: true,
+      updated_at: new Date().toISOString(), lane: "submitted", meta: [], linked_issue_ids: ["i"],
+      linked_pr_ids: [], archived_at: null, discarded_at: null,
+    };
+    boardList.mockResolvedValue([
+      { ...base, id: "snoozed", number: 1, review_decision: "APPROVED" },
+      { ...base, id: "ci", number: 2, review_decision: null, ci_status: "FAILURE" },
+      { ...base, id: "ready", number: 3, review_decision: "APPROVED" },
+    ]);
+    useSettingsStore.getState().snoozeCard("snoozed", Date.now() + 3_600_000);
+    renderNav(false);
+
+    // "ci" is off by default and "snoozed" is snoozed: only "ready" counts.
     expect(await screen.findByTitle("1 card needs your action")).toHaveTextContent("1");
   });
 });

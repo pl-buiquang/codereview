@@ -5,6 +5,7 @@ import { toast } from "../lib/toast";
 import { confirmDialog } from "../lib/confirm";
 import { timeAgo } from "../lib/timeAgo";
 import { useSettingsStore, type BoardBorderSide } from "../lib/settings";
+import { parseSnoozeOptions } from "../lib/snooze";
 import { useUIStore } from "../store";
 import { RepoName } from "./RepoName";
 import { AutoMergeBadge, CiBadge, CommentsBadge, MergeStateBadge, MergeableBadge, StackBadge } from "./InboxBadges";
@@ -440,6 +441,13 @@ export function BoardCard({
   const [adding, setAdding] = useState(false);
   const [linkInput, setLinkInput] = useState("");
   const [titleMenuOpen, setTitleMenuOpen] = useState(false);
+  const [snoozeMenuOpen, setSnoozeMenuOpen] = useState(false);
+  const snoozeRef = useRef<HTMLSpanElement>(null);
+  const snoozeOptions = parseSnoozeOptions(useSettingsStore((s) => s.boardSnoozeOptions));
+  const snoozedUntil = useSettingsStore((s) => s.boardSnoozes[card.id] ?? 0);
+  const snoozeCard = useSettingsStore((s) => s.snoozeCard);
+  const unsnoozeCard = useSettingsStore((s) => s.unsnoozeCard);
+  const snoozed = snoozedUntil > Date.now();
   const titleMenuRef = useRef<HTMLSpanElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
   const highlighted = useUIStore((s) => s.boardHighlightCardId === card.id);
@@ -460,6 +468,15 @@ export function BoardCard({
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
   }, [titleMenuOpen]);
+
+  useEffect(() => {
+    if (!snoozeMenuOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (snoozeRef.current && !snoozeRef.current.contains(e.target as Node)) setSnoozeMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [snoozeMenuOpen]);
 
   const allMeta = [...card.meta, ...card.inherited_meta];
   const inheritedIds = new Set(card.inherited_meta.map((m) => m.id));
@@ -567,6 +584,37 @@ export function BoardCard({
           >
             <Icon name="code" size={13} /> <span className="board-card-action-label">VSCode</span>
           </button>
+        )}
+        {card.type === "pr" && (
+          <span ref={snoozeRef} className="board-card-title-wrap board-card-snooze">
+            <button
+              className="btn btn-sm btn-ghost board-card-action-btn"
+              onClick={() => (snoozed ? unsnoozeCard(card.id) : setSnoozeMenuOpen((o) => !o))}
+              title={
+                snoozed
+                  ? `Snoozed until ${new Date(snoozedUntil).toLocaleString()} (left out of the sidebar badge). Click to unsnooze.`
+                  : "Leave this card out of the sidebar Board badge for a while"
+              }
+            >
+              <span className="board-card-action-label">{snoozed ? "Unsnooze" : "Snooze"}</span>
+            </button>
+            {snoozeMenuOpen && (
+              <div className="btn-split-menu card" role="menu">
+                {snoozeOptions.map((o) => (
+                  <button
+                    key={o.label}
+                    role="menuitem"
+                    onClick={() => {
+                      snoozeCard(card.id, Date.now() + o.ms);
+                      setSnoozeMenuOpen(false);
+                    }}
+                  >
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </span>
         )}
         {onDiscard && (
           <button className="btn btn-sm btn-ghost board-card-action-btn" disabled={busy} onClick={discard} title="Discard">

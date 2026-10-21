@@ -51,7 +51,22 @@ describe("actionable", () => {
     const cards = Array.from({ length: 9 }, () => card({ review_decision: "APPROVED" }));
     const d = buildDigest(cards, NOW);
     expect(d.doNext).toHaveLength(7);
-    expect(d.actionable).toBe(9);
+    expect(d.actionable).toHaveLength(9);
+    expect(d.actionable.every((a) => a.kind === "merge")).toBe(true);
+  });
+});
+
+describe("actionable kinds", () => {
+  it("tags each ranked card with why it needs action", () => {
+    const d = buildDigest(
+      [
+        card({ is_mine: false, lane: "reviews" }),
+        card({ ci_status: "FAILURE" }),
+        card({ merge_state_status: "BEHIND" }),
+      ],
+      NOW,
+    );
+    expect(d.actionable.map((a) => a.kind)).toEqual(["review", "ci", "behind"]);
   });
 });
 

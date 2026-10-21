@@ -7,6 +7,14 @@ export const STALE_PR_DAYS = 7;
 export const STALE_DRAFT_DAYS = 14;
 export const STALE_ISSUE_DAYS = 21;
 
+/** Why a card needs my action; the sidebar badge can count each kind or not. */
+export type ActionKind = "review" | "merge" | "conflicts" | "ci" | "changes" | "behind";
+
+export interface ActionableCard {
+  cardId: string;
+  kind: ActionKind;
+}
+
 export interface DigestItem {
   cardId: string;
   ref: string;
@@ -25,7 +33,7 @@ export interface ProjectCounts {
 export interface Digest {
   open: number;
   /** Every ranked card, before `doNext` is capped. */
-  actionable: number;
+  actionable: ActionableCard[];
   doNext: DigestItem[];
   blocked: DigestItem[];
   waiting: DigestItem[];
@@ -57,7 +65,7 @@ export function buildDigest(cards: BoardCard[], now: Date): Digest {
   const open = cards.filter(isOpenCard);
   const byId = new Map(cards.map((c) => [c.id, c]));
 
-  const ranked: { rank: number; age: number; item: DigestItem }[] = [];
+  const ranked: { rank: number; age: number; item: DigestItem; kind: ActionKind }[] = [];
   const waiting: DigestItem[] = [];
   const blocked: DigestItem[] = [];
   const stale: DigestItem[] = [];
@@ -109,7 +117,7 @@ export function buildDigest(cards: BoardCard[], now: Date): Digest {
     if (!c.is_mine) {
       if (c.lane === "reviews" && !approved) {
         if (age >= REVIEW_WAITING_DAYS) blocked.push(item(c, `review request waiting ${age}d`));
-        ranked.push({ rank: 1, age, item: item(c, `Review (waiting ${age}d)`) });
+        ranked.push({ rank: 1, age, kind: "review", item: item(c, `Review (waiting ${age}d)`) });
       }
       continue;
     }
@@ -117,19 +125,20 @@ export function buildDigest(cards: BoardCard[], now: Date): Digest {
     if (!c.linked_issue_ids.length) hygiene.push(item(c, "PR has no linked issue"));
 
     if (approved && !autoMerge) {
-      ranked.push({ rank: 2, age, item: item(c, behind ? "Update branch, then merge" : "Merge") });
+      ranked.push({ rank: 2, age, kind: "merge", item: item(c, behind ? "Update branch, then merge" : "Merge") });
     } else if (conflicts) {
-      ranked.push({ rank: 3, age, item: item(c, "Resolve conflicts") });
+      ranked.push({ rank: 3, age, kind: "conflicts", item: item(c, "Resolve conflicts") });
     } else if (ciFailing(c)) {
-      ranked.push({ rank: 4, age, item: item(c, "Fix CI") });
+      ranked.push({ rank: 4, age, kind: "ci", item: item(c, "Fix CI") });
     } else if (changes || threads > 0) {
       ranked.push({
         rank: 5,
         age,
+        kind: "changes",
         item: item(c, threads > 0 ? `Address ${threads} unresolved thread${threads === 1 ? "" : "s"}` : "Address requested changes"),
       });
     } else if (behind) {
-      ranked.push({ rank: 6, age, item: item(c, "Update branch") });
+      ranked.push({ rank: 6, age, kind: "behind", item: item(c, "Update branch") });
     } else if (mineActive) {
       const why = autoMerge
         ? "auto-merge on"
@@ -145,7 +154,7 @@ export function buildDigest(cards: BoardCard[], now: Date): Digest {
 
   return {
     open: open.length,
-    actionable: ranked.length,
+    actionable: ranked.map((r) => ({ cardId: r.item.cardId, kind: r.kind })),
     doNext,
     blocked,
     waiting,

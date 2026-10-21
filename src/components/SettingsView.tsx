@@ -5,6 +5,8 @@ import type { LogLevel } from "../lib/log";
 import {
   AUTO_FETCH_OPTIONS,
   AUTO_SYNC_OPTIONS,
+  BOARD_BADGE_KIND_OPTIONS,
+  DEFAULT_BOARD_BADGE_KINDS,
   LOG_LEVEL_OPTIONS,
   BOARD_MONITOR_OPTIONS,
   DISCOVERY_INTERVAL_OPTIONS,
@@ -23,6 +25,7 @@ import {
 } from "../lib/settings";
 import { DEFAULT_CONFIG_PATTERNS, DEFAULT_TEST_PATTERNS } from "../lib/fileCategory";
 import { DIRECTIONS } from "../lib/themes";
+import { DEFAULT_SNOOZE_OPTIONS, isValidSnoozeOptions } from "../lib/snooze";
 import { api, pickJsonFile, pickSavePath } from "../lib/api";
 import { toast } from "../lib/toast";
 import { confirmDialog } from "../lib/confirm";
@@ -256,6 +259,11 @@ function GeneralSection() {
   const boardArchiveDays = useSettingsStore((s) => s.boardArchiveDays);
   const setBoardArchiveDays = useSettingsStore((s) => s.setBoardArchiveDays);
   const boardCountDone = useSettingsStore((s) => s.boardCountDone);
+  const boardBadgeKinds = useSettingsStore((s) => s.boardBadgeKinds);
+  const setBoardBadgeKind = useSettingsStore((s) => s.setBoardBadgeKind);
+  const boardSnoozeOptions = useSettingsStore((s) => s.boardSnoozeOptions);
+  const setBoardSnoozeOptions = useSettingsStore((s) => s.setBoardSnoozeOptions);
+  const [snoozeDraft, setSnoozeDraft] = useState(boardSnoozeOptions);
   const setBoardCountDone = useSettingsStore((s) => s.setBoardCountDone);
   const boardMonitorIntervalMin = useSettingsStore((s) => s.boardMonitorIntervalMin);
   const setBoardMonitorIntervalMin = useSettingsStore((s) => s.setBoardMonitorIntervalMin);
@@ -474,6 +482,33 @@ function GeneralSection() {
             type="checkbox"
             checked={boardCountDone}
             onChange={(e) => setBoardCountDone(e.target.checked)}
+          />
+        </label>
+        {BOARD_BADGE_KIND_OPTIONS.map((o) => (
+          <label key={o.kind} className="settings-row" title={`${o.hint}. Counted in the sidebar Board badge when on.`}>
+            <span>Badge: {o.label}</span>
+            <input
+              type="checkbox"
+              checked={boardBadgeKinds[o.kind] ?? DEFAULT_BOARD_BADGE_KINDS[o.kind]}
+              onChange={(e) => setBoardBadgeKind(o.kind, e.target.checked)}
+            />
+          </label>
+        ))}
+        <label
+          className="settings-row"
+          title="Durations offered by a card's Snooze button, comma-separated: a number then h (hours), d (days) or w (weeks). A snoozed card is left out of the sidebar Board badge until it lapses."
+        >
+          <span>Snooze durations</span>
+          <input
+            className="input"
+            value={snoozeDraft}
+            aria-invalid={!isValidSnoozeOptions(snoozeDraft)}
+            placeholder={DEFAULT_SNOOZE_OPTIONS}
+            style={isValidSnoozeOptions(snoozeDraft) ? undefined : { borderColor: "var(--danger)" }}
+            onChange={(e) => {
+              setSnoozeDraft(e.target.value);
+              if (isValidSnoozeOptions(e.target.value)) setBoardSnoozeOptions(e.target.value.trim());
+            }}
           />
         </label>
       </section>

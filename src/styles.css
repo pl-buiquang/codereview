@@ -4844,6 +4844,10 @@ input[type="range"] {
   right: auto;
   min-width: 160px;
 }
+.board-card-title-wrap.board-card-snooze {
+  display: inline-block;
+  flex: none;
+}
 .board-card-title-link,
 .review-pr-link {
   -webkit-user-select: none;

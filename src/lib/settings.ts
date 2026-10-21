@@ -4,6 +4,8 @@ import { api } from "./api";
 import { DIRECTIONS, type Direction } from "./themes";
 import { DEFAULT_CONFIG_PATTERNS, DEFAULT_TEST_PATTERNS } from "./fileCategory";
 import type { AutoSync, IgnoreRule } from "./types";
+import type { ActionKind } from "./boardDigest";
+import { DEFAULT_SNOOZE_OPTIONS } from "./snooze";
 import { DEFAULT_LOG_LEVEL, type LogLevel } from "./log";
 
 export type ThemeMode = "dark" | "light" | "system";
@@ -75,6 +77,25 @@ export const AUTO_FETCH_OPTIONS: { label: string; value: number }[] = [
   { label: "30 min", value: 30 },
 ];
 
+/** What the sidebar Board badge can count, in ranking order. */
+export const BOARD_BADGE_KIND_OPTIONS: { kind: ActionKind; label: string; hint: string }[] = [
+  { kind: "review", label: "Review requests", hint: "PRs in the Reviews lane that aren't yours and aren't approved" },
+  { kind: "merge", label: "Ready to merge", hint: "Your approved PRs without auto-merge" },
+  { kind: "conflicts", label: "Merge conflicts", hint: "Your PRs with conflicts" },
+  { kind: "ci", label: "Failing CI", hint: "Your PRs with failing CI" },
+  { kind: "changes", label: "Changes requested / open threads", hint: "Your PRs with requested changes or unresolved threads" },
+  { kind: "behind", label: "Behind the base branch", hint: "Your PRs that need a branch update" },
+];
+
+export const DEFAULT_BOARD_BADGE_KINDS: Record<ActionKind, boolean> = {
+  review: true,
+  merge: true,
+  conflicts: true,
+  ci: false,
+  changes: true,
+  behind: false,
+};
+
 /** Starting rules, off until switched on in Settings. */
 export const DEFAULT_IGNORE_RULES: IgnoreRule[] = [
   { id: "preset-closed-quiet", name: "Closed or merged, quiet for 30 days", enabled: false, subjectClosed: true, olderThanDays: 30 },
@@ -108,6 +129,9 @@ type PersistedSettings = Pick<
   | "boardMonitorIntervalMin"
   | "boardArchiveDays"
   | "boardCountDone"
+  | "boardBadgeKinds"
+  | "boardSnoozeOptions"
+  | "boardSnoozes"
   | "markEdits"
   | "largeDiffMaxLines"
   | "fileTestPatterns"
@@ -144,6 +168,9 @@ const DEFAULTS: PersistedSettings = {
   boardMonitorIntervalMin: 5,
   boardArchiveDays: 7,
   boardCountDone: true,
+  boardBadgeKinds: DEFAULT_BOARD_BADGE_KINDS,
+  boardSnoozeOptions: DEFAULT_SNOOZE_OPTIONS,
+  boardSnoozes: {},
   markEdits: false,
   largeDiffMaxLines: 3000,
   fileTestPatterns: DEFAULT_TEST_PATTERNS,
@@ -203,6 +230,12 @@ interface SettingsState {
   boardArchiveDays: number;
   /** Include Done-lane cards in the Board filter counts. */
   boardCountDone: boolean;
+  /** Which kinds of cards the sidebar Board badge counts. */
+  boardBadgeKinds: Record<ActionKind, boolean>;
+  /** Card snooze durations, one line of comma-separated `<n>h|d|w` (see `lib/snooze.ts`). */
+  boardSnoozeOptions: string;
+  /** Card id → epoch ms until which the card is left out of the Board badge. */
+  boardSnoozes: Record<string, number>;
   /** Newline-separated globs classifying changed files as tests (checked first). */
   fileTestPatterns: string;
   /** Newline-separated globs classifying changed files as config/docs. */
@@ -254,6 +287,10 @@ interface SettingsState {
   setBoardMonitorIntervalMin: (min: number) => void;
   setBoardArchiveDays: (days: number) => void;
   setBoardCountDone: (on: boolean) => void;
+  setBoardBadgeKind: (kind: ActionKind, on: boolean) => void;
+  setBoardSnoozeOptions: (s: string) => void;
+  snoozeCard: (cardId: string, until: number) => void;
+  unsnoozeCard: (cardId: string) => void;
 }
 
 const ENUMS: Partial<Record<keyof PersistedSettings, readonly string[]>> = {
@@ -334,6 +371,11 @@ export const useSettingsStore = create<SettingsState>()(
       setBoardMonitorIntervalMin: (boardMonitorIntervalMin) => set({ boardMonitorIntervalMin }),
       setBoardArchiveDays: (boardArchiveDays) => set({ boardArchiveDays }),
       setBoardCountDone: (boardCountDone) => set({ boardCountDone }),
+      setBoardBadgeKind: (kind, on) => set((s) => ({ boardBadgeKinds: { ...s.boardBadgeKinds, [kind]: on } })),
+      setBoardSnoozeOptions: (boardSnoozeOptions) => set({ boardSnoozeOptions }),
+      snoozeCard: (cardId, until) => set((s) => ({ boardSnoozes: { ...s.boardSnoozes, [cardId]: until } })),
+      unsnoozeCard: (cardId) =>
+        set((s) => ({ boardSnoozes: Object.fromEntries(Object.entries(s.boardSnoozes).filter(([id]) => id !== cardId)) })),
     }),
     {
       name: "codereview-settings",
