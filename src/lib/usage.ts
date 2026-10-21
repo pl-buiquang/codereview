@@ -31,6 +31,7 @@ const FEATURE_LABELS: Record<string, string> = {
   focus: "Focus",
   board_overview: "Board overview",
   session_summary: "Session summary",
+  routine: "Routine",
 };
 
 export function featureLabel(feature: string, variant?: string | null): string {

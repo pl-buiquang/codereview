@@ -29,6 +29,7 @@ describe("usage formatting", () => {
   it("labels features with their variant", () => {
     expect(featureLabel("ai_review", "critique")).toBe("AI review · critique");
     expect(featureLabel("focus")).toBe("Focus");
+    expect(featureLabel("routine", "babysit")).toBe("Routine · babysit");
     expect(featureLabel("future_thing")).toBe("future_thing");
   });
 
