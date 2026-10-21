@@ -19,6 +19,7 @@ const MIRROR_QUERY_KEYS = [
   ["inbox"],
   ["inbox-archive"],
   ["inbox-meta"],
+  ["conversations"],
   ["board"],
   ["board-last-refresh"],
   ["board-tracked"],

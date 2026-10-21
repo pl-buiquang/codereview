@@ -9,6 +9,7 @@ import {
 } from "react-diff-view";
 import {
   anchorByLine,
+  hunkSnippetFile,
   languageForPath,
   fileDisplayPath,
   indexFile,
@@ -601,5 +602,20 @@ index e1fc989..368d3c3 100644
     const { keyByAnchor } = indexFile({ ...file, hunks: expanded });
     expect(keyByAnchor.get("LEFT:20")).toBeDefined();
     expect(keyByAnchor.get("LEFT:21")).toBeUndefined();
+  });
+});
+
+describe("hunkSnippetFile", () => {
+  const hunk = "@@ -1,5 +1,6 @@ fn a\n one\n two\n-three\n+three!\n+four\n five\n six";
+
+  it("keeps the hunk and trims it to the last lines", () => {
+    const file = hunkSnippetFile("src/a.ts", hunk, 3);
+    expect(file?.hunks).toHaveLength(1);
+    expect(file?.hunks[0].changes).toHaveLength(3);
+    expect(file?.hunks[0].changes[2]?.content).toBe("six");
+  });
+
+  it("returns null for text that is not a hunk", () => {
+    expect(hunkSnippetFile("src/a.ts", "")).toBeNull();
   });
 });

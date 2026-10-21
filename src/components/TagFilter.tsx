@@ -14,6 +14,7 @@ export function TagFilter({
   title = "Tags",
   placeholder = "Filter by tag…",
   variant = "include",
+  label = (key) => key,
 }: {
   tags: [string, number][];
   selected: string[];
@@ -22,6 +23,8 @@ export function TagFilter({
   title?: string;
   placeholder?: string;
   variant?: "include" | "exclude";
+  /** Display (and search) text for a key, when the key itself isn't readable. */
+  label?: (key: string) => string;
 }) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
@@ -42,7 +45,7 @@ export function TagFilter({
 
   const q = query.trim().toLowerCase();
   const options = tags.filter(
-    ([t]) => !selected.includes(t) && !unavailable?.includes(t) && (!q || t.toLowerCase().includes(q)),
+    ([t]) => !selected.includes(t) && !unavailable?.includes(t) && (!q || label(t).toLowerCase().includes(q)),
   );
   const activeHighlight = Math.min(highlight, Math.max(options.length - 1, 0));
 
@@ -102,7 +105,7 @@ export function TagFilter({
         />
         {open && (
           <div className="tag-filter-dropdown card" id={listboxId} role="listbox">
-            {options.length === 0 && <div className="tag-filter-empty faint">No matching tags</div>}
+            {options.length === 0 && <div className="tag-filter-empty faint">No matches</div>}
             {options.map(([tag, count], i) => (
               <button
                 key={tag}
@@ -113,7 +116,7 @@ export function TagFilter({
                 onMouseEnter={() => setHighlight(i)}
                 onClick={() => select(tag)}
               >
-                <span className="lbl">{tag}</span>
+                <span className="lbl">{label(tag)}</span>
                 <span className="count">{count}</span>
               </button>
             ))}
@@ -124,8 +127,8 @@ export function TagFilter({
         <div className="tag-filter-chips">
           {selected.map((tag) => (
             <span key={tag} className={`tag-chip${variant === "exclude" ? " tag-chip-exclude" : ""}`}>
-              {tag}
-              <button className="btn-icon" title={`Remove ${tag} filter`} onClick={() => remove(tag)}>
+              {label(tag)}
+              <button className="btn-icon" title={`Remove ${label(tag)} filter`} onClick={() => remove(tag)}>
                 <Icon name="x" size={10} />
               </button>
             </span>

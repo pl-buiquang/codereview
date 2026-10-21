@@ -5542,3 +5542,73 @@ button.board-overview-ref {
 .inbox-toolbar .chip {
   cursor: pointer;
 }
+
+/* Inbox Conversations tab */
+.conv-row {
+  padding: 8px 10px;
+  display: block;
+}
+.conv-row.unread {
+  border-left: 3px solid var(--accent, #3b82f6);
+}
+.conv-row.pinned .btn-icon.on,
+.conv-actions .btn-icon.on {
+  color: var(--accent, #3b82f6);
+}
+.conv-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.conv-toggle {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  background: none;
+  border: 0;
+  padding: 0;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+}
+.conv-chev-closed {
+  transform: rotate(-90deg);
+}
+.conv-title {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.conv-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+.conv-subject {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 48ch;
+}
+.conv-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.conv-body {
+  margin-top: 8px;
+}
+.conv-snippet {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow-x: auto;
+  margin-bottom: 8px;
+  font-size: 12px;
+}

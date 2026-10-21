@@ -5,18 +5,21 @@ import { toast } from "../lib/toast";
 import { parseBotLogins, parseRepoBasePaths, useSettingsStore } from "../lib/settings";
 import { useSyncNow, useSyncScope } from "../lib/sync";
 import { timeAgo } from "../lib/timeAgo";
-import { useUIStore } from "../store";
+import { EMPTY_CONVERSATION_FILTERS, useUIStore } from "../store";
 import type { InboxItem } from "../lib/types";
 import { InboxItemRow, type RowVariant } from "./InboxItemRow";
+import { ConversationsView } from "./ConversationsView";
+import { FilterList, MultiFilterList } from "./RailFilters";
 import { RepoName } from "./RepoName";
 import { Icon, type IconName } from "./icons";
 import { SyncButton } from "./SyncButton";
 
-type TabKey = "new" | "archive";
+type TabKey = "new" | "archive" | "conversations";
 
 const TABS: { key: TabKey; label: string; icon: IconName; variant: RowVariant }[] = [
   { key: "new", label: "New", icon: "inbox", variant: "new" },
   { key: "archive", label: "Archive", icon: "archive", variant: "archive" },
+  { key: "conversations", label: "Conversations", icon: "comment", variant: "new" },
 ];
 
 const ARCHIVE_PAGE = 100;
@@ -85,7 +88,8 @@ export function InboxView() {
     flag: flagFilter,
     cause: causeFilter,
   } = filters;
-  const active: TabKey = filters.bucket === "archive" ? "archive" : "new";
+  const active: TabKey =
+    filters.bucket === "archive" ? "archive" : filters.bucket === "conversations" ? "conversations" : "new";
   const setActive = (bucket: TabKey) => setInboxFilters({ bucket });
   const setRepoFilter = (repos: string[]) => setInboxFilters({ repos });
   const setAuthorFilter = (authors: string[]) => setInboxFilters({ authors });
@@ -107,6 +111,11 @@ export function InboxView() {
     enabled: active === "archive",
   });
   const metaQuery = useQuery({ queryKey: ["inbox-meta"], queryFn: api.inboxMeta });
+  // Unread count for the Conversations tab badge (default filters: bots hidden).
+  const conversationsBadge = useQuery({
+    queryKey: ["conversations", "badge", botLogins],
+    queryFn: () => api.listConversations(EMPTY_CONVERSATION_FILTERS, [...parseBotLogins(botLogins)], 1),
+  });
   const reviewsQuery = useQuery({ queryKey: ["reviews", null], queryFn: () => api.listReviews(null) });
   const trackedQuery = useQuery({ queryKey: ["board-tracked"], queryFn: api.boardTrackedIds });
   const trackedIds = useMemo(() => new Set(trackedQuery.data ?? []), [trackedQuery.data]);
@@ -167,7 +176,7 @@ export function InboxView() {
 
   const newItems = inboxQuery.data ?? [];
   const archiveItems = archiveQuery.data ?? [];
-  const tabItems = active === "new" ? newItems : archiveItems;
+  const tabItems = active === "archive" ? archiveItems : newItems;
 
   // Build sidebar filter counts from the active tab's items.
   const { repoEntries, authorEntries, typeEntries, reviewEntries, statusEntries, reasonEntries, flagEntries } =
@@ -235,7 +244,7 @@ export function InboxView() {
 
   const busy = archive.isPending || restore.isPending || openPr.isPending || track.isPending;
   const lastRefresh = metaQuery.data?.lastRefreshAt;
-  const loading = active === "new" ? inboxQuery.isLoading : archiveQuery.isLoading;
+  const loading = active === "archive" ? archiveQuery.isLoading : inboxQuery.isLoading;
   const tab = TABS.find((t) => t.key === active)!;
   const canLoadMore = active === "archive" && archiveItems.length >= archiveLimit;
 
@@ -271,10 +280,16 @@ export function InboxView() {
             <Icon name={t.icon} size={13} />
             <span>{t.label}</span>
             {t.key === "new" && <span className="n">{newItems.length}</span>}
+            {t.key === "conversations" && !!conversationsBadge.data?.facets.unread && (
+              <span className="n">{conversationsBadge.data.facets.unread}</span>
+            )}
           </button>
         ))}
       </div>
 
+      {active === "conversations" ? (
+        <ConversationsView />
+      ) : (
       <div className="inbox-layout">
         <aside className="cr-rail">
           <FilterList
@@ -375,88 +390,7 @@ export function InboxView() {
           )}
         </div>
       </div>
+      )}
     </section>
-  );
-}
-
-function MultiFilterList({
-  title,
-  entries,
-  selected,
-  onChange,
-  renderLabel,
-}: {
-  title: string;
-  entries: [string, number][];
-  selected: string[];
-  onChange: (next: string[]) => void;
-  renderLabel?: (key: string) => React.ReactNode;
-}) {
-  if (entries.length === 0) return null;
-  return (
-    <div className="cr-rail-group">
-      <div className="cr-rail-h">
-        <span>{title}</span>
-        {selected.length > 0 && (
-          <button className="cr-rail-clear" onClick={() => onChange([])}>
-            clear
-          </button>
-        )}
-      </div>
-      {entries.map(([key, count]) => {
-        const on = selected.includes(key);
-        return (
-          <button
-            key={key}
-            className={`cr-rail-item${on ? " on" : ""}`}
-            aria-pressed={on}
-            onClick={() => onChange(on ? selected.filter((k) => k !== key) : [...selected, key])}
-          >
-            {renderLabel ? renderLabel(key) : <span className="lbl">{key}</span>}
-            <span className="count">{count}</span>
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-function FilterList({
-  title,
-  entries,
-  selected,
-  onSelect,
-  mono,
-  renderLabel,
-}: {
-  title: string;
-  entries: [string, number][];
-  selected: string | null;
-  onSelect: (v: string | null) => void;
-  mono?: boolean;
-  renderLabel?: (key: string) => React.ReactNode;
-}) {
-  if (entries.length === 0) return null;
-  return (
-    <div className="cr-rail-group">
-      <div className="cr-rail-h">
-        <span>{title}</span>
-        {selected && (
-          <button className="cr-rail-clear" onClick={() => onSelect(null)}>
-            clear
-          </button>
-        )}
-      </div>
-      {entries.map(([key, count]) => (
-        <button
-          key={key}
-          className={`cr-rail-item${key === selected ? " on" : ""}`}
-          onClick={() => onSelect(key === selected ? null : key)}
-        >
-          {renderLabel ? renderLabel(key) : <span className={mono ? "lbl mono" : "lbl"}>{key}</span>}
-          <span className="count">{count}</span>
-        </button>
-      ))}
-    </div>
   );
 }

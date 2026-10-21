@@ -206,6 +206,8 @@ export interface ToolEnv {
 export interface PrActor {
   login: string | null;
   avatarUrl: string | null;
+  /** GraphQL __typename (User | Bot | …); only on thread / discussion authors. */
+  __typename?: string | null;
 }
 
 export interface PrLabel {
@@ -755,3 +757,73 @@ export interface FetchResult {
 }
 
 export type GitChangeKind = "head" | "refs" | "index" | "fetch";
+
+// --- Inbox conversations (review threads + discussions of notified / tracked PRs) ---
+
+export interface DiscussionComment {
+  id: string;
+  databaseId: number | null;
+  kind: "comment" | "review";
+  reviewState: string | null;
+  author: PrActor | null;
+  body: string;
+  createdAt: string;
+  url: string;
+}
+
+export interface ConversationSubject {
+  id: string;
+  kind: "pr" | "issue";
+  owner: string;
+  name: string;
+  number: number;
+  title: string;
+  url: string;
+  state: string | null;
+  reason: string | null;
+  onBoard: boolean;
+}
+
+export interface Conversation {
+  id: string;
+  kind: "thread" | "discussion";
+  subject: ConversationSubject;
+  thread: PrThread | null;
+  comments: DiscussionComment[];
+  path: string | null;
+  line: number | null;
+  diffHunk: string | null;
+  isResolved: boolean;
+  isOutdated: boolean;
+  lastCommentAt: string;
+  url: string;
+  lastAuthor: string | null;
+  commentCount: number;
+  unreadCount: number;
+  pinned: boolean;
+  isBot: boolean;
+}
+
+export interface ConversationFacets {
+  subjects: { subject: ConversationSubject; count: number; unread: number }[];
+  repos: [string, number][];
+  pinned: number;
+  unread: number;
+  unresolved: number;
+  bots: number;
+}
+
+export interface ConversationList {
+  items: Conversation[];
+  total: number;
+  facets: ConversationFacets;
+}
+
+export interface ConversationFilters {
+  subjectIds: string[];
+  repos: string[];
+  pinned: boolean;
+  unread: boolean;
+  unresolved: boolean;
+  showBots: boolean;
+}

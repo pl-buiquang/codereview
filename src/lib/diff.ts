@@ -1,5 +1,6 @@
 import {
   getChangeKey,
+  parseDiff,
   markEdits,
   tokenize,
   type ChangeData,
@@ -402,4 +403,20 @@ export function countChanges(file: FileData): { add: number; del: number } {
 export function isLargeDiff(file: FileData, maxLines: number): boolean {
   const { add, del } = countChanges(file);
   return add + del > maxLines;
+}
+
+/** A one-hunk `FileData` from a GitHub `diffHunk` (the hunk header plus the
+ *  lines up to the commented one), trimmed to its last `maxLines` changes. */
+export function hunkSnippetFile(path: string, diffHunk: string, maxLines = 8): FileData | null {
+  const text = `diff --git a/${path} b/${path}\n--- a/${path}\n+++ b/${path}\n${diffHunk}\n`;
+  try {
+    const file = parseDiff(text)[0];
+    const hunk = file?.hunks[0];
+    if (!hunk) return null;
+    const changes = hunk.changes.slice(-maxLines);
+    if (changes.length === 0) return null;
+    return { ...file, hunks: [{ ...hunk, changes }] };
+  } catch {
+    return null;
+  }
 }

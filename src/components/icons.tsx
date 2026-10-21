@@ -42,6 +42,7 @@ export type IconName =
   | "trash"
   | "edit"
   | "terminal"
+  | "pin"
   | "dot"
   | "kebab";
 
@@ -194,6 +195,7 @@ const STROKE: Record<Exclude<IconName, "dot" | "kebab">, ReactNode> = {
       <path d="M9 4 11 6" />
     </>
   ),
+  pin: <path d="M9.8 2.2 13.8 6.2l-1.6.6-2.4 2.4.4 2.6-.9.9-3.1-3.1-3.6 3.6M6 5.6l.9-.9 2.6.4 2.4-2.4" />,
   terminal: (
     <>
       <rect x="1.8" y="2.8" width="12.4" height="10.4" rx="1.2" />

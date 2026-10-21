@@ -25,6 +25,7 @@ export function GithubThread({
   draftReplies,
   readOnly,
   onCommentsChanged,
+  onChanged,
 }: {
   thread: PrThread;
   ctx?: PrThreadCtx | null;
@@ -32,16 +33,21 @@ export function GithubThread({
   draftReplies?: Comment[];
   readOnly?: boolean;
   onCommentsChanged?: () => void;
+  /** Called after a reply or resolve landed on GitHub, for views that don't
+   *  watch ["pr-threads"] (the Inbox conversations). */
+  onChanged?: () => void;
 }) {
   const collapsible = thread.isResolved && thread.isCollapsed;
   const [expanded, setExpanded] = useState(!collapsible);
   const [replying, setReplying] = useState(false);
   const queryClient = useQueryClient();
 
-  const invalidate = () =>
+  const invalidate = () => {
     queryClient.invalidateQueries({
       queryKey: ["pr-threads", ctx!.owner, ctx!.name, ctx!.number],
     });
+    onChanged?.();
+  };
 
   const setResolved = useMutation({
     mutationFn: (resolved: boolean) => api.setPrThreadResolved(thread.id, resolved),
@@ -253,7 +259,11 @@ function DraftReplyItem({
   );
 }
 
-function ThreadComment({ comment }: { comment: PrThreadComment }) {
+export function ThreadComment({
+  comment,
+}: {
+  comment: Pick<PrThreadComment, "author" | "body" | "createdAt" | "url">;
+}) {
   const login = comment.author?.login ?? "unknown";
   return (
     <div className="github-thread-comment">

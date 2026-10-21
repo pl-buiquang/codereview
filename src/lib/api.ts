@@ -31,6 +31,8 @@ import type {
   GraphCommit,
   GraphScope,
   InboxItem,
+  ConversationFilters,
+  ConversationList,
   InboxMeta,
   PrMeta,
   PrSummary,
@@ -222,6 +224,15 @@ export const api = {
   /** Archived and tracked items; `cause` is an ArchiveCause or "tracked". */
   listInboxArchive: (search: string | null, cause: string | null, limit: number) =>
     invoke<InboxItem[]>("list_inbox_archive", { search, cause, limit }),
+  listConversations: (filters: ConversationFilters, botLogins: string[], limit: number) =>
+    invoke<ConversationList>("list_conversations", { filters: { ...filters, botLogins }, limit }),
+  setConversationPinned: (id: string, subjectId: string, pinned: boolean) =>
+    invoke<void>("set_conversation_pinned", { id, subjectId, pinned }),
+  /** Read up to `seenAt` (a conversation's latest comment time); an earlier time marks it unread. */
+  setConversationSeen: (id: string, subjectId: string, seenAt: string | null) =>
+    invoke<void>("set_conversation_seen", { id, subjectId, seenAt }),
+  replyToDiscussion: (subjectId: string, owner: string, name: string, number: number, body: string) =>
+    invoke<void>("reply_to_discussion", { subjectId, owner, name, number, body }),
   inboxMeta: () => invoke<InboxMeta>("inbox_meta"),
   archiveItem: (id: string) => invoke<void>("archive_item", { id }),
   restoreItem: (id: string) => invoke<void>("restore_item", { id }),

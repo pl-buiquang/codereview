@@ -79,6 +79,36 @@ export const EMPTY_INBOX_FILTERS: InboxFilters = {
   cause: null,
 };
 
+export interface ConversationFiltersState {
+  /** PR / issue node ids. */
+  subjectIds: string[];
+  repos: string[];
+  pinned: boolean;
+  unread: boolean;
+  unresolved: boolean;
+  showBots: boolean;
+}
+
+export const EMPTY_CONVERSATION_FILTERS: ConversationFiltersState = {
+  subjectIds: [],
+  repos: [],
+  pinned: false,
+  unread: false,
+  unresolved: false,
+  showBots: false,
+};
+
+/** A one-shot request to scroll a review to a GitHub thread once it renders. */
+export interface ThreadJump {
+  owner: string;
+  name: string;
+  number: number;
+  threadId: string;
+  nonce: number;
+}
+
+let threadJumpNonce = 0;
+
 interface UIState {
   tabs: Tab[];
   activeTabId: string;
@@ -94,6 +124,12 @@ interface UIState {
   setBoardFilters: (patch: Partial<BoardFilters>) => void;
   inboxFilters: InboxFilters;
   setInboxFilters: (patch: Partial<InboxFilters>) => void;
+  conversationFilters: ConversationFiltersState;
+  setConversationFilters: (patch: Partial<ConversationFiltersState>) => void;
+  /** Thread to scroll to in the matching review (not persisted). */
+  threadJump: ThreadJump | null;
+  requestThreadJump: (jump: Omit<ThreadJump, "nonce">) => void;
+  clearThreadJump: () => void;
   /** Board card to scroll to and flash once the Board renders (not persisted). */
   boardHighlightCardId: string | null;
   showBoardCard: (cardId: string) => void;
@@ -129,6 +165,7 @@ type Persisted = Pick<
   | "collapsedLanes"
   | "boardFilters"
   | "inboxFilters"
+  | "conversationFilters"
 >;
 
 function upsertTab(tabs: Tab[], tab: Tab): Tab[] {
@@ -147,6 +184,8 @@ export const useUIStore = create<UIState>()(
       collapsedLanes: [],
       boardFilters: EMPTY_BOARD_FILTERS,
       inboxFilters: EMPTY_INBOX_FILTERS,
+      conversationFilters: EMPTY_CONVERSATION_FILTERS,
+      threadJump: null,
       boardHighlightCardId: null,
       graphFocus: null,
 
@@ -232,6 +271,10 @@ export const useUIStore = create<UIState>()(
       toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
 
       setInboxFilters: (patch) => set((s) => ({ inboxFilters: { ...s.inboxFilters, ...patch } })),
+      setConversationFilters: (patch) =>
+        set((s) => ({ conversationFilters: { ...s.conversationFilters, ...patch } })),
+      requestThreadJump: (jump) => set({ threadJump: { ...jump, nonce: ++threadJumpNonce } }),
+      clearThreadJump: () => set({ threadJump: null }),
       setBoardFilters: (patch) => set((s) => ({ boardFilters: { ...s.boardFilters, ...patch } })),
 
       toggleLane: (lane) =>
@@ -284,6 +327,7 @@ export const useUIStore = create<UIState>()(
         collapsedLanes: s.collapsedLanes,
         boardFilters: s.boardFilters,
         inboxFilters: s.inboxFilters,
+        conversationFilters: s.conversationFilters,
       }),
       migrate: (persisted, version) => migratePersisted(persisted, version),
       merge: (persisted, current) => {
@@ -291,6 +335,8 @@ export const useUIStore = create<UIState>()(
         next.boardFilters = upgradeFilters(EMPTY_BOARD_FILTERS, next.boardFilters, { repo: "repos" });
         next.inboxFilters = upgradeFilters(EMPTY_INBOX_FILTERS, next.inboxFilters, { repo: "repos", author: "authors" });
         delete (next.inboxFilters as unknown as Record<string, unknown>).tracking;
+        next.conversationFilters = { ...EMPTY_CONVERSATION_FILTERS, ...next.conversationFilters };
+        delete (next.conversationFilters as unknown as Record<string, unknown>).subjectId;
         // The Archive page was folded into the Inbox's Archive tab.
         if ((next.homeSection as string) === "archive") {
           next.homeSection = "inbox";
