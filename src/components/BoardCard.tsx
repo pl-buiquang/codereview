@@ -316,6 +316,10 @@ function PrActionsMenu({
         };
         return (
           <>
+            <button role="menuitem" onClick={run(() => copyCardUrl(card.url))}>
+              Copy GitHub link
+            </button>
+            <hr className="btn-split-menu-separator" />
             <button
               role="menuitem"
               disabled={!isOpen || card.is_draft}
@@ -397,6 +401,13 @@ function PrActionsMenu({
         );
       }}
     </KebabMenu>
+  );
+}
+
+function copyCardUrl(url: string) {
+  navigator.clipboard.writeText(url).then(
+    () => toast.success("GitHub link copied to clipboard"),
+    (e) => toast.error(`Could not copy link: ${String(e)}`),
   );
 }
 
@@ -533,10 +544,7 @@ export function BoardCard({
                 role="menuitem"
                 onClick={() => {
                   setTitleMenuOpen(false);
-                  navigator.clipboard.writeText(card.url).then(
-                    () => toast.success("GitHub link copied to clipboard"),
-                    (e) => toast.error(`Could not copy link: ${String(e)}`),
-                  );
+                  copyCardUrl(card.url);
                 }}
               >
                 Copy GitHub link
