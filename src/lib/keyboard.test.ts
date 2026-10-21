@@ -2,9 +2,40 @@ import { describe, it, expect } from "vitest";
 import {
   isCloseTabShortcut,
   isEditableTarget,
+  navHistoryDirection,
   pickThread,
   moveCursorKey,
 } from "./keyboard";
+
+describe("navHistoryDirection", () => {
+  const ev = (key: string, mods: Partial<Record<"ctrlKey" | "metaKey" | "altKey" | "shiftKey", boolean>> = {}) => ({
+    key,
+    ctrlKey: false,
+    metaKey: false,
+    altKey: false,
+    shiftKey: false,
+    ...mods,
+  });
+
+  it("uses Cmd+Arrow on macOS", () => {
+    expect(navHistoryDirection(ev("ArrowLeft", { metaKey: true }), true)).toBe(-1);
+    expect(navHistoryDirection(ev("ArrowRight", { metaKey: true }), true)).toBe(1);
+    expect(navHistoryDirection(ev("ArrowLeft", { altKey: true }), true)).toBeNull();
+  });
+
+  it("uses Alt+Arrow elsewhere", () => {
+    expect(navHistoryDirection(ev("ArrowLeft", { altKey: true }), false)).toBe(-1);
+    expect(navHistoryDirection(ev("ArrowRight", { altKey: true }), false)).toBe(1);
+    expect(navHistoryDirection(ev("ArrowLeft", { metaKey: true }), false)).toBeNull();
+  });
+
+  it("ignores plain arrows, other keys and extra modifiers", () => {
+    expect(navHistoryDirection(ev("ArrowLeft"), true)).toBeNull();
+    expect(navHistoryDirection(ev("ArrowUp", { metaKey: true }), true)).toBeNull();
+    expect(navHistoryDirection(ev("ArrowLeft", { metaKey: true, shiftKey: true }), true)).toBeNull();
+    expect(navHistoryDirection(ev("ArrowLeft", { metaKey: true, ctrlKey: true }), true)).toBeNull();
+  });
+});
 
 describe("isEditableTarget", () => {
   it("is true for editable fields and elements inside [contenteditable]", () => {

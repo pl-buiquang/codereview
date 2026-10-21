@@ -13,7 +13,8 @@ import { UpdateBanner } from "./components/UpdateBanner";
 import { SettingsView } from "./components/SettingsView";
 import { api } from "./lib/api";
 import { toast } from "./lib/toast";
-import { isCloseTabShortcut, isCommandPaletteShortcut } from "./lib/keyboard";
+import { isCloseTabShortcut, isCommandPaletteShortcut, isEditableTarget, navHistoryDirection } from "./lib/keyboard";
+import { goBack, goForward, startNavHistory } from "./lib/navHistory";
 import { toggleCommandPalette } from "./lib/commandPalette";
 import { useApplySettings } from "./lib/useApplySettings";
 import { useDeepLinkListener } from "./lib/deepLink";
@@ -171,6 +172,33 @@ function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  useEffect(() => {
+    const stop = startNavHistory();
+    const isMac = navigator.userAgent.includes("Mac");
+    const onKey = (e: KeyboardEvent) => {
+      const dir = navHistoryDirection(e, isMac);
+      if (dir == null || isEditableTarget(e.target)) return;
+      e.preventDefault();
+      if (dir < 0) goBack();
+      else goForward();
+    };
+    // Mouse side buttons: 3 = back, 4 = forward.
+    const onMouse = (e: MouseEvent) => {
+      if (e.button !== 3 && e.button !== 4) return;
+      e.preventDefault();
+      if (e.type === "mouseup") (e.button === 3 ? goBack : goForward)();
+    };
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("mousedown", onMouse);
+    window.addEventListener("mouseup", onMouse);
+    return () => {
+      stop();
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("mousedown", onMouse);
+      window.removeEventListener("mouseup", onMouse);
+    };
   }, []);
 
   const reposQuery = useQuery({

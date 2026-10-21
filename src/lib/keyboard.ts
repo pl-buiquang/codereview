@@ -7,6 +7,7 @@ export interface Binding {
 export const BINDINGS: Binding[] = [
   { keys: ["⌘/Ctrl + P"], description: "Quick access — search reviews" },
   { keys: ["⌘/Ctrl + W"], description: "Close current tab" },
+  { keys: ["⌘/Alt + ←", "⌘/Alt + →"], description: "Navigate back / forward" },
   { keys: ["]", "["], description: "Next / previous file" },
   { keys: ["n", "p"], description: "Next / previous comment thread" },
   { keys: ["j", "k"], description: "Move line cursor down / up (active file)" },
@@ -46,6 +47,20 @@ export function isCloseTabShortcut(
     !event.shiftKey &&
     event.key.toLowerCase() === "w"
   );
+}
+
+/** -1 for back (⌘← / Alt+←), 1 for forward (⌘→ / Alt+→), null otherwise.
+ *  The modifier is ⌘ on macOS and Alt elsewhere; extra modifiers don't match. */
+export function navHistoryDirection(
+  event: Pick<KeyboardEvent, "key" | "ctrlKey" | "metaKey" | "altKey" | "shiftKey">,
+  isMac: boolean,
+): -1 | 1 | null {
+  if (event.ctrlKey || event.shiftKey) return null;
+  const modifierOnly = isMac ? event.metaKey && !event.altKey : event.altKey && !event.metaKey;
+  if (!modifierOnly) return null;
+  if (event.key === "ArrowLeft") return -1;
+  if (event.key === "ArrowRight") return 1;
+  return null;
 }
 
 /**
