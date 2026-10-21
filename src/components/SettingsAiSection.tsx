@@ -111,10 +111,17 @@ export function AiSection() {
 
       <section className="settings-group">
         <h3>AI features</h3>
-        <label className="settings-row">
-          <span>Enable AI features</span>
-          <input type="checkbox" checked={aiEnabled} onChange={(e) => setAiEnabled(e.target.checked)} />
-        </label>
+        <div className="settings-row">
+          <span id="ai-enabled-label">Enable AI features</span>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={aiEnabled}
+            aria-labelledby="ai-enabled-label"
+            className="switch"
+            onClick={() => setAiEnabled(!aiEnabled)}
+          />
+        </div>
         <span className="settings-hint muted">
           Master switch for everything the app runs through <code>claude -p</code>: review chat, focus, AI
           review, board insights, session summaries and routines. While it is off, those buttons are disabled
