@@ -105,6 +105,11 @@ pub fn record(conn: &Connection, actions: &[MonitorAction]) -> AppResult<()> {
     }
     let at = Utc::now().to_rfc3339();
     for a in actions {
+        let line = format!("[monitor] {} {}#{}: {}", a.kind.as_str(), a.repo, a.number, a.detail);
+        match a.kind {
+            ActionKind::Updated | ActionKind::Reran => log::info!("{line}"),
+            ActionKind::GaveUp | ActionKind::Error => crate::logging::warn(&line),
+        }
         conn.execute(
             "INSERT INTO board_monitor_log (at, card_id, repo, number, kind, detail) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             params![at, a.card_id, a.repo, a.number, a.kind.as_str(), a.detail],

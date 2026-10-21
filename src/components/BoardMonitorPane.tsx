@@ -4,9 +4,11 @@ import { useSettingsStore } from "../lib/settings";
 import { timeAgo } from "../lib/timeAgo";
 import { useUIStore } from "../store";
 import type { BoardCard, MonitorLogEntry } from "../lib/types";
+import { CiBadge, MergeStateBadge, MergeableBadge } from "./InboxBadges";
 import { Icon } from "./icons";
 
-const LOG_LIMIT = 200;
+// Only the newest action per card is shown; the full history lives in the app log.
+const LOG_LIMIT = 500;
 
 const KIND_LABEL: Record<MonitorLogEntry["kind"], string> = {
   updated: "Updated branch",
@@ -21,6 +23,19 @@ const KIND_CLASS: Record<MonitorLogEntry["kind"], string> = {
   gave_up: "board-monitor-kind warn",
   error: "board-monitor-kind bad",
 };
+
+/** Mirrors `board_monitor::candidates`: the PRs the monitor acts on. */
+function isMonitored(c: BoardCard): boolean {
+  return (
+    c.type === "pr" &&
+    c.state === "open" &&
+    !c.is_draft &&
+    !c.discarded_at &&
+    !c.archived_at &&
+    c.auto_merge != null &&
+    c.review_decision === "APPROVED"
+  );
+}
 
 export function BoardMonitorPane({
   cards,
@@ -38,15 +53,15 @@ export function BoardMonitorPane({
     queryFn: () => api.boardMonitorLog(LOG_LIMIT),
   });
 
-  const openCard = (entry: MonitorLogEntry) => {
-    if (visibleIds.has(entry.card_id)) showBoardCard(entry.card_id);
-    else {
-      const card = cards.find((c) => c.id === entry.card_id);
-      if (card) api.openUrl(card.url);
-    }
+  const openCard = (card: BoardCard) => {
+    if (visibleIds.has(card.id)) showBoardCard(card.id);
+    else api.openUrl(card.url);
   };
 
-  const entries = query.data ?? [];
+  // The log is newest first, so the first entry seen per card is its last action.
+  const lastByCard = new Map<string, MonitorLogEntry>();
+  for (const e of query.data ?? []) if (!lastByCard.has(e.card_id)) lastByCard.set(e.card_id, e);
+  const watched = cards.filter(isMonitored);
 
   return (
     <section className="board-overview">
@@ -64,27 +79,35 @@ export function BoardMonitorPane({
         </button>
       </div>
       <div className="board-overview-body">
-        {query.isLoading ? (
-          <span className="muted">Loading…</span>
-        ) : entries.length === 0 ? (
-          <span className="muted">
-            Nothing done yet. Actions the monitor takes (branch updates, CI reruns, giving up) are
-            logged here.
-          </span>
+        {watched.length === 0 ? (
+          <span className="muted">No approved PRs with auto-merge on.</span>
         ) : (
           <ul className="board-digest-list">
-            {entries.map((e) => (
-              <li key={e.id} className="board-digest-row">
-                <span className="cr-sub board-monitor-time" title={new Date(e.at).toLocaleString()}>
-                  {timeAgo(e.at)}
-                </span>
-                <span className={KIND_CLASS[e.kind]}>{KIND_LABEL[e.kind]}</span>
-                <button className="board-overview-ref" onClick={() => openCard(e)}>
-                  {e.repo.split("/").pop()}#{e.number}
-                </button>
-                <span className="board-digest-title-text">{e.detail}</span>
-              </li>
-            ))}
+            {watched.map((c) => {
+              const last = lastByCard.get(c.id);
+              return (
+                <li key={c.id} className="board-digest-row">
+                  <button className="board-overview-ref" onClick={() => openCard(c)}>
+                    {c.repo.split("/").pop()}#{c.number}
+                  </button>
+                  <CiBadge state={c.ci_status ? c.ci_status.toLowerCase() : null} />
+                  <MergeableBadge mergeable={c.mergeable} />
+                  <MergeStateBadge state={c.merge_state_status} stacked={c.stack_number != null} />
+                  <span className="board-digest-title-text">{c.title}</span>
+                  {last ? (
+                    <>
+                      <span className={KIND_CLASS[last.kind]}>{KIND_LABEL[last.kind]}</span>
+                      <span className="cr-sub">{last.detail}</span>
+                      <span className="cr-sub board-monitor-time" title={new Date(last.at).toLocaleString()}>
+                        {timeAgo(last.at)}
+                      </span>
+                    </>
+                  ) : (
+                    <span className="cr-sub">no action yet</span>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         )}
       </div>
