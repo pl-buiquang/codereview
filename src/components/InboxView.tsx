@@ -1,11 +1,12 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { toast } from "../lib/toast";
 import { parseBotLogins, parseRepoBasePaths, useSettingsStore } from "../lib/settings";
+import { useInboxCounts } from "../lib/inboxCounts";
 import { useSyncNow, useSyncScope } from "../lib/sync";
 import { timeAgo } from "../lib/timeAgo";
-import { EMPTY_CONVERSATION_FILTERS, useUIStore } from "../store";
+import { useUIStore } from "../store";
 import type { InboxItem } from "../lib/types";
 import { InboxItemRow, type RowVariant } from "./InboxItemRow";
 import { ConversationsView } from "./ConversationsView";
@@ -111,11 +112,8 @@ export function InboxView() {
     enabled: active === "archive",
   });
   const metaQuery = useQuery({ queryKey: ["inbox-meta"], queryFn: api.inboxMeta });
-  // Unread count for the Conversations tab badge (default filters: bots hidden).
-  const conversationsBadge = useQuery({
-    queryKey: ["conversations", "badge", botLogins],
-    queryFn: () => api.listConversations(EMPTY_CONVERSATION_FILTERS, [...parseBotLogins(botLogins)], 1),
-  });
+  const { unreadConversations } = useInboxCounts();
+
   const reviewsQuery = useQuery({ queryKey: ["reviews", null], queryFn: () => api.listReviews(null) });
   const trackedQuery = useQuery({ queryKey: ["board-tracked"], queryFn: api.boardTrackedIds });
   const trackedIds = useMemo(() => new Set(trackedQuery.data ?? []), [trackedQuery.data]);
@@ -140,6 +138,18 @@ export function InboxView() {
   };
 
   const sync = useSyncNow("inbox");
+
+  // While the New tab is on screen its items count as seen, including ones
+  // that arrive meanwhile (the sidebar badge counts only what came after).
+  const viewingNew = onHome && active === "new";
+  const newCount = inboxQuery.data?.length ?? 0;
+  useEffect(() => {
+    if (!viewingNew) return;
+    api
+      .markInboxNewSeen()
+      .then(() => queryClient.invalidateQueries({ queryKey: ["inbox-meta"] }))
+      .catch(() => {});
+  }, [viewingNew, newCount, queryClient]);
 
   const onErr = (e: unknown) => toast.error(String(e));
   const archive = useMutation({ mutationFn: api.archiveItem, onSuccess: invalidate, onError: onErr });
@@ -280,9 +290,7 @@ export function InboxView() {
             <Icon name={t.icon} size={13} />
             <span>{t.label}</span>
             {t.key === "new" && <span className="n">{newItems.length}</span>}
-            {t.key === "conversations" && !!conversationsBadge.data?.facets.unread && (
-              <span className="n">{conversationsBadge.data.facets.unread}</span>
-            )}
+            {t.key === "conversations" && unreadConversations > 0 && <span className="n">{unreadConversations}</span>}
           </button>
         ))}
       </div>

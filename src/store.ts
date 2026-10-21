@@ -87,6 +87,8 @@ export interface ConversationFiltersState {
   unread: boolean;
   unresolved: boolean;
   showBots: boolean;
+  /** Show what the enabled ignore rules hide. */
+  showIgnored: boolean;
 }
 
 export const EMPTY_CONVERSATION_FILTERS: ConversationFiltersState = {
@@ -96,6 +98,7 @@ export const EMPTY_CONVERSATION_FILTERS: ConversationFiltersState = {
   unread: false,
   unresolved: false,
   showBots: false,
+  showIgnored: false,
 };
 
 /** A one-shot request to scroll a review to a GitHub thread once it renders. */

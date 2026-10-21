@@ -366,13 +366,33 @@ pub async fn open_pr_review(
 pub struct InboxMeta {
     pub last_refresh_at: Option<String>,
     pub viewer_login: Option<String>,
+    /// When the New tab was last on screen; items first seen after it are
+    /// "new" for the sidebar badge. Starts at the first read.
+    pub new_seen_at: String,
 }
 
+const NEW_SEEN_KEY: &str = "inbox_new_seen_at";
+
 pub fn inbox_meta_impl(conn: &Connection) -> AppResult<InboxMeta> {
+    let new_seen_at = match get_meta(conn, NEW_SEEN_KEY) {
+        Some(t) => t,
+        None => {
+            let t = now();
+            set_meta(conn, NEW_SEEN_KEY, &t)?;
+            t
+        }
+    };
     Ok(InboxMeta {
         last_refresh_at: get_meta(conn, "last_refresh_at"),
         viewer_login: get_meta(conn, "viewer_login"),
+        new_seen_at,
     })
+}
+
+/// The New tab is on screen: everything in the inbox now counts as seen.
+#[tauri::command]
+pub fn mark_inbox_new_seen(db: State<Db>) -> AppResult<()> {
+    set_meta(&db.0.lock().unwrap(), NEW_SEEN_KEY, &now())
 }
 
 #[tauri::command]
@@ -392,6 +412,15 @@ mod tests {
             params![id, typ],
         )
         .unwrap();
+    }
+
+    #[test]
+    fn new_seen_marker_starts_at_first_read_and_is_stable() {
+        let conn = open_memory();
+        let first = inbox_meta_impl(&conn).unwrap().new_seen_at;
+        assert_eq!(inbox_meta_impl(&conn).unwrap().new_seen_at, first);
+        set_meta(&conn, NEW_SEEN_KEY, "2030-01-01T00:00:00+00:00").unwrap();
+        assert_eq!(inbox_meta_impl(&conn).unwrap().new_seen_at, "2030-01-01T00:00:00+00:00");
     }
 
     fn reason(name: &str) -> inbox::Reason {

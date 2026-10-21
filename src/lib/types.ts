@@ -420,6 +420,8 @@ export interface ReanchorResult {
 export interface InboxMeta {
   lastRefreshAt: string | null;
   viewerLogin: string | null;
+  /** When the New tab was last on screen. */
+  newSeenAt: string;
 }
 
 export type WorktreeSource = "claude" | "codex" | "codereview" | "manual";
@@ -802,6 +804,8 @@ export interface Conversation {
   unreadCount: number;
   pinned: boolean;
   isBot: boolean;
+  /** Ids of the enabled ignore rules matching this conversation. */
+  ignoredBy: string[];
 }
 
 export interface ConversationFacets {
@@ -811,6 +815,9 @@ export interface ConversationFacets {
   unread: number;
   unresolved: number;
   bots: number;
+  ignored: number;
+  /** Conversations each rule matches (enabled or not), by rule id. */
+  ruleHits: Record<string, number>;
 }
 
 export interface ConversationList {
@@ -819,8 +826,35 @@ export interface ConversationList {
   facets: ConversationFacets;
 }
 
+/** A user rule hiding Inbox conversations. Every condition that is set must
+ *  hold; a rule without conditions matches nothing. */
+export interface IgnoreRule {
+  id: string;
+  name: string;
+  enabled: boolean;
+  kind?: "thread" | "discussion";
+  resolved?: boolean;
+  outdated?: boolean;
+  /** Author of the latest comment. */
+  lastAuthor?: "me" | "bot" | "other";
+  /** The PR / issue is closed or merged. */
+  subjectClosed?: boolean;
+  /** The latest comment is at least this many days old. */
+  olderThanDays?: number;
+  subjectMine?: boolean;
+  /** I wrote a comment in the conversation. */
+  iCommented?: boolean;
+  /** Case-insensitive text found in the latest comment. */
+  bodyContains?: string;
+  /** Logins of the latest comment's author. */
+  authors?: string[];
+  /** Discussion whose human comments are all approving reviews. */
+  approvalsOnly?: boolean;
+}
+
 export interface ConversationFilters {
   subjectIds: string[];
+  showIgnored: boolean;
   repos: string[];
   pinned: boolean;
   unread: boolean;

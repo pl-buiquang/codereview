@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { identicon } from "../lib/avatar";
+import { useInboxCounts } from "../lib/inboxCounts";
 import { repoLabel, repoShortName } from "../lib/repoLabel";
 import { useUIStore, type HomeSection } from "../store";
 import { Icon, type IconName } from "./icons";
@@ -40,6 +41,7 @@ export function HomeNav({
   const toggleSidebar = useUIStore((s) => s.toggleSidebar);
   const openSettingsTab = useUIStore((s) => s.openSettingsTab);
   const onHome = activeTabId === "home";
+  const inboxCounts = useInboxCounts();
   const versionQuery = useQuery({ queryKey: ["appVersion"], queryFn: api.appVersion, staleTime: Infinity });
 
   const { data: repos } = useQuery({
@@ -77,6 +79,14 @@ export function HomeNav({
           >
             <Icon name={n.icon} size={15} />
             {!collapsed && n.label}
+            {n.key === "inbox" && inboxCounts.total > 0 && (
+              <span
+                className="cr-nav-badge"
+                title={`${inboxCounts.newItems} new item${inboxCounts.newItems === 1 ? "" : "s"}, ${inboxCounts.unreadConversations} unread conversation${inboxCounts.unreadConversations === 1 ? "" : "s"}`}
+              >
+                {inboxCounts.total > 99 ? "99+" : inboxCounts.total}
+              </span>
+            )}
           </button>
         ))}
       </div>

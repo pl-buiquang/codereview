@@ -30,6 +30,7 @@ import { invalidateMirrorQueries } from "../lib/sync";
 import type { AutoSync, ToolEnv } from "../lib/types";
 import { Icon, type IconName } from "./icons";
 import { AiSection } from "./SettingsAiSection";
+import { ConversationRulesEditor } from "./SettingsConversationRules";
 import { UsageSection } from "./SettingsUsageSection";
 
 type SettingsSection = "general" | "ai" | "usage" | "logs";
@@ -707,6 +708,7 @@ function GeneralSection() {
             name shows the full <code>owner/name</code>.
           </span>
         </label>
+        <ConversationRulesEditor />
       </section>
 
       <section className="settings-group">

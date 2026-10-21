@@ -3,7 +3,7 @@ import { createJSONStorage, persist, type StateStorage } from "zustand/middlewar
 import { api } from "./api";
 import { DIRECTIONS, type Direction } from "./themes";
 import { DEFAULT_CONFIG_PATTERNS, DEFAULT_TEST_PATTERNS } from "./fileCategory";
-import type { AutoSync } from "./types";
+import type { AutoSync, IgnoreRule } from "./types";
 import { DEFAULT_LOG_LEVEL, type LogLevel } from "./log";
 
 export type ThemeMode = "dark" | "light" | "system";
@@ -75,6 +75,15 @@ export const AUTO_FETCH_OPTIONS: { label: string; value: number }[] = [
   { label: "30 min", value: 30 },
 ];
 
+/** Starting rules, off until switched on in Settings. */
+export const DEFAULT_IGNORE_RULES: IgnoreRule[] = [
+  { id: "preset-closed-quiet", name: "Closed or merged, quiet for 30 days", enabled: false, subjectClosed: true, olderThanDays: 30 },
+  { id: "preset-resolved", name: "Resolved threads", enabled: false, kind: "thread", resolved: true },
+  { id: "preset-mine-last", name: "My message is the last", enabled: false, lastAuthor: "me" },
+  { id: "preset-bot-commands", name: "Commands to bots", enabled: false, kind: "discussion", lastAuthor: "me", bodyContains: "@dependabot" },
+  { id: "preset-approvals", name: "Approvals only", enabled: false, approvalsOnly: true },
+];
+
 type PersistedSettings = Pick<
   SettingsState,
   | "direction"
@@ -83,6 +92,7 @@ type PersistedSettings = Pick<
   | "defaultViewType"
   | "defaultThreeDot"
   | "botLogins"
+  | "conversationIgnoreRules"
   | "repoStripPrefixes"
   | "repoBasePaths"
   | "autoSync"
@@ -118,6 +128,7 @@ const DEFAULTS: PersistedSettings = {
   defaultViewType: "split",
   defaultThreeDot: true,
   botLogins: "",
+  conversationIgnoreRules: DEFAULT_IGNORE_RULES,
   repoStripPrefixes: "",
   repoBasePaths: "~/projects",
   autoSync: "periodic",
@@ -158,6 +169,8 @@ interface SettingsState {
   defaultThreeDot: boolean;
   /** Comma-separated GitHub logins treated as bots in the inbox "Bots" bucket. */
   botLogins: string;
+  /** Rules hiding Inbox conversations (Conversations tab). */
+  conversationIgnoreRules: IgnoreRule[];
   /** Comma-separated prefixes stripped from repo names shown in the inbox. */
   repoStripPrefixes: string;
   /** Comma-separated base directories where local git clones live (e.g. "~/projects"). */
@@ -214,6 +227,7 @@ interface SettingsState {
   setDefaultViewType: (v: DiffViewType) => void;
   setDefaultThreeDot: (b: boolean) => void;
   setBotLogins: (s: string) => void;
+  setConversationIgnoreRules: (rules: IgnoreRule[]) => void;
   setRepoStripPrefixes: (s: string) => void;
   setRepoBasePaths: (s: string) => void;
   setAutoSync: (mode: AutoSync) => void;
@@ -293,6 +307,7 @@ export const useSettingsStore = create<SettingsState>()(
       setDefaultViewType: (defaultViewType) => set({ defaultViewType }),
       setDefaultThreeDot: (defaultThreeDot) => set({ defaultThreeDot }),
       setBotLogins: (botLogins) => set({ botLogins }),
+      setConversationIgnoreRules: (conversationIgnoreRules) => set({ conversationIgnoreRules }),
       setRepoStripPrefixes: (repoStripPrefixes) => set({ repoStripPrefixes }),
       setRepoBasePaths: (repoBasePaths) => set({ repoBasePaths }),
       setAutoSync: (autoSync) => set({ autoSync }),
@@ -402,6 +417,7 @@ function sanitizeSettings(source: Record<string, unknown>): Partial<PersistedSet
   for (const key of PERSISTED_KEYS) {
     const value = source[key];
     if (typeof value !== typeof DEFAULTS[key]) continue;
+    if (Array.isArray(value) !== Array.isArray(DEFAULTS[key])) continue;
     if (typeof value === "number" && !Number.isFinite(value)) continue;
     const allowed = ENUMS[key];
     if (allowed && !allowed.includes(value as string)) continue;

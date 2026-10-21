@@ -78,6 +78,7 @@ describe("useSettingsStore", () => {
         "boardOverviewOpen",
         "boardStatusBorderSide",
         "botLogins",
+        "conversationIgnoreRules",
         "chatModel",
         "defaultTerminal",
         "defaultThreeDot",
@@ -119,7 +120,7 @@ describe("exportSettings / importSettings", () => {
     s.setFileTestPatterns("");
     const applied = importSettings(json);
     const n = useSettingsStore.getState();
-    expect(applied).toBe(32);
+    expect(applied).toBe(33);
     expect(n.mode).toBe("light");
     expect(n.diffFontSize).toBe(15);
     expect(n.fileTestPatterns).toBe("*.spec.rb");

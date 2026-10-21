@@ -5,7 +5,14 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 
 const listRepositories = vi.fn();
-vi.mock("../lib/api", () => ({ api: { listRepositories: () => listRepositories() } }));
+vi.mock("../lib/api", () => ({
+  api: {
+    listRepositories: () => listRepositories(),
+    listInbox: () => Promise.resolve([]),
+    inboxMeta: () => Promise.resolve({ newSeenAt: "2000-01-01T00:00:00Z" }),
+    listConversations: () => Promise.resolve({ items: [], total: 0, facets: { unread: 0 } }),
+  },
+}));
 
 import { HomeNav } from "./HomeNav";
 import { useUIStore } from "../store";

@@ -35,9 +35,11 @@ export function ConversationsView() {
   useEffect(() => setLimit(PAGE), [filtersKey]);
 
   const bots = useMemo(() => [...parseBotLogins(botLogins)], [botLogins]);
+  const rules = useSettingsStore((s) => s.conversationIgnoreRules);
+  const ruleNames = useMemo(() => new Map(rules.map((r) => [r.id, r.name])), [rules]);
   const query = useQuery({
-    queryKey: ["conversations", filters, bots, limit],
-    queryFn: () => api.listConversations(filters, bots, limit),
+    queryKey: ["conversations", filters, bots, rules, limit],
+    queryFn: () => api.listConversations(filters, bots, rules, limit),
     placeholderData: keepPreviousData,
   });
   const reviewsQuery = useQuery({ queryKey: ["reviews", null], queryFn: () => api.listReviews(null) });
@@ -122,6 +124,9 @@ export function ConversationsView() {
             setFilters({ unresolved: !filters.unresolved }),
           )}
           {flag("Bot conversations", facets?.bots, filters.showBots, () => setFilters({ showBots: !filters.showBots }))}
+          {flag("Ignored by rules", facets?.ignored, filters.showIgnored, () =>
+            setFilters({ showIgnored: !filters.showIgnored }),
+          )}
         </div>
         <TagFilter
           title="Pull requests / issues"
@@ -159,6 +164,7 @@ export function ConversationsView() {
             open={expanded.has(c.id)}
             busy={openInReview.isPending}
             canOpenReview={c.subject.kind === "pr"}
+            ruleNames={ruleNames}
             onToggle={() => toggle(c)}
             onPin={() => pin.mutate(c)}
             onSeen={(read) => seen.mutate({ c, read })}
@@ -181,6 +187,7 @@ function ConversationRow({
   open,
   busy,
   canOpenReview,
+  ruleNames,
   onToggle,
   onPin,
   onSeen,
@@ -191,6 +198,7 @@ function ConversationRow({
   open: boolean;
   busy: boolean;
   canOpenReview: boolean;
+  ruleNames: Map<string, string>;
   onToggle: () => void;
   onPin: () => void;
   onSeen: (read: boolean) => void;
@@ -222,6 +230,11 @@ function ConversationRow({
               {c.isResolved && <span className="chip">resolved</span>}
               {c.isOutdated && <span className="chip">outdated</span>}
               {c.isBot && <span className="chip">bot</span>}
+              {c.ignoredBy.length > 0 && (
+                <span className="chip" title="Hidden by an ignore rule">
+                  ignored · {c.ignoredBy.map((id) => ruleNames.get(id) ?? id).join(", ")}
+                </span>
+              )}
               {unread && <span className="chip accent">{c.unreadCount} new</span>}
               <span className="muted">
                 {c.commentCount} comment{c.commentCount === 1 ? "" : "s"}

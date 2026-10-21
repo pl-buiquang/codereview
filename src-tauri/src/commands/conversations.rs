@@ -28,6 +28,103 @@ pub struct ConversationFilters {
     pub show_bots: bool,
     /// Extra bot logins from the settings (lower-case).
     pub bot_logins: Vec<String>,
+    /// Show the conversations the enabled ignore rules hide.
+    pub show_ignored: bool,
+    /// Ignore rules from the settings, enabled or not (disabled ones only get hit counts).
+    pub rules: Vec<IgnoreRule>,
+}
+
+/// A user rule hiding conversations. Every condition that is set must hold;
+/// a rule without conditions matches nothing.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct IgnoreRule {
+    pub id: String,
+    pub enabled: bool,
+    /// `thread` or `discussion`.
+    pub kind: Option<String>,
+    pub resolved: Option<bool>,
+    pub outdated: Option<bool>,
+    /// Author of the latest comment: `me`, `bot` or `other`.
+    pub last_author: Option<String>,
+    /// The PR / issue is closed or merged.
+    pub subject_closed: Option<bool>,
+    /// The latest comment is older than this many days.
+    pub older_than_days: Option<i64>,
+    /// The PR / issue is mine.
+    pub subject_mine: Option<bool>,
+    /// I wrote a comment in the conversation.
+    pub i_commented: Option<bool>,
+    /// Case-insensitive text found in the latest comment.
+    pub body_contains: Option<String>,
+    /// Latest comment authors (logins, case-insensitive).
+    pub authors: Vec<String>,
+    /// Discussion whose human comments are all approving reviews.
+    pub approvals_only: Option<bool>,
+}
+
+/// What a rule can look at in a conversation.
+struct Facts {
+    kind: &'static str,
+    resolved: bool,
+    outdated: bool,
+    last_author: Option<String>,
+    last_is_me: bool,
+    last_is_bot: bool,
+    last_body: String,
+    subject_closed: bool,
+    subject_mine: bool,
+    i_commented: bool,
+    approvals_only: bool,
+    age_days: Option<i64>,
+}
+
+impl IgnoreRule {
+    fn has_conditions(&self) -> bool {
+        self.kind.is_some()
+            || self.resolved.is_some()
+            || self.outdated.is_some()
+            || self.last_author.is_some()
+            || self.subject_closed.is_some()
+            || self.older_than_days.is_some()
+            || self.subject_mine.is_some()
+            || self.i_commented.is_some()
+            || self.body_contains.as_deref().is_some_and(|b| !b.trim().is_empty())
+            || !self.authors.is_empty()
+            || self.approvals_only.is_some()
+    }
+
+    fn matches(&self, f: &Facts) -> bool {
+        if !self.has_conditions() {
+            return false;
+        }
+        let last_kind = if f.last_is_me {
+            "me"
+        } else if f.last_is_bot {
+            "bot"
+        } else {
+            "other"
+        };
+        self.kind.as_deref().is_none_or(|k| k == f.kind)
+            && self.resolved.is_none_or(|v| v == f.resolved)
+            && self.outdated.is_none_or(|v| v == f.outdated)
+            && self.last_author.as_deref().is_none_or(|a| a == last_kind)
+            && self.subject_closed.is_none_or(|v| v == f.subject_closed)
+            && self.older_than_days.is_none_or(|d| f.age_days.is_some_and(|a| a >= d))
+            && self.subject_mine.is_none_or(|v| v == f.subject_mine)
+            && self.i_commented.is_none_or(|v| v == f.i_commented)
+            && self
+                .body_contains
+                .as_deref()
+                .map(str::trim)
+                .filter(|b| !b.is_empty())
+                .is_none_or(|b| f.last_body.to_lowercase().contains(&b.to_lowercase()))
+            && (self.authors.is_empty()
+                || f.last_author
+                    .as_deref()
+                    .is_some_and(|a| self.authors.iter().any(|x| x.trim().eq_ignore_ascii_case(a))))
+            && self.approvals_only.is_none_or(|v| v == f.approvals_only)
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -69,6 +166,8 @@ pub struct Conversation {
     pub unread_count: usize,
     pub pinned: bool,
     pub is_bot: bool,
+    /// Ids of the enabled ignore rules matching this conversation.
+    pub ignored_by: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -89,6 +188,10 @@ pub struct ConversationFacets {
     pub unresolved: usize,
     /// Conversations made only of bot comments.
     pub bots: usize,
+    /// Conversations hidden by the enabled ignore rules.
+    pub ignored: usize,
+    /// Conversations each rule matches (enabled or not), by rule id.
+    pub rule_hits: HashMap<String, usize>,
 }
 
 #[derive(Debug, Serialize)]
@@ -109,6 +212,7 @@ struct SubjectRow {
     threads_json: Option<String>,
     discussion_json: Option<String>,
     last_read_at: Option<String>,
+    author_login: Option<String>,
 }
 
 fn read_subjects(conn: &Connection) -> AppResult<Vec<SubjectRow>> {
@@ -118,7 +222,7 @@ fn read_subjects(conn: &Connection) -> AppResult<Vec<SubjectRow>> {
                 COALESCE(p.title, i.title), COALESCE(p.url, i.url), COALESCE(p.state, i.state),
                 n.reason, n.last_read_at,
                 EXISTS (SELECT 1 FROM board_card b WHERE b.id = s.id AND b.archived_at IS NULL AND b.discarded_at IS NULL),
-                th.threads_json, d.comments_json
+                th.threads_json, d.comments_json, COALESCE(p.author_login, i.author_login)
          FROM (SELECT subject_node_id AS id FROM gh_notification WHERE subject_node_id IS NOT NULL
                UNION
                SELECT id FROM board_card WHERE archived_at IS NULL AND discarded_at IS NULL) s
@@ -148,6 +252,7 @@ fn read_subjects(conn: &Connection) -> AppResult<Vec<SubjectRow>> {
                 last_read_at: r.get(9)?,
                 threads_json: r.get(11)?,
                 discussion_json: r.get(12)?,
+                author_login: r.get(13)?,
             })
         })?
         .collect::<rusqlite::Result<_>>()?;
@@ -191,6 +296,45 @@ impl Ctx {
     }
 }
 
+fn facts_of(c: &Conversation, ctx: &Ctx, subject_mine: bool, now: DateTime<Utc>) -> Facts {
+    // (author login, bot?, body, review approving?) of every comment, oldest first.
+    let comments: Vec<(Option<String>, bool, &str, bool)> = match &c.thread {
+        Some(t) => t
+            .comments
+            .iter()
+            .map(|x| (x.author.as_ref().and_then(|a| a.login.clone()), ctx.is_bot(x.author.as_ref()), x.body.as_str(), false))
+            .collect(),
+        None => c
+            .comments
+            .iter()
+            .map(|x| {
+                let approving = x.kind == "review" && x.review_state.as_deref() == Some("APPROVED");
+                (x.author.as_ref().and_then(|a| a.login.clone()), ctx.is_bot(x.author.as_ref()), x.body.as_str(), approving)
+            })
+            .collect(),
+    };
+    let is_me = |login: &Option<String>| match (login, &ctx.viewer) {
+        (Some(l), Some(v)) => l.eq_ignore_ascii_case(v),
+        _ => false,
+    };
+    let last = comments.last();
+    let humans: Vec<_> = comments.iter().filter(|x| !x.1).collect();
+    Facts {
+        kind: c.kind,
+        resolved: c.is_resolved,
+        outdated: c.is_outdated,
+        last_author: last.and_then(|x| x.0.clone()),
+        last_is_me: last.is_some_and(|x| is_me(&x.0)),
+        last_is_bot: last.is_some_and(|x| x.1),
+        last_body: last.map(|x| x.2.to_string()).unwrap_or_default(),
+        subject_closed: matches!(c.subject.state.as_deref().map(str::to_lowercase).as_deref(), Some("closed" | "merged")),
+        subject_mine,
+        i_commented: comments.iter().any(|x| is_me(&x.0)),
+        approvals_only: c.kind == "discussion" && !humans.is_empty() && humans.iter().all(|x| x.3),
+        age_days: ts(&c.last_comment_at).map(|t| now.signed_duration_since(t).num_days()),
+    }
+}
+
 pub fn list_conversations_impl(conn: &Connection, f: &ConversationFilters, limit: usize) -> AppResult<ConversationList> {
     let ctx = Ctx {
         viewer: mirror::store::viewer_login(conn).map(|v| v.to_lowercase()),
@@ -208,7 +352,12 @@ pub fn list_conversations_impl(conn: &Connection, f: &ConversationFilters, limit
 
     let mut all: Vec<Conversation> = Vec::new();
     let mut bots = 0usize;
+    let mut mine_subject: HashMap<String, bool> = HashMap::new();
     for row in read_subjects(conn)? {
+        mine_subject.insert(
+            row.subject.id.clone(),
+            matches!((&row.author_login, &ctx.viewer), (Some(a), Some(v)) if a.eq_ignore_ascii_case(v)),
+        );
         let threads: Vec<PrThread> = row.threads_json.as_deref().and_then(|j| serde_json::from_str(j).ok()).unwrap_or_default();
         let discussion: Vec<DiscussionComment> =
             row.discussion_json.as_deref().and_then(|j| serde_json::from_str(j).ok()).unwrap_or_default();
@@ -245,6 +394,7 @@ pub fn list_conversations_impl(conn: &Connection, f: &ConversationFilters, limit
                 unread_count: ctx.unread(seen_of(&t.id), &metas),
                 pinned: pinned_of(&t.id),
                 is_bot,
+                ignored_by: Vec::new(),
                 comments: Vec::new(),
                 thread: Some(t),
             });
@@ -279,13 +429,30 @@ pub fn list_conversations_impl(conn: &Connection, f: &ConversationFilters, limit
                     unread_count: ctx.unread(seen_of(&id), &metas),
                     pinned: pinned_of(&id),
                     is_bot: all_bot,
+                    ignored_by: Vec::new(),
                     comments: visible,
                 });
             }
         }
     }
 
-    let mut facets = ConversationFacets { bots, ..Default::default() };
+    let now = Utc::now();
+    let mut rule_hits: HashMap<String, usize> = HashMap::new();
+    for c in &mut all {
+        let facts = facts_of(c, &ctx, mine_subject.get(&c.subject.id).copied().unwrap_or(false), now);
+        for r in f.rules.iter().filter(|r| r.matches(&facts)) {
+            *rule_hits.entry(r.id.clone()).or_default() += 1;
+            if r.enabled {
+                c.ignored_by.push(r.id.clone());
+            }
+        }
+    }
+    let ignored = all.iter().filter(|c| !c.ignored_by.is_empty()).count();
+    if !f.show_ignored {
+        all.retain(|c| c.ignored_by.is_empty());
+    }
+
+    let mut facets = ConversationFacets { bots, ignored, rule_hits, ..Default::default() };
     let mut by_subject: HashMap<&str, SubjectFacet> = HashMap::new();
     let mut by_repo: HashMap<String, usize> = HashMap::new();
     for c in &all {
@@ -489,5 +656,65 @@ mod tests {
         assert_eq!((got.items.len(), got.total), (2, 5));
         assert_eq!(got.items[0].id, "T4", "newest first");
         assert_eq!(got.facets.subjects.len(), 1);
+    }
+
+    fn rule(id: &str) -> IgnoreRule {
+        IgnoreRule { id: id.into(), enabled: true, ..Default::default() }
+    }
+
+    #[test]
+    fn rules_hide_matching_conversations_and_count_hits() {
+        let conn = open_memory();
+        seed(&conn, vec![
+            {
+                let mut t = thread("T_resolved", &[("bob", "User", "2026-01-02T00:00:00Z")]);
+                t["isResolved"] = true.into();
+                t
+            },
+            thread("T_mine", &[("bob", "User", "2026-01-02T00:00:00Z"), ("me", "User", "2026-01-03T00:00:00Z")]),
+            thread("T_open", &[("bob", "User", "2026-01-02T00:00:00Z")]),
+        ]);
+        let resolved = IgnoreRule { resolved: Some(true), ..rule("resolved") };
+        let mine_last = IgnoreRule { last_author: Some("me".into()), enabled: false, ..rule("mine") };
+        let empty = rule("empty");
+        let filters = |show_ignored| ConversationFilters {
+            rules: vec![resolved.clone(), mine_last.clone(), empty.clone()],
+            show_ignored,
+            ..Default::default()
+        };
+
+        let got = list(&conn, filters(false), 10);
+        let ids: Vec<&str> = got.items.iter().map(|c| c.id.as_str()).collect();
+        assert_eq!(ids, vec!["T_mine", "T_open"], "only the enabled rule hides; a rule with no conditions matches nothing");
+        assert_eq!(got.facets.ignored, 1);
+        assert_eq!(got.facets.rule_hits.get("resolved"), Some(&1));
+        assert_eq!(got.facets.rule_hits.get("mine"), Some(&1), "disabled rules still get hit counts");
+        assert_eq!(got.facets.rule_hits.get("empty"), None);
+
+        let shown = list(&conn, filters(true), 10);
+        assert_eq!(shown.total, 3);
+        let flagged = shown.items.iter().find(|c| c.id == "T_resolved").unwrap();
+        assert_eq!(flagged.ignored_by, vec!["resolved"]);
+    }
+
+    #[test]
+    fn rules_match_age_state_body_and_approvals() {
+        let conn = open_memory();
+        seed(&conn, vec![thread("T_old", &[("bob", "User", "2026-01-02T00:00:00Z")])]);
+        conn.execute("UPDATE gh_pr SET state = 'merged' WHERE node_id = 'PR_1'", []).unwrap();
+        let comments = serde_json::json!([
+            { "id": "R1", "kind": "review", "reviewState": "APPROVED", "author": { "login": "bob", "__typename": "User" },
+              "body": "lgtm", "createdAt": "2026-01-03T00:00:00Z", "url": "u1" }]);
+        conn.execute("INSERT INTO gh_discussion (subject_id, comments_json, fetched_at) VALUES ('PR_1', ?1, 'now')", params![comments.to_string()]).unwrap();
+        let hits = |r: IgnoreRule| list(&conn, ConversationFilters { rules: vec![r], show_ignored: true, ..Default::default() }, 10).facets.rule_hits;
+
+        let stale = IgnoreRule { subject_closed: Some(true), older_than_days: Some(30), ..rule("stale") };
+        assert_eq!(hits(stale).get("stale"), Some(&2), "both conversations of a merged PR quiet for 30+ days");
+        let approvals = IgnoreRule { approvals_only: Some(true), ..rule("approvals") };
+        assert_eq!(hits(approvals).get("approvals"), Some(&1));
+        let body = IgnoreRule { body_contains: Some("LGTM".into()), kind: Some("discussion".into()), ..rule("body") };
+        assert_eq!(hits(body).get("body"), Some(&1));
+        let author = IgnoreRule { authors: vec!["BOB".into()], ..rule("author") };
+        assert_eq!(hits(author).get("author"), Some(&2));
     }
 }
