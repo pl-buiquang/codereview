@@ -61,6 +61,14 @@ pub fn run(db: &Db, req: &SyncRequest, notify: &dyn Fn(MirrorUpdated)) -> AppRes
         }
     }
 
+    if scope.inbox() && (req.discover || req.mode != Mode::Light || notifications_stale(&db.0.lock().unwrap())) {
+        let ids = sync_notifications(db)?;
+        if !ids.is_empty() {
+            notify(updated(scope, ids.iter().cloned()));
+            changed.extend(ids);
+        }
+    }
+
     let (inbox_ids, board_ids, target_ids) = {
         let conn = db.0.lock().unwrap();
         (
@@ -129,7 +137,12 @@ pub fn run(db: &Db, req: &SyncRequest, notify: &dyn Fn(MirrorUpdated)) -> AppRes
 
     if scope.board() {
         board_cmd::reconcile_links(&db.0.lock().unwrap())?;
-        report.threads = sync_threads(db, req.mode, &visible)?;
+    }
+    if scope.board() || scope.inbox() {
+        report.threads = sync_threads(db, scope, req.mode, &visible)?;
+    }
+    if scope.inbox() {
+        sync_discussions(db, req.mode, &visible)?;
     }
 
     {
@@ -401,8 +414,9 @@ pub fn threads_need_fetch(
 
 /// Fetch the threads facet (and so the pending-threads badge) of the open
 /// tracked PR cards that need it: stale ones, all of them in a Full sync, and
-/// the visible ones in a Forced sync.
-fn sync_threads(db: &Db, mode: Mode, visible: &HashSet<&str>) -> AppResult<usize> {
+/// the visible ones in a Forced sync. In the inbox scope the PRs behind
+/// notifications are covered too (stale ones only, so a Full sync stays cheap).
+fn sync_threads(db: &Db, scope: Scope, mode: Mode, visible: &HashSet<&str>) -> AppResult<usize> {
     struct Job {
         id: String,
         owner: String,
@@ -410,24 +424,11 @@ fn sync_threads(db: &Db, mode: Mode, visible: &HashSet<&str>) -> AppResult<usize
         number: i64,
     }
 
-    let started = Utc::now();
-    let jobs: Vec<Job> = {
-        let conn = db.0.lock().unwrap();
-        let mut stmt = conn.prepare(&format!(
-            "SELECT c.id, c.repo, c.number, c.updated_at, th.gh_updated_at,
-                    th.pending_count IS NOT NULL, th.fetched_at
-             FROM {} c LEFT JOIN gh_pr_threads th ON th.pr_id = c.id
-             WHERE c.type = 'pr' AND c.archived_at IS NULL AND c.discarded_at IS NULL
-               AND c.state NOT IN ('merged', 'closed')",
-            board_cmd::CARD_VIEW
-        ))?;
-        type Row = (String, String, i64, String, Option<String>, bool, Option<String>);
-        let rows: Vec<Row> = stmt
-            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?)))?
-            .collect::<rusqlite::Result<_>>()?;
+    type Row = (String, String, i64, String, Option<String>, bool, Option<String>);
+    fn split(rows: Vec<Row>, started: DateTime<Utc>, force_all: bool, visible: &HashSet<&str>) -> Vec<Job> {
         rows.into_iter()
             .filter(|(id, _, _, updated_at, stored, has_count, fetched_at)| {
-                mode == Mode::Full
+                force_all
                     || visible.contains(id.as_str())
                     || threads_need_fetch(stored.as_deref(), updated_at, *has_count, fetched_at.as_deref(), started)
             })
@@ -436,6 +437,44 @@ fn sync_threads(db: &Db, mode: Mode, visible: &HashSet<&str>) -> AppResult<usize
                 Some(Job { id, owner: owner.to_string(), name: name.to_string(), number })
             })
             .collect()
+    }
+
+    let started = Utc::now();
+    let jobs: Vec<Job> = {
+        let conn = db.0.lock().unwrap();
+        let mut jobs = Vec::new();
+        if scope.board() {
+            let mut stmt = conn.prepare(&format!(
+                "SELECT c.id, c.repo, c.number, c.updated_at, th.gh_updated_at,
+                        th.pending_count IS NOT NULL, th.fetched_at
+                 FROM {} c LEFT JOIN gh_pr_threads th ON th.pr_id = c.id
+                 WHERE c.type = 'pr' AND c.archived_at IS NULL AND c.discarded_at IS NULL
+                   AND c.state NOT IN ('merged', 'closed')",
+                board_cmd::CARD_VIEW
+            ))?;
+            let rows: Vec<Row> = stmt
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?)))?
+                .collect::<rusqlite::Result<_>>()?;
+            jobs.extend(split(rows, started, mode == Mode::Full, visible));
+        }
+        if scope.inbox() {
+            let mut stmt = conn.prepare(
+                "SELECT DISTINCT p.node_id, r.remote_owner || '/' || r.remote_name, p.number,
+                        COALESCE(p.gh_updated_at, ''), th.gh_updated_at, th.pending_count IS NOT NULL, th.fetched_at
+                 FROM gh_notification n
+                 JOIN gh_pr p ON p.node_id = n.subject_node_id
+                 JOIN repository r ON r.id = p.repo_id
+                 LEFT JOIN gh_pr_threads th ON th.pr_id = p.node_id
+                 WHERE p.state = 'open' OR th.pr_id IS NULL",
+            )?;
+            let rows: Vec<Row> = stmt
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?)))?
+                .collect::<rusqlite::Result<_>>()?;
+            jobs.extend(split(rows, started, false, visible));
+        }
+        let mut seen = HashSet::new();
+        jobs.retain(|j| seen.insert(j.id.clone()));
+        jobs
     };
 
     let ids: Vec<String> = jobs.iter().map(|j| j.id.clone()).collect();
@@ -459,6 +498,163 @@ fn sync_threads(db: &Db, mode: Mode, visible: &HashSet<&str>) -> AppResult<usize
     }
     drop(claim);
     flight.wait("threads", &others);
+    Ok(n)
+}
+
+// ---------------------------------------------------------------------------
+// Notifications + discussions (Inbox Conversations tab)
+// ---------------------------------------------------------------------------
+
+const NOTIFICATIONS_MAX_AGE: chrono::Duration = chrono::Duration::minutes(10);
+const NOTIFICATIONS_FIRST_LOOKBACK: chrono::Duration = chrono::Duration::days(14);
+/// Subjects resolved per run, newest first (the first run can see hundreds).
+const NOTIFICATIONS_RESOLVE_LIMIT: usize = 150;
+const NOTIF_FETCHED_KEY: &str = "notifications_fetched_at";
+
+fn notifications_stale(conn: &Connection) -> bool {
+    inbox_cmd::get_meta(conn, NOTIF_FETCHED_KEY)
+        .and_then(|t| DateTime::parse_from_rfc3339(&t).ok())
+        .is_none_or(|t| Utc::now().signed_duration_since(t) >= NOTIFICATIONS_MAX_AGE)
+}
+
+/// `(node id, fetched_at)` of a PR/issue the mirror already knows.
+fn mirror_subject(conn: &Connection, owner: &str, name: &str, number: i64) -> Option<(String, String)> {
+    ["gh_pr", "gh_issue"].iter().find_map(|table| {
+        conn.query_row(
+            &format!(
+                "SELECT s.node_id, s.fetched_at FROM {table} s JOIN repository r ON r.id = s.repo_id
+                 WHERE LOWER(r.remote_owner) = LOWER(?1) AND LOWER(r.remote_name) = LOWER(?2) AND s.number = ?3"
+            ),
+            rusqlite::params![owner, name, number],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .ok()
+    })
+}
+
+/// Fetch the notifications updated since the last one seen, resolve their
+/// PR/issue subjects into the mirror and store the notification rows. A failure
+/// (e.g. a token without the `notifications` scope) is logged and swallowed:
+/// the Conversations tab then only lists board PRs. Returns the subject ids written.
+fn sync_notifications(db: &Db) -> AppResult<Vec<String>> {
+    let flight = inflight::global();
+    let (claim, mine, others) = flight.claim("notifications", &["all".to_string()]);
+    if mine.is_empty() {
+        flight.wait("notifications", &others);
+        return Ok(Vec::new());
+    }
+
+    let since = {
+        let conn = db.0.lock().unwrap();
+        let newest: Option<String> =
+            conn.query_row("SELECT MAX(updated_at) FROM gh_notification", [], |r| r.get(0)).ok().flatten();
+        newest
+            .and_then(|t| DateTime::parse_from_rfc3339(&t).ok())
+            .map(|t| (t - chrono::Duration::minutes(1)).with_timezone(&Utc))
+            .unwrap_or_else(|| Utc::now() - NOTIFICATIONS_FIRST_LOOKBACK)
+            .format("%Y-%m-%dT%H:%M:%SZ")
+            .to_string()
+    };
+    let notifications = match crate::gh::fetch_notifications(&since) {
+        Ok(n) => n,
+        Err(e) => {
+            crate::logging::warn(&format!("[sync.notifications] fetch failed: {e}"));
+            drop(claim);
+            return Ok(Vec::new());
+        }
+    };
+
+    // Resolve the subjects the mirror doesn't know, or knows from before the notification.
+    let mut known: HashMap<(String, String, i64), String> = HashMap::new();
+    let mut to_resolve: Vec<(String, String, i64)> = Vec::new();
+    {
+        let conn = db.0.lock().unwrap();
+        for n in &notifications {
+            let key = (n.owner.clone(), n.name.clone(), n.number);
+            if known.contains_key(&key) || to_resolve.contains(&key) {
+                continue;
+            }
+            match mirror_subject(&conn, &n.owner, &n.name, n.number) {
+                Some((id, fetched_at)) if fetched_at.as_str() >= n.updated_at.as_str() => {
+                    known.insert(key, id);
+                }
+                _ if to_resolve.len() < NOTIFICATIONS_RESOLVE_LIMIT => to_resolve.push(key),
+                _ => {}
+            }
+        }
+    }
+    let resolved = mirror::fetch::resolve_many(to_resolve);
+
+    let ts = now();
+    let mut ids: Vec<String> = Vec::new();
+    {
+        let mut conn = db.0.lock().unwrap();
+        let tx = conn.transaction()?;
+        for (key, node) in &resolved {
+            mirror::store::upsert_node(&tx, node, &ts)?;
+            known.insert(key.clone(), node.id.clone());
+            ids.push(node.id.clone());
+        }
+        for n in &notifications {
+            let id = known.get(&(n.owner.clone(), n.name.clone(), n.number));
+            mirror::store::upsert_notification(&tx, n, id.map(String::as_str), &ts)?;
+        }
+        inbox_cmd::set_meta(&tx, NOTIF_FETCHED_KEY, &ts)?;
+        tx.commit()?;
+    }
+    drop(claim);
+    flight.wait("notifications", &others);
+    Ok(ids)
+}
+
+/// Fetch the discussion facet (top-level comments + review bodies) of the
+/// notified PRs/issues and the tracked board cards whose `updatedAt` moved,
+/// the visible ones in a Forced sync, and all of them in a Full sync.
+fn sync_discussions(db: &Db, mode: Mode, visible: &HashSet<&str>) -> AppResult<usize> {
+    let jobs: Vec<(String, Option<String>)> = {
+        let conn = db.0.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT s.id, COALESCE(p.gh_updated_at, i.gh_updated_at), d.gh_updated_at, d.subject_id IS NOT NULL
+             FROM (SELECT subject_node_id AS id FROM gh_notification WHERE subject_node_id IS NOT NULL
+                   UNION
+                   SELECT id FROM board_card WHERE archived_at IS NULL AND discarded_at IS NULL) s
+             LEFT JOIN gh_pr p ON p.node_id = s.id
+             LEFT JOIN gh_issue i ON i.node_id = s.id
+             LEFT JOIN gh_discussion d ON d.subject_id = s.id
+             WHERE p.node_id IS NOT NULL OR i.node_id IS NOT NULL",
+        )?;
+        type Row = (String, Option<String>, Option<String>, bool);
+        let rows: Vec<Row> = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        rows.into_iter()
+            .filter(|(id, current, stored, has)| {
+                mode == Mode::Full || visible.contains(id.as_str()) || !has || stored != current
+            })
+            .map(|(id, current, ..)| (id, current))
+            .collect()
+    };
+
+    let ids: Vec<String> = jobs.iter().map(|(id, _)| id.clone()).collect();
+    let flight = inflight::global();
+    let (claim, mine, others) = flight.claim("discussion", &ids);
+    let mine: HashSet<String> = mine.into_iter().collect();
+    let jobs: Vec<(String, Option<String>)> = jobs.into_iter().filter(|(id, _)| mine.contains(id)).collect();
+    let fetched = mirror::fetch::discussions(&jobs.iter().map(|(id, _)| id.clone()).collect::<Vec<_>>());
+    let n = fetched.len();
+    {
+        let conn = db.0.lock().unwrap();
+        let ts = now();
+        let mut fetched = fetched;
+        for (id, current) in &jobs {
+            // A failed batch is absent from the map: keep the previous rows.
+            if let Some(Some(d)) = fetched.remove(id) {
+                mirror::store::upsert_discussion(&conn, id, current.as_deref(), &d.into_comments(), &ts)?;
+            }
+        }
+    }
+    drop(claim);
+    flight.wait("discussion", &others);
     Ok(n)
 }
 

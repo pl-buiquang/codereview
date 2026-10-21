@@ -24,7 +24,7 @@ fn now() -> String {
 }
 
 /// The Review's live fetches land in the mirror too, so Inbox and Board follow.
-fn notify_mirror(app: &AppHandle, id: &str) {
+pub(crate) fn notify_mirror(app: &AppHandle, id: &str) {
     let update = MirrorUpdated { scopes: vec![Scope::Inbox, Scope::Board], ids: vec![id.to_string()] };
     log::debug!(target: "mirror", "emit {MIRROR_UPDATED_EVENT} from a review fetch: {update:?}");
     let _ = app.emit(MIRROR_UPDATED_EVENT, update);

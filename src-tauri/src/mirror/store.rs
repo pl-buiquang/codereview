@@ -315,12 +315,12 @@ pub fn read_pr_meta(conn: &Connection, owner: &str, name: &str, number: i64) -> 
                 review_decision: r.get(10)?,
                 auto_merge: auto_merge_method.map(|m| PrAutoMerge {
                     merge_method: Some(m),
-                    enabled_by: auto_merge_by.map(|login| PrActor { login: Some(login), avatar_url: None }),
+                    enabled_by: auto_merge_by.map(|login| PrActor { login: Some(login), avatar_url: None, typename: None }),
                 }),
                 additions: r.get::<_, Option<i64>>(13)?.unwrap_or(0),
                 deletions: r.get::<_, Option<i64>>(14)?.unwrap_or(0),
                 changed_files: r.get::<_, Option<i64>>(15)?.unwrap_or(0),
-                author: author_login.map(|login| PrActor { login: Some(login), avatar_url: r.get(17).ok().flatten() }),
+                author: author_login.map(|login| PrActor { login: Some(login), avatar_url: r.get(17).ok().flatten(), typename: None }),
                 labels: parse_json(r.get(18)?),
                 reviews: parse_json(r.get(19)?),
                 ci_state: r.get(20)?,
@@ -346,8 +346,48 @@ pub fn read_threads(conn: &Connection, owner: &str, name: &str, number: i64) -> 
 
 /// Wipe the mirror (facets cascade). User tables keep their soft refs and show
 /// placeholders until the next sync refetches them.
+/// Store a subject's discussion facet (top-level comments + review bodies).
+pub fn upsert_discussion(
+    conn: &Connection,
+    subject_id: &str,
+    gh_updated_at: Option<&str>,
+    comments: &[crate::mirror::fetch::DiscussionComment],
+    ts: &str,
+) -> AppResult<()> {
+    conn.execute(
+        "INSERT INTO gh_discussion (subject_id, gh_updated_at, comments_json, fetched_at)
+         VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(subject_id) DO UPDATE SET gh_updated_at = excluded.gh_updated_at,
+           comments_json = excluded.comments_json, fetched_at = excluded.fetched_at",
+        params![subject_id, gh_updated_at, serde_json::to_string(comments).unwrap_or_else(|_| "[]".into()), ts],
+    )?;
+    Ok(())
+}
+
+/// Store the notified PRs/issues; `subject_node_id` is filled in by the caller
+/// once the subject is resolved into the mirror.
+pub fn upsert_notification(conn: &Connection, n: &crate::gh::Notification, subject_node_id: Option<&str>, ts: &str) -> AppResult<()> {
+    conn.execute(
+        "INSERT INTO gh_notification (id, subject_type, subject_node_id, repo, number, title, reason, unread, updated_at, last_read_at, fetched_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+         ON CONFLICT(id) DO UPDATE SET subject_type = excluded.subject_type,
+           subject_node_id = COALESCE(excluded.subject_node_id, subject_node_id),
+           repo = excluded.repo, number = excluded.number, title = excluded.title, reason = excluded.reason,
+           unread = excluded.unread, updated_at = excluded.updated_at, last_read_at = excluded.last_read_at,
+           fetched_at = excluded.fetched_at",
+        params![
+            n.id, n.subject_type, subject_node_id, format!("{}/{}", n.owner, n.name), n.number, n.title,
+            n.reason, n.unread, n.updated_at, n.last_read_at, ts
+        ],
+    )?;
+    Ok(())
+}
+
 pub fn reset(conn: &Connection) -> AppResult<()> {
-    conn.execute_batch("DELETE FROM gh_pr; DELETE FROM gh_issue; DELETE FROM gh_user;")?;
+    conn.execute_batch(
+        "DELETE FROM gh_pr; DELETE FROM gh_issue; DELETE FROM gh_user;
+         DELETE FROM gh_notification; DELETE FROM gh_discussion;",
+    )?;
     Ok(())
 }
 
@@ -359,14 +399,22 @@ pub fn gc(conn: &Connection) -> AppResult<usize> {
         "DELETE FROM gh_pr WHERE fetched_at < ?1
            AND node_id NOT IN (SELECT id FROM inbox_entry)
            AND node_id NOT IN (SELECT id FROM board_card)
-           AND node_id NOT IN (SELECT gh_pr_id FROM target WHERE gh_pr_id IS NOT NULL)",
+           AND node_id NOT IN (SELECT gh_pr_id FROM target WHERE gh_pr_id IS NOT NULL)
+           AND node_id NOT IN (SELECT subject_node_id FROM gh_notification WHERE subject_node_id IS NOT NULL)",
         params![cutoff],
     )?;
     n += conn.execute(
         "DELETE FROM gh_issue WHERE fetched_at < ?1
            AND node_id NOT IN (SELECT id FROM inbox_entry)
-           AND node_id NOT IN (SELECT id FROM board_card)",
+           AND node_id NOT IN (SELECT id FROM board_card)
+           AND node_id NOT IN (SELECT subject_node_id FROM gh_notification WHERE subject_node_id IS NOT NULL)",
         params![cutoff],
+    )?;
+    n += conn.execute("DELETE FROM gh_notification WHERE updated_at < ?1", params![cutoff])?;
+    n += conn.execute(
+        "DELETE FROM gh_discussion
+         WHERE subject_id NOT IN (SELECT node_id FROM gh_pr) AND subject_id NOT IN (SELECT node_id FROM gh_issue)",
+        [],
     )?;
     n += conn.execute(
         "DELETE FROM gh_user WHERE fetched_at < ?1

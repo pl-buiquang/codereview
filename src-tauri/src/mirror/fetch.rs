@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::error::{AppError, AppResult};
@@ -591,6 +591,131 @@ pub fn prs_by_head(owner: &str, name: &str, branches: &[String]) -> (Vec<Node>, 
     (nodes.into_iter().filter(Node::is_pr).collect(), failed)
 }
 
+// ---------------------------------------------------------------------------
+// Discussion facet (top-level comments + review bodies)
+// ---------------------------------------------------------------------------
+
+const DISCUSSION_QUERY: &str = r#"
+query MirrorDiscussion($ids: [ID!]!) {
+  nodes(ids: $ids) {
+    ... on PullRequest {
+      id updatedAt
+      comments(last: 50) { nodes { id databaseId author { __typename login avatarUrl } body createdAt url } }
+      reviews(last: 50) { nodes { id databaseId author { __typename login avatarUrl } body state submittedAt url } }
+    }
+    ... on Issue {
+      id updatedAt
+      comments(last: 50) { nodes { id databaseId author { __typename login avatarUrl } body createdAt url } }
+    }
+  }
+}
+"#;
+const DISCUSSION_BATCH_SIZE: usize = 10;
+
+/// One top-level comment or review body of a PR/issue.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiscussionComment {
+    pub id: String,
+    pub database_id: Option<i64>,
+    /// `comment` or `review`.
+    pub kind: String,
+    /// A review's state (`APPROVED`, `CHANGES_REQUESTED`, `COMMENTED`, …).
+    pub review_state: Option<String>,
+    pub author: Option<gh::PrActor>,
+    pub body: String,
+    pub created_at: String,
+    pub url: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RawDiscussionComment {
+    id: String,
+    #[serde(default)]
+    database_id: Option<i64>,
+    #[serde(default)]
+    author: Option<gh::PrActor>,
+    #[serde(default)]
+    body: String,
+    #[serde(default)]
+    created_at: Option<String>,
+    #[serde(default)]
+    submitted_at: Option<String>,
+    #[serde(default)]
+    state: Option<String>,
+    #[serde(default)]
+    url: String,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct RawDiscussionConn {
+    #[serde(default)]
+    nodes: Vec<RawDiscussionComment>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Discussion {
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    pub updated_at: Option<String>,
+    #[serde(default)]
+    comments: RawDiscussionConn,
+    #[serde(default)]
+    reviews: RawDiscussionConn,
+}
+
+impl Fetched for Discussion {
+    fn supported_id(&self) -> Option<&str> {
+        self.id.as_deref()
+    }
+}
+
+impl Discussion {
+    /// Comments and non-empty review bodies, oldest first.
+    pub fn into_comments(self) -> Vec<DiscussionComment> {
+        let comments = self.comments.nodes.into_iter().map(|c| ("comment", c));
+        let reviews = self.reviews.nodes.into_iter().filter(|r| !r.body.trim().is_empty()).map(|r| ("review", r));
+        let mut out: Vec<DiscussionComment> = comments
+            .chain(reviews)
+            .map(|(kind, c)| DiscussionComment {
+                id: c.id,
+                database_id: c.database_id,
+                kind: kind.to_string(),
+                review_state: c.state,
+                author: c.author,
+                body: c.body,
+                created_at: c.created_at.or(c.submitted_at).unwrap_or_default(),
+                url: c.url,
+            })
+            .collect();
+        out.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+        out
+    }
+}
+
+/// The discussion facet of PRs/issues by node id, in concurrent batches.
+pub fn discussions(ids: &[String]) -> HashMap<String, Option<Discussion>> {
+    nodes_by_id(DISCUSSION_QUERY, ids, DISCUSSION_BATCH_SIZE)
+}
+
+/// Resolve several `owner/name#number` subjects (PRs or issues), concurrently.
+/// Failures are left out.
+pub fn resolve_many(subjects: Vec<(String, String, i64)>) -> HashMap<(String, String, i64), Node> {
+    crate::inbox::concurrent_map(subjects, REFETCH_CONCURRENCY, |(owner, name, number)| {
+        let node = resolve(owner, name, *number);
+        if let Err(e) = &node {
+            crate::logging::warn(&format!("[mirror.resolve_many] {owner}/{name}#{number}: {e}"));
+        }
+        ((owner.clone(), name.clone(), *number), node.ok())
+    })
+    .into_iter()
+    .filter_map(|(k, n)| Some((k, n?)))
+    .collect()
+}
+
 /// Resolve a PR by `owner/name#number`, rejecting issues.
 pub fn resolve_pr(owner: &str, name: &str, number: i64) -> AppResult<Node> {
     let node = resolve(owner, name, number)?;
@@ -603,6 +728,25 @@ pub fn resolve_pr(owner: &str, name: &str, number: i64) -> AppResult<Node> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn discussion_merges_comments_and_review_bodies_oldest_first() {
+        let d: Discussion = serde_json::from_value(serde_json::json!({
+            "id": "PR_1", "updatedAt": "2026-01-03T00:00:00Z",
+            "comments": { "nodes": [
+                { "id": "C2", "databaseId": 2, "author": { "__typename": "Bot", "login": "sonar" },
+                  "body": "gate", "createdAt": "2026-01-03T00:00:00Z", "url": "u2" }] },
+            "reviews": { "nodes": [
+                { "id": "R1", "databaseId": 1, "author": { "__typename": "User", "login": "me" },
+                  "body": "looks good", "state": "APPROVED", "submittedAt": "2026-01-02T00:00:00Z", "url": "u1" },
+                { "id": "R0", "author": null, "body": "  ", "state": "COMMENTED", "submittedAt": "2026-01-01T00:00:00Z", "url": "u0" }] }
+        }))
+        .unwrap();
+        let got = d.into_comments();
+        assert_eq!(got.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(), vec!["R1", "C2"]);
+        assert_eq!(got[0].review_state.as_deref(), Some("APPROVED"));
+        assert_eq!(got[1].author.as_ref().unwrap().typename.as_deref(), Some("Bot"));
+    }
 
     #[test]
     fn by_head_query_aliases_each_branch_and_uses_only_the_pr_fragment() {

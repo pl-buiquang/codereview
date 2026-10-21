@@ -644,6 +644,10 @@ pub struct PrMeta {
 pub struct PrActor {
     pub login: Option<String>,
     pub avatar_url: Option<String>,
+    /// GraphQL `__typename` (`User`, `Bot`, …); only the threads/discussion
+    /// queries select it. Used to tell bot comments from human ones.
+    #[serde(default, rename = "__typename", skip_serializing_if = "Option::is_none")]
+    pub typename: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -1165,7 +1169,7 @@ query PrThreads($owner: String!, $name: String!, $number: Int!, $cursor: String)
             nodes {
               id
               databaseId
-              author { login avatarUrl }
+              author { __typename login avatarUrl }
               body
               createdAt
               url
@@ -1181,7 +1185,7 @@ query PrThreads($owner: String!, $name: String!, $number: Int!, $cursor: String)
 "#;
 
 /// An existing GitHub review thread on a PR's diff, mirrored in `gh_pr_threads`.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct PrThread {
     pub id: String,
@@ -1198,7 +1202,7 @@ pub struct PrThread {
     pub comments: Vec<PrThreadComment>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct PrThreadComment {
     pub id: String,
@@ -1382,6 +1386,15 @@ pub fn reply_to_thread(
     parse_rest_id(&out, "reply")
 }
 
+/// Post a top-level comment on a PR or issue (the issues API serves both).
+pub fn comment_on_issue(owner: &str, name: &str, number: i64, body: &str) -> AppResult<i64> {
+    let endpoint = format!("repos/{owner}/{name}/issues/{number}/comments");
+    let ctx = GhRepo::Remote { owner: owner.to_string(), name: name.to_string() };
+    let payload = serde_json::json!({ "body": body }).to_string();
+    let out = run_gh_stdin(&ctx, &["api", &endpoint, "--method", "POST", "--input", "-"], &payload)?;
+    parse_rest_id(&out, "comment")
+}
+
 // Both mutations alias their payload object to `result` so one deserializer
 // (ThreadMutationData) serves resolve and unresolve alike.
 const RESOLVE_THREAD_MUTATION: &str = r#"
@@ -1487,9 +1500,128 @@ pub fn poll_notifications(if_modified_since: Option<&str>) -> AppResult<Notifica
     notifications_poll_from(&stdout)
 }
 
+/// A PR/issue GitHub notified me about (one row per subject).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Notification {
+    pub id: String,
+    pub owner: String,
+    pub name: String,
+    pub number: i64,
+    pub subject_type: String,
+    pub title: String,
+    pub reason: Option<String>,
+    pub unread: bool,
+    pub updated_at: String,
+    pub last_read_at: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawNotification {
+    id: String,
+    #[serde(default)]
+    reason: Option<String>,
+    #[serde(default)]
+    unread: bool,
+    updated_at: String,
+    #[serde(default)]
+    last_read_at: Option<String>,
+    subject: RawNotificationSubject,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawNotificationSubject {
+    title: String,
+    #[serde(default)]
+    url: Option<String>,
+    #[serde(rename = "type")]
+    kind: String,
+}
+
+/// `(owner, name, number)` of a notification subject's API url
+/// (`…/repos/o/n/pulls/42` or `…/issues/42`).
+pub fn parse_subject_url(url: &str) -> Option<(String, String, i64)> {
+    let rest = url.split("/repos/").nth(1)?;
+    let mut parts = rest.split('/');
+    let (owner, name, kind, number) = (parts.next()?, parts.next()?, parts.next()?, parts.next()?);
+    if kind != "pulls" && kind != "issues" {
+        return None;
+    }
+    Some((owner.to_string(), name.to_string(), number.parse().ok()?))
+}
+
+fn notifications_from(json: &str) -> AppResult<Vec<Notification>> {
+    let raw: Vec<RawNotification> =
+        serde_json::from_str(json).map_err(|e| AppError::Gh(format!("failed to parse notifications: {e}")))?;
+    Ok(raw
+        .into_iter()
+        .filter(|n| n.subject.kind == "PullRequest" || n.subject.kind == "Issue")
+        .filter_map(|n| {
+            let (owner, name, number) = parse_subject_url(n.subject.url.as_deref()?)?;
+            Some(Notification {
+                id: n.id,
+                owner,
+                name,
+                number,
+                subject_type: n.subject.kind,
+                title: n.subject.title,
+                reason: n.reason,
+                unread: n.unread,
+                updated_at: n.updated_at,
+                last_read_at: n.last_read_at,
+            })
+        })
+        .collect())
+}
+
+const NOTIFICATIONS_PAGE: usize = 50;
+const NOTIFICATIONS_MAX_PAGES: usize = 6;
+
+/// PR/issue notifications (read ones included) updated since `since`, newest
+/// first. Pages until a short page or [`NOTIFICATIONS_MAX_PAGES`].
+pub fn fetch_notifications(since: &str) -> AppResult<Vec<Notification>> {
+    let ctx = GhRepo::Remote { owner: String::new(), name: String::new() };
+    let mut out = Vec::new();
+    for page in 1..=NOTIFICATIONS_MAX_PAGES {
+        let endpoint = format!("notifications?all=true&per_page={NOTIFICATIONS_PAGE}&since={since}&page={page}");
+        let raw = run_gh(&ctx, &["api", &endpoint])?;
+        let count = serde_json::from_str::<Vec<serde_json::Value>>(&raw).map(|v| v.len()).unwrap_or(0);
+        out.extend(notifications_from(&raw)?);
+        if count < NOTIFICATIONS_PAGE {
+            break;
+        }
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn parses_notification_subject_urls() {
+        assert_eq!(
+            parse_subject_url("https://api.github.com/repos/acme/widget/pulls/42"),
+            Some(("acme".into(), "widget".into(), 42))
+        );
+        assert_eq!(
+            parse_subject_url("https://api.github.com/repos/acme/widget/issues/7"),
+            Some(("acme".into(), "widget".into(), 7))
+        );
+        assert_eq!(parse_subject_url("https://api.github.com/repos/acme/widget/commits/abc"), None);
+    }
+
+    #[test]
+    fn notifications_keep_only_prs_and_issues() {
+        let json = r#"[
+          {"id":"1","reason":"author","unread":true,"updated_at":"2026-10-21T13:41:21Z","last_read_at":null,
+           "subject":{"title":"t","url":"https://api.github.com/repos/a/b/pulls/5","latest_comment_url":null,"type":"PullRequest"}},
+          {"id":"2","reason":"subscribed","unread":false,"updated_at":"2026-10-21T13:41:21Z",
+           "subject":{"title":"rel","url":"https://api.github.com/repos/a/b/releases/9","type":"Release"}},
+          {"id":"3","reason":"mention","unread":true,"updated_at":"2026-10-21T13:41:21Z",
+           "subject":{"title":"i","url":"https://api.github.com/repos/a/b/issues/6","type":"Issue"}}]"#;
+        let got = notifications_from(json).unwrap();
+        assert_eq!(got.iter().map(|n| (n.id.as_str(), n.number)).collect::<Vec<_>>(), vec![("1", 5), ("3", 6)]);
+    }
+
 
     #[test]
     fn notifications_200_carries_last_modified_and_poll_interval() {

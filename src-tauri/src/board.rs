@@ -299,6 +299,7 @@ mod tests {
                     author: Some(gh::PrActor {
                         login: Some(login.to_string()),
                         avatar_url: None,
+                        typename: None,
                     }),
                     body: "b".into(),
                     created_at: "now".into(),

@@ -1,6 +1,7 @@
 pub mod ai_review;
 pub mod board;
 pub mod chat;
+pub mod conversations;
 pub mod editor;
 pub mod export;
 pub mod focus;
