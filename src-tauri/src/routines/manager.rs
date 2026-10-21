@@ -334,7 +334,8 @@ impl RoutineManager {
     /// Start queued runs while below the concurrency cap.
     pub fn pump(&self, app: &AppHandle) {
         let inner = self.inner.lock().unwrap();
-        if inner.shutting_down {
+        // Queued runs wait while AI is off; `set_ai_enabled(true)` pumps again.
+        if inner.shutting_down || !crate::ai_gate::is_enabled() {
             return;
         }
         let db = app.state::<Db>();

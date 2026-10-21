@@ -12,6 +12,8 @@ pub struct PromptDef {
 }
 
 pub const CHAT_SYSTEM: &str = "chat.system";
+/// Retired Settings prompts: the system prompts now live on the `focus` and `board_overview`
+/// routines (see `routines::adopt_prompt_overrides`). Only old `prompt_override` rows use these keys.
 pub const FOCUS_SYSTEM: &str = "focus.system";
 pub const BOARD_OVERVIEW: &str = "board.overview";
 pub const SESSION_LIVE_SUMMARY: &str = "session.live_summary";
@@ -60,9 +62,9 @@ Modifying comments:
   cr comment unresolve <COMMENT_ID>
   cr comment delete <COMMENT_ID>"#;
 
-const FOCUS_DEFAULT: &str = include_str!("../../skills/local-review/focus.md");
+pub const FOCUS_DEFAULT: &str = include_str!("../../skills/local-review/focus.md");
 
-const BOARD_OVERVIEW_DEFAULT: &str = r#"You add judgment on top of a rule-based digest of a developer's PR/issue board. The user
+pub const BOARD_OVERVIEW_DEFAULT: &str = r#"You add judgment on top of a rule-based digest of a developer's PR/issue board. The user
 ALREADY sees, computed by rules: review requests waiting on them, approved PRs to merge,
 failing CI, conflicts, behind-base, changes requested / unresolved threads, stale items,
 per-repo lane counts, issues whose PRs merged, PRs without an issue. Never restate those.
@@ -97,20 +99,6 @@ pub const PROMPTS: &[PromptDef] = &[
         description: "Instructions for the Sessions view's Generate summary button. Used as the system prompt when summarizing an extract of the transcript, and as the message when forking a warm session.",
         placeholders: &[],
         default: SESSION_LIVE_SUMMARY_DEFAULT,
-    },
-    PromptDef {
-        key: BOARD_OVERVIEW,
-        label: "Board AI insights",
-        description: "System prompt for the board's AI insights, shown above the rule-based digest. The compact board snapshot is sent as the user message.",
-        placeholders: &[],
-        default: BOARD_OVERVIEW_DEFAULT,
-    },
-    PromptDef {
-        key: FOCUS_SYSTEM,
-        label: "Focus mode",
-        description: "System prompt for focus generation (hunk triage). An app-mode suffix with the review id and the `cr focus set` instructions is always appended. Overrides apply in this app only, not to the `/local-review --focus` skill.",
-        placeholders: &[],
-        default: FOCUS_DEFAULT,
     },
     PromptDef {
         key: CHAT_SYSTEM,

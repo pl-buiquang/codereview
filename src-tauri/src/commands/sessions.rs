@@ -113,6 +113,7 @@ pub async fn generate_live_session_summary(
     fork: bool,
     db: State<'_, Db>,
 ) -> AppResult<SessionSummary> {
+    crate::ai_gate::ensure_enabled()?;
     if crate::tools::claude_path().is_none() {
         return Err(AppError::Other("the `claude` CLI was not found on PATH".into()));
     }

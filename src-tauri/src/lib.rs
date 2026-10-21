@@ -1,3 +1,4 @@
+pub mod ai_gate;
 pub mod ai_usage;
 mod anchor;
 mod avatar;
@@ -174,6 +175,7 @@ pub fn run() {
             let conn = db::open(&db_path)?;
             commands::focus::fail_interrupted(&conn)?;
             routines::seed(&conn)?;
+            routines::adopt_prompt_overrides(&conn)?;
             routines::manager::mark_interrupted(&conn)?;
             app.manage(Db(Mutex::new(conn)));
             ai_usage::init(app.handle().clone());
@@ -353,6 +355,7 @@ pub fn run() {
             commands::board::board_card_for_pr,
             commands::overview::board_overview_get,
             commands::overview::board_overview_generate,
+            ai_gate::set_ai_enabled,
             commands::prompts::prompts_list,
             commands::prompts::prompt_set,
             commands::prompts::prompt_reset,

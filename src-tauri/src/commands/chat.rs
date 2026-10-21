@@ -496,6 +496,7 @@ pub async fn chat_send(
     model: Option<String>,
     db: State<'_, Db>,
 ) -> AppResult<ChatTurnResult> {
+    crate::ai_gate::ensure_enabled()?;
     // --- Phase 1: gather context under DB lock ---
     let (detail, existing_chat, diff_source, chat_template) = {
         let conn = db.0.lock().unwrap();

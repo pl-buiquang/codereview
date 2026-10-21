@@ -21,7 +21,6 @@ use crate::commands::focus::{begin_generation, finish_generation, review_local_p
 use crate::commands::{board::board_list_impl, overview, review::ensure_draft};
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
-use crate::prompts;
 
 const AI_REVIEW_PREFIX: &str = "ai_review_";
 
@@ -178,15 +177,6 @@ fn review_cwd(app: &AppHandle, id: i64, tag: &str) -> AppResult<PathBuf> {
     }
 }
 
-/// The routine's own system prompt when edited, else the prompt of the same name in Settings.
-fn system_or_setting(app: &AppHandle, routine: &Routine, key: &str) -> AppResult<Option<String>> {
-    if routine.system_prompt.trim().is_empty() {
-        Ok(Some(prompts::resolve(&app.state::<Db>().0.lock().unwrap(), key)?))
-    } else {
-        Ok(None)
-    }
-}
-
 pub fn prepare(app: &AppHandle, routine: &Routine, run: &RoutineRun) -> AppResult<Prep> {
     let mut prep = Prep::default();
     match routine.handler.as_deref() {
@@ -201,7 +191,6 @@ pub fn prepare(app: &AppHandle, routine: &Routine, run: &RoutineRun) -> AppResul
             }
             OVERVIEW_IDS.lock().unwrap().get_or_insert_with(HashMap::new).insert(run.id, ids);
             prep.vars.push(("snapshot".into(), snapshot));
-            prep.system = system_or_setting(app, routine, prompts::BOARD_OVERVIEW)?;
             prep.cwd = Some(std::env::temp_dir().join("codereview_overview"));
             std::fs::create_dir_all(prep.cwd.as_ref().unwrap())?;
         }
@@ -211,7 +200,6 @@ pub fn prepare(app: &AppHandle, routine: &Routine, run: &RoutineRun) -> AppResul
             let scratch = scratch_for("codereview-focus", id)?;
             let plan = scratch.join("plan.json").display().to_string();
             prep.extra_tools.push(format!("Edit(/{}/**)", scratch.display()));
-            prep.system = system_or_setting(app, routine, prompts::FOCUS_SYSTEM)?;
             prep.system_suffix = format!(
                 "\n\n---\n\nApp mode. Review id = {id}. Do not create or open reviews. \
                  The `cr` CLI on PATH already points at the app's database. \

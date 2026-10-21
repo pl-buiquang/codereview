@@ -6,7 +6,7 @@ pub mod context;
 pub mod handlers;
 pub mod manager;
 
-use rusqlite::{params, Connection, Row};
+use rusqlite::{params, Connection, OptionalExtension, Row};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{AppError, AppResult};
@@ -148,8 +148,6 @@ const fn ai_review(
     }
 }
 
-/// The system prompt of `board_overview` and `focus` is empty: they use the prompt of the same
-/// name in Settings → Prompts (`prompts.rs`), so existing overrides keep applying.
 pub const DEFAULTS: &[Defaults] = &[
     Defaults {
         key: BABYSIT_KEY,
@@ -169,10 +167,10 @@ pub const DEFAULTS: &[Defaults] = &[
     Defaults {
         key: "board_overview",
         name: "Board overview",
-        description: "AI insights shown above the board digest. The board snapshot is the prompt; the system prompt is Settings → Prompts → Board AI insights while this field is empty.",
+        description: "AI insights shown above the board digest. The board snapshot is the prompt.",
         context_type: "board",
         prompt_template: "{{snapshot}}",
-        system_prompt: "",
+        system_prompt: crate::prompts::BOARD_OVERVIEW_DEFAULT,
         system_prompt_mode: "replace",
         needs_worktree: false,
         permission_mode: "default",
@@ -184,10 +182,10 @@ pub const DEFAULTS: &[Defaults] = &[
     Defaults {
         key: "focus",
         name: "Focus",
-        description: "Triage a review's hunks into focus tiers. The system prompt is Settings → Prompts → Focus mode while this field is empty; the app-mode suffix is always appended.",
+        description: "Triage a review's hunks into focus tiers. The app-mode suffix with the review id and the `cr focus set` instructions is always appended to the system prompt.",
         context_type: "review",
         prompt_template: "Generate the focus for review {{review_id}}.",
-        system_prompt: "",
+        system_prompt: crate::prompts::FOCUS_DEFAULT,
         system_prompt_mode: "append",
         needs_worktree: false,
         permission_mode: "default",
@@ -228,6 +226,27 @@ pub fn seed(conn: &Connection) -> AppResult<()> {
                 now
             ],
         )?;
+    }
+    Ok(())
+}
+
+/// One-time move of the former Settings → Prompts entries into the routines that now own them: a
+/// built-in `board_overview` / `focus` with an empty system prompt (rows seeded before the move)
+/// gets the user's override, else the shipped text. The old override rows are then dropped.
+/// Idempotent: a routine that already has a system prompt is left alone.
+pub fn adopt_prompt_overrides(conn: &Connection) -> AppResult<()> {
+    use crate::prompts::{BOARD_OVERVIEW, BOARD_OVERVIEW_DEFAULT, FOCUS_DEFAULT, FOCUS_SYSTEM};
+    for (routine_key, prompt_key, default) in
+        [("board_overview", BOARD_OVERVIEW, BOARD_OVERVIEW_DEFAULT), ("focus", FOCUS_SYSTEM, FOCUS_DEFAULT)]
+    {
+        let custom: Option<String> = conn
+            .query_row("SELECT body FROM prompt_override WHERE key = ?1", params![prompt_key], |r| r.get(0))
+            .optional()?;
+        conn.execute(
+            "UPDATE routine SET system_prompt = ?2 WHERE key = ?1 AND builtin = 1 AND TRIM(system_prompt) = ''",
+            params![routine_key, custom.as_deref().unwrap_or(default)],
+        )?;
+        conn.execute("DELETE FROM prompt_override WHERE key = ?1", params![prompt_key])?;
     }
     Ok(())
 }
@@ -454,6 +473,46 @@ mod tests {
             timeout_min: 30,
             enabled: true,
         }
+    }
+
+    fn system_of(conn: &Connection, key: &str) -> String {
+        conn.query_row("SELECT system_prompt FROM routine WHERE key = ?1", params![key], |r| r.get(0)).unwrap()
+    }
+
+    fn override_count(conn: &Connection) -> i64 {
+        conn.query_row("SELECT COUNT(*) FROM prompt_override", [], |r| r.get(0)).unwrap()
+    }
+
+    #[test]
+    fn adopt_moves_overrides_and_defaults_into_the_routines() {
+        let conn = open_memory();
+        seed(&conn).unwrap();
+        // A row seeded before the move has an empty system prompt.
+        conn.execute("UPDATE routine SET system_prompt = '' WHERE key IN ('focus', 'board_overview')", []).unwrap();
+        conn.execute(
+            "INSERT INTO prompt_override (key, body, updated_at) VALUES ('board.overview', 'mine', 'now'), ('chat.system', 'chat', 'now')",
+            [],
+        )
+        .unwrap();
+
+        adopt_prompt_overrides(&conn).unwrap();
+        assert_eq!(system_of(&conn, "board_overview"), "mine");
+        assert_eq!(system_of(&conn, "focus"), crate::prompts::FOCUS_DEFAULT);
+        assert_eq!(override_count(&conn), 1, "only the chat override is left");
+
+        // Idempotent, and a routine that now has a prompt is not touched again.
+        conn.execute("UPDATE routine SET system_prompt = 'edited' WHERE key = 'focus'", []).unwrap();
+        adopt_prompt_overrides(&conn).unwrap();
+        assert_eq!(system_of(&conn, "focus"), "edited");
+        assert_eq!(system_of(&conn, "board_overview"), "mine");
+    }
+
+    #[test]
+    fn seeded_overview_and_focus_ship_their_system_prompt() {
+        let conn = open_memory();
+        seed(&conn).unwrap();
+        assert_eq!(system_of(&conn, "board_overview"), crate::prompts::BOARD_OVERVIEW_DEFAULT);
+        assert_eq!(system_of(&conn, "focus"), crate::prompts::FOCUS_DEFAULT);
     }
 
     #[test]

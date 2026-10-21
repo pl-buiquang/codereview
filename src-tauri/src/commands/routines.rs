@@ -63,6 +63,7 @@ pub fn launch(
     note: &str,
     model: &str,
 ) -> AppResult<RoutineRun> {
+    crate::ai_gate::ensure_enabled()?;
     if crate::tools::claude_path().is_none() {
         return Err(AppError::Other("the `claude` CLI was not found on PATH".into()));
     }
