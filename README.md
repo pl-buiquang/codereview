@@ -12,42 +12,36 @@ Built with **Tauri v2** (Rust) + **React/TypeScript**.
 
 ## Features
 
-- **Local-first** — works against any local git repo; no server.
-- **Board** — a kanban view of your work in flight: issues in **Backlog**, your PRs in **In
-  progress** (draft) / **Submitted** (ready), others' PRs you're reviewing in **Reviews**, and
-  everything merged/closed in **Done**. Lanes are derived from GitHub state — no dragging. Cards
-  can carry plan/spec files, links, notes and Claude Code session pointers.
-- **Home sidebar** — Board / Inbox / Reviews / Repositories plus your **open repositories**
-  (they open inside the Home tab and stay loaded, so switching is instant; ✕ closes one). Fold it
-  to icons only, and hover the Home tab icon or the
-  window's left edge to pop the menu from anywhere.
-- **Git graph** — a GitKraken-style view of the repo's history, with light git actions: a sidebar of local /
-  remote branches, worktrees and tags (filterable; click to jump to the tip), a lane-drawn commit
-  graph paged as you scroll (scope **Local** (default) / **All**), a `// WIP` row for uncommitted
-  changes, and a commit panel with author/committer, parents and the changed files. Click a file
-  to preview its diff in place. Right-click a branch, tag or commit to check it out, create or
-  delete branches and tags, or open a terminal / Claude session on a checked-out branch; the
-  toolbar has **Pull** (fast-forward only) and **Push**, and the `// WIP` panel stages, unstages,
-  discards, commits (or amends) and stashes.
-- **Two diff sources, both first-class**
-  - *Virtual PR*: start a review of any branch against the default branch (or any `base` via
-    **Review vs…**) from the graph's branch menu; diff uses the merge-base (`base...head`,
-    GitHub semantics) with a two-dot toggle.
-  - *GitHub PR*: list open PRs and fetch their diff through `gh`.
-- **GitHub-style diff viewer** — split/unified, syntax highlighting, +/− counts, per-file
-  "viewed" collapse.
-- **Inline review comments** — click a line to comment; **shift-click** another line on the
-  same side to comment on a **multi-line range**.
-- **Keyboard shortcuts** — `]`/`[` next/previous file, `n`/`p` next/previous comment thread,
-  `j`/`k` move a line cursor, `c` comment on the focused line, `?` for the full list.
-- **Reviews are a first-class, autosaved model**
-  - Every comment / summary / verdict change persists immediately (no save button).
-  - Close the app and reopen — a review is fully reconstructed.
-  - Many reviews per target; resume or delete any from the Reviews list.
-- **Two outputs**
-  - **Export** Markdown (AI-readable: file + line + diff hunk + comment) or JSON. Repeatable.
-  - **Publish** a GitHub-PR review (comment / approve / request-changes) via `gh`. A published
-    review is locked (can't edit or re-publish) but can still be exported.
+Each area has a page under [`docs/features/`](docs/features/).
+
+- **Local-first** — works against any local git repo; no server. GitHub access is delegated to `gh`.
+- **Home** — a sidebar with Sessions, Board, Inbox, Reviews, Worktrees and Repositories, plus your
+  open repositories (they stay loaded inside the Home tab). Fold it to an icon rail. A command
+  palette (`⌘P`) jumps anywhere.
+  → [sessions & worktrees](docs/features/sessions-worktrees.md)
+- **Git graph** — a GitKraken-style commit graph with branches, worktrees, tags, a `// WIP` row and
+  light git actions (checkout, branch/tag, pull, push, stage, commit, stash).
+  → [graph](docs/features/graph.md)
+- **Review** — GitHub-style split/unified diff with syntax and word-level highlighting, inline,
+  multi-line and whole-file comments, suggested changes, threaded replies, resolve, outdated-comment
+  re-anchoring, and a keyboard-driven workflow. Everything autosaves to SQLite.
+  → [review](docs/features/review.md)
+- **Two diff sources, one flow** — a real GitHub PR (via `gh`) or a *virtual PR* between any two
+  local branches (three-dot by default, two-dot toggle).
+  → [GitHub](docs/features/github.md)
+- **Publish or export** — publish to GitHub (comment / approve / request-changes, or as a pending
+  draft you submit later), or export Markdown/JSON for an agent; import JSON back.
+  → [GitHub](docs/features/github.md), [import & export](docs/features/import-export.md)
+- **Inbox & Board** — a triage queue for what GitHub says needs you, and a kanban of work in flight
+  with an auto-merge monitor and card metadata (plans, links, Claude sessions).
+  → [board & inbox](docs/features/board-inbox.md)
+- **Focus & AI** — AI-tiered hunks so you read what matters, in-app review runs, a chat panel and
+  editable prompts, via the `claude` CLI.
+  → [focus & AI](docs/features/focus-and-ai.md)
+- **`cr` CLI and deep links** — script the same database from a terminal; `codereview://` links.
+  → [CLI](docs/features/cli.md)
+- **Settings & themes** — 4 design directions × dark/light/system, sync modes, AI models and
+  usage, backup, auto-update. → [settings](docs/features/settings.md), [THEMING.md](THEMING.md)
 
 ---
 
@@ -93,6 +87,8 @@ Useful checks:
 
 ```bash
 pnpm exec tsc --noEmit          # typecheck the frontend
+pnpm test                       # frontend tests (vitest)
+cargo clippy --manifest-path src-tauri/Cargo.toml
 cargo test --manifest-path src-tauri/Cargo.toml   # Rust tests
 ```
 
@@ -148,212 +144,15 @@ of this.
 
 ---
 
-## Usage
+## Quick start
 
-1. **Add a repository** — click **+ Add repo** and choose a local git repo.
-2. Open it from **Repositories** (it's then listed in the Home sidebar until you close it), then
-   choose a tab:
-   - **Graph** (default when the repo has a local clone) — browse the commit graph. Pick a scope
-     (**All** = all branches/remotes/tags, **Local** = local branches, **Current** = the checkout's
-     `HEAD` only), click a sidebar branch/tag to jump to its tip, select a commit (or the `// WIP`
-     row) to see its files in the right panel, and click a file to preview its diff (`Esc` or ✕
-     closes the preview; ‹/› cycle files). Clicking a worktree in the sidebar makes it the graph's
-     context checkout (HEAD marker, WIP row); the toolbar chip resets it to the main
-     checkout. Worktree rows can also be opened in VS Code, removed, or pruned. Right-click a
-     branch (sidebar row or graph pill), or use its `⋯` button, for **Review vs `<default>`** or
-     **Review vs…** to start a virtual-PR review. The same menu (and tag / commit menus) has
-     checkout, create / rename / delete branch, create / delete tag, and **Open terminal** /
-     **New Claude session** for branches checked out in a worktree. Risky cases (unmerged
-     delete, rejected push, branch held by another worktree) show git's message with an
-     explicit escalation. Mutations always act on the context checkout.
-   - **GitHub PRs** — lists open PRs (requires `gh auth`); click **Review** to start one.
-3. In a review: **click a line** to comment (shift-click to select a range), fill in the
-   **summary** and **verdict**. Everything autosaves.
-4. Finish with **Export** (Markdown/JSON, any review, repeatable) or **Publish** (GitHub PR
-   reviews only; locks the review).
-
-The **Reviews** tab shows every saved review for the repo — open to resume,
-or ✕ to delete. Repos with a GitHub remote have a **GitHub** link in the header that opens the
-repo in the browser.
-
-### Open the graph from a terminal
-
-`cr open graph` (alias `cr open tree`) opens the app on the Graph of the repo containing the
-current directory, focused on the checked-out branch (or exact tag when detached). Inside a linked
-worktree it also selects that worktree as the graph's context. A repo that isn't registered yet is
-added automatically.
-
-```bash
-cr open graph                    # current repo, current branch
-cr open graph --ref v1.2.0       # a specific branch, remote branch (origin/x) or tag
-cr open graph --no-ref           # just the repo's Graph
-cr open graph ~/projects/foo     # another repo/worktree path
-```
-
-Under the hood this is the deep link `codereview://repo/<repo_id>[?ref=<name>][&worktree=<path>]`.
-
-### Focus review
-
-**Focus** is an AI-assisted lens over a review. Every hunk is tiered `critical` / `review` / `skim` / `trivial`.
-Lower tiers collapse into one-click bars, and a digest lists what was hidden and why. Focus content is never published.
-
-- **From the terminal** — install the Claude Code skill once (a symlink keeps it in sync with the repo):
-  ```bash
-  ln -s "$PWD/skills/local-review" ~/.claude/skills/local-review
-  ```
-  then run `/local-review <pr-url | owner/repo#N | branch <head> | review-id> --focus`. The app embeds
-  its own copy of `skills/local-review/focus.md` at build time.
-  The same skill has two more optional layers: `--critique` (Standards and Spec sub-agents, with a
-  code-smell baseline) and `--codex` (the Codex plugin's adversarial review of the PR's checkout, via
-  `cr worktree`). Without flags it writes one explanatory comment per change.
-- **In the app** — **Generate focus** in the review header (needs the `claude` CLI). Pick a level
-  and a model; the run happens in the background. Then switch levels, hide or show hunks and files,
-  **Adopt** an AI note as a draft comment, or **Copy into summary** to paste the digest.
-- **Scripting** — `cr focus hunks|hunk|set|show|clear <review-id>`. See `cr focus --help`.
-
-### Inbox
-
-The Inbox is a triage queue for new items, not a monitor (the Board does that). **New** lists
-what GitHub says needs you: review requested (directly or via a team), mentions, assignments and
-issues you opened. Per item: **Track** (or **Open as review**) moves it to the Board and out of
-the queue; **Archive** dismisses it. Items that close on GitHub archive themselves. An archived
-item comes back only when it gains a new reason (e.g. you are re-requested as reviewer), never
-on plain activity. An item no search finds any more is marked **stale** and stays until triaged.
-Your own PRs are never queued. Bot-authored items are tagged **bot** (GitHub's account type plus
-the Settings list) and filterable. The **Archive** tab keeps everything triaged — dismissed,
-closed, discarded from the Board, tracked — with search and no cap. `cr inbox list|archive|restore|sync`.
-Discovery runs every 5 minutes by default (Settings → Sync).
-
-### Board
-
-Issues and PRs land on the Board by **tracking** them — from the Inbox's **Track** button (or
-**Open as review**, which tracks too), by pasting a URL into a lane's **+** header, or via
-`cr board track <url|owner/repo#n>`. Your own open PRs (in registered repos) are tracked
-automatically. **Discard** removes a card into the Inbox's **Archive** tab, where you can
-re-track it; your own PRs can't be discarded. Linking a PR to a backlog
-issue (automatically, via "Fixes #n" / a `pbq/issue-<n>`-named branch, or manually by pasting a PR
-URL on the issue's card) moves it to **In progress**/**Submitted**/**Reviews** and hides the
-issue until every linked PR closes. **Done** cards older than a month can be purged with the
-lane's archive button.
-
-Expand a card to see and add **metadata**: a plan or spec file, a link, a note, or a Claude Code
-session (with a one-click "copy resume command"). The same CLI that drives Focus does this:
-
-```bash
-cr board show --here                                    # resolve the card for the current repo+branch
-cr board meta add --here --kind file --value /path/to/plan.md --tag plan
-```
-
-See `skills/board/SKILL.md` for the full agent workflow, and `cr board --help` for every
-subcommand. To have Claude Code auto-link its session to the card it's working on, add this to
-`~/.claude/CLAUDE.md`:
-
-```markdown
-## CodeReview board
-
-At the start of a session in a repo, run `cr board show --here`. If the card is tracked,
-run `cr board meta add --here --kind claude_session --value <this session's id>` so the
-board can show a "resume" link back to this session.
-```
-
----
-
-## Import / Export
-
-### Export
-
-From a review, export it as **Markdown** (AI-readable) or **JSON** (machine-readable). Exporting
-is repeatable and never locks the review.
-
-### Import
-
-Click **Import** in the Reviews list header to load a JSON file and create a new draft review
-from it. The format matches the JSON export, so you can round-trip: export → edit → re-import.
-
-You can also **create a review JSON from scratch** — useful for feeding AI-generated reviews
-into the app, or for seeding reviews from an external tool.
-
-#### Minimal example
-
-Only `title` is required; everything else has sensible defaults:
-
-```json
-{
-  "title": "Quick note on the parser"
-}
-```
-
-#### Full example
-
-```json
-{
-  "title": "Improve error handling in parser",
-  "repo": "owner/name",
-  "kind": "github_pr",
-  "github_pr_number": 42,
-  "base_ref": "main",
-  "head_ref": "feature/parser",
-  "base_sha": "abcdef1234567890",
-  "head_sha": "1234567890abcdef",
-  "verdict": "request_changes",
-  "summary": "A few issues to fix before merging.",
-  "comments": [
-    {
-      "file": "src/parser.rs",
-      "side": "RIGHT",
-      "line": 15,
-      "start_line": 12,
-      "diff_hunk": "@@ -10,5 +10,8 @@\n fn parse() {\n+    let x = 1;",
-      "body": "This should handle the empty-input case.",
-      "subject_type": "line",
-      "origin": "diff",
-      "resolved_at": null,
-      "replies": [
-        { "body": "Good catch, will fix." }
-      ]
-    },
-    {
-      "file": "src/parser.rs",
-      "subject_type": "file",
-      "body": "Overall the module needs a doc comment."
-    }
-  ]
-}
-```
-
-#### Field reference
-
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `title` | string | **required** | Review title (shown in the reviews list) |
-| `repo` | string | `"imported"` | Repository label (`"owner/name"` for GitHub, or a path). Matched to an existing repo if possible, otherwise a placeholder is created. |
-| `kind` | `"github_pr"` \| `"local"` | `"local"` | Whether this targets a GitHub PR or a local branch comparison |
-| `github_pr_number` | number \| null | `null` | PR number (only meaningful when `kind` is `"github_pr"`) |
-| `base_ref` | string | `"unknown"` | Base branch/ref name |
-| `head_ref` | string | `"unknown"` | Head branch/ref name |
-| `base_sha` | string \| null | `null` | Resolved base commit SHA |
-| `head_sha` | string \| null | `null` | Resolved head commit SHA |
-| `verdict` | `"approve"` \| `"request_changes"` \| `"comment"` \| null | `null` | Review verdict |
-| `summary` | string | `""` | Review body / summary text (Markdown) |
-| `comments` | array | `[]` | Inline comments (see below) |
-
-**Comment fields:**
-
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `file` | string | **required** | File path the comment is anchored to |
-| `body` | string | **required** | Comment text (Markdown; supports `` ```suggestion `` fences) |
-| `side` | `"LEFT"` \| `"RIGHT"` | `"RIGHT"` | Which diff side (`LEFT` = old/base, `RIGHT` = new/head) |
-| `line` | number | `0` | Line number the comment points at |
-| `start_line` | number \| null | `null` | Start line for multi-line range comments |
-| `diff_hunk` | string \| null | `null` | The diff hunk context for the comment |
-| `subject_type` | `"line"` \| `"file"` | `"line"` | `"file"` for whole-file comments (line is ignored) |
-| `origin` | `"diff"` \| `"file_view"` | `"diff"` | Where the comment was authored; `"file_view"` comments fold into the body on publish |
-| `resolved_at` | string \| null | `null` | ISO-8601 timestamp if the thread is resolved |
-| `replies` | array | `[]` | Thread replies: `[{ "body": "..." }]` |
-
-The imported review is always created as a **draft** — you can edit it, add more comments, then
-export or publish it.
+1. **Add a repository** — click **+ Add repo** and choose a local git repo, then open it from
+   **Repositories**.
+2. Browse history on the **Graph** tab, or open the **GitHub PRs** tab and click **Review**. To
+   review local work, right-click a branch in the graph and choose **Review vs `<default>`**.
+3. **Click a line** to comment (shift-click for a range), write a summary and pick a verdict.
+   Everything autosaves; close and reopen at any time.
+4. Finish with **Export** or **Publish**.
 
 ---
 
@@ -363,22 +162,37 @@ export or publish it.
 src-tauri/                 # Rust backend
   src/
     lib.rs                 # Tauri builder, DB init, command registration
-    db/                    # rusqlite connection + migrations + row models
-    git.rs                 # git CLI: branches, rev-parse, diff
-    gh.rs                  # gh CLI: PR list/view/diff, post review
-    inbox.rs               # GitHub inbox fetch pipeline
-    board.rs               # kanban board fetch pipeline + lane/thread logic
+    db/                    # rusqlite connection, append-only migrations, row models
+    mirror/                # disposable GitHub mirror (gh_pr, gh_issue, …) — ADR 0002
+    sync/                  # backend-owned sync engine: pipeline, scheduler — ADR 0003
+    graph/                 # commit-graph layout and git mutations
+    git.rs, gh.rs          # git / gh CLI wrappers (no git library, no stored token)
+    provider.rs            # forge-provider trait over gh.rs
+    anchor.rs              # comment line re-anchoring through diffs
+    diff_cache.rs          # LRU of parsed diffs per (repo, PR, base, head)
+    inbox.rs, board.rs     # inbox / kanban pipelines; board_monitor.rs = auto-merge monitor
+    claude_sessions.rs     # Claude Code session discovery (+ terminal/, session_summaries.rs)
+    worktree.rs, worktree_gc.rs   # worktree helpers and the janitor
+    watch.rs, repo_sync.rs # lazy file watchers, background fetch — ADR 0004
     export.rs              # review model -> Markdown / JSON
-    commands/              # #[tauri::command] handlers (repo, review, gh, export, board)
-    bin/cr.rs              # `cr` CLI, shares the same SQLite db + modules
+    prompts.rs, ai_usage.rs# editable AI prompts, usage tracking
+    deep_link.rs           # codereview:// handling
+    commands/              # #[tauri::command] handlers, one module per area
+    bin/cr.rs              # `cr` CLI, shares the same SQLite db and modules
 src/                       # React frontend
-  components/              # RepoSidebar, RepoView, ReviewView, DiffViewer, BoardView
-  lib/                     # typed invoke wrappers, diff helpers
+  components/              # views (Review, Board, Inbox, Sessions, Settings, …); graph/ subfolder
+  lib/                     # api.ts (the typed invoke boundary), diff helpers, settings, themes
   store.ts                 # Zustand UI state
+docs/                      # features/, adr/, signing.md
+skills/                    # Claude Code skills (local-review, board)
 ```
 
-**Data model** (SQLite): `repository → target (local | github_pr) → review → comment`.
-A `target` is reused across multiple reviews. The database lives in the OS app-data directory
-(e.g. `~/.local/share/com.codereview.app/codereview.db` on Linux) — `pnpm tauri dev` and other
-debug builds use a sibling `codereview-dev.db` instead, so local development never touches your
-real data.
+**Data model** (SQLite): `repository → target (local | github_pr) → review → comment`. A `target`
+is reused across reviews; each review pins its own base/head SHAs ([ADR 0001](docs/adr/0001-pin-lives-on-review.md)).
+GitHub facts live in a separate disposable mirror. The database lives in the OS app-data directory
+(e.g. `~/.local/share/com.codereview.app/codereview.db` on Linux) — `pnpm tauri dev` uses its own
+identifier (`com.codereview.app.dev`) and therefore its own empty database, so local development
+never touches your real data.
+
+More: [`docs/adr/`](docs/adr/) (design decisions), [`GLOSSARY.md`](GLOSSARY.md) (domain terms),
+[`THEMING.md`](THEMING.md), [`docs/signing.md`](docs/signing.md).
