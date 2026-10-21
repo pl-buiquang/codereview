@@ -29,6 +29,12 @@ fn periodic_base(scope: Scope) -> (Duration, u32) {
     }
 }
 const TICK: Duration = Duration::from_secs(20);
+/// While notifications are polled, the discovery timer is only a safety net:
+/// they record events, not current state (a withdrawn review request, a
+/// changed watch setting), so the searches still run now and then.
+const DISCOVERY_FALLBACK: Duration = Duration::from_secs(30 * 60);
+const NOTIF_POLL_DEFAULT: Duration = Duration::from_secs(60);
+const NOTIF_META_KEY: &str = "notifications_last_modified";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -108,6 +114,12 @@ struct State {
     last_error: Option<(String, String)>,
     last_monitor: Option<Instant>,
     monitoring: bool,
+    /// Notifications poll (triggers discovery); `healthy` turns false for the
+    /// session when a poll fails, which restores the plain discovery timer.
+    last_notif_poll: Option<Instant>,
+    notif_interval: Duration,
+    notif_polling: bool,
+    notif_healthy: bool,
 }
 
 impl State {
@@ -126,8 +138,19 @@ impl State {
     }
 
     fn discovery_due(&self) -> bool {
-        self.discovery_interval()
-            .is_some_and(|i| self.last_discovery.is_none_or(|t| t.elapsed() >= i))
+        self.discovery_interval().is_some_and(|i| {
+            let i = if self.notif_healthy { i.max(DISCOVERY_FALLBACK) } else { i };
+            self.last_discovery.is_none_or(|t| t.elapsed() >= i)
+        })
+    }
+
+    fn notif_poll_due(&self) -> bool {
+        self.notif_healthy
+            && !self.notif_polling
+            && self.visible
+            && self.config.auto_sync != AutoSync::Off
+            && self.discovery_interval().is_some()
+            && self.last_notif_poll.is_none_or(|t| t.elapsed() >= self.notif_interval)
     }
 
     fn monitor_due(&self) -> bool {
@@ -184,6 +207,10 @@ impl SyncEngine {
                     last_error: None,
                     last_monitor: None,
                     monitoring: false,
+                    last_notif_poll: None,
+                    notif_interval: NOTIF_POLL_DEFAULT,
+                    notif_polling: false,
+                    notif_healthy: true,
                 }),
             }),
         };
@@ -258,15 +285,18 @@ impl SyncEngine {
             if !gained || s.config.auto_sync == AutoSync::Off {
                 return;
             }
-            let discover = s.discovery_interval().is_some_and(|i| away.is_some_and(|a| a >= i));
+            let discover = !s.notif_healthy
+                && s.discovery_interval().is_some_and(|i| away.is_some_and(|a| a >= i));
             let scopes: Vec<Scope> = s.active.keys().copied().filter(|sc| s.due(*sc, LIGHT_TTL)).collect();
             (discover, scopes)
         };
         self.spawn_round(discover, scopes);
+        self.maybe_poll_notifications();
     }
 
     fn tick(&self) {
         self.maybe_monitor();
+        self.maybe_poll_notifications();
         let (discover, scopes) = {
             let s = self.state();
             if !s.visible || s.config.auto_sync != AutoSync::Periodic {
@@ -280,6 +310,57 @@ impl SyncEngine {
             log::debug!(target: "sync", "tick: discover={discover}, due scopes={scopes:?}");
         }
         self.spawn_round(discover, scopes);
+    }
+
+    /// Poll `/notifications` if due; a change since the last poll starts a
+    /// discovery. The very first poll (no stored `Last-Modified`) only records
+    /// the baseline: the fallback timer covers startup.
+    fn maybe_poll_notifications(&self) {
+        {
+            let mut s = self.state();
+            if !s.notif_poll_due() {
+                return;
+            }
+            s.notif_polling = true;
+            s.last_notif_poll = Some(Instant::now());
+        }
+        let engine = self.clone();
+        let spawned = std::thread::Builder::new().name("notifications-poll".into()).spawn(move || {
+            engine.poll_notifications_round();
+            engine.state().notif_polling = false;
+        });
+        if let Err(e) = spawned {
+            self.state().notif_polling = false;
+            crate::logging::warn(&format!("[sync] could not start the notifications poll: {e}"));
+        }
+    }
+
+    fn poll_notifications_round(&self) {
+        let db = self.inner.app.state::<Db>();
+        let since = crate::commands::inbox::get_meta(&db.0.lock().unwrap(), NOTIF_META_KEY);
+        match crate::gh::poll_notifications(since.as_deref()) {
+            Ok(crate::gh::NotificationsPoll::NotModified) => {
+                log::debug!(target: "sync", "notifications: 304");
+            }
+            Ok(crate::gh::NotificationsPoll::Changed { last_modified, poll_interval }) => {
+                log::debug!(target: "sync", "notifications: changed (baseline={})", since.is_none());
+                if let Some(lm) = &last_modified {
+                    let _ = crate::commands::inbox::set_meta(&db.0.lock().unwrap(), NOTIF_META_KEY, lm);
+                }
+                if let Some(secs) = poll_interval {
+                    self.state().notif_interval = Duration::from_secs(secs).max(NOTIF_POLL_DEFAULT);
+                }
+                if since.is_some() {
+                    self.spawn(SyncRequest { discover: true, ..SyncRequest::new(Scope::All, Mode::Light) });
+                }
+            }
+            Err(e) => {
+                crate::logging::warn(&format!(
+                    "[sync] notifications poll failed, falling back to the discovery timer: {e}"
+                ));
+                self.state().notif_healthy = false;
+            }
+        }
     }
 
     /// Start a monitor round if it is on and due. Unlike light syncs this

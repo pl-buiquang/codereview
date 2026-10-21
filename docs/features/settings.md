@@ -40,7 +40,7 @@ Defaults are from [`src/lib/settings.ts`](../../src/lib/settings.ts).
 | Setting | Default | What it does |
 |---|---|---|
 | Auto Sync | Periodic | When Inbox, Board and Review sync from GitHub by themselves: **Off**; **On focus** (when a view opens or the window regains focus); **Periodic** (also on a timer while the app is visible, slower when nothing changes) |
-| Look for new PRs/issues every | 5 min | Discovery interval: off, 5, 15, 30, 60 min. Needs Auto Sync on; a manual Sync always looks |
+| Look for new PRs/issues every | 5 min | Discovery interval: off, 5, 15, 30, 60 min. GitHub notifications trigger discovery as soon as something changes, so this is a safety net (at least every 30 min) unless notifications are unavailable. Needs Auto Sync on; a manual Sync always looks |
 | Auto-merge monitor every | 5 min | How often the Board's auto-merge monitor runs (2, 5, 10, 15, 30 min). The monitor itself is switched on from the Board: it updates BEHIND branches and reruns failed CI (up to 3 attempts) on approved PRs with auto-merge on, while the app is open |
 | GitHub mirror: Reset mirror... | | Deletes the local copy of GitHub PRs, issues and users and rebuilds it. Inbox triage, board tracking and reviews are kept (placeholders show until the rebuild lands) |
 

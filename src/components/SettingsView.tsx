@@ -494,7 +494,7 @@ function GeneralSection() {
         </label>
         <label
           className="settings-row"
-          title="Search GitHub for new review requests, mentions and authored PRs this often while the app is visible (and on return after a longer absence). Needs Auto Sync on; a Sync click always looks."
+          title="Search GitHub for new review requests, mentions and authored PRs this often while the app is visible. GitHub notifications trigger a search as soon as something changes, so this is a safety net (at least every 30 min) unless notifications are unavailable. Needs Auto Sync on; a Sync click always looks."
         >
           <span>Look for new PRs/issues every</span>
           <select

@@ -21,7 +21,7 @@ The Inbox is a triage queue, not a monitor ([ADR 0005](../adr/0005-inbox-is-a-tr
   filterable.
 - **Archive** tab: everything triaged (dismissed, closed, discarded from the Board, tracked), with
   search and no cap. Archived items have a **Restore** button that moves them back to New.
-- Discovery runs every 5 minutes by default (Settings → Sync).
+- Discovery runs as soon as a conditional `GET /notifications` poll (about every 60s) sees a change; the interval in Settings → Sync (5 minutes by default, at least 30 minutes while notifications work) is a fallback, since notifications record events, not current state.
 - CLI: `cr inbox list|archive|restore|sync`.
 
 ## Board

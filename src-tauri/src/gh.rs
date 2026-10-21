@@ -1433,9 +1433,87 @@ pub fn set_thread_resolved(thread_id: &str, resolved: bool) -> AppResult<bool> {
         .ok_or_else(|| AppError::Gh("thread mutation returned no thread".into()))
 }
 
+/// Outcome of a conditional `GET /notifications`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NotificationsPoll {
+    NotModified,
+    Changed { last_modified: Option<String>, poll_interval: Option<u64> },
+}
+
+/// Parse `gh api -i` output: the status code and the lower-cased headers.
+fn parse_http_head(out: &str) -> Option<(u16, HashMap<String, String>)> {
+    let mut lines = out.lines();
+    let status = lines.next()?.split_whitespace().nth(1)?.parse().ok()?;
+    let headers = lines
+        .take_while(|l| !l.trim().is_empty())
+        .filter_map(|l| l.split_once(':'))
+        .map(|(k, v)| (k.trim().to_ascii_lowercase(), v.trim().to_string()))
+        .collect();
+    Some((status, headers))
+}
+
+fn notifications_poll_from(out: &str) -> AppResult<NotificationsPoll> {
+    let (status, headers) = parse_http_head(out)
+        .ok_or_else(|| AppError::Gh(format!("unreadable notifications response: {}", out.lines().next().unwrap_or(""))))?;
+    match status {
+        304 => Ok(NotificationsPoll::NotModified),
+        200..=299 => Ok(NotificationsPoll::Changed {
+            last_modified: headers.get("last-modified").cloned(),
+            poll_interval: headers.get("x-poll-interval").and_then(|v| v.parse().ok()),
+        }),
+        s => Err(AppError::Gh(format!("notifications returned HTTP {s}"))),
+    }
+}
+
+/// One cheap `GET /notifications?per_page=1`, conditional on `if_modified_since`
+/// (a `Last-Modified` value from the previous poll). `gh` exits non-zero on a
+/// 304 but still prints the headers with `-i`, so stdout is read regardless of
+/// the exit status; `run_gh` would log a warning every minute.
+pub fn poll_notifications(if_modified_since: Option<&str>) -> AppResult<NotificationsPoll> {
+    let mut args = vec!["api", "-i", "notifications?per_page=1"];
+    let header;
+    if let Some(since) = if_modified_since {
+        header = format!("If-Modified-Since: {since}");
+        args.extend(["-H", &header]);
+    }
+    let output = Command::new(crate::tools::gh_bin())
+        .args(&args)
+        .output()
+        .map_err(|e| AppError::Gh(format!("failed to spawn gh: {e}")))?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    if stdout.trim().is_empty() {
+        return Err(AppError::Gh(String::from_utf8_lossy(&output.stderr).trim().to_string()));
+    }
+    notifications_poll_from(&stdout)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn notifications_200_carries_last_modified_and_poll_interval() {
+        let out = "HTTP/2.0 200 OK\r\nX-Poll-Interval: 60\r\nLast-Modified: Wed, 21 Oct 2026 13:16:20 GMT\r\n\r\n[]";
+        assert_eq!(
+            notifications_poll_from(out).unwrap(),
+            NotificationsPoll::Changed {
+                last_modified: Some("Wed, 21 Oct 2026 13:16:20 GMT".into()),
+                poll_interval: Some(60)
+            }
+        );
+    }
+
+    #[test]
+    fn notifications_304_is_not_modified() {
+        let out = "HTTP/2.0 304 Not Modified\nX-Poll-Interval: 60\n\n";
+        assert_eq!(notifications_poll_from(out).unwrap(), NotificationsPoll::NotModified);
+    }
+
+    #[test]
+    fn notifications_errors_and_garbage_are_errors() {
+        assert!(notifications_poll_from("HTTP/2.0 403 Forbidden\n\n{}").is_err());
+        assert!(notifications_poll_from("gh: not logged in").is_err());
+    }
 
     #[test]
     fn pr_meta_query_sends_only_the_fragment_it_uses() {
