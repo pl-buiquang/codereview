@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import { toast } from "../../lib/toast";
 import { formatDuration, isActiveRun } from "../../lib/routines";
-import { parseRepoBasePaths, useSettingsStore } from "../../lib/settings";
+import { parseRepoBasePaths, useAiDisabledReason, useSettingsStore } from "../../lib/settings";
 import { useUIStore } from "../../store";
 import type { RoutineContextKind, RoutineOption } from "../../lib/types";
 import { RunStatusBadge } from "./RunStatusBadge";
@@ -36,6 +36,7 @@ export function RoutineLaunchModal({
     refetchInterval: 5_000,
   });
 
+  const aiOff = useAiDisabledReason();
   const launch = useMutation({
     mutationFn: (routineId: number) => api.routineLaunch(routineId, context, note, model),
     onSuccess: (run) => {
@@ -145,7 +146,8 @@ export function RoutineLaunchModal({
           <button
             type="button"
             className="btn-primary"
-            disabled={!selected || launch.isPending}
+            disabled={!selected || launch.isPending || aiOff != null}
+            title={aiOff ?? undefined}
             onClick={() => selected && launch.mutate(selected.routine.id)}
           >
             {launch.isPending ? "Starting…" : "Run"}

@@ -20,6 +20,7 @@ export function useApplySettings() {
   const mode = useSettingsStore((s) => s.mode);
   const diffFontSize = useSettingsStore((s) => s.diffFontSize);
   const logLevel = useSettingsStore((s) => s.logLevel);
+  const aiEnabled = useSettingsStore((s) => s.aiEnabled);
 
   useEffect(() => {
     const apply = () => applyTheme(direction, effectiveTheme(mode));
@@ -41,4 +42,9 @@ export function useApplySettings() {
     setClientLogLevel(logLevel);
     if ("__TAURI_INTERNALS__" in window) api.setLogLevel(logLevel).catch(() => {});
   }, [logLevel]);
+
+  // The backend refuses to start AI work while the switch is off; keep it in step.
+  useEffect(() => {
+    if ("__TAURI_INTERNALS__" in window) api.setAiEnabled(aiEnabled).catch(() => {});
+  }, [aiEnabled]);
 }

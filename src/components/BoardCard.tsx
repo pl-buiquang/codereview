@@ -4,7 +4,7 @@ import { api, pickFile } from "../lib/api";
 import { toast } from "../lib/toast";
 import { confirmDialog } from "../lib/confirm";
 import { timeAgo } from "../lib/timeAgo";
-import { useSettingsStore, type BoardBorderSide } from "../lib/settings";
+import { useAiDisabledReason, useSettingsStore, type BoardBorderSide } from "../lib/settings";
 import { parseSnoozeOptions } from "../lib/snooze";
 import { useUIStore } from "../store";
 import { RepoName } from "./RepoName";
@@ -280,6 +280,7 @@ function PrActionsMenu({
   onRoutines: () => void;
 }) {
   const isOpen = card.state === "open";
+  const aiOff = useAiDisabledReason();
   const updateDisabledReason = updateBranchDisabledReason(card);
   const rerunDisabledReason = rerunCiDisabledReason(card);
 
@@ -369,7 +370,12 @@ function PrActionsMenu({
               </>
             )}
             <hr className="btn-split-menu-separator" />
-            <button role="menuitem" title="Run a routine (e.g. babysit) on this PR" onClick={run(onRoutines)}>
+            <button
+              role="menuitem"
+              disabled={aiOff != null}
+              title={aiOff ?? "Run a routine (e.g. babysit) on this PR"}
+              onClick={run(onRoutines)}
+            >
               Routines…
             </button>
             <hr className="btn-split-menu-separator" />
@@ -461,6 +467,7 @@ export function BoardCard({
   const [linkInput, setLinkInput] = useState("");
   const [titleMenuOpen, setTitleMenuOpen] = useState(false);
   const [routinesOpen, setRoutinesOpen] = useState(false);
+  const aiOff = useAiDisabledReason();
   const activeRuns = useActiveRoutineRuns().get(cardContextKey(card));
   const showRoutineRun = useUIStore((s) => s.showRoutineRun);
   const [snoozeMenuOpen, setSnoozeMenuOpen] = useState(false);
@@ -581,7 +588,8 @@ export function BoardCard({
                 </button>
                 <button
                   role="menuitem"
-                  title="Run a routine on this issue"
+                  disabled={aiOff != null}
+                  title={aiOff ?? "Run a routine on this issue"}
                   onClick={() => {
                     close();
                     setRoutinesOpen(true);

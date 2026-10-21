@@ -20,6 +20,7 @@ vi.mock("../lib/api", () => ({
 
 import { ReviewView, newCommitsLabel } from "./ReviewView";
 import { useUIStore } from "../store";
+import { useSettingsStore } from "../lib/settings";
 
 globalThis.ResizeObserver ??= class {
   observe() {}
@@ -183,6 +184,7 @@ function renderReview() {
 }
 
 beforeEach(() => {
+  useSettingsStore.setState({ aiEnabled: true });
   for (const k of Object.keys(handlers)) delete handlers[k];
   handlers.getReview = vi.fn(() => Promise.resolve(detail()));
   handlers.reviewDiff = vi.fn(() => Promise.resolve(DIFF));

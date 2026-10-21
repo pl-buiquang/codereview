@@ -150,6 +150,7 @@ export const api = {
   // Logs
   logPath: () => invoke<string>("log_path"),
   setLogLevel: (level: LogLevel) => invoke<void>("set_log_level", { level }),
+  setAiEnabled: (enabled: boolean) => invoke<void>("set_ai_enabled", { enabled }),
   readAppLog: (maxLines: number) => invoke<string>("read_app_log", { maxLines }),
 
   chatSend: (reviewId: number, text: string, model?: string) =>

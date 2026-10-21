@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import type { ChatMessage } from "../lib/types";
-import { useSettingsStore } from "../lib/settings";
+import { useAiDisabledReason, useSettingsStore } from "../lib/settings";
 import { confirmDialog } from "../lib/confirm";
 import { Icon } from "./icons";
 import { Markdown } from "./Markdown";
@@ -36,6 +36,8 @@ export function ChatPanel({
   const [input, setInput] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const aiOff = useAiDisabledReason();
 
   const messagesQuery = useQuery({
     queryKey: ["chat-messages", reviewId],
@@ -227,9 +229,9 @@ export function ChatPanel({
         <textarea
           ref={textareaRef}
           className="chat-input"
-          placeholder="Ask about the changes… (⌘↵ to send)"
+          placeholder={aiOff ?? "Ask about the changes… (⌘↵ to send)"}
           value={input}
-          disabled={busy}
+          disabled={busy || aiOff != null}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && (e.metaKey || e.altKey)) {
@@ -244,8 +246,8 @@ export function ChatPanel({
             className="chat-model-select"
             value={chatModel}
             onChange={(e) => setChatModel(e.target.value)}
-            disabled={busy}
-            title="Model"
+            disabled={busy || aiOff != null}
+            title={aiOff ?? "Model"}
           >
             {MODEL_OPTIONS.map((opt) => (
               <option key={opt.value} value={opt.value}>
@@ -255,7 +257,8 @@ export function ChatPanel({
           </select>
           <button
             className="btn btn-primary btn-sm"
-            disabled={!input.trim() || busy}
+            disabled={!input.trim() || busy || aiOff != null}
+            title={aiOff ?? undefined}
             onClick={handleSend}
           >
             Send

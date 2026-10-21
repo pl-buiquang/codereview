@@ -121,6 +121,8 @@ type PersistedSettings = Pick<
   | "autoFetchMinutes"
   | "logLevel"
   | "boardStatusBorderSide"
+  | "aiEnabled"
+  | "aiEnabled"
   | "chatModel"
   | "overviewModel"
   | "boardOverviewOpen"
@@ -160,6 +162,7 @@ const DEFAULTS: PersistedSettings = {
   autoFetchMinutes: 0,
   logLevel: DEFAULT_LOG_LEVEL,
   boardStatusBorderSide: "top",
+  aiEnabled: false,
   chatModel: "",
   overviewModel: "sonnet",
   boardOverviewOpen: false,
@@ -218,6 +221,8 @@ interface SettingsState {
   markEdits: boolean;
   /** Files with more changed lines (add + del) are not rendered in the diff. */
   largeDiffMaxLines: number;
+  /** Master switch for every app-spawned `claude -p` feature (chat, focus, AI review, overview, routines). */
+  aiEnabled: boolean;
   /** Model passed to `claude -p --model`. Empty = use env default (opus). */
   chatModel: string;
   /** Model for the board AI overview; empty = same resolution as chat. */
@@ -268,6 +273,7 @@ interface SettingsState {
   setDiscoveryIntervalMin: (minutes: number) => void;
   setAutoFetchMinutes: (minutes: number) => void;
   setBoardStatusBorderSide: (side: BoardBorderSide) => void;
+  setAiEnabled: (on: boolean) => void;
   setChatModel: (s: string) => void;
   setMarkEdits: (b: boolean) => void;
   setLargeDiffMaxLines: (n: number) => void;
@@ -352,6 +358,7 @@ export const useSettingsStore = create<SettingsState>()(
       setDiscoveryIntervalMin: (discoveryIntervalMin) => set({ discoveryIntervalMin }),
       setAutoFetchMinutes: (autoFetchMinutes) => set({ autoFetchMinutes }),
       setBoardStatusBorderSide: (boardStatusBorderSide) => set({ boardStatusBorderSide }),
+      setAiEnabled: (aiEnabled) => set({ aiEnabled }),
       setChatModel: (chatModel) => set({ chatModel }),
       setMarkEdits: (markEdits) => set({ markEdits }),
       setLargeDiffMaxLines: (largeDiffMaxLines) => set({ largeDiffMaxLines }),
@@ -511,4 +518,11 @@ export function stripRepoPrefix(
 export function effectiveTheme(theme: ThemeMode): "dark" | "light" {
   if (theme !== "system") return theme;
   return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+}
+
+export const AI_DISABLED_REASON = "AI features are turned off in Settings → AI";
+
+/** Why AI actions are unavailable (for a button's `title`), or null when the switch is on. */
+export function useAiDisabledReason(): string | null {
+  return useSettingsStore((s) => s.aiEnabled) ? null : AI_DISABLED_REASON;
 }

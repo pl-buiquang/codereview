@@ -12,7 +12,7 @@ import {
   type HunkFocus,
 } from "../lib/focus";
 import type { FocusLevel, FocusOverride, FocusView } from "../lib/types";
-import { useSettingsStore } from "../lib/settings";
+import { useAiDisabledReason, useSettingsStore } from "../lib/settings";
 import { Markdown } from "./Markdown";
 import { MODEL_OPTIONS } from "./ChatPanel";
 
@@ -39,6 +39,7 @@ export function FocusGenerate({
 }) {
   const chatModel = useSettingsStore((s) => s.chatModel);
   const [open, setOpen] = useState(false);
+  const aiOff = useAiDisabledReason();
   const [model, setModel] = useState(chatModel);
   if (view?.focus.status === "generating" || generate.isPending) {
     return (
@@ -52,11 +53,12 @@ export function FocusGenerate({
     <span className="focus-generate">
       <button
         className="btn"
-        disabled={!claudeAvailable}
+        disabled={aiOff != null || !claudeAvailable}
         title={
-          claudeAvailable
+          aiOff ??
+          (claudeAvailable
             ? "Tier every hunk with AI and hide the noise"
-            : "Install the `claude` CLI to generate a focus here (`/local-review --focus` also works from the terminal)"
+            : "Install the `claude` CLI to generate a focus here (`/local-review --focus` also works from the terminal)")
         }
         onClick={() => setOpen((o) => !o)}
       >
@@ -212,6 +214,7 @@ export function FocusDigest({
   onCopyToSummary: (markdown: string) => void;
   onRegenerate?: () => void;
 }) {
+  const aiOff = useAiDisabledReason();
   const [collapsed, setCollapsed] = useState(false);
   const { focus } = view;
   const planned = focus.planned_at != null;
@@ -251,7 +254,12 @@ export function FocusDigest({
             Focus generated at <code>{shortSha(focus.head_sha)}</code>; the review is now on{" "}
             <code>{shortSha(headSha)}</code>
             {onRegenerate && (
-              <button className="expand-btn" onClick={onRegenerate}>
+              <button
+                className="expand-btn"
+                onClick={onRegenerate}
+                disabled={aiOff != null}
+                title={aiOff ?? undefined}
+              >
                 Regenerate
               </button>
             )}

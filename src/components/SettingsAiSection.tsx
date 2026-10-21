@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { useSettingsStore } from "../lib/settings";
+import { useUIStore } from "../store";
 import { toast } from "../lib/toast";
 import type { PromptInfo } from "../lib/types";
 import { MODEL_OPTIONS } from "./ChatPanel";
@@ -93,6 +94,9 @@ export function AiSection() {
   const setChatModel = useSettingsStore((s) => s.setChatModel);
   const overviewModel = useSettingsStore((s) => s.overviewModel);
   const setOverviewModel = useSettingsStore((s) => s.setOverviewModel);
+  const aiEnabled = useSettingsStore((s) => s.aiEnabled);
+  const setAiEnabled = useSettingsStore((s) => s.setAiEnabled);
+  const showRoutinesConfig = useUIStore((s) => s.showRoutinesConfig);
   const prompts = useQuery({ queryKey: ["prompts"], queryFn: api.promptsList });
 
   return (
@@ -104,6 +108,20 @@ export function AiSection() {
           </option>
         ))}
       </datalist>
+
+      <section className="settings-group">
+        <h3>AI features</h3>
+        <label className="settings-row">
+          <span>Enable AI features</span>
+          <input type="checkbox" checked={aiEnabled} onChange={(e) => setAiEnabled(e.target.checked)} />
+        </label>
+        <span className="settings-hint muted">
+          Master switch for everything the app runs through <code>claude -p</code>: review chat, focus, AI
+          review, board insights, session summaries and routines. While it is off, those buttons are disabled
+          and queued routine runs wait. Terminal sessions (new agent session, resume) are not affected. Off by
+          default.
+        </span>
+      </section>
 
       <section className="settings-group">
         <h3>Models</h3>
@@ -135,6 +153,12 @@ export function AiSection() {
 
       <section className="settings-group">
         <h3>Prompts</h3>
+        <span className="settings-hint muted">
+          Focus, board insights, AI review and babysit prompts are edited with their routines.{" "}
+          <button className="link-button" onClick={showRoutinesConfig}>
+            Open routine config
+          </button>
+        </span>
         {prompts.isLoading && <span className="muted">Loading…</span>}
         {prompts.error && <span className="error">{String(prompts.error)}</span>}
         {prompts.data?.map((p) => <PromptEditor key={p.key} prompt={p} />)}

@@ -4,7 +4,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { api } from "../lib/api";
 import { buildDigest, digestHeadline, isOpenCard, type Digest, type DigestItem } from "../lib/boardDigest";
-import { useSettingsStore } from "../lib/settings";
+import { useAiDisabledReason, useSettingsStore } from "../lib/settings";
 import { timeAgo } from "../lib/timeAgo";
 import { useUIStore } from "../store";
 import type { BoardCard } from "../lib/types";
@@ -45,6 +45,7 @@ export function BoardOverviewPane({
   const overviewModel = useSettingsStore((s) => s.overviewModel);
   const showBoardCard = useUIStore((s) => s.showBoardCard);
   const query = useQuery({ queryKey: ["board-overview"], queryFn: api.boardOverviewGet });
+  const aiOff = useAiDisabledReason();
   const generate = useMutation({
     mutationFn: () => api.boardOverviewGenerate(overviewModel),
     onSuccess: (data) => qc.setQueryData(["board-overview"], data),
@@ -100,8 +101,8 @@ export function BoardOverviewPane({
         <button
           className="btn btn-sm"
           onClick={() => generate.mutate()}
-          disabled={generate.isPending}
-          title="Regenerate the overview from the current board (local data only)"
+          disabled={generate.isPending || aiOff != null}
+          title={aiOff ?? "Regenerate the overview from the current board (local data only)"}
         >
           {generate.isPending ? (
             <>

@@ -6,7 +6,7 @@ import { toast } from "../lib/toast";
 import { confirmDialog } from "../lib/confirm";
 import { timeAgo } from "../lib/timeAgo";
 import { isWaiting } from "../lib/sessionCounts";
-import { useSettingsStore } from "../lib/settings";
+import { useAiDisabledReason, useSettingsStore } from "../lib/settings";
 import { useUIStore, type SessionsTab } from "../store";
 import type { CardSession, ClaudeSession, SessionFocusState } from "../lib/types";
 import { Icon } from "./icons";
@@ -264,6 +264,7 @@ function SessionRow({
   const fork = useSettingsStore((st) => st.sessionSummaryFork);
   const summaries = s.summaries ?? [];
   const canExpand = s.live || summaries.length > 0;
+  const aiOff = useAiDisabledReason();
   const generate = useMutation({
     mutationFn: () => api.generateLiveSessionSummary(s.session_id, fork),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["claude-sessions"] }),
@@ -348,8 +349,8 @@ function SessionRow({
           {s.live && (
             <button
               className="btn btn-sm"
-              disabled={generate.isPending}
-              title="Summarize this session so far; stored separately from the end-of-session summaries"
+              disabled={generate.isPending || aiOff != null}
+              title={aiOff ?? "Summarize this session so far; stored separately from the end-of-session summaries"}
               onClick={() => generate.mutate()}
             >
               {generate.isPending ? "Summarizing…" : summaries.length > 0 ? "Regenerate summary" : "Generate summary"}

@@ -17,6 +17,7 @@ vi.mock("../../lib/api", () => ({
 
 import { RoutineLaunchModal } from "./RoutineLaunchModal";
 import { useUIStore } from "../../store";
+import { useSettingsStore } from "../../lib/settings";
 
 const routine = (over: Partial<Routine> = {}): Routine => ({
   id: 1,
@@ -77,7 +78,19 @@ function renderModal(options: RoutineOption[]) {
 
 describe("RoutineLaunchModal", () => {
   beforeEach(() => {
+    useSettingsStore.setState({ aiEnabled: true });
     vi.clearAllMocks();
+  });
+
+  it("disables Run with an explanation while AI features are off", async () => {
+    useSettingsStore.setState({ aiEnabled: false });
+    renderModal([{ routine: routine(), active_run: null }]);
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: /Babysit/ }));
+    const runButton = screen.getByRole("button", { name: "Run" });
+    expect(runButton).toBeDisabled();
+    expect(runButton).toHaveAttribute("title", expect.stringContaining("Settings → AI"));
   });
 
   it("launches the selected routine with the note", async () => {

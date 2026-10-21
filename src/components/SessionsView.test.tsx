@@ -19,6 +19,7 @@ vi.mock("../lib/api", () => ({
 
 import { SessionsView, resumeCommand, tildePath } from "./SessionsView";
 import { useUIStore } from "../store";
+import { useSettingsStore } from "../lib/settings";
 
 const session = (over: Partial<ClaudeSession> = {}): ClaudeSession => ({
   session_id: "s1",
@@ -59,6 +60,7 @@ function renderView() {
 
 describe("SessionsView", () => {
   beforeEach(() => {
+    useSettingsStore.setState({ aiEnabled: true });
     vi.clearAllMocks();
     focusClaudeSession.mockResolvedValue(undefined);
     resumeClaudeSession.mockResolvedValue(undefined);

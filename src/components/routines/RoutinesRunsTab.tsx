@@ -4,6 +4,7 @@ import { api } from "../../lib/api";
 import { toast } from "../../lib/toast";
 import { timeAgo } from "../../lib/timeAgo";
 import { formatDuration, isActiveRun, STATUS_LABEL } from "../../lib/routines";
+import { useAiDisabledReason } from "../../lib/settings";
 import { useUIStore } from "../../store";
 import type { RoutineRun, RoutineRunStatus } from "../../lib/types";
 import { RunStatusBadge } from "./RunStatusBadge";
@@ -43,6 +44,7 @@ export function RoutinesRunsTab() {
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["routine-runs"] });
   const stop = useMutation({ mutationFn: api.routineRunStop, onSuccess: invalidate, onError: (e) => toast.error(String(e)) });
+  const aiOff = useAiDisabledReason();
   const relaunch = useMutation({
     mutationFn: api.routineRunRelaunch,
     onSuccess: (run) => {
@@ -143,7 +145,10 @@ export function RoutinesRunsTab() {
                     Stop
                   </button>
                 ) : (
-                  <button type="button" className="btn btn-sm" disabled={relaunch.isPending} onClick={() => relaunch.mutate(selected.id)}>
+                  <button type="button" className="btn btn-sm" disabled={relaunch.isPending || aiOff != null}
+                    title={aiOff ?? undefined}
+                    onClick={() => relaunch.mutate(selected.id)}
+                  >
                     Run again
                   </button>
                 )}

@@ -76,7 +76,7 @@ import { Icon } from "./icons";
 import { AgentSessionItems, KebabMenu } from "./KebabMenu";
 import { githubPrUrl } from "../lib/githubUrl";
 import { useDebouncedCallback } from "../lib/useDebouncedCallback";
-import { useSettingsStore } from "../lib/settings";
+import { useAiDisabledReason, useSettingsStore } from "../lib/settings";
 import { autoSyncRefetch } from "../lib/sync";
 import { useUIStore } from "../store";
 import {
@@ -1005,6 +1005,7 @@ function ReviewHeader({
   });
   const claudeAvailable = envQuery.data ? envQuery.data.claude != null : true;
   const chatModel = useSettingsStore((s) => s.chatModel);
+  const aiOff = useAiDisabledReason();
   const focusGenerating = focusView?.focus.status === "generating" || generateFocus.isPending;
   const hasFocus = focusView?.focus.planned_at != null;
   const aiReviewStatus = useQuery({
@@ -1582,18 +1583,28 @@ function ReviewHeader({
                 {hasFocus && (
                   <button
                     role="menuitem"
-                    disabled={!claudeAvailable || focusGenerating}
-                    title={claudeAvailable ? "Tier every hunk again with AI (default chat model)" : "Claude CLI not found"}
+                    disabled={aiOff != null || !claudeAvailable || focusGenerating}
+                    title={
+                      aiOff ??
+                      (claudeAvailable ? "Tier every hunk again with AI (default chat model)" : "Claude CLI not found")
+                    }
                     onClick={run(() => generateFocus.mutate({ model: chatModel || undefined }))}
                   >
                     Regenerate AI focus
                   </button>
                 )}
-                <button role="menuitem" title="Run a routine (e.g. babysit) on this review" onClick={run(() => setShowRoutines(true))}>
+                <button
+                  role="menuitem"
+                  disabled={aiOff != null}
+                  title={aiOff ?? "Run a routine (e.g. babysit) on this review"}
+                  onClick={run(() => setShowRoutines(true))}
+                >
                   Routines…
                 </button>
                 {aiReviewItems.map((item) => {
-                  const disabledReason = !claudeAvailable
+                  const disabledReason = aiOff
+                    ? aiOff
+                    : !claudeAvailable
                     ? "Claude CLI not found"
                     : readOnly
                       ? "Published reviews cannot be edited"
@@ -3182,6 +3193,7 @@ export function Composer({
   suggestionSeed?: string | null;
   onSendToChat?: (text: string) => void;
 }) {
+  const aiOff = useAiDisabledReason();
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const run = async (fn: (text: string) => Promise<void>) => {
@@ -3228,8 +3240,8 @@ export function Composer({
         {onSendToChat && (
           <button
             className="btn btn-ghost"
-            disabled={busy || text.trim() === ""}
-            title="Send to Chat panel instead of creating a comment"
+            disabled={busy || text.trim() === "" || aiOff != null}
+            title={aiOff ?? "Send to Chat panel instead of creating a comment"}
             onClick={() => {
               if (text.trim()) {
                 onSendToChat(text.trim());

@@ -142,6 +142,8 @@ interface UIState {
   setSessionsTab: (tab: SessionsTab) => void;
   routineRunFocus: number | null;
   showRoutineRun: (runId: number) => void;
+  /** Open Sessions → Config (the routines editor). */
+  showRoutinesConfig: () => void;
   clearRoutineRunFocus: () => void;
   showBoardCard: (cardId: string) => void;
   clearBoardHighlight: () => void;
@@ -209,6 +211,8 @@ export const useUIStore = create<UIState>()(
           sessionsTab: "routines",
           routineRunFocus: runId,
         }),
+      showRoutinesConfig: () =>
+        set({ homeSection: "sessions", homeRepoId: null, activeTabId: HOME_TAB.id, sessionsTab: "config" }),
       clearRoutineRunFocus: () => set({ routineRunFocus: null }),
       graphFocus: null,
 
