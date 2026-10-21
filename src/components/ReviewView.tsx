@@ -880,7 +880,25 @@ export function newCommitsLabel(live: FreshnessResult | undefined, pinnedHead: s
   return "new commits";
 }
 
-function PrNumberLink({ prNumber, prUrl }: { prNumber: number; prUrl: string }) {
+function copyPrUrl(prUrl: string) {
+  navigator.clipboard.writeText(prUrl).then(
+    () => toast.success("PR URL copied to clipboard"),
+    (e) => toast.error(`Could not copy URL: ${String(e)}`),
+  );
+}
+
+/** Opens the PR in the browser on click; right-click offers "Copy URL". */
+function PrLink({
+  prUrl,
+  className,
+  wrapClassName,
+  children,
+}: {
+  prUrl: string;
+  className: string;
+  wrapClassName?: string;
+  children: React.ReactNode;
+}) {
   const [menuOpen, setMenuOpen] = useState(false);
   const ref = useRef<HTMLSpanElement>(null);
 
@@ -894,10 +912,9 @@ function PrNumberLink({ prNumber, prUrl }: { prNumber: number; prUrl: string }) 
   }, [menuOpen]);
 
   return (
-    <span ref={ref} className="pr-number-link-wrap">
-      {" "}
+    <span ref={ref} className={wrapClassName ?? "pr-number-link-wrap"}>
       <button
-        className="review-repo-link review-pr-link"
+        className={className}
         title="Open PR in browser"
         onClick={() => api.openUrl(prUrl)}
         onContextMenu={(e) => {
@@ -905,7 +922,7 @@ function PrNumberLink({ prNumber, prUrl }: { prNumber: number; prUrl: string }) 
           setMenuOpen(true);
         }}
       >
-        #{prNumber}
+        {children}
       </button>
       {menuOpen && (
         <div className="btn-split-menu card" role="menu">
@@ -913,10 +930,7 @@ function PrNumberLink({ prNumber, prUrl }: { prNumber: number; prUrl: string }) 
             role="menuitem"
             onClick={() => {
               setMenuOpen(false);
-              navigator.clipboard.writeText(prUrl).then(
-                () => toast.success("PR URL copied to clipboard"),
-                (e) => toast.error(`Could not copy URL: ${String(e)}`),
-              );
+              copyPrUrl(prUrl);
             }}
           >
             Copy URL
@@ -1265,7 +1279,15 @@ function ReviewHeader({
           </button>
         )}
         <div className="review-title-wrap">
-          <h2 className="review-title">{target.title}</h2>
+          <h2 className="review-title">
+            {prUrl ? (
+              <PrLink prUrl={prUrl} className="review-title-link">
+                {target.title}
+              </PrLink>
+            ) : (
+              target.title
+            )}
+          </h2>
           {(sourceRepo || detail.local_path) && (
             <span className="review-repo mono">
               {sourceRepo && (
@@ -1278,7 +1300,12 @@ function ReviewHeader({
                 </button>
               )}
               {prNumber != null && prUrl ? (
-                <PrNumberLink prNumber={prNumber} prUrl={prUrl} />
+                <>
+                  {" "}
+                  <PrLink prUrl={prUrl} className="review-repo-link review-pr-link">
+                    #{prNumber}
+                  </PrLink>
+                </>
               ) : prNumber != null ? (
                 <span> #{prNumber}</span>
               ) : null}
@@ -1475,6 +1502,11 @@ function ReviewHeader({
             };
             return (
               <>
+                {prUrl && (
+                  <button role="menuitem" onClick={run(() => copyPrUrl(prUrl))}>
+                    Copy PR URL
+                  </button>
+                )}
                 <button
                   role="menuitem"
                   disabled={readOnly || refreshReview.isPending}

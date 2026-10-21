@@ -3815,6 +3815,33 @@ input[type="range"] {
   color: var(--accent);
   text-decoration: underline;
 }
+.review-title:has(.review-title-link) {
+  overflow: visible;
+}
+.review-title .pr-number-link-wrap {
+  display: block;
+  max-width: 100%;
+}
+.review-title-link {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  appearance: none;
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+.review-title-link:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
 .review-pr-link {
   font-weight: 700;
   color: var(--text);
