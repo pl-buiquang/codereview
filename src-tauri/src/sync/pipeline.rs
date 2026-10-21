@@ -13,7 +13,7 @@ use super::{inflight, MirrorUpdated, Mode, Scope, SyncReport, SyncRequest};
 use crate::commands::{board as board_cmd, inbox as inbox_cmd};
 use crate::db::Db;
 use crate::error::AppResult;
-use crate::inbox::{self, EnrichTarget, ViewerInfo};
+use crate::inbox::{self, ViewerInfo};
 use crate::mirror::{self, fetch::Probe, Node};
 
 const AUTHORED_SEARCH: &str = "is:pr is:open author:@me";
@@ -120,13 +120,11 @@ pub fn run(db: &Db, req: &SyncRequest, notify: &dyn Fn(MirrorUpdated)) -> AppRes
         let tx = conn.transaction()?;
         let closed = closed_in_mirror(&tx, &inbox_ids)?;
         for id in inbox_ids.iter().filter(|id| closed.contains(*id) || gone.contains(id)) {
-            if inbox_cmd::mark_item_closed(&tx, id, &ts)? {
+            if inbox_cmd::archive_closed_item(&tx, id, &ts)? {
                 report.closed_count += 1;
             }
         }
         tx.commit()?;
-        drop(conn);
-        report.files = sync_files(db, &inbox_ids, &changed, req.mode == Mode::Full)?;
     }
 
     if scope.board() {
@@ -182,9 +180,11 @@ fn discover(
         return Ok(false);
     }
 
+    let mut complete_discovery = false;
     let (merged, authored): (Vec<inbox::ReasonedNode>, Vec<Node>) = if scope.inbox() {
         let search_scope = std::env::var("CODEREVIEW_SEARCH_SCOPE").ok();
-        let merged = inbox::run_all_searches(viewer, search_scope.as_deref());
+        let (merged, complete) = inbox::run_all_searches(viewer, search_scope.as_deref());
+        complete_discovery = complete;
         let authored = merged
             .iter()
             .filter(|r| r.reasons.iter().any(|x| x.reason == "author"))
@@ -205,10 +205,11 @@ fn discover(
     let mut conn = db.0.lock().unwrap();
     let tx = conn.transaction()?;
     let before = updated_at_of(&tx, &ids)?;
+    let prev_discovery = inbox_cmd::get_meta(&tx, "last_complete_discovery_at");
     for r in &merged {
         mirror::store::upsert_node(&tx, &r.node, &ts)?;
         inbox_cmd::upsert_entry(&tx, &r.node, &ts)?;
-        inbox_cmd::replace_reasons(&tx, &r.node.id, &r.reasons)?;
+        inbox_cmd::record_reasons(&tx, &r.node.id, &r.reasons, prev_discovery.as_deref(), &ts)?;
     }
     if !scope.inbox() {
         for node in &authored {
@@ -218,6 +219,9 @@ fn discover(
     report.auto_tracked = board_cmd::auto_track_authored(&tx, authored.iter(), &ts)?;
     if scope.inbox() {
         inbox_cmd::set_meta(&tx, "last_discovery_at", &ts)?;
+        if complete_discovery {
+            inbox_cmd::set_meta(&tx, "last_complete_discovery_at", &ts)?;
+        }
     }
     tx.commit()?;
     drop(conn);
@@ -379,67 +383,6 @@ fn closed_in_mirror(conn: &Connection, ids: &[String]) -> AppResult<HashSet<Stri
 // ---------------------------------------------------------------------------
 // Facets
 // ---------------------------------------------------------------------------
-
-/// The files facet is fresh when fetched at the PR's head. Rows backfilled
-/// without a head key stay fresh until the PR changes.
-pub fn files_need_fetch(head_sha: Option<&str>, files_head: Option<Option<&str>>, pr_changed: bool) -> bool {
-    match files_head {
-        None => true,
-        Some(Some(h)) => head_sha != Some(h),
-        Some(None) => pr_changed,
-    }
-}
-
-/// Fetch the files facet of the open inbox PRs that need it.
-fn sync_files(db: &Db, inbox_ids: &[String], changed: &HashSet<String>, full: bool) -> AppResult<usize> {
-    if inbox_ids.is_empty() {
-        return Ok(0);
-    }
-    let targets: Vec<EnrichTarget> = {
-        let conn = db.0.lock().unwrap();
-        let sql = format!(
-            "SELECT p.node_id, r.remote_owner || '/' || r.remote_name, p.number, p.head_sha,
-                    EXISTS (SELECT 1 FROM gh_pr_file f WHERE f.pr_id = p.node_id),
-                    (SELECT MAX(f.head_sha) FROM gh_pr_file f WHERE f.pr_id = p.node_id)
-             FROM gh_pr p JOIN repository r ON r.id = p.repo_id
-             WHERE p.state = 'open' AND p.node_id IN ({})",
-            placeholders(inbox_ids.len())
-        );
-        let mut stmt = conn.prepare(&sql)?;
-        type Row = (String, String, i64, Option<String>, bool, Option<String>);
-        let rows: Vec<Row> = stmt
-            .query_map(params_from_iter(inbox_ids), |r| {
-                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?))
-            })?
-            .collect::<rusqlite::Result<_>>()?;
-        rows.into_iter()
-            .filter(|(id, _, _, head, has_files, files_head)| {
-                let files = has_files.then_some(files_head.as_deref());
-                full || files_need_fetch(head.as_deref(), files, changed.contains(id))
-            })
-            .map(|(id, repo, number, head_sha, ..)| EnrichTarget { id, repo, number, head_sha })
-            .collect()
-    };
-    let ids: Vec<String> = targets.iter().map(|t| t.id.clone()).collect();
-    let flight = inflight::global();
-    let (claim, mine, others) = flight.claim("files", &ids);
-    let mine: HashSet<String> = mine.into_iter().collect();
-    let files = inbox::enrich_all(targets.into_iter().filter(|t| mine.contains(&t.id)).collect());
-    let n = files.len();
-    {
-        let mut conn = db.0.lock().unwrap();
-        let tx = conn.transaction()?;
-        for (target, files) in &files {
-            if let Some(files) = files {
-                mirror::store::upsert_files(&tx, &target.id, target.head_sha.as_deref(), files)?;
-            }
-        }
-        tx.commit()?;
-    }
-    drop(claim);
-    flight.wait("files", &others);
-    Ok(n)
-}
 
 /// Whether a PR's mirrored threads are stale: never counted, fetched before
 /// the PR's current `updatedAt`, or older than [`THREADS_MAX_AGE`].
@@ -664,15 +607,6 @@ mod tests {
         let ids: Vec<String> = ["PR_open", "PR_merged", "I_closed"].iter().map(|s| s.to_string()).collect();
         let closed = closed_in_mirror(&conn, &ids).unwrap();
         assert_eq!(closed, HashSet::from(["PR_merged".to_string(), "I_closed".to_string()]));
-    }
-
-    #[test]
-    fn files_refetch_on_new_head_or_when_missing() {
-        assert!(files_need_fetch(Some("h1"), None, false), "never fetched");
-        assert!(!files_need_fetch(Some("h1"), Some(Some("h1")), true), "keyed on head, not updatedAt");
-        assert!(files_need_fetch(Some("h2"), Some(Some("h1")), false), "new head");
-        assert!(!files_need_fetch(Some("h1"), Some(None), false), "backfilled, PR unchanged");
-        assert!(files_need_fetch(Some("h1"), Some(None), true), "backfilled, PR changed");
     }
 
     #[test]

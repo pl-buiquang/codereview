@@ -67,6 +67,10 @@ fn track_node(conn: &Connection, node: &Node, ts: &str, clear_discard: bool) -> 
         &format!("INSERT INTO board_card (id, type, tracked_at) VALUES (?1, ?2, ?3) ON CONFLICT(id) {on_conflict}"),
         params![node.id, typ, ts],
     )?;
+    if clear_discard {
+        // An explicit Track takes the item out of the Inbox queue.
+        crate::commands::inbox::set_inbox_state(conn, &node.id, "tracked", None)?;
+    }
     Ok(())
 }
 
@@ -534,6 +538,8 @@ pub fn board_discard_impl(conn: &Connection, card_id: &str) -> AppResult<()> {
         return Err(AppError::Other("your own PRs can't be discarded".into()));
     }
     conn.execute("UPDATE board_card SET discarded_at = ?1 WHERE id = ?2", params![now(), card_id])?;
+    // Discarded means "not interested": it lands in the Inbox archive.
+    crate::commands::inbox::set_inbox_state(conn, card_id, "archived", Some("discarded"))?;
     Ok(())
 }
 
@@ -873,6 +879,32 @@ mod tests {
         crate::commands::inbox::set_meta(&conn, "viewer_login", "me").unwrap();
         assert!(card_row(&conn, "pr1").unwrap().is_mine);
         assert!(board_discard_impl(&conn, "pr1").is_err(), "own PRs can't be discarded");
+    }
+
+    #[test]
+    fn discarding_a_card_archives_its_inbox_entry_and_tracking_takes_it_out_of_new() {
+        let conn = open_memory();
+        seed_card(&conn, "pr1", "owner/repo", 1, "pr");
+        conn.execute("INSERT INTO inbox_entry (id, type, first_seen_at) VALUES ('pr1', 'pr', 't')", []).unwrap();
+        let state = |conn: &Connection| -> (String, Option<String>) {
+            conn.query_row("SELECT state, archive_cause FROM inbox_entry WHERE id = 'pr1'", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap()
+        };
+        assert_eq!(state(&conn).0, "new");
+
+        board_discard_impl(&conn, "pr1").unwrap();
+        assert_eq!(state(&conn), ("archived".into(), Some("discarded".into())));
+
+        let node: Node = serde_json::from_value(serde_json::json!({
+            "__typename": "PullRequest", "id": "pr1", "number": 1, "title": "t", "url": "u",
+            "state": "OPEN", "updatedAt": "2024-01-01T00:00:00Z",
+            "repository": { "nameWithOwner": "owner/repo" }
+        }))
+        .unwrap();
+        track_node(&conn, &node, "now", true).unwrap();
+        assert_eq!(state(&conn), ("tracked".into(), None));
     }
 
     #[test]

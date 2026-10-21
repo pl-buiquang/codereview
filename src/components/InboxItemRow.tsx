@@ -1,36 +1,26 @@
 import { timeAgo } from "../lib/timeAgo";
 import type { InboxItem } from "../lib/types";
-import { CiBadge, ReasonBadge, StatusPill, TypeBadge } from "./InboxBadges";
+import { BotBadge, CiBadge, ReasonBadge, StaleBadge, StatusPill, TypeBadge } from "./InboxBadges";
 import { RepoName } from "./RepoName";
 import { Icon } from "./icons";
 
-interface TopFile {
-  path: string;
-  additions: number;
-  deletions: number;
-  changes: number;
-}
+/** `new`: an untriaged item. `archive`: a dismissed, closed, discarded or tracked one. */
+export type RowVariant = "new" | "archive";
 
-function parseTopFiles(json: string | null): TopFile[] {
-  if (!json) return [];
-  try {
-    return JSON.parse(json) as TopFile[];
-  } catch {
-    return [];
-  }
-}
-
-export type RowVariant = "inbox" | "visited" | "archive" | "closed";
+const CAUSE_LABEL: Record<string, string> = {
+  dismissed: "dismissed",
+  closed: "closed on GitHub",
+  discarded: "discarded from board",
+};
 
 export function InboxItemRow({
   item,
   variant,
   busy,
+  isBot,
   existingReviewId,
-  onEngage,
-  onUnengage,
-  onUntrack,
-  onRetrack,
+  onArchive,
+  onRestore,
   onOpenReview,
   onOpenExisting,
   boardTracked,
@@ -39,20 +29,20 @@ export function InboxItemRow({
   item: InboxItem;
   variant: RowVariant;
   busy: boolean;
+  /** Author is a bot, by GitHub's account type or the Settings list. */
+  isBot: boolean;
   existingReviewId?: number;
-  onEngage: () => void;
-  onUnengage: () => void;
-  onUntrack: () => void;
-  onRetrack: () => void;
+  onArchive: () => void;
+  onRestore: () => void;
+  /** Opens the PR as a review; this also tracks it on the board. */
   onOpenReview: () => void;
   onOpenExisting?: () => void;
   /** Whether this item already has a card on the kanban board. */
   boardTracked?: boolean;
-  /** Shown as a "Track" button when the item isn't on the board yet.
-   *  Omitted entirely for the viewer's own PRs, which are tracked automatically. */
+  /** Shown as a "Track" button when the item isn't on the board yet. */
   onBoardTrack?: () => void;
 }) {
-  const topFiles = parseTopFiles(item.top_files_json);
+  const tracked = boardTracked || item.inbox_state === "tracked";
 
   return (
     <div className="card pr-card">
@@ -81,6 +71,18 @@ export function InboxItemRow({
           {item.reasons.map((r, i) => (
             <ReasonBadge key={i} reason={r.reason} detail={r.detail} />
           ))}
+          {isBot && <BotBadge />}
+          {item.stale && <StaleBadge />}
+          {variant === "archive" &&
+            (item.inbox_state === "tracked" ? (
+              <span className="chip accent" title="On the board">
+                tracked
+              </span>
+            ) : (
+              <span className="chip" title={`Moved ${timeAgo(item.state_at)}`}>
+                {CAUSE_LABEL[item.archive_cause ?? "dismissed"] ?? "archived"}
+              </span>
+            ))}
           <span className="faint">by {item.author_login ?? "unknown"}</span>
         </div>
 
@@ -104,11 +106,6 @@ export function InboxItemRow({
             </span>
             {item.review_decision && (
               <span>{item.review_decision.toLowerCase().replace(/_/g, " ")}</span>
-            )}
-            {topFiles.length > 0 && (
-              <a href={item.url} target="_blank" rel="noreferrer" title={topFiles.map((f) => f.path).join("\n")}>
-                {topFiles.length} top file{topFiles.length > 1 ? "s" : ""}
-              </a>
             )}
           </div>
         )}
@@ -134,61 +131,46 @@ export function InboxItemRow({
                   className="btn btn-sm"
                   disabled={busy}
                   onClick={onOpenReview}
-                  title="Start a new review of this PR"
+                  title="Start a new review of this PR (tracks it on the board)"
                 >
                   New review
                 </button>
               </>
             ) : (
-              <button className="btn btn-sm btn-primary" disabled={busy} onClick={onOpenReview}>
+              <button
+                className="btn btn-sm btn-primary"
+                disabled={busy}
+                onClick={onOpenReview}
+                title="Review this PR; it is tracked on the board and leaves the inbox"
+              >
                 Open as review
               </button>
             ))}
-          {(variant === "inbox" || variant === "visited") && (
-            <>
-              {variant === "inbox" ? (
-                <button
-                  className="btn btn-sm"
-                  disabled={busy}
-                  onClick={onEngage}
-                  title="Done — moves to Visited; resurfaces on new activity"
-                >
-                  Done
-                </button>
-              ) : (
-                <button
-                  className="btn btn-sm"
-                  disabled={busy}
-                  onClick={onUnengage}
-                  title="Bring back to its inbox bucket"
-                >
-                  Bring back
-                </button>
-              )}
-              <button
-                className="btn btn-sm btn-ghost"
-                disabled={busy}
-                onClick={onUntrack}
-                title="Archive — hide from inbox (find it again in Archive)"
-              >
-                Archive
-              </button>
-            </>
-          )}
-          {variant === "archive" && (
-            <button className="btn btn-sm" disabled={busy} onClick={onRetrack} title="Move back to the inbox">
-              Unarchive
-            </button>
-          )}
-          {!boardTracked && onBoardTrack && (
+          {!tracked && onBoardTrack && (
             <button
-              className="btn btn-sm btn-ghost"
+              className="btn btn-sm"
               disabled={busy}
               onClick={onBoardTrack}
-              title="Send to the kanban board"
+              title="Track on the board — leaves the inbox"
             >
               Track
             </button>
+          )}
+          {variant === "new" ? (
+            <button
+              className="btn btn-sm btn-ghost"
+              disabled={busy}
+              onClick={onArchive}
+              title="Archive — hide from New; comes back only if GitHub gives it a new reason"
+            >
+              Archive
+            </button>
+          ) : (
+            item.inbox_state === "archived" && (
+              <button className="btn btn-sm btn-ghost" disabled={busy} onClick={onRestore} title="Move back to New">
+                Restore
+              </button>
+            )
           )}
         </div>
       </div>

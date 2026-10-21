@@ -219,14 +219,12 @@ export const api = {
 
   // GitHub inbox
   listInbox: () => invoke<InboxItem[]>("list_inbox"),
-  listArchive: (search: string | null) =>
-    invoke<InboxItem[]>("list_archive", { search }),
-  listClosed: () => invoke<InboxItem[]>("list_closed"),
+  /** Archived and tracked items; `cause` is an ArchiveCause or "tracked". */
+  listInboxArchive: (search: string | null, cause: string | null, limit: number) =>
+    invoke<InboxItem[]>("list_inbox_archive", { search, cause, limit }),
   inboxMeta: () => invoke<InboxMeta>("inbox_meta"),
-  engageItem: (id: string) => invoke<void>("engage_item", { id }),
-  unengageItem: (id: string) => invoke<void>("unengage_item", { id }),
-  untrackItem: (id: string) => invoke<void>("untrack_item", { id }),
-  retrackItem: (id: string) => invoke<void>("retrack_item", { id }),
+  archiveItem: (id: string) => invoke<void>("archive_item", { id }),
+  restoreItem: (id: string) => invoke<void>("restore_item", { id }),
   openPrReview: (itemId: string, owner: string, name: string, number: number, basePaths: string[] = []) =>
     invoke<Review>("open_pr_review", { itemId, owner, name, number, basePaths }),
   linkLocalPath: (repoId: number, path: string) =>

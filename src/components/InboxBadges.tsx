@@ -7,7 +7,6 @@ const REASON_LABEL: Record<ItemReasonKind, string> = {
   direct_review: "review",
   team_review: "team review",
   author: "authored",
-  comment: "comment",
 };
 
 export function ReasonBadge({ reason, detail }: { reason: ItemReasonKind; detail?: string }) {
@@ -17,6 +16,22 @@ export function ReasonBadge({ reason, detail }: { reason: ItemReasonKind; detail
     <span className="chip" title={detail || undefined}>
       {label}
       {team}
+    </span>
+  );
+}
+
+export function BotBadge() {
+  return (
+    <span className="chip" title="Authored by a bot">
+      <Icon name="bot" size={11} /> bot
+    </span>
+  );
+}
+
+export function StaleBadge() {
+  return (
+    <span className="chip warn" title="No longer matches any GitHub search (e.g. review request removed)">
+      stale
     </span>
   );
 }

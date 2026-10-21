@@ -121,7 +121,7 @@ const DEFAULTS: PersistedSettings = {
   repoStripPrefixes: "",
   repoBasePaths: "~/projects",
   autoSync: "periodic",
-  discoveryIntervalMin: 15,
+  discoveryIntervalMin: 5,
   autoFetchMinutes: 0,
   logLevel: DEFAULT_LOG_LEVEL,
   boardStatusBorderSide: "top",

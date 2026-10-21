@@ -480,7 +480,7 @@ export function BoardCard({
     if (
       await confirmDialog({
         title: "Discard card",
-        message: `Discard ${card.repo}#${card.number}? You can re-track it from the Inbox.`,
+        message: `Discard ${card.repo}#${card.number}? It moves to the Inbox archive, where you can re-track it.`,
         confirmLabel: "Discard",
       })
     ) {

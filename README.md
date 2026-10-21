@@ -17,7 +17,7 @@ Built with **Tauri v2** (Rust) + **React/TypeScript**.
   progress** (draft) / **Submitted** (ready), others' PRs you're reviewing in **Reviews**, and
   everything merged/closed in **Done**. Lanes are derived from GitHub state — no dragging. Cards
   can carry plan/spec files, links, notes and Claude Code session pointers.
-- **Home sidebar** — Board / Inbox / Reviews / Archive / Repositories plus your **open repositories**
+- **Home sidebar** — Board / Inbox / Reviews / Repositories plus your **open repositories**
   (they open inside the Home tab and stay loaded, so switching is instant; ✕ closes one). Fold it
   to icons only, and hover the Home tab icon or the
   window's left edge to pop the menu from anywhere.
@@ -211,12 +211,26 @@ Lower tiers collapse into one-click bars, and a digest lists what was hidden and
   **Adopt** an AI note as a draft comment, or **Copy into summary** to paste the digest.
 - **Scripting** — `cr focus hunks|hunk|set|show|clear <review-id>`. See `cr focus --help`.
 
+### Inbox
+
+The Inbox is a triage queue for new items, not a monitor (the Board does that). **New** lists
+what GitHub says needs you: review requested (directly or via a team), mentions, assignments and
+issues you opened. Per item: **Track** (or **Open as review**) moves it to the Board and out of
+the queue; **Archive** dismisses it. Items that close on GitHub archive themselves. An archived
+item comes back only when it gains a new reason (e.g. you are re-requested as reviewer), never
+on plain activity. An item no search finds any more is marked **stale** and stays until triaged.
+Your own PRs are never queued. Bot-authored items are tagged **bot** (GitHub's account type plus
+the Settings list) and filterable. The **Archive** tab keeps everything triaged — dismissed,
+closed, discarded from the Board, tracked — with search and no cap. `cr inbox list|archive|restore|sync`.
+Discovery runs every 5 minutes by default (Settings → Sync).
+
 ### Board
 
-Issues and PRs land on the Board by **tracking** them — from the Inbox's **Track** button, by
-pasting a URL into a lane's **+** header, or via `cr board track <url|owner/repo#n>`. Your own
-open PRs (in registered repos) are tracked automatically. **Discard** removes a card (you can
-always re-track it from the Inbox); your own PRs can't be discarded. Linking a PR to a backlog
+Issues and PRs land on the Board by **tracking** them — from the Inbox's **Track** button (or
+**Open as review**, which tracks too), by pasting a URL into a lane's **+** header, or via
+`cr board track <url|owner/repo#n>`. Your own open PRs (in registered repos) are tracked
+automatically. **Discard** removes a card into the Inbox's **Archive** tab, where you can
+re-track it; your own PRs can't be discarded. Linking a PR to a backlog
 issue (automatically, via "Fixes #n" / a `pbq/issue-<n>`-named branch, or manually by pasting a PR
 URL on the issue's card) moves it to **In progress**/**Submitted**/**Reviews** and hides the
 issue until every linked PR closes. **Done** cards older than a month can be purged with the

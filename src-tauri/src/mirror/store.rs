@@ -8,7 +8,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use super::fetch::{Actor, Node};
 use crate::board::{self, ThreadMode};
 use crate::error::AppResult;
-use crate::gh::{ChangedFile, PrActor, PrAutoMerge, PrDetail, PrMeta, PrThread};
+use crate::gh::{PrActor, PrAutoMerge, PrDetail, PrMeta, PrThread};
 
 /// Unreferenced mirror rows are kept this long after their last sync.
 const GC_AFTER_DAYS: i64 = 30;
@@ -57,11 +57,13 @@ fn upsert_user(conn: &Connection, actor: Option<&Actor>, ts: &str) -> AppResult<
         return Ok(());
     };
     conn.execute(
-        "INSERT INTO gh_user (login, avatar_url, fetched_at) VALUES (?1, ?2, ?3)
+        "INSERT INTO gh_user (login, avatar_url, fetched_at, is_bot) VALUES (?1, ?2, ?3, ?4)
          ON CONFLICT(login) DO UPDATE SET
             avatar_url = COALESCE(excluded.avatar_url, gh_user.avatar_url),
-            fetched_at = excluded.fetched_at",
-        params![login, actor.and_then(|a| a.avatar_url.as_deref()), ts],
+            fetched_at = excluded.fetched_at,
+            -- Only the author selection carries the type; other actors keep what's known.
+            is_bot = MAX(gh_user.is_bot, excluded.is_bot)",
+        params![login, actor.and_then(|a| a.avatar_url.as_deref()), ts, actor.is_some_and(Actor::is_bot)],
     )?;
     Ok(())
 }
@@ -222,7 +224,7 @@ pub fn upsert_pr_detail(conn: &Connection, detail: &PrDetail, ts: &str) -> AppRe
 }
 
 fn actor_of(a: &PrActor) -> Actor {
-    Actor { login: a.login.clone(), avatar_url: a.avatar_url.clone() }
+    Actor { type_name: None, login: a.login.clone(), avatar_url: a.avatar_url.clone() }
 }
 
 /// The viewer login cached by the inbox (`meta.viewer_login`).
@@ -259,19 +261,6 @@ pub fn upsert_threads(conn: &Connection, pr_id: &str, threads: &[PrThread], ts: 
             threads_json = excluded.threads_json, fetched_at = excluded.fetched_at",
         params![pr_id, updated_at, pending, serde_json::to_string(threads)?, ts],
     )?;
-    Ok(())
-}
-
-/// Replace a PR's changed-file list, fetched at `head_sha`.
-pub fn upsert_files(conn: &Connection, pr_id: &str, head_sha: Option<&str>, files: &[ChangedFile]) -> AppResult<()> {
-    conn.execute("DELETE FROM gh_pr_file WHERE pr_id = ?1", params![pr_id])?;
-    for f in files {
-        conn.execute(
-            "INSERT OR REPLACE INTO gh_pr_file (pr_id, filename, additions, deletions, changes, head_sha)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![pr_id, f.filename, f.additions, f.deletions, f.changes, head_sha],
-        )?;
-    }
     Ok(())
 }
 

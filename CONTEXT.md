@@ -63,6 +63,33 @@ Glossary of domain terms used in this app.
   that needs it is open. Unwatched repositories reload when a view opens or the window
   regains focus.
 
+## Inbox
+
+- **Inbox** — the triage queue for new GitHub items that need the user's attention (review
+  requested, mentioned, assigned, a team's review requested, an issue they opened). It finds
+  things; the Board is where tracked work is monitored.
+- **Inbox entry** — the user's triage decision about one issue or PR. It is in exactly one state:
+  **New** (untriaged), **Tracked** (put on the Board; out of the queue) or **Archived**.
+  Not to be confused with an *activity event* (see below).
+- **New** — the Inbox tab listing untriaged entries, most recently updated first. The user's own
+  PRs never appear (they are tracked automatically); their own issues do.
+- **Archive** — the Inbox tab listing everything triaged: entries archived by hand
+  (*dismissed*), that closed or merged on GitHub (*closed*), or whose Board card was discarded
+  (*discarded*), plus Tracked ones. Searchable, never capped. Distinct from the Board Done
+  lane, which is derived from GitHub state.
+  _Avoid_: untrack (it means archive; Track always means the Board)
+- **Track** — put an item on the Board. Also what *Open as review* does. The entry leaves New.
+- **Reason** — why GitHub surfaced an item: `assigned`, `direct_review`, `mention`, `team_review`
+  or `author`. An archived entry returns to New only when it gains a reason it didn't have, or
+  one that lapsed and came back (re-requested as reviewer). Activity on the item never brings it back.
+- **Stale** — a New entry that no search of the last complete discovery still found (the review
+  request was withdrawn, the user was unassigned). It stays in New, marked, until triaged.
+- **Bot** — an item authored by a GitHub Bot account, or by a login in the Settings bot list.
+  A filter on the Inbox, not a tab.
+- **Activity event** _(future)_ — something that happened on a tracked item (CI changed, a
+  comment thread opened or updated). Separate from an inbox entry's state, with its own
+  seen/unseen flag, and shown in its own Inbox view. Not built yet.
+
 ## Board
 
 - **Card session** — a live session that belongs to a PR card: either recorded on the card as a

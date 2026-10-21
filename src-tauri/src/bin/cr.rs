@@ -383,8 +383,12 @@ enum RepoAction {
 
 #[derive(Subcommand)]
 enum InboxAction {
-    /// List inbox items
+    /// List the New queue
     List,
+    /// Archive an inbox item (URL or `owner/repo#n`)
+    Archive { reference: String },
+    /// Bring an archived item back to New
+    Restore { reference: String },
     /// Sync the inbox from GitHub
     #[command(alias = "refresh")]
     Sync,
@@ -1090,7 +1094,7 @@ fn run(cmd: Cmd, json: bool, db: &Db) -> AppResult<()> {
                         return Ok(());
                     }
                     println!(
-                        "{:<40} {:<8} {:<30} {:<15}",
+                        "{:<40} {:<8} {:<30} {:<15} REASON",
                         "REPO", "NUMBER", "TITLE", "AUTHOR"
                     );
                     for item in &items {
@@ -1100,16 +1104,21 @@ fn run(cmd: Cmd, json: bool, db: &Db) -> AppResult<()> {
                             .author_login
                             .as_deref()
                             .unwrap_or("-");
+                        let reasons = item.reasons.iter().map(|r| r.reason.as_str()).collect::<Vec<_>>().join(",");
                         println!(
-                            "{:<40} {:<8} {:<30} {:<15}",
+                            "{:<40} {:<8} {:<30} {:<15} {}{}",
                             truncate(&item.item.repo, 38),
                             item.item.number,
                             title,
                             author,
+                            reasons,
+                            if item.item.stale { " (stale)" } else { "" },
                         );
                     }
                 }
             }
+            InboxAction::Archive { reference } => set_inbox_archived(db, &reference, true)?,
+            InboxAction::Restore { reference } => set_inbox_archived(db, &reference, false)?,
             InboxAction::Sync => print_sync(&sync_once(db, Scope::Inbox, Mode::Forced)?, json)?,
         },
 
@@ -1167,13 +1176,27 @@ fn sync_once(db: &Db, scope: Scope, mode: Mode) -> AppResult<SyncReport> {
     sync::run(db, &SyncRequest::new(scope, mode), &|_| {})
 }
 
+fn set_inbox_archived(db: &Db, reference: &str, archive: bool) -> AppResult<()> {
+    let (owner, name, number) = board::parse_ref(reference)?;
+    let conn = db.0.lock().unwrap();
+    let id = inbox::find_item_id(&conn, &owner, &name, number)?
+        .ok_or_else(|| AppError::Other(format!("{owner}/{name}#{number} isn't in the inbox")))?;
+    if archive {
+        inbox::archive_item_impl(&conn, &id)?;
+    } else {
+        inbox::restore_item_impl(&conn, &id)?;
+    }
+    println!("{owner}/{name}#{number} {}.", if archive { "archived" } else { "restored to New" });
+    Ok(())
+}
+
 fn print_sync(r: &SyncReport, json: bool) -> AppResult<()> {
     if json {
         println!("{}", serde_json::to_string_pretty(r)?);
     } else {
         println!(
             "Synced for {} — {} inbox items ({} closed), {} board cards ({} newly tracked); \
-             {} probed, {} refetched, {} threads, {} files ({}ms)",
+             {} probed, {} refetched, {} threads ({}ms)",
             r.viewer_login,
             r.item_count,
             r.closed_count,
@@ -1182,7 +1205,6 @@ fn print_sync(r: &SyncReport, json: bool) -> AppResult<()> {
             r.probed,
             r.changed,
             r.threads,
-            r.files,
             r.duration_ms,
         );
     }

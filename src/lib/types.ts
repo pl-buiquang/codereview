@@ -290,16 +290,19 @@ export type ItemReasonKind =
   | "mention"
   | "direct_review"
   | "team_review"
-  | "author"
-  | "comment";
+  | "author";
 
 export interface ItemReason {
   reason: ItemReasonKind;
   detail: string;
 }
 
-/** One inbox item (PR or issue). Mirrors the backend `items` row, flattened with
- *  its `reasons`. */
+/** Triage state of an inbox entry (`state` on the item is GitHub's). */
+export type InboxState = "new" | "tracked" | "archived";
+export type ArchiveCause = "dismissed" | "closed" | "discarded";
+
+/** One inbox item (PR or issue): an inbox entry joined with its mirrored
+ *  facts, flattened with its `reasons`. */
 export interface InboxItem {
   id: string;
   type: "pr" | "issue";
@@ -318,12 +321,16 @@ export interface InboxItem {
   files_changed: number | null;
   additions: number | null;
   deletions: number | null;
-  top_files_json: string | null;
   ci_state: string | null;
   review_decision: string | null;
-  untracked_at: string | null;
-  closed_at: string | null;
-  engaged_at: string | null;
+  inbox_state: InboxState;
+  archive_cause: ArchiveCause | null;
+  /** When it last changed inbox state. */
+  state_at: string;
+  /** GitHub reports the author as a Bot. */
+  author_is_bot: boolean;
+  /** A New item no search in the last complete discovery still found. */
+  stale: boolean;
   first_seen_at: string;
   last_refreshed: string;
   reasons: ItemReason[];

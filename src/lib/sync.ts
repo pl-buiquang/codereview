@@ -17,8 +17,7 @@ export const BOARD_MONITOR_EVENT = "board-monitor";
  *  fetchers themselves and are deliberately not listed. */
 const MIRROR_QUERY_KEYS = [
   ["inbox"],
-  ["closed"],
-  ["archive"],
+  ["inbox-archive"],
   ["inbox-meta"],
   ["board"],
   ["board-last-refresh"],

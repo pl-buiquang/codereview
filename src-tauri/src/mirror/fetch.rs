@@ -21,7 +21,7 @@ macro_rules! issue_core {
         r#"
 fragment IssueCore on Issue {
   id number title url bodyText state updatedAt closedAt
-  author { login avatarUrl }
+  author { __typename login avatarUrl }
   repository { nameWithOwner }
   comments(last: 1) { nodes { bodyText author { login } } }
 }
@@ -35,7 +35,7 @@ macro_rules! pr_core {
 fragment PrCore on PullRequest {
   id number title url bodyText state isDraft merged updatedAt closedAt
   baseRefName headRefName headRefOid
-  author { login avatarUrl }
+  author { __typename login avatarUrl }
   repository { nameWithOwner }
   changedFiles additions deletions reviewDecision
   reviews(first: 1) { totalCount }
@@ -72,10 +72,19 @@ fn with_fragments(query: String) -> String {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Actor {
+    #[serde(default, rename = "__typename")]
+    pub type_name: Option<String>,
     #[serde(default)]
     pub login: Option<String>,
     #[serde(default)]
     pub avatar_url: Option<String>,
+}
+
+impl Actor {
+    /// GitHub reports the author as a `Bot` (dependabot, renovate, apps).
+    pub fn is_bot(&self) -> bool {
+        self.type_name.as_deref() == Some("Bot")
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]

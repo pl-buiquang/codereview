@@ -1,6 +1,6 @@
 //! GitHub "inbox" discovery pipeline, ported from the gh-dashboard app. Pure-ish
 //! helpers (no DB, no Tauri): they fan out the attention searches, merge the
-//! results by node id, and fetch the files facet. Results land in the mirror;
+//! results by node id. Results land in the mirror;
 //! the DB orchestration lives in `commands/inbox.rs`.
 
 use std::collections::HashMap;
@@ -11,12 +11,11 @@ use serde::Deserialize;
 use serde_json::json;
 
 use crate::error::AppResult;
-use crate::gh::{self, ChangedFile};
+use crate::gh;
 use crate::mirror::{self, Node};
 
 const PER_SEARCH_LIMIT: i64 = 50;
 const TEAM_LIMIT: usize = 20;
-const ENRICH_CONCURRENCY: usize = 8;
 const SEARCH_CONCURRENCY: usize = 8;
 /// Cached viewer (login + teams) is considered fresh for 24h.
 pub const VIEWER_TTL_MS: i64 = 24 * 60 * 60 * 1000;
@@ -119,14 +118,6 @@ pub struct ReasonedNode {
 pub struct ViewerInfo {
     pub login: String,
     pub team_slugs: Vec<String>,
-}
-
-/// A PR queued for the files facet, fetched at `head_sha`.
-pub struct EnrichTarget {
-    pub id: String,
-    pub repo: String,
-    pub number: i64,
-    pub head_sha: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -245,30 +236,36 @@ fn build_search_tasks(viewer: &ViewerInfo, scope: Option<&str>) -> Vec<SearchTas
     tasks
 }
 
-fn run_search(task: &SearchTask) -> Vec<ReasonedNode> {
+/// `None` when the search failed, so the caller knows the results are partial.
+fn run_search(task: &SearchTask) -> Option<Vec<ReasonedNode>> {
     match mirror::fetch::search(&task.query, PER_SEARCH_LIMIT) {
-        Ok(nodes) => nodes
-            .into_iter()
-            .map(|node| ReasonedNode {
-                node,
-                reasons: vec![Reason {
-                    reason: task.reason.to_string(),
-                    detail: task.detail.clone(),
-                }],
-            })
-            .collect(),
+        Ok(nodes) => Some(
+            nodes
+                .into_iter()
+                .map(|node| ReasonedNode {
+                    node,
+                    reasons: vec![Reason {
+                        reason: task.reason.to_string(),
+                        detail: task.detail.clone(),
+                    }],
+                })
+                .collect(),
+        ),
         Err(e) => {
             crate::logging::warn(&format!("[inbox.search] q={:?} failed: {e}", task.query));
-            Vec::new()
+            None
         }
     }
 }
 
-/// Fan out all attention searches concurrently and merge them.
-pub fn run_all_searches(viewer: &ViewerInfo, scope: Option<&str>) -> Vec<ReasonedNode> {
+/// Fan out all attention searches concurrently and merge them. The flag is
+/// true when every search succeeded: only then does a missing reason mean the
+/// item no longer matches.
+pub fn run_all_searches(viewer: &ViewerInfo, scope: Option<&str>) -> (Vec<ReasonedNode>, bool) {
     let tasks = build_search_tasks(viewer, scope);
-    let buckets = concurrent_map(tasks, SEARCH_CONCURRENCY, run_search);
-    merge_reasons(buckets)
+    let results = concurrent_map(tasks, SEARCH_CONCURRENCY, run_search);
+    let complete = results.iter().all(Option::is_some);
+    (merge_reasons(results.into_iter().flatten().collect()), complete)
 }
 
 /// Fetch the viewer's login + team slugs (`org/team`) via GraphQL, paginating the
@@ -305,27 +302,6 @@ pub fn fetch_viewer() -> AppResult<ViewerInfo> {
         }
     }
     Ok(ViewerInfo { login, team_slugs })
-}
-
-/// A PR's changed files (first 100). `None` on any failure, so a rate limit
-/// degrades the preview rather than aborting the sync.
-pub fn fetch_files(repo: &str, number: i64) -> Option<Vec<ChangedFile>> {
-    let (owner, name) = repo.split_once('/')?;
-    match gh::pr_files(owner, name, number) {
-        Ok(files) => Some(files),
-        Err(e) => {
-            crate::logging::warn(&format!("[inbox.enrich] files failed for {repo}#{number}: {e}"));
-            None
-        }
-    }
-}
-
-/// Fetch the files facet of many PRs concurrently.
-pub fn enrich_all(prs: Vec<EnrichTarget>) -> Vec<(EnrichTarget, Option<Vec<ChangedFile>>)> {
-    let files = concurrent_map(prs.iter().collect(), ENRICH_CONCURRENCY, |p: &&EnrichTarget| {
-        fetch_files(&p.repo, p.number)
-    });
-    prs.into_iter().zip(files).collect()
 }
 
 // ---------------------------------------------------------------------------

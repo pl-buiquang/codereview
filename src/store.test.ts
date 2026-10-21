@@ -32,11 +32,11 @@ describe("useUIStore", () => {
   it("setHomeSection activates home and leaves the repo view", () => {
     useUIStore.getState().openRepo(3);
     useUIStore.getState().openSettingsTab();
-    useUIStore.getState().setHomeSection("archive");
+    useUIStore.getState().setHomeSection("reviews");
     const s = useUIStore.getState();
     expect(s.activeTabId).toBe("home");
     expect(s.homeRepoId).toBeNull();
-    expect(s.homeSection).toBe("archive");
+    expect(s.homeSection).toBe("reviews");
   });
 
   it("openReview opens a focused review tab parented to the repo shown in home", () => {

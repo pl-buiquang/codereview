@@ -24,7 +24,7 @@ describe("navHistory", () => {
 
   it("steps back and forward through home sections", () => {
     s().setHomeSection("inbox");
-    s().setHomeSection("archive");
+    s().setHomeSection("reviews");
     goBack();
     expect(s().homeSection).toBe("inbox");
     goBack();
@@ -42,9 +42,9 @@ describe("navHistory", () => {
   it("a new navigation after Back clears Forward", () => {
     s().setHomeSection("inbox");
     goBack();
-    s().setHomeSection("archive");
+    s().setHomeSection("reviews");
     goForward();
-    expect(s().homeSection).toBe("archive");
+    expect(s().homeSection).toBe("reviews");
   });
 
   it("Back reopens a review tab that was closed, under its parent repo", () => {

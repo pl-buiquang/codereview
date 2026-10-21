@@ -19,7 +19,7 @@ beforeEach(() => {
     botLogins: "",
     repoStripPrefixes: "",
     autoSync: "periodic",
-    discoveryIntervalMin: 15,
+    discoveryIntervalMin: 5,
     fileTestPatterns: "",
     fileConfigPatterns: "",
   });
@@ -36,7 +36,7 @@ describe("useSettingsStore", () => {
     expect(s.defaultViewType).toBe("split");
     expect(s.defaultThreeDot).toBe(true);
     expect(s.autoSync).toBe("periodic");
-    expect(s.discoveryIntervalMin).toBe(15);
+    expect(s.discoveryIntervalMin).toBe(5);
   });
 
   it("setters update each field", () => {
@@ -201,7 +201,7 @@ describe("settings migration to v2", () => {
     expect(out.botLogins).toBe("");
     expect(out.repoStripPrefixes).toBe("");
     expect(out.autoSync).toBe("periodic");
-    expect(out.discoveryIntervalMin).toBe(15);
+    expect(out.discoveryIntervalMin).toBe(5);
   });
 });
 

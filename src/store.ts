@@ -9,7 +9,6 @@ export type HomeSection =
   | "board"
   | "inbox"
   | "reviews"
-  | "archive"
   | "worktrees"
   | "repositories";
 
@@ -53,13 +52,19 @@ export const EMPTY_BOARD_FILTERS: BoardFilters = {
 };
 
 export interface InboxFilters {
+  /** "archive" for the Archive tab; anything else is the New tab. */
   bucket: string | null;
   repos: string[];
   authors: string[];
   type: string | null;
   review: string | null;
   status: string | null;
-  tracking: string | null;
+  /** needs-you | team-review | authored */
+  reason: string | null;
+  /** bot | human | stale */
+  flag: string | null;
+  /** Archive tab only: dismissed | closed | discarded | tracked. */
+  cause: string | null;
 }
 
 export const EMPTY_INBOX_FILTERS: InboxFilters = {
@@ -69,7 +74,9 @@ export const EMPTY_INBOX_FILTERS: InboxFilters = {
   type: null,
   review: null,
   status: null,
-  tracking: null,
+  reason: null,
+  flag: null,
+  cause: null,
 };
 
 interface UIState {
@@ -283,6 +290,12 @@ export const useUIStore = create<UIState>()(
         const next = { ...current, ...(persisted as Partial<UIState>) };
         next.boardFilters = upgradeFilters(EMPTY_BOARD_FILTERS, next.boardFilters, { repo: "repos" });
         next.inboxFilters = upgradeFilters(EMPTY_INBOX_FILTERS, next.inboxFilters, { repo: "repos", author: "authors" });
+        delete (next.inboxFilters as unknown as Record<string, unknown>).tracking;
+        // The Archive page was folded into the Inbox's Archive tab.
+        if ((next.homeSection as string) === "archive") {
+          next.homeSection = "inbox";
+          next.inboxFilters = { ...next.inboxFilters, bucket: "archive" };
+        }
         const openRepoIds = next.openRepoIds ?? [];
         if (next.homeRepoId != null && !openRepoIds.includes(next.homeRepoId)) {
           openRepoIds.push(next.homeRepoId);

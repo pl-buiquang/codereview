@@ -15,7 +15,6 @@ const NAV: { key: HomeSection; label: string; icon: IconName }[] = [
   { key: "board", label: "Board", icon: "board" },
   { key: "inbox", label: "Inbox", icon: "inbox" },
   { key: "reviews", label: "Reviews", icon: "review" },
-  { key: "archive", label: "Archive", icon: "archive" },
   { key: "worktrees", label: "Worktrees", icon: "branch" },
   { key: "repositories", label: "Repositories", icon: "repo" },
 ];

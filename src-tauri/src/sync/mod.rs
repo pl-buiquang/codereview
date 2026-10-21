@@ -77,7 +77,6 @@ pub struct SyncReport {
     /// Entities whose core + status facets were refetched.
     pub changed: usize,
     pub threads: usize,
-    pub files: usize,
     pub duration_ms: i64,
 }
 

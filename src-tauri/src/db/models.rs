@@ -275,12 +275,16 @@ pub struct ItemRow {
     pub files_changed: Option<i64>,
     pub additions: Option<i64>,
     pub deletions: Option<i64>,
-    pub top_files_json: Option<String>,
     pub ci_state: Option<String>,
     pub review_decision: Option<String>,
-    pub untracked_at: Option<String>,
-    pub closed_at: Option<String>,
-    pub engaged_at: Option<String>,
+    /// Triage state: `new` / `tracked` / `archived` (`state` is GitHub's).
+    pub inbox_state: String,
+    /// Why it was archived: `dismissed` / `closed` / `discarded`.
+    pub archive_cause: Option<String>,
+    pub state_at: String,
+    pub author_is_bot: bool,
+    /// A New item no search in the last complete discovery still found.
+    pub stale: bool,
     pub first_seen_at: String,
     pub last_refreshed: String,
 }
@@ -305,12 +309,13 @@ impl ItemRow {
             files_changed: row.get("files_changed")?,
             additions: row.get("additions")?,
             deletions: row.get("deletions")?,
-            top_files_json: row.get("top_files_json")?,
             ci_state: row.get("ci_state")?,
             review_decision: row.get("review_decision")?,
-            untracked_at: row.get("untracked_at")?,
-            closed_at: row.get("closed_at")?,
-            engaged_at: row.get("engaged_at")?,
+            inbox_state: row.get("inbox_state")?,
+            archive_cause: row.get("archive_cause")?,
+            state_at: row.get("state_at")?,
+            author_is_bot: row.get::<_, i64>("author_is_bot")? != 0,
+            stale: row.get::<_, i64>("stale")? != 0,
             first_seen_at: row.get("first_seen_at")?,
             last_refreshed: row.get("last_refreshed")?,
         })

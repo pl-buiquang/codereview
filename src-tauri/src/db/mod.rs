@@ -50,6 +50,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("migrations/0031_board_monitor_log.sql"),
     include_str!("migrations/0032_comment_ai_subtags.sql"),
     include_str!("migrations/0033_ai_run.sql"),
+    include_str!("migrations/0034_inbox_triage.sql"),
 ];
 
 pub fn open(path: &Path) -> AppResult<Connection> {
@@ -250,6 +251,49 @@ mod tests {
             .unwrap();
         let both = (Some("base1".to_string()), Some("head1".to_string()));
         assert_eq!(pins, vec![both.clone(), both, (None, None)]);
+    }
+
+    #[test]
+    fn migration_0034_maps_old_inbox_timestamps_to_triage_state() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        for script in &MIGRATIONS[..33] {
+            conn.execute_batch(script).unwrap();
+        }
+        conn.pragma_update(None, "user_version", 33_i64).unwrap();
+        conn.execute_batch(
+            "INSERT INTO inbox_entry (id, type, first_seen_at, untracked_at, engaged_at, closed_at) VALUES
+                ('open', 'issue', 's', NULL, NULL, NULL),
+                ('done', 'pr', 's', NULL, 'e', NULL),
+                ('arch', 'pr', 's', 'a', NULL, NULL),
+                ('closed', 'pr', 's', NULL, NULL, 'c'),
+                ('mine', 'pr', 's', NULL, NULL, NULL),
+                ('mine_issue', 'issue', 's', NULL, NULL, NULL),
+                ('onboard', 'pr', 's', NULL, 'e', NULL),
+                ('discarded', 'pr', 's', NULL, NULL, NULL);
+             INSERT INTO item_reasons (item_id, reason, detail) VALUES
+                ('open', 'mention', ''), ('mine', 'author', ''), ('mine_issue', 'author', '');
+             INSERT INTO board_card (id, type, tracked_at, discarded_at) VALUES
+                ('onboard', 'pr', 't', NULL), ('discarded', 'pr', 't', 'd');",
+        )
+        .unwrap();
+
+        migrate(&conn).unwrap();
+
+        let q = |id: &str| -> (String, Option<String>) {
+            conn.query_row("SELECT state, archive_cause FROM inbox_entry WHERE id = ?1", [id], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap()
+        };
+        assert_eq!(q("open"), ("new".into(), None));
+        assert_eq!(q("done"), ("archived".into(), Some("dismissed".into())));
+        assert_eq!(q("arch"), ("archived".into(), Some("dismissed".into())));
+        assert_eq!(q("closed"), ("archived".into(), Some("closed".into())));
+        assert_eq!(q("mine"), ("archived".into(), Some("dismissed".into())), "own PRs leave the queue");
+        assert_eq!(q("mine_issue"), ("new".into(), None), "own issues stay");
+        assert_eq!(q("onboard"), ("tracked".into(), None), "on the board beats done");
+        assert_eq!(q("discarded"), ("new".into(), None));
     }
 
     #[test]

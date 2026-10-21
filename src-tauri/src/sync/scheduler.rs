@@ -60,7 +60,7 @@ impl Default for SyncConfig {
     fn default() -> Self {
         Self {
             auto_sync: AutoSync::Periodic,
-            discovery_interval_min: 15,
+            discovery_interval_min: 5,
             board_monitor: false,
             board_monitor_interval_min: default_monitor_interval_min(),
         }
@@ -426,14 +426,13 @@ impl SyncEngine {
             match &result {
                 Ok(report) => {
                     log::info!(
-                        "[sync] {:?} {:?}{}: {} probed, {} refetched, {} threads, {} files in {}ms",
+                        "[sync] {:?} {:?}{}: {} probed, {} refetched, {} threads in {}ms",
                         req.scope,
                         req.mode,
                         if report.discovered { " + discovery" } else { "" },
                         report.probed,
                         report.changed,
                         report.threads,
-                        report.files,
                         report.duration_ms,
                     );
                     s.last_error = None;

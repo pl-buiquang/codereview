@@ -15,7 +15,7 @@ type DeepLinkAction =
   | { kind: "navigateHome"; section: string | null }
   | { kind: "showBoardCard"; owner: string; name: string; number: number };
 
-const VALID_SECTIONS = new Set<HomeSection>(["sessions", "board", "inbox", "reviews", "archive", "worktrees", "repositories"]);
+const VALID_SECTIONS = new Set<HomeSection>(["sessions", "board", "inbox", "reviews", "worktrees", "repositories"]);
 
 export async function handleDeepLinkAction(action: DeepLinkAction): Promise<void> {
   const { openReview, setActiveTab, setHomeSection, showBoardCard } = useUIStore.getState();
@@ -87,7 +87,11 @@ export async function handleDeepLinkAction(action: DeepLinkAction): Promise<void
     }
 
     case "navigateHome":
-      if (action.section && VALID_SECTIONS.has(action.section as HomeSection)) {
+      if (action.section === "archive") {
+        // The Archive page is now the Inbox's Archive tab.
+        useUIStore.getState().setInboxFilters({ bucket: "archive" });
+        setHomeSection("inbox");
+      } else if (action.section && VALID_SECTIONS.has(action.section as HomeSection)) {
         setHomeSection(action.section as HomeSection);
       } else {
         setActiveTab("home");
