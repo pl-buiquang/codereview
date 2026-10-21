@@ -5729,3 +5729,222 @@ button.board-overview-ref {
   font-size: 9px;
   line-height: 14px;
 }
+
+/* --- Routines --------------------------------------------------------------- */
+.sessions-shell {
+  min-height: 0;
+}
+.routine-status-running,
+.routine-status-queued {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.routine-status-ok {
+  color: var(--success);
+}
+.routine-status-needs_attention,
+.routine-status-timeout,
+.routine-status-interrupted {
+  color: var(--warning);
+}
+.routine-status-error {
+  color: var(--danger);
+}
+.routine-badge {
+  cursor: pointer;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: none;
+}
+.routine-launch-modal {
+  width: min(560px, 90vw);
+}
+.routine-launch-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 12px 0;
+  overflow: auto;
+}
+.routine-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-m);
+  padding: 8px 10px;
+}
+.routine-option.selected {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.routine-option-main {
+  flex: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  text-align: left;
+  background: transparent;
+  border: none;
+  padding: 0;
+}
+.routine-option-desc {
+  flex-basis: 100%;
+  font-size: 12px;
+}
+.routine-option-run {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.routine-launch-opts {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.routines-runs {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(280px, 380px) 1fr;
+}
+.routines-runs-list,
+.routines-config-list {
+  overflow: auto;
+  padding: 12px 12px 12px 24px;
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.routines-run-detail {
+  overflow: auto;
+  padding: 12px 24px;
+}
+.routines-filters {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.routine-run-row {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  text-align: left;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-m);
+  background: transparent;
+}
+.routine-run-row:hover {
+  background: var(--surface-2);
+}
+.routine-run-row.selected {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.routine-run-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.routine-run-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+.routine-run-actions {
+  display: flex;
+  gap: 6px;
+}
+.routine-cwd {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.routine-transcript {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+.routine-tool {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-m);
+  padding: 4px 8px;
+  background: var(--bg-sunken);
+}
+.routine-tool.error {
+  border-color: var(--danger);
+}
+.routine-tool summary {
+  cursor: pointer;
+  display: flex;
+  gap: 8px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.routine-tool-arg {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.routine-tool pre {
+  margin: 6px 0 0;
+  max-height: 260px;
+  overflow: auto;
+  font-size: 11.5px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.routine-result {
+  border-left: 3px solid var(--accent);
+  padding-left: 10px;
+}
+.routine-result.error {
+  border-left-color: var(--danger);
+}
+.routines-config {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(240px, 300px) 1fr;
+}
+.routines-config-form {
+  overflow: auto;
+  padding: 12px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.routines-config-form label,
+.routines-cap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.routines-config-row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-end;
+}
+.routines-config-row > label {
+  flex: 1;
+}
+.routines-check {
+  flex-direction: row !important;
+  align-items: center;
+  flex: none !important;
+}
+.routines-cap {
+  margin-top: 12px;
+}
+.input.mono {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}

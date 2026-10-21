@@ -96,6 +96,8 @@ import {
 } from "../lib/commentFilter";
 import { anchorPin, isCommentOutdated } from "../lib/staleness";
 import { summaryLine } from "../lib/text";
+import { prContextKey, useActiveRoutineRuns } from "../lib/routines";
+import { RoutineLaunchModal } from "./routines/RoutineLaunchModal";
 import { AI_SUBTAGS, isAiTag, tagLabel, tagTitle, type CommentTag } from "../lib/commentTag";
 import type {
   AiReviewLayer,
@@ -968,6 +970,13 @@ function ReviewHeader({
   const { review, target } = detail;
   const isActiveTab = useUIStore((s) => s.activeTabId === `review-${review.id}`);
   const [showExport, setShowExport] = useState(false);
+  const [showRoutines, setShowRoutines] = useState(false);
+  const showRoutineRun = useUIStore((s) => s.showRoutineRun);
+  const routineContextKey =
+    target.kind === "github_pr" && detail.remote_owner && detail.remote_name && target.github_pr_number != null
+      ? prContextKey(`${detail.remote_owner}/${detail.remote_name}`, target.github_pr_number)
+      : `review:${review.id}`;
+  const activeRoutineRuns = useActiveRoutineRuns().get(routineContextKey);
   const [collapsed, setCollapsed] = useState(review.pr_details_collapsed);
   const togglePrDetails = () => {
     const next = !collapsed;
@@ -1466,6 +1475,15 @@ function ReviewHeader({
             <span className="spinner" /> AI review…
           </span>
         )}
+        {activeRoutineRuns && activeRoutineRuns.length > 0 && (
+          <button
+            className="badge routine-badge"
+            title={activeRoutineRuns.map((r) => `${r.routine_name}: ${r.status}`).join("\n")}
+            onClick={() => showRoutineRun(activeRoutineRuns[0].id)}
+          >
+            ⚙ {activeRoutineRuns.length === 1 ? activeRoutineRuns[0].routine_name : `${activeRoutineRuns.length} routines`}
+          </button>
+        )}
         <KebabMenu title="Review actions">
           {(close) => {
             const run = (fn: () => void) => () => {
@@ -1571,6 +1589,9 @@ function ReviewHeader({
                     Regenerate AI focus
                   </button>
                 )}
+                <button role="menuitem" title="Run a routine (e.g. babysit) on this review" onClick={run(() => setShowRoutines(true))}>
+                  Routines…
+                </button>
                 {aiReviewItems.map((item) => {
                   const disabledReason = !claudeAvailable
                     ? "Claude CLI not found"
@@ -1672,6 +1693,10 @@ function ReviewHeader({
           }}
         </KebabMenu>
       </div>
+
+      {showRoutines && (
+        <RoutineLaunchModal kind="review" id={String(review.id)} title={target.title} onClose={() => setShowRoutines(false)} />
+      )}
 
       {showExport && (
         <ExportModal

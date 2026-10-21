@@ -36,6 +36,13 @@ import type {
   IgnoreRule,
   InboxMeta,
   PrMeta,
+  Routine,
+  RoutineContextRef,
+  RoutineInput,
+  RoutineOption,
+  RoutineRun,
+  RoutineRunEvent,
+  RoutineRunFilter,
   PrSummary,
   PrThread,
   PublishDraftRepliesResult,
@@ -114,6 +121,22 @@ export const api = {
   runAiReview: (reviewId: number, layer: AiReviewLayer, model?: string) =>
     invoke<void>("run_ai_review", { reviewId, layer, model: model || null }),
   aiReviewStatus: (reviewId: number) => invoke<AiReviewLayer | null>("ai_review_status", { reviewId }),
+
+  // Routines
+  routineList: () => invoke<Routine[]>("routine_list"),
+  routineSave: (routine: RoutineInput) => invoke<Routine>("routine_save", { routine }),
+  routineDelete: (id: number) => invoke<void>("routine_delete", { id }),
+  routineReset: (id: number) => invoke<Routine>("routine_reset", { id }),
+  routineListForContext: (context: RoutineContextRef) =>
+    invoke<RoutineOption[]>("routine_list_for_context", { context }),
+  routineLaunch: (routineId: number, context: RoutineContextRef, note?: string, model?: string) =>
+    invoke<RoutineRun>("routine_launch", { routineId, context, note: note || null, model: model || null }),
+  routineRunList: (filter?: RoutineRunFilter) => invoke<RoutineRun[]>("routine_run_list", { filter: filter ?? null }),
+  routineRunEvents: (runId: number, afterSeq = 0) => invoke<RoutineRunEvent[]>("routine_run_events", { runId, afterSeq }),
+  routineRunStop: (runId: number) => invoke<void>("routine_run_stop", { runId }),
+  routineRunRelaunch: (runId: number) => invoke<RoutineRun>("routine_run_relaunch", { runId }),
+  routineMaxConcurrency: () => invoke<number>("routine_max_concurrency"),
+  routineSetMaxConcurrency: (n: number) => invoke<void>("routine_set_max_concurrency", { n }),
 
   // AI usage log
   aiUsageSummary: (range: UsageRange) => invoke<AiUsageSummary>("ai_usage_summary", { range }),

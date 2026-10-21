@@ -11,6 +11,8 @@ import { RepoName } from "./RepoName";
 import { AutoMergeBadge, CiBadge, CommentsBadge, MergeStateBadge, MergeableBadge, StackBadge } from "./InboxBadges";
 import { Icon } from "./icons";
 import { AgentSessionItems, KebabMenu } from "./KebabMenu";
+import { RoutineLaunchModal } from "./routines/RoutineLaunchModal";
+import { cardContextKey, useActiveRoutineRuns } from "../lib/routines";
 
 const BORDER_STYLE_KEY: Record<BoardBorderSide, "borderTopColor" | "borderRightColor" | "borderBottomColor" | "borderLeftColor"> = {
   top: "borderTopColor",
@@ -270,10 +272,12 @@ function PrActionsMenu({
   card,
   actions,
   terminal,
+  onRoutines,
 }: {
   card: BoardCardT;
   actions: PrActions;
   terminal: TerminalAction | null;
+  onRoutines: () => void;
 }) {
   const isOpen = card.state === "open";
   const updateDisabledReason = updateBranchDisabledReason(card);
@@ -365,6 +369,10 @@ function PrActionsMenu({
               </>
             )}
             <hr className="btn-split-menu-separator" />
+            <button role="menuitem" title="Run a routine (e.g. babysit) on this PR" onClick={run(onRoutines)}>
+              Routines…
+            </button>
+            <hr className="btn-split-menu-separator" />
             <button
               role="menuitem"
               disabled={updateDisabledReason != null}
@@ -452,6 +460,9 @@ export function BoardCard({
   const [adding, setAdding] = useState(false);
   const [linkInput, setLinkInput] = useState("");
   const [titleMenuOpen, setTitleMenuOpen] = useState(false);
+  const [routinesOpen, setRoutinesOpen] = useState(false);
+  const activeRuns = useActiveRoutineRuns().get(cardContextKey(card));
+  const showRoutineRun = useUIStore((s) => s.showRoutineRun);
   const [snoozeMenuOpen, setSnoozeMenuOpen] = useState(false);
   const snoozeRef = useRef<HTMLSpanElement>(null);
   const snoozeOptions = parseSnoozeOptions(useSettingsStore((s) => s.boardSnoozeOptions));
@@ -552,7 +563,36 @@ export function BoardCard({
             </div>
           )}
         </span>
-        {card.type === "pr" && prActions && <PrActionsMenu card={card} actions={prActions} terminal={terminal} />}
+        {card.type === "pr" && prActions && (
+          <PrActionsMenu card={card} actions={prActions} terminal={terminal} onRoutines={() => setRoutinesOpen(true)} />
+        )}
+        {card.type === "issue" && (
+          <KebabMenu title="Issue actions" className="board-card-menu">
+            {(close) => (
+              <>
+                <button
+                  role="menuitem"
+                  onClick={() => {
+                    close();
+                    copyCardUrl(card.url);
+                  }}
+                >
+                  Copy GitHub link
+                </button>
+                <button
+                  role="menuitem"
+                  title="Run a routine on this issue"
+                  onClick={() => {
+                    close();
+                    setRoutinesOpen(true);
+                  }}
+                >
+                  Routines…
+                </button>
+              </>
+            )}
+          </KebabMenu>
+        )}
       </div>
 
       <div className="board-card-subtitle-row">
@@ -693,11 +733,28 @@ export function BoardCard({
             <Icon name="plus" size={13} />
           </button>
         )}
+        {activeRuns && activeRuns.length > 0 && (
+          <button
+            className="badge routine-badge"
+            title={activeRuns.map((r) => `${r.routine_name}: ${r.status}`).join("\n")}
+            onClick={() => showRoutineRun(activeRuns[0].id)}
+          >
+            ⚙ {activeRuns.length === 1 ? activeRuns[0].routine_name : `${activeRuns.length} routines`}
+          </button>
+        )}
         <span className="cr-spacer" />
         <span className="board-card-when faint" title={`Last updated ${card.updated_at}`}>
           {timeAgo(card.updated_at)}
         </span>
       </div>
+      {routinesOpen && (
+        <RoutineLaunchModal
+          kind={card.type}
+          id={card.id}
+          title={`${card.repo}#${card.number}`}
+          onClose={() => setRoutinesOpen(false)}
+        />
+      )}
     </div>
   );
 }

@@ -21,6 +21,7 @@ import { useDeepLinkListener } from "./lib/deepLink";
 import { dismissSplash } from "./lib/splash";
 import { GIT_CHANGED_EVENT, gitChangedQueryKeys, type GitChangedPayload } from "./lib/gitChanged";
 import { useSyncBridge } from "./lib/sync";
+import { useRoutineEvents } from "./lib/routines";
 import { brief, log } from "./lib/log";
 import { useUIStore, type Tab } from "./store";
 import type { AiReviewUpdated } from "./lib/types";
@@ -53,6 +54,7 @@ function App() {
   useApplySettings();
   useDeepLinkListener();
   useSyncBridge();
+  useRoutineEvents();
   const tabs = useUIStore((s) => s.tabs);
   const closeTab = useUIStore((s) => s.closeTab);
   const openRepoIds = useUIStore((s) => s.openRepoIds);

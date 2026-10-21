@@ -862,3 +862,95 @@ export interface ConversationFilters {
   unresolved: boolean;
   showBots: boolean;
 }
+
+// --- Routines ---------------------------------------------------------------
+
+export type RoutineContextKind = "pr" | "review" | "issue" | "board";
+
+/** What a menu launches a routine on: a board card id, a review id (as a string), or nothing. */
+export interface RoutineContextRef {
+  kind: RoutineContextKind;
+  id: string;
+  base_paths: string[];
+}
+
+export interface Routine {
+  id: number;
+  key: string;
+  name: string;
+  description: string;
+  context_type: RoutineContextKind;
+  prompt_template: string;
+  system_prompt: string;
+  system_prompt_mode: "append" | "replace";
+  needs_worktree: boolean;
+  permission_mode: string;
+  allowed_tools: string[];
+  extra_args: string[];
+  model: string;
+  timeout_min: number;
+  builtin: boolean;
+  handler: string | null;
+  enabled: boolean;
+}
+
+export type RoutineInput = Omit<Routine, "id" | "key" | "builtin" | "handler"> & { id: number | null };
+
+export type RoutineRunStatus =
+  | "queued"
+  | "running"
+  | "ok"
+  | "needs_attention"
+  | "error"
+  | "killed"
+  | "timeout"
+  | "interrupted";
+
+export interface RoutineRun {
+  id: number;
+  routine_id: number;
+  routine_key: string;
+  routine_name: string;
+  context_type: string;
+  /** Canonical key: `pr:owner/name#12`, `issue:owner/name#3`, `review:7` or `board`. */
+  context_key: string;
+  context_label: string;
+  context: RoutineContextRef;
+  status: RoutineRunStatus;
+  note: string;
+  model: string;
+  session_id: string | null;
+  cwd: string | null;
+  result_text: string | null;
+  error: string | null;
+  cost_usd: number;
+  num_turns: number;
+  queued_at: string;
+  started_at: string | null;
+  ended_at: string | null;
+}
+
+export interface RoutineOption {
+  routine: Routine;
+  active_run: RoutineRun | null;
+}
+
+export interface RoutineRunFilter {
+  statuses?: RoutineRunStatus[];
+  routine_id?: number;
+  context_key?: string;
+  limit?: number;
+}
+
+/** One stream-json line of a run; `json` is the raw line. */
+export interface RoutineRunEvent {
+  seq: number;
+  ts: string;
+  kind: string;
+  json: string;
+}
+
+export interface RoutineRunUpdated {
+  run_id: number;
+  status: RoutineRunStatus;
+}

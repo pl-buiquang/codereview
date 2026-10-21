@@ -7,10 +7,12 @@ import { confirmDialog } from "../lib/confirm";
 import { timeAgo } from "../lib/timeAgo";
 import { isWaiting } from "../lib/sessionCounts";
 import { useSettingsStore } from "../lib/settings";
-import { useUIStore } from "../store";
+import { useUIStore, type SessionsTab } from "../store";
 import type { CardSession, ClaudeSession, SessionFocusState } from "../lib/types";
 import { Icon } from "./icons";
 import { Markdown } from "./Markdown";
+import { RoutinesConfigTab } from "./routines/RoutinesConfigTab";
+import { RoutinesRunsTab } from "./routines/RoutinesRunsTab";
 
 const FOCUS_DISABLED_REASON: Record<Exclude<SessionFocusState, "ready">, string> = {
   detached: "No terminal is attached to this tmux session",
@@ -37,7 +39,7 @@ export function resumeCommand(s: Pick<ClaudeSession, "cwd" | "session_id">): str
   return `cd ${shellQuote(s.cwd)}; claude --resume ${s.session_id}`;
 }
 
-export function SessionsView() {
+function TerminalSessions() {
   const historyDays = useSettingsStore((s) => s.sessionHistoryDays);
   const summaryDir = useSettingsStore((s) => s.sessionSummaryDir);
   const defaultTerminal = useSettingsStore((s) => s.defaultTerminal);
@@ -355,6 +357,39 @@ function SessionRow({
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+const SESSION_TABS: { key: SessionsTab; label: string }[] = [
+  { key: "terminal", label: "Terminal sessions" },
+  { key: "routines", label: "Routines" },
+  { key: "config", label: "Config" },
+];
+
+/** Sessions section: live Claude terminals, routine runs, and routine definitions. */
+export function SessionsView() {
+  const tab = useUIStore((s) => s.sessionsTab);
+  const setTab = useUIStore((s) => s.setSessionsTab);
+  return (
+    <div className="cr-main sessions-shell">
+      <div className="cr-tabs" role="tablist">
+        {SESSION_TABS.map((t) => (
+          <button
+            key={t.key}
+            type="button"
+            role="tab"
+            aria-selected={t.key === tab}
+            className={`cr-tab${t.key === tab ? " active" : ""}`}
+            onClick={() => setTab(t.key)}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+      {tab === "terminal" && <TerminalSessions />}
+      {tab === "routines" && <RoutinesRunsTab />}
+      {tab === "config" && <RoutinesConfigTab />}
     </div>
   );
 }

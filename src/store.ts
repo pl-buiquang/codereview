@@ -12,6 +12,8 @@ export type HomeSection =
   | "worktrees"
   | "repositories";
 
+export type SessionsTab = "terminal" | "routines" | "config";
+
 export interface Tab {
   id: string;
   kind: TabKind;
@@ -135,6 +137,12 @@ interface UIState {
   clearThreadJump: () => void;
   /** Board card to scroll to and flash once the Board renders (not persisted). */
   boardHighlightCardId: string | null;
+  /** Active tab of the Sessions section, and the routine run it should open (not persisted). */
+  sessionsTab: SessionsTab;
+  setSessionsTab: (tab: SessionsTab) => void;
+  routineRunFocus: number | null;
+  showRoutineRun: (runId: number) => void;
+  clearRoutineRunFocus: () => void;
   showBoardCard: (cardId: string) => void;
   clearBoardHighlight: () => void;
   /** Pending request to open a repo's Graph on a ref/worktree (not persisted). */
@@ -190,6 +198,18 @@ export const useUIStore = create<UIState>()(
       conversationFilters: EMPTY_CONVERSATION_FILTERS,
       threadJump: null,
       boardHighlightCardId: null,
+      sessionsTab: "terminal",
+      setSessionsTab: (sessionsTab) => set({ sessionsTab }),
+      routineRunFocus: null,
+      showRoutineRun: (runId) =>
+        set({
+          homeSection: "sessions",
+          homeRepoId: null,
+          activeTabId: HOME_TAB.id,
+          sessionsTab: "routines",
+          routineRunFocus: runId,
+        }),
+      clearRoutineRunFocus: () => set({ routineRunFocus: null }),
       graphFocus: null,
 
       focusGraph: (focus) =>
