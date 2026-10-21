@@ -18,8 +18,8 @@ type TabKey = "new" | "archive" | "conversations";
 
 const TABS: { key: TabKey; label: string; icon: IconName; variant: RowVariant }[] = [
   { key: "new", label: "New", icon: "inbox", variant: "new" },
-  { key: "archive", label: "Archive", icon: "archive", variant: "archive" },
   { key: "conversations", label: "Conversations", icon: "comment", variant: "new" },
+  { key: "archive", label: "Archive", icon: "archive", variant: "archive" },
 ];
 
 const ARCHIVE_PAGE = 100;
