@@ -136,7 +136,7 @@ export function HomeNav({
                 <img className="cr-open-repo-avatar" src={identicon(label)} alt="" />
                 {!collapsed && (
                   <>
-                    <span className="cr-open-repo-label">{repoShortName(repo)}</span>
+                    <span className="cr-open-repo-label">{repo.friendly_name?.trim() || repoShortName(repo)}</span>
                     <button
                       className="cr-open-repo-close"
                       title="Close repository"
