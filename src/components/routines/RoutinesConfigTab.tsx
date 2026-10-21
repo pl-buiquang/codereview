@@ -202,7 +202,7 @@ export function RoutinesConfigTab() {
             System prompt
             <textarea
               className="input mono"
-              rows={10}
+              rows={16}
               value={draft.system_prompt}
               onChange={(e) => patch({ system_prompt: e.target.value })}
             />
@@ -233,7 +233,7 @@ export function RoutinesConfigTab() {
               Allowed tools <span className="muted">(one per line, empty = unrestricted)</span>
               <textarea
                 className="input mono"
-                rows={3}
+                rows={4}
                 value={toolsText}
                 onChange={(e) => setToolsText(e.target.value)}
               />
@@ -242,7 +242,7 @@ export function RoutinesConfigTab() {
               Extra claude args <span className="muted">(one per line)</span>
               <textarea
                 className="input mono"
-                rows={3}
+                rows={4}
                 value={argsText}
                 onChange={(e) => setArgsText(e.target.value)}
               />
