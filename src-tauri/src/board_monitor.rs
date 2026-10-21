@@ -73,6 +73,10 @@ pub fn candidates(conn: &Connection) -> AppResult<Vec<Candidate>> {
         .into_iter()
         .filter_map(|c| {
             let (owner, name) = c.repo.split_once('/')?;
+            // A running babysit routine already owns this PR's CI; don't race it on reruns.
+            if crate::routines::babysit_active(conn, &crate::routines::context::pr_key(owner, name, c.number)) {
+                return None;
+            }
             Some(Candidate {
                 owner: owner.to_string(),
                 name: name.to_string(),

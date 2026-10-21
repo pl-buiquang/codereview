@@ -20,7 +20,7 @@ fn now() -> String {
 
 /// Generate a UUID v4 without an external crate. Uses microsecond timestamp +
 /// an atomic counter + process id for uniqueness.
-fn new_session_id() -> String {
+pub(crate) fn new_session_id() -> String {
     static COUNTER: AtomicU64 = AtomicU64::new(0);
     let ts = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -39,10 +39,10 @@ fn new_session_id() -> String {
 
 /// JSON envelope returned by `claude -p --output-format json`.
 #[derive(Deserialize)]
-struct ClaudeEnvelope {
-    result: Option<serde_json::Value>,
+pub(crate) struct ClaudeEnvelope {
+    pub(crate) result: Option<serde_json::Value>,
     #[serde(default)]
-    is_error: bool,
+    pub(crate) is_error: bool,
     #[serde(default)]
     total_cost_usd: f64,
     usage: Option<ClaudeUsage>,
@@ -77,7 +77,7 @@ struct ClaudeModelUsage {
 }
 
 impl ClaudeEnvelope {
-    fn run_usage(&self) -> RunUsage {
+    pub(crate) fn run_usage(&self) -> RunUsage {
         let usage = self.usage.as_ref();
         let mut models: Vec<ModelTokens> = self
             .model_usage

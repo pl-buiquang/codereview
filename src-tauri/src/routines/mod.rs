@@ -1,0 +1,416 @@
+//! Routines: named `claude -p` runs with their own prompt, scoped to a context (a PR, a review, an
+//! issue or the board). `manager` owns the processes (streaming, queue, dedup, kill on exit),
+//! `context` turns a launch reference into prompt variables and a working directory.
+
+pub mod context;
+pub mod manager;
+
+use rusqlite::{params, Connection, Row};
+use serde::{Deserialize, Serialize};
+
+use crate::error::{AppError, AppResult};
+
+pub const BABYSIT_KEY: &str = "babysit";
+
+/// A routine definition, as stored and as edited in the Config tab.
+#[derive(Debug, Clone, Serialize)]
+pub struct Routine {
+    pub id: i64,
+    pub key: String,
+    pub name: String,
+    pub description: String,
+    pub context_type: String,
+    pub prompt_template: String,
+    pub system_prompt: String,
+    pub system_prompt_mode: String,
+    pub needs_worktree: bool,
+    pub permission_mode: String,
+    pub allowed_tools: Vec<String>,
+    pub extra_args: Vec<String>,
+    pub model: String,
+    pub timeout_min: i64,
+    pub builtin: bool,
+    pub handler: Option<String>,
+    pub enabled: bool,
+}
+
+impl Routine {
+    pub fn from_row(row: &Row) -> rusqlite::Result<Self> {
+        let json_list = |col: &str| -> rusqlite::Result<Vec<String>> {
+            let raw: String = row.get(col)?;
+            Ok(serde_json::from_str(&raw).unwrap_or_default())
+        };
+        Ok(Self {
+            id: row.get("id")?,
+            key: row.get("key")?,
+            name: row.get("name")?,
+            description: row.get("description")?,
+            context_type: row.get("context_type")?,
+            prompt_template: row.get("prompt_template")?,
+            system_prompt: row.get("system_prompt")?,
+            system_prompt_mode: row.get("system_prompt_mode")?,
+            needs_worktree: row.get::<_, i64>("needs_worktree")? != 0,
+            permission_mode: row.get("permission_mode")?,
+            allowed_tools: json_list("allowed_tools")?,
+            extra_args: json_list("extra_args")?,
+            model: row.get("model")?,
+            timeout_min: row.get("timeout_min")?,
+            builtin: row.get::<_, i64>("builtin")? != 0,
+            handler: row.get("handler")?,
+            enabled: row.get::<_, i64>("enabled")? != 0,
+        })
+    }
+}
+
+pub fn get(conn: &Connection, id: i64) -> AppResult<Routine> {
+    conn.query_row("SELECT * FROM routine WHERE id = ?1", params![id], Routine::from_row)
+        .map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => AppError::Other(format!("routine {id} not found")),
+            other => other.into(),
+        })
+}
+
+pub fn list(conn: &Connection) -> AppResult<Vec<Routine>> {
+    let mut stmt = conn.prepare("SELECT * FROM routine ORDER BY builtin DESC, name COLLATE NOCASE")?;
+    let rows = stmt.query_map([], Routine::from_row)?.collect::<rusqlite::Result<_>>()?;
+    Ok(rows)
+}
+
+/// The fields a built-in is reset to.
+pub struct Defaults {
+    pub key: &'static str,
+    pub name: &'static str,
+    pub description: &'static str,
+    pub context_type: &'static str,
+    pub prompt_template: &'static str,
+    pub system_prompt: &'static str,
+    pub needs_worktree: bool,
+    pub timeout_min: i64,
+}
+
+const BABYSIT_PROMPT: &str = "/goal PR {{repo}}#{{number}} has every required check passing on its latest head and its branch is not behind {{base_ref}}, or you have stopped and reported NEEDS_ATTENTION";
+
+const BABYSIT_SYSTEM: &str = "\
+You are babysitting pull request {{url}} ({{title}}). Your working directory is its checked-out worktree \
+({{worktree}}), on branch `{{head_ref}}` (base `{{base_ref}}`). Keep going until the goal holds.
+
+Loop:
+1. Read the PR state: `gh pr view {{number}} --json mergeStateStatus,mergeable,statusCheckRollup,headRefOid` and \
+`gh pr checks {{number}}`. Only the latest head commit matters.
+2. If checks are still running, wait for them without burning turns: run `gh pr checks {{number}} --watch` in the \
+foreground, or start a background `gh run watch` and wait for it.
+3. If the branch is BEHIND `{{base_ref}}`, update it: `gh pr update-branch {{number}}`. If the PR is part of a stack \
+(use the gh-stack skill), rebase it on its parent instead; `git push --force-with-lease` is allowed only after such a rebase.
+4. If a check failed, read its log (`gh run view <id> --log-failed`). A flaky or infrastructure failure (network, runner, \
+timeout, unrelated test): rerun just the failed jobs (`gh run rerun <id> --failed`), at most 3 times per run. A real failure \
+caused by the branch: fix it in the worktree, run the relevant tests locally, commit with a one-line Conventional Commit \
+message (no body), and `git push` (never a plain `--force`). Then go back to step 1.
+5. Never merge the PR, never post comments or reviews on GitHub, never touch other branches.
+
+Stop when the goal holds, or when you cannot make progress without a human (a failure you cannot fix, a decision only the \
+author can take, repeated reruns of the same failure). In that last case finish with `NEEDS_ATTENTION: <one-sentence diagnosis>`.";
+
+pub const DEFAULTS: &[Defaults] = &[Defaults {
+    key: BABYSIT_KEY,
+    name: "Babysit",
+    description: "Keep a PR's CI green: wait for checks, rerun flaky jobs, update the branch, fix real failures and push.",
+    context_type: "pr",
+    prompt_template: BABYSIT_PROMPT,
+    system_prompt: BABYSIT_SYSTEM,
+    needs_worktree: true,
+    timeout_min: 240,
+}];
+
+/// Insert the built-in routines that don't exist yet. Existing rows (possibly edited) are left alone.
+pub fn seed(conn: &Connection) -> AppResult<()> {
+    let now = chrono::Utc::now().to_rfc3339();
+    for d in DEFAULTS {
+        conn.execute(
+            "INSERT OR IGNORE INTO routine
+               (key, name, description, context_type, prompt_template, system_prompt, system_prompt_mode,
+                needs_worktree, permission_mode, timeout_min, builtin, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'append', ?7, 'bypassPermissions', ?8, 1, ?9, ?9)",
+            params![
+                d.key,
+                d.name,
+                d.description,
+                d.context_type,
+                d.prompt_template,
+                d.system_prompt,
+                d.needs_worktree as i64,
+                d.timeout_min,
+                now
+            ],
+        )?;
+    }
+    Ok(())
+}
+
+/// Put a built-in back to its shipped prompt, worktree flag and timeout.
+pub fn reset(conn: &Connection, id: i64) -> AppResult<Routine> {
+    let routine = get(conn, id)?;
+    let d = DEFAULTS
+        .iter()
+        .find(|d| d.key == routine.key)
+        .ok_or_else(|| AppError::Other("only built-in routines can be reset".into()))?;
+    conn.execute(
+        "UPDATE routine SET name = ?2, description = ?3, prompt_template = ?4, system_prompt = ?5,
+                system_prompt_mode = 'append', needs_worktree = ?6, permission_mode = 'bypassPermissions',
+                allowed_tools = '[]', extra_args = '[]', model = '', timeout_min = ?7, enabled = 1, updated_at = ?8
+         WHERE id = ?1",
+        params![
+            id,
+            d.name,
+            d.description,
+            d.prompt_template,
+            d.system_prompt,
+            d.needs_worktree as i64,
+            d.timeout_min,
+            chrono::Utc::now().to_rfc3339()
+        ],
+    )?;
+    get(conn, id)
+}
+
+/// What the Config tab sends. `id: None` creates a user routine.
+#[derive(Debug, Deserialize)]
+pub struct RoutineInput {
+    pub id: Option<i64>,
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    pub context_type: String,
+    pub prompt_template: String,
+    #[serde(default)]
+    pub system_prompt: String,
+    #[serde(default = "default_mode")]
+    pub system_prompt_mode: String,
+    #[serde(default)]
+    pub needs_worktree: bool,
+    #[serde(default = "default_permission")]
+    pub permission_mode: String,
+    #[serde(default)]
+    pub allowed_tools: Vec<String>,
+    #[serde(default)]
+    pub extra_args: Vec<String>,
+    #[serde(default)]
+    pub model: String,
+    #[serde(default = "default_timeout")]
+    pub timeout_min: i64,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+fn default_mode() -> String {
+    "append".into()
+}
+fn default_permission() -> String {
+    "bypassPermissions".into()
+}
+fn default_timeout() -> i64 {
+    240
+}
+fn default_true() -> bool {
+    true
+}
+
+const PERMISSION_MODES: &[&str] = &["default", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions"];
+
+fn slug(name: &str) -> String {
+    let s: String = name
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+    let s = s.split('-').filter(|p| !p.is_empty()).collect::<Vec<_>>().join("-");
+    if s.is_empty() {
+        "routine".into()
+    } else {
+        s
+    }
+}
+
+pub fn save(conn: &Connection, input: RoutineInput) -> AppResult<Routine> {
+    let name = input.name.trim().to_string();
+    if name.is_empty() {
+        return Err(AppError::Other("a routine needs a name".into()));
+    }
+    if input.prompt_template.trim().is_empty() {
+        return Err(AppError::Other("a routine needs a prompt".into()));
+    }
+    if !["pr", "review", "issue", "board"].contains(&input.context_type.as_str()) {
+        return Err(AppError::Other(format!("unknown context type `{}`", input.context_type)));
+    }
+    if !["append", "replace"].contains(&input.system_prompt_mode.as_str()) {
+        return Err(AppError::Other("system prompt mode must be append or replace".into()));
+    }
+    if !PERMISSION_MODES.contains(&input.permission_mode.as_str()) {
+        return Err(AppError::Other(format!("unknown permission mode `{}`", input.permission_mode)));
+    }
+    let timeout = input.timeout_min.clamp(1, 24 * 60);
+    let tools = serde_json::to_string(&input.allowed_tools).unwrap_or_else(|_| "[]".into());
+    let args = serde_json::to_string(&input.extra_args).unwrap_or_else(|_| "[]".into());
+    let now = chrono::Utc::now().to_rfc3339();
+
+    match input.id {
+        Some(id) => {
+            // Built-ins keep their key and context type: the board, review and handlers rely on them.
+            let existing = get(conn, id)?;
+            let context_type = if existing.builtin { existing.context_type.clone() } else { input.context_type };
+            conn.execute(
+                "UPDATE routine SET name = ?2, description = ?3, context_type = ?4, prompt_template = ?5,
+                        system_prompt = ?6, system_prompt_mode = ?7, needs_worktree = ?8, permission_mode = ?9,
+                        allowed_tools = ?10, extra_args = ?11, model = ?12, timeout_min = ?13, enabled = ?14,
+                        updated_at = ?15
+                 WHERE id = ?1",
+                params![
+                    id,
+                    name,
+                    input.description,
+                    context_type,
+                    input.prompt_template,
+                    input.system_prompt,
+                    input.system_prompt_mode,
+                    input.needs_worktree as i64,
+                    input.permission_mode,
+                    tools,
+                    args,
+                    input.model,
+                    timeout,
+                    input.enabled as i64,
+                    now
+                ],
+            )?;
+            get(conn, id)
+        }
+        None => {
+            let base = slug(&name);
+            let mut key = base.clone();
+            let mut n = 2;
+            while conn
+                .query_row("SELECT 1 FROM routine WHERE key = ?1", params![key], |_| Ok(()))
+                .is_ok()
+            {
+                key = format!("{base}-{n}");
+                n += 1;
+            }
+            conn.execute(
+                "INSERT INTO routine
+                   (key, name, description, context_type, prompt_template, system_prompt, system_prompt_mode,
+                    needs_worktree, permission_mode, allowed_tools, extra_args, model, timeout_min, enabled,
+                    builtin, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, 0, ?15, ?15)",
+                params![
+                    key,
+                    name,
+                    input.description,
+                    input.context_type,
+                    input.prompt_template,
+                    input.system_prompt,
+                    input.system_prompt_mode,
+                    input.needs_worktree as i64,
+                    input.permission_mode,
+                    tools,
+                    args,
+                    input.model,
+                    timeout,
+                    input.enabled as i64,
+                    now
+                ],
+            )?;
+            get(conn, conn.last_insert_rowid())
+        }
+    }
+}
+
+/// Whether a babysit run is queued or running on the context.
+pub fn babysit_active(conn: &Connection, context_key: &str) -> bool {
+    conn.query_row(
+        "SELECT 1 FROM routine_run r JOIN routine ro ON ro.id = r.routine_id
+         WHERE ro.key = ?1 AND r.context_key = ?2 AND r.status IN ('queued', 'running')",
+        params![BABYSIT_KEY, context_key],
+        |_| Ok(()),
+    )
+    .is_ok()
+}
+
+pub fn delete(conn: &Connection, id: i64) -> AppResult<()> {
+    if get(conn, id)?.builtin {
+        return Err(AppError::Other("built-in routines can't be deleted (use reset)".into()));
+    }
+    conn.execute("DELETE FROM routine WHERE id = ?1", params![id])?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::open_memory;
+
+    fn input(name: &str) -> RoutineInput {
+        RoutineInput {
+            id: None,
+            name: name.into(),
+            description: String::new(),
+            context_type: "pr".into(),
+            prompt_template: "hi {{number}}".into(),
+            system_prompt: String::new(),
+            system_prompt_mode: "append".into(),
+            needs_worktree: false,
+            permission_mode: "bypassPermissions".into(),
+            allowed_tools: vec![],
+            extra_args: vec![],
+            model: String::new(),
+            timeout_min: 30,
+            enabled: true,
+        }
+    }
+
+    #[test]
+    fn seed_is_idempotent_and_keeps_edits() {
+        let conn = open_memory();
+        seed(&conn).unwrap();
+        let babysit = list(&conn).unwrap().into_iter().find(|r| r.key == BABYSIT_KEY).unwrap();
+        assert!(babysit.builtin && babysit.needs_worktree && babysit.permission_mode == "bypassPermissions");
+        assert!(babysit.prompt_template.starts_with("/goal "));
+
+        conn.execute("UPDATE routine SET timeout_min = 5 WHERE id = ?1", params![babysit.id]).unwrap();
+        seed(&conn).unwrap();
+        assert_eq!(get(&conn, babysit.id).unwrap().timeout_min, 5);
+        assert_eq!(reset(&conn, babysit.id).unwrap().timeout_min, 240);
+    }
+
+    #[test]
+    fn user_routines_get_unique_keys_and_can_be_deleted_but_builtins_cannot() {
+        let conn = open_memory();
+        seed(&conn).unwrap();
+        let a = save(&conn, input("Fix lint")).unwrap();
+        let b = save(&conn, input("Fix lint")).unwrap();
+        assert_eq!((a.key.as_str(), b.key.as_str()), ("fix-lint", "fix-lint-2"));
+        delete(&conn, a.id).unwrap();
+        let babysit = list(&conn).unwrap().into_iter().find(|r| r.key == BABYSIT_KEY).unwrap();
+        assert!(delete(&conn, babysit.id).is_err());
+    }
+
+    #[test]
+    fn builtin_context_type_cannot_change() {
+        let conn = open_memory();
+        seed(&conn).unwrap();
+        let babysit = list(&conn).unwrap().into_iter().find(|r| r.key == BABYSIT_KEY).unwrap();
+        let mut edit = input("Babysit");
+        edit.id = Some(babysit.id);
+        edit.context_type = "issue".into();
+        assert_eq!(save(&conn, edit).unwrap().context_type, "pr");
+    }
+
+    #[test]
+    fn rejects_bad_input() {
+        let conn = open_memory();
+        let mut bad = input("x");
+        bad.permission_mode = "yolo".into();
+        assert!(save(&conn, bad).is_err());
+        let mut empty = input("  ");
+        empty.name = "  ".into();
+        assert!(save(&conn, empty).is_err());
+    }
+}

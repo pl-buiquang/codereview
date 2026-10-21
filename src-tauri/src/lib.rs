@@ -22,6 +22,7 @@ mod path_env;
 pub mod provider;
 pub mod prompts;
 pub mod repo_sync;
+pub mod routines;
 pub mod session_summaries;
 pub mod sync;
 pub mod terminal;
@@ -143,6 +144,7 @@ pub fn run() {
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_notification::init())
         .menu(app_menu)
         .on_menu_event(|app, event| {
             if event.id() == CLOSE_TAB_MENU_ID {
@@ -152,6 +154,7 @@ pub fn run() {
         .manage(CrNote(Mutex::new(cr_note)))
         .manage(watch::Watchers::default())
         .manage(commands::ai_review::AiReviewJobs::default())
+        .manage(routines::manager::RoutineManager::default())
         .setup(move |app| {
             // Ensure ~/.codereview/ exists for worktrees and future per-user data.
             if let Some(home) = dirs::home_dir() {
@@ -171,8 +174,11 @@ pub fn run() {
             }
             let conn = db::open(&db_path)?;
             commands::focus::fail_interrupted(&conn)?;
+            routines::seed(&conn)?;
+            routines::manager::mark_interrupted(&conn)?;
             app.manage(Db(Mutex::new(conn)));
             ai_usage::init(app.handle().clone());
+            routines::manager::RoutineManager::start_ticker(app.handle().clone());
             app.manage(db::DbPath(db_path.clone()));
             app.manage(sync::SyncEngine::start(app.handle().clone()));
 
@@ -234,6 +240,18 @@ pub fn run() {
             commands::focus::generate_focus,
             commands::ai_review::run_ai_review,
             commands::ai_review::ai_review_status,
+            commands::routines::routine_list,
+            commands::routines::routine_save,
+            commands::routines::routine_delete,
+            commands::routines::routine_reset,
+            commands::routines::routine_list_for_context,
+            commands::routines::routine_launch,
+            commands::routines::routine_run_list,
+            commands::routines::routine_run_events,
+            commands::routines::routine_run_stop,
+            commands::routines::routine_run_relaunch,
+            commands::routines::routine_max_concurrency,
+            commands::routines::routine_set_max_concurrency,
             commands::review::create_review,
             commands::review::list_reviews,
             commands::review::list_target_reviews,
@@ -397,8 +415,14 @@ pub fn run() {
             cr_install_note,
             app_version,
         ]))
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            // Routine runs lead their own process groups, so they'd outlive us unless killed here.
+            if let tauri::RunEvent::Exit = event {
+                app.state::<routines::manager::RoutineManager>().kill_all(app);
+            }
+        });
 }
 
 fn app_menu<R: tauri::Runtime>(

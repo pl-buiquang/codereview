@@ -85,7 +85,7 @@ fn registered_repo(conn: &Connection, owner: &str, name: &str) -> AppResult<bool
     Ok(count > 0)
 }
 
-fn card_row(conn: &Connection, card_id: &str) -> AppResult<BoardCardRow> {
+pub(crate) fn card_row(conn: &Connection, card_id: &str) -> AppResult<BoardCardRow> {
     conn.query_row(&format!("SELECT * FROM {CARD_VIEW} WHERE id = ?1"), params![card_id], BoardCardRow::from_row)
         .map_err(AppError::from)
 }

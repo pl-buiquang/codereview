@@ -11,6 +11,7 @@
     "window-state:default",
     "updater:default",
     "process:default",
-    "deep-link:default"
+    "deep-link:default",
+    "notification:default"
   ]
 }
