@@ -1,3 +1,4 @@
+import { Tooltip } from "../Tooltip";
 import {
   forwardRef,
   useCallback,
@@ -183,17 +184,30 @@ export const CommitGraph = forwardRef<CommitGraphHandle, CommitGraphProps>(funct
   const headRow = headIndex >= 0 ? rows[headIndex] : undefined;
   const wipLane = headRow?.lane ?? 0;
 
+  const pillClass = (p: Pill) =>
+    `cg-pill cg-pill-${p.kind}${"ref" in p && p.ref.is_head ? " cg-pill-current" : ""}`;
+
   const renderPills = (pills: Pill[] | undefined) => {
-    if (!pills || pills.length === 0) return null;
+    if (!pills || pills.length === 0) return <div className="cg-refs" />;
     const shown = pills.slice(0, MAX_VISIBLE_PILLS);
     const hidden = pills.slice(MAX_VISIBLE_PILLS);
+    const clipped = (el: HTMLElement) =>
+      hidden.length > 0 || Array.from(el.children).some((c) => c.scrollWidth > c.clientWidth);
+    const full = (
+      <div className="cg-refs-tip">
+        {pills.map((p, i) => (
+          <span key={`${p.kind}:${p.label}:${i}`} className={pillClass(p)}>
+            {"title" in p ? `${p.label} — ${p.title}` : p.label}
+          </span>
+        ))}
+      </div>
+    );
     return (
-      <>
+      <Tooltip content={full} className="cg-refs" variant="card" when={clipped}>
         {shown.map((p, i) => (
           <span
             key={`${p.kind}:${p.label}:${i}`}
-            className={`cg-pill cg-pill-${p.kind}${"ref" in p && p.ref.is_head ? " cg-pill-current" : ""}`}
-            title={"title" in p ? p.title : p.label}
+            className={pillClass(p)}
             data-ref-kind={p.kind}
             onContextMenu={
               "ref" in p && onRefContextMenu
@@ -208,12 +222,8 @@ export const CommitGraph = forwardRef<CommitGraphHandle, CommitGraphProps>(funct
             {p.label}
           </span>
         ))}
-        {hidden.length > 0 && (
-          <span className="cg-pill cg-pill-more" title={hidden.map((p) => p.label).join(", ")}>
-            +{hidden.length}
-          </span>
-        )}
-      </>
+        {hidden.length > 0 && <span className="cg-pill cg-pill-more">+{hidden.length}</span>}
+      </Tooltip>
     );
   };
 
@@ -272,7 +282,7 @@ export const CommitGraph = forwardRef<CommitGraphHandle, CommitGraphProps>(funct
             : undefined
         }
       >
-        <div className="cg-refs">{renderPills(pillsBySha.get(commit.sha))}</div>
+        {renderPills(pillsBySha.get(commit.sha))}
         <svg className="cg-lanes" width={svgWidth} height={ROW_HEIGHT} aria-hidden>
           {row?.edgesUp.map((e, i) => (
             <path key={`u${i}`} className={`cg-edge ${colorClass(e.color)}`} d={edgePath(e, 0, mid)} />

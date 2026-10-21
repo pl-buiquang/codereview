@@ -119,7 +119,7 @@ export function HomeNav({
           {openRepos.map((repo) => {
             const label = repoLabel(repo);
             return (
-              <Tooltip key={repo.id} text={label}>
+              <Tooltip key={repo.id} content={label}>
               <div
                 role="button"
                 tabIndex={0}

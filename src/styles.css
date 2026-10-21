@@ -3229,6 +3229,13 @@ tr.search-current {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 }
 
+.cr-tooltip-card {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  padding: 6px 8px;
+}
+
 /* Page scaffolding */
 .cr-main {
   flex: 1;
