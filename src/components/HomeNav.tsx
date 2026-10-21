@@ -2,7 +2,9 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { identicon } from "../lib/avatar";
+import { useBoardActionCount } from "../lib/boardCounts";
 import { useInboxCounts } from "../lib/inboxCounts";
+import { useWaitingSessions } from "../lib/sessionCounts";
 import { repoLabel, repoShortName } from "../lib/repoLabel";
 import { useUIStore, type HomeSection } from "../store";
 import { Icon, type IconName } from "./icons";
@@ -42,6 +44,23 @@ export function HomeNav({
   const openSettingsTab = useUIStore((s) => s.openSettingsTab);
   const onHome = activeTabId === "home";
   const inboxCounts = useInboxCounts();
+  const waitingSessions = useWaitingSessions();
+  const boardActions = useBoardActionCount();
+  const plural = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`;
+  const badges: Partial<Record<HomeSection, { count: number; title: string; attention?: boolean }>> = {
+    inbox: {
+      count: inboxCounts.total,
+      title: `${plural(inboxCounts.newItems, "new item")}, ${plural(inboxCounts.unreadConversations, "unread conversation")}`,
+    },
+    sessions: {
+      count: waitingSessions.length,
+      title: `Waiting for input:\n${waitingSessions
+        .map((s) => `${s.name ?? s.session_id.slice(0, 8)} (${s.waiting_for ?? "input needed"})`)
+        .join("\n")}`,
+      attention: true,
+    },
+    board: { count: boardActions, title: `${plural(boardActions, "card")} ${boardActions === 1 ? "needs" : "need"} your action` },
+  };
   const versionQuery = useQuery({ queryKey: ["appVersion"], queryFn: api.appVersion, staleTime: Infinity });
 
   const { data: repos } = useQuery({
@@ -70,7 +89,9 @@ export function HomeNav({
         </button>
       </div>
       <div className="cr-nav">
-        {NAV.map((n) => (
+        {NAV.map((n) => {
+          const badge = badges[n.key];
+          return (
           <button
             key={n.key}
             className={`cr-nav-item${onHome && homeRepoId == null && section === n.key ? " active" : ""}`}
@@ -79,16 +100,14 @@ export function HomeNav({
           >
             <Icon name={n.icon} size={15} />
             {!collapsed && n.label}
-            {n.key === "inbox" && inboxCounts.total > 0 && (
-              <span
-                className="cr-nav-badge"
-                title={`${inboxCounts.newItems} new item${inboxCounts.newItems === 1 ? "" : "s"}, ${inboxCounts.unreadConversations} unread conversation${inboxCounts.unreadConversations === 1 ? "" : "s"}`}
-              >
-                {inboxCounts.total > 99 ? "99+" : inboxCounts.total}
+            {badge && badge.count > 0 && (
+              <span className={`cr-nav-badge${badge.attention ? " attention" : ""}`} title={badge.title}>
+                {badge.count > 99 ? "99+" : badge.count}
               </span>
             )}
           </button>
-        ))}
+          );
+        })}
       </div>
       {openRepos.length > 0 && (
         <div className="cr-nav cr-open-repos">

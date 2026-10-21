@@ -5,6 +5,7 @@ import { useRefetchOnActivate } from "../lib/useRefetchOnActivate";
 import { toast } from "../lib/toast";
 import { confirmDialog } from "../lib/confirm";
 import { timeAgo } from "../lib/timeAgo";
+import { isWaiting } from "../lib/sessionCounts";
 import { useSettingsStore } from "../lib/settings";
 import { useUIStore } from "../store";
 import type { CardSession, ClaudeSession, SessionFocusState } from "../lib/types";
@@ -30,9 +31,7 @@ export function attachCommand(s: Pick<ClaudeSession, "session_id" | "job_id">): 
   return `claude attach ${s.job_id ?? s.session_id.slice(0, 8)}`;
 }
 
-export function isWaiting(s: Pick<ClaudeSession, "live" | "status" | "waiting_for">): boolean {
-  return s.live && (s.status === "waiting" || s.waiting_for != null);
-}
+export { isWaiting };
 
 export function resumeCommand(s: Pick<ClaudeSession, "cwd" | "session_id">): string {
   return `cd ${shellQuote(s.cwd)}; claude --resume ${s.session_id}`;

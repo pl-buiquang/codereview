@@ -5677,6 +5677,10 @@ button.board-overview-ref {
   line-height: 18px;
   text-align: center;
 }
+.cr-nav-badge.attention {
+  background: var(--warning);
+  color: var(--on-accent);
+}
 .cr-side.collapsed .cr-nav-badge {
   position: absolute;
   top: 2px;

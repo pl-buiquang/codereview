@@ -46,6 +46,15 @@ function card(over: Partial<BoardCard>): BoardCard {
   };
 }
 
+describe("actionable", () => {
+  it("counts every ranked card beyond the doNext cap", () => {
+    const cards = Array.from({ length: 9 }, () => card({ review_decision: "APPROVED" }));
+    const d = buildDigest(cards, NOW);
+    expect(d.doNext).toHaveLength(7);
+    expect(d.actionable).toBe(9);
+  });
+});
+
 const refs = (items: { ref: string }[]) => items.map((i) => i.ref);
 
 describe("buildDigest", () => {

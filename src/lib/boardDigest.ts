@@ -24,6 +24,8 @@ export interface ProjectCounts {
 
 export interface Digest {
   open: number;
+  /** Every ranked card, before `doNext` is capped. */
+  actionable: number;
   doNext: DigestItem[];
   blocked: DigestItem[];
   waiting: DigestItem[];
@@ -143,6 +145,7 @@ export function buildDigest(cards: BoardCard[], now: Date): Digest {
 
   return {
     open: open.length,
+    actionable: ranked.length,
     doNext,
     blocked,
     waiting,
