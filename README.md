@@ -138,7 +138,10 @@ pnpm tauri build
 ```
 
 (`read -rs` keeps the password out of your shell history; drop that line if your key has no
-password.) The bundles are **not** OS code-signed (no Apple/Windows certificate yet) — see
+password.) To avoid retyping it, keep both variables in a `chmod 600` env file, `~/.tauri/codereview.env`
+(`TAURI_SIGNING_PRIVATE_KEY=…` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD=…`), and build with
+`set -a; source ~/.tauri/codereview.env; set +a; pnpm tauri build`. Tauri only reads
+`TAURI_SIGNING_PRIVATE_KEY` (the key *contents*); `TAURI_SIGNING_PRIVATE_KEY_PATH` is ignored. The bundles are **not** OS code-signed (no Apple/Windows certificate yet) — see
 `docs/signing.md`. `pnpm tauri dev` / `ubt start` don't build updater artifacts, so they need none
 of this.
 
