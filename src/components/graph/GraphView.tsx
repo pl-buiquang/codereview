@@ -27,6 +27,7 @@ const OUT_OF_SCOPE_MESSAGE = "Switch to All to see this branch";
 
 const SCOPE_OPTIONS: { value: GraphScope; label: string }[] = [
   { value: "local", label: "Local" },
+  { value: "tracked", label: "Local + remotes" },
   { value: "all", label: "All" },
 ];
 
@@ -277,7 +278,7 @@ export function GraphView({ repo }: { repo: Repository }) {
   const onJumpToRef = useCallback(
     (ref: RefInfo) => {
       setJumpedRef(ref);
-      if (ref.kind === "remote" && scope !== "all") {
+      if (ref.kind === "remote" && scope === "local") {
         toast.error(OUT_OF_SCOPE_MESSAGE);
         return;
       }

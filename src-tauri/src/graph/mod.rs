@@ -18,6 +18,8 @@ pub use wip::{worktree_file_diff, worktree_status};
 pub enum Scope {
     All,
     Local,
+    /// Local branches plus the remote-tracking refs that mirror them.
+    Tracked,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

@@ -15,9 +15,16 @@ pub fn graph_log(
     limit: u32,
 ) -> AppResult<Vec<GraphCommit>> {
     let has_head = run_git(checkout, &["rev-parse", "--verify", "-q", "HEAD"]).is_ok();
+    let tracked;
     let mut revs: Vec<&str> = match scope {
         Scope::All => vec!["--branches", "--remotes", "--tags"],
         Scope::Local => vec!["--branches"],
+        Scope::Tracked => {
+            tracked = tracked_remote_refs(checkout)?;
+            let mut revs = vec!["--branches"];
+            revs.extend(tracked.iter().map(String::as_str));
+            revs
+        }
     };
     if has_head {
         revs.push("HEAD");
@@ -42,6 +49,39 @@ pub fn graph_log(
         .filter(|rec| !rec.is_empty())
         .map(parse_commit)
         .collect()
+}
+
+/// Remote-tracking refs of local branches: each branch's upstream, plus any
+/// `<remote>/<name>` sharing a local branch's name.
+fn tracked_remote_refs(checkout: &Path) -> AppResult<Vec<String>> {
+    let heads = run_git(
+        checkout,
+        &["for-each-ref", "--format=%(refname:short)%09%(upstream)", "refs/heads"],
+    )?;
+    let mut names = std::collections::HashSet::new();
+    let mut refs = std::collections::BTreeSet::new();
+    for line in heads.lines() {
+        let (name, upstream) = line.split_once('\t').unwrap_or((line, ""));
+        names.insert(name.to_string());
+        if upstream.starts_with("refs/remotes/") {
+            refs.insert(upstream.to_string());
+        }
+    }
+    let remotes = run_git(
+        checkout,
+        &["for-each-ref", "--format=%(refname)%09%(symref)", "refs/remotes"],
+    )?;
+    for line in remotes.lines() {
+        let (refname, symref) = line.split_once('\t').unwrap_or((line, ""));
+        if !symref.is_empty() {
+            continue;
+        }
+        let short = refname.strip_prefix("refs/remotes/").unwrap_or(refname);
+        if short.split_once('/').is_some_and(|(_, branch)| names.contains(branch)) {
+            refs.insert(refname.to_string());
+        }
+    }
+    Ok(refs.into_iter().collect())
 }
 
 fn parse_commit(rec: &str) -> AppResult<GraphCommit> {
@@ -319,6 +359,28 @@ mod tests {
         assert!(all.contains(&remote_only));
         assert!(all.contains(&tag_only));
         assert_eq!(all.len(), 4);
+    }
+
+    #[test]
+    fn tracked_scope_adds_only_remotes_of_local_branches() {
+        let f = Fixture::new();
+        let base = f.commit("a.txt", "base");
+        let ahead = f.commit("a.txt", "remote main ahead");
+        f.git(&["update-ref", "refs/remotes/origin/main", &ahead]);
+        f.git(&["reset", "-q", "--hard", &base]);
+        f.git(&["checkout", "-q", "-b", "tmp"]);
+        let other = f.commit("r.txt", "other remote work");
+        f.git(&["update-ref", "refs/remotes/origin/other", &other]);
+        f.git(&["checkout", "-q", "main"]);
+        f.git(&["branch", "-q", "-D", "tmp"]);
+
+        let local = shas(&graph_log(f.path(), Scope::Local, 0, 100).unwrap());
+        assert_eq!(local, vec![base.clone()]);
+
+        let tracked = shas(&graph_log(f.path(), Scope::Tracked, 0, 100).unwrap());
+        assert!(tracked.contains(&ahead));
+        assert!(!tracked.contains(&other));
+        assert_eq!(tracked.len(), 2);
     }
 
     #[test]

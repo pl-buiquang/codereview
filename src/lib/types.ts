@@ -440,7 +440,7 @@ export interface WorktreeInfo {
 }
 
 // Git graph (spec 22)
-export type GraphScope = "all" | "local";
+export type GraphScope = "all" | "local" | "tracked";
 
 export type WipKind = "staged" | "unstaged" | "untracked";
 
