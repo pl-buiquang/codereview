@@ -114,6 +114,11 @@ struct State {
     last_error: Option<(String, String)>,
     last_monitor: Option<Instant>,
     monitoring: bool,
+    /// Set when the monitor is switched back on: its next round restarts the
+    /// attempt cap for the workflows an earlier round gave up on.
+    retry_gave_up: bool,
+    /// Where each reset restarted the cap; forgotten when the monitor is turned off.
+    cap_floors: crate::board_monitor::CapFloors,
     /// Notifications poll (triggers discovery); `healthy` turns false for the
     /// session when a poll fails, which restores the plain discovery timer.
     last_notif_poll: Option<Instant>,
@@ -207,6 +212,8 @@ impl SyncEngine {
                     last_error: None,
                     last_monitor: None,
                     monitoring: false,
+                    retry_gave_up: false,
+                    cap_floors: Default::default(),
                     last_notif_poll: None,
                     notif_interval: NOTIF_POLL_DEFAULT,
                     notif_polling: false,
@@ -234,6 +241,11 @@ impl SyncEngine {
         let mut s = self.state();
         if config.board_monitor && !s.config.board_monitor {
             s.last_monitor = None;
+            s.retry_gave_up = true;
+        }
+        if !config.board_monitor {
+            s.cap_floors.clear();
+            s.retry_gave_up = false;
         }
         s.config = config;
     }
@@ -397,7 +409,19 @@ impl SyncEngine {
         let mut error = self.execute(req).err().map(|e| e.to_string());
         if error.is_none() {
             let db = self.inner.app.state::<Db>();
-            match crate::board_monitor::run(&db) {
+            let (reset, mut floors) = {
+                let mut s = self.state();
+                (std::mem::take(&mut s.retry_gave_up), std::mem::take(&mut s.cap_floors))
+            };
+            let result = crate::board_monitor::run(&db, &mut floors, reset);
+            {
+                let mut s = self.state();
+                // Turned off mid-round: keep the cleared memory.
+                if s.config.board_monitor {
+                    s.cap_floors = floors;
+                }
+            }
+            match result {
                 Ok(actions) => {
                     log::info!("[sync] monitor: {} actions", actions.len());
                     if !actions.is_empty() {

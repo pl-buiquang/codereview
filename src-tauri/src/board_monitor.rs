@@ -19,6 +19,10 @@ const MAX_ATTEMPTS: i64 = 3;
 /// Newest log rows kept; older ones are pruned on each write.
 const LOG_KEEP: i64 = 500;
 
+/// Attempt count each gave-up workflow run had when the cap was last reset
+/// (run id → attempt). The cap then counts reruns from there.
+pub type CapFloors = std::collections::HashMap<i64, i64>;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Candidate {
     pub card_id: String,
@@ -159,7 +163,7 @@ fn act(c: &Candidate, kind: ActionKind, detail: impl Into<String>) -> MonitorAct
     }
 }
 
-fn check(c: &Candidate, actions: &mut Vec<MonitorAction>) -> AppResult<bool> {
+fn check(c: &Candidate, floors: &mut CapFloors, reset: bool, actions: &mut Vec<MonitorAction>) -> AppResult<bool> {
     let repo = format!("{}/{}", c.owner, c.name);
     if c.merge_state_status.as_deref() == Some("BEHIND") && c.viewer_can_update_branch && !c.stacked {
         gh::update_pr_branch(&c.owner, &c.name, c.number, false)?;
@@ -172,7 +176,11 @@ fn check(c: &Candidate, actions: &mut Vec<MonitorAction>) -> AppResult<bool> {
     let mut touched = false;
     for run in gh::failing_workflow_runs(&c.owner, &c.name, c.number)? {
         let attempt = gh::run_attempt(&repo, run.run_id)?;
-        if attempt < MAX_ATTEMPTS {
+        if reset && attempt >= MAX_ATTEMPTS {
+            floors.insert(run.run_id, attempt);
+        }
+        let floor = floors.get(&run.run_id).copied().unwrap_or(0);
+        if attempt - floor < MAX_ATTEMPTS {
             gh::rerun_run(&repo, run.run_id, true)?;
             actions.push(act(c, ActionKind::Reran, format!("{} (attempt {attempt})", run.workflow)));
             touched = true;
@@ -184,12 +192,14 @@ fn check(c: &Candidate, actions: &mut Vec<MonitorAction>) -> AppResult<bool> {
 }
 
 /// One pass over the candidates. `gh` calls run unlocked; a per-PR failure is
-/// recorded as an `Error` action and never aborts the pass.
-pub fn run(db: &Db) -> AppResult<Vec<MonitorAction>> {
+/// recorded as an `Error` action and never aborts the pass. `reset` restarts
+/// the attempt cap for runs already given up on (the monitor was switched back
+/// on): they get `MAX_ATTEMPTS` more reruns, counted from `floors`.
+pub fn run(db: &Db, floors: &mut CapFloors, reset: bool) -> AppResult<Vec<MonitorAction>> {
     let candidates = candidates(&db.0.lock().unwrap())?;
     let mut actions = Vec::new();
     for c in &candidates {
-        match check(c, &mut actions) {
+        match check(c, floors, reset, &mut actions) {
             Ok(true) => {
                 if let Err(e) = refetch_card(db, &c.owner, &c.name, c.number) {
                     actions.push(act(c, ActionKind::Error, format!("refetch failed: {e}")));
