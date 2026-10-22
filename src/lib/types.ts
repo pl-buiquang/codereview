@@ -983,3 +983,20 @@ export interface RoutineRunUpdated {
   run_id: number;
   status: RoutineRunStatus;
 }
+
+export type StackLocalCopy =
+  | { kind: "none" }
+  | { kind: "branch"; sha: string }
+  | { kind: "worktree"; path: string; sha: string };
+
+export interface StackRebasePreview {
+  ok: boolean;
+  reasons: string[];
+  noop: boolean;
+  trunk: string | null;
+  branches: { number: number; branch: string; commits: number; changed: boolean; local: StackLocalCopy }[];
+}
+
+export interface StackRebaseResult {
+  report: { pushed: string[]; moved_local: string[]; skipped_local: string[] };
+}

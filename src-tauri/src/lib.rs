@@ -24,6 +24,7 @@ pub mod provider;
 pub mod prompts;
 pub mod repo_sync;
 pub mod routines;
+pub mod stack_rebase;
 pub mod session_summaries;
 pub mod sync;
 pub mod terminal;
@@ -335,6 +336,8 @@ pub fn run() {
             commands::board::board_pr_squash_merge,
             commands::board::board_pr_set_draft,
             commands::board::board_pr_update_branch,
+            commands::stack_rebase::board_stack_rebase_preview,
+            commands::stack_rebase::board_stack_rebase,
             commands::board::board_pr_rerun_ci,
             commands::board::board_link_pr,
             commands::board::board_unlink,

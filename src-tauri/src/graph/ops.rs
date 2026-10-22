@@ -47,7 +47,7 @@ fn run(checkout: &Path, args: &[&str]) -> AppResult<String> {
     run_git(checkout, args).map_err(tag_refusal)
 }
 
-fn run_network(checkout: &Path, args: &[&str]) -> AppResult<String> {
+pub(crate) fn run_network(checkout: &Path, args: &[&str]) -> AppResult<String> {
     run_git_env(checkout, args, &NO_PROMPT_ENV).map_err(tag_refusal)
 }
 

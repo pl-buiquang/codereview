@@ -241,6 +241,13 @@ export function updateBranchDisabledReason(card: BoardCardT): string | null {
   return null;
 }
 
+/** An open PR that belongs to a stack. */
+export function rebaseStackDisabledReason(card: BoardCardT): string | null {
+  if (card.state !== "open") return "PR is not open";
+  if (card.stack_number == null) return "Not part of a stack";
+  return null;
+}
+
 export function canEnableAutoMerge(card: BoardCardT): boolean {
   return card.type === "pr" && card.state === "open" && !card.is_draft && card.auto_merge == null;
 }
@@ -262,6 +269,7 @@ export interface PrActions {
   onSquashMerge: () => void;
   onSetDraft: (draft: boolean) => void;
   onUpdateBranch: (rebase: boolean) => void;
+  onRebaseStack: () => void;
   onRerunCi: (failedOnly: boolean) => void;
 }
 
@@ -289,6 +297,7 @@ function PrActionsMenu({
   const aiOff = useAiDisabledReason();
   const updateDisabledReason = updateBranchDisabledReason(card);
   const rerunDisabledReason = rerunCiDisabledReason(card);
+  const rebaseStackReason = rebaseStackDisabledReason(card);
 
   return (
     <KebabMenu title="PR actions" disabled={actions.busy} className="board-card-menu">
@@ -400,6 +409,14 @@ function PrActionsMenu({
               onClick={run(() => actions.onUpdateBranch(true))}
             >
               Update branch (rebase)
+            </button>
+            <button
+              role="menuitem"
+              disabled={rebaseStackReason != null}
+              title={rebaseStackReason ?? "Rebase the whole stack onto its trunk, locally and atomically"}
+              onClick={run(actions.onRebaseStack)}
+            >
+              Rebase stack…
             </button>
             <button
               role="menuitem"

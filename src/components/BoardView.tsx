@@ -173,6 +173,45 @@ export function BoardView() {
     },
     onError: (e) => toast.error(`Update branch failed:\n${String(e)}`),
   });
+  const prRebaseStack = useMutation({
+    mutationFn: async ({ cardId }: { cardId: string }) => {
+      const preview = await api.boardStackRebasePreview(cardId);
+      if (!preview.ok) {
+        await confirmDialog({
+          title: "Can't rebase this stack locally",
+          message: preview.reasons.join("\n"),
+          confirmLabel: "OK",
+          cancelLabel: "Close",
+        });
+        return null;
+      }
+      if (preview.noop) {
+        toast.success("Stack is already up to date");
+        return null;
+      }
+      const lines = preview.branches.map(
+        (b) =>
+          `#${b.number} ${b.branch}: ${b.changed ? `${b.commits} commit${b.commits === 1 ? "" : "s"} replayed` : "unchanged"}` +
+          (b.changed && b.local.kind === "worktree" ? " (worktree updated)" : ""),
+      );
+      const ok = await confirmDialog({
+        title: `Rebase stack onto ${preview.trunk}`,
+        message: `${lines.join("\n")}\n\nForce-pushes every changed branch in one atomic push.`,
+        confirmLabel: "Rebase and push",
+      });
+      return ok ? api.boardStackRebase(cardId) : null;
+    },
+    onSuccess: (res) => {
+      if (!res) return;
+      invalidate();
+      const { pushed, skipped_local } = res.report;
+      toast.success(
+        `Rebased ${pushed.length} branch${pushed.length === 1 ? "" : "es"}` +
+          (skipped_local.length ? `\nLeft local copy of ${skipped_local.join(", ")} (changed meanwhile) — Resync it from Worktrees` : ""),
+      );
+    },
+    onError: (e) => toast.error(`Rebase stack failed:\n${String(e)}`),
+  });
   const prRerunCi = useMutation({
     mutationFn: ({ cardId, failedOnly }: { cardId: string; failedOnly: boolean }) => api.boardPrRerunCi(cardId, failedOnly),
     onSuccess: (n) => {
@@ -187,6 +226,7 @@ export function BoardView() {
     (prSetDraft.isPending && prSetDraft.variables?.cardId) ||
     (prUpdateBranch.isPending && prUpdateBranch.variables?.cardId) ||
     (prRerunCi.isPending && prRerunCi.variables?.cardId) ||
+    (prRebaseStack.isPending && prRebaseStack.variables?.cardId) ||
     null;
   const linkPr = useMutation({
     mutationFn: ({ issueId, reference }: { issueId: string; reference: string }) => api.boardLinkPr(issueId, reference),
@@ -660,6 +700,7 @@ export function BoardView() {
                               onSquashMerge: () => prSquashMerge.mutate({ cardId: card.id }),
                               onSetDraft: (draft) => prSetDraft.mutate({ cardId: card.id, draft }),
                               onUpdateBranch: (rebase) => prUpdateBranch.mutate({ cardId: card.id, rebase }),
+                              onRebaseStack: () => prRebaseStack.mutate({ cardId: card.id }),
                               onRerunCi: (failedOnly) => prRerunCi.mutate({ cardId: card.id, failedOnly }),
                             }
                           : null

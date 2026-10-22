@@ -3,6 +3,8 @@ import { open, save } from "@tauri-apps/plugin-dialog";
 import type { LogLevel } from "./log";
 import type { CommentTag } from "./commentTag";
 import type {
+  StackRebasePreview,
+  StackRebaseResult,
   ChatWorktree,
   WorktreeGcReport,
   BoardCard,
@@ -302,6 +304,9 @@ export const api = {
   boardPrSetDraft: (cardId: string, draft: boolean) => invoke<void>("board_pr_set_draft", { cardId, draft }),
   boardPrUpdateBranch: (cardId: string, rebase: boolean) =>
     invoke<void>("board_pr_update_branch", { cardId, rebase }),
+  boardStackRebasePreview: (cardId: string) =>
+    invoke<StackRebasePreview>("board_stack_rebase_preview", { cardId }),
+  boardStackRebase: (cardId: string) => invoke<StackRebaseResult>("board_stack_rebase", { cardId }),
   boardPrRerunCi: (cardId: string, failedOnly: boolean) => invoke<number>("board_pr_rerun_ci", { cardId, failedOnly }),
   boardLinkPr: (issueId: string, prReference: string) =>
     invoke<void>("board_link_pr", { issueId, prReference }),
