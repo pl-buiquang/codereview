@@ -2,16 +2,24 @@ import { useEffect, useState } from "react";
 import { checkForUpdate, installAndRelaunch, type Update } from "../lib/updater";
 import { toast } from "../lib/toast";
 
+/** How often a running app re-checks for a release (it used to check only at launch). */
+export const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000;
+
 export function UpdateBanner() {
   const [update, setUpdate] = useState<Update | null>(null);
   const [installing, setInstalling] = useState(false);
-  const [dismissed, setDismissed] = useState(false);
+  // Keyed by version, so dismissing v1 doesn't hide a newer v2 found later.
+  const [dismissedVersion, setDismissedVersion] = useState<string | null>(null);
 
   useEffect(() => {
-    checkForUpdate().then(setUpdate);
+    // A failed or up-to-date check resolves null: never clear an update already found.
+    const check = () => checkForUpdate().then((u) => u && setUpdate(u));
+    check();
+    const timer = window.setInterval(check, UPDATE_CHECK_INTERVAL_MS);
+    return () => window.clearInterval(timer);
   }, []);
 
-  if (!update || dismissed) return null;
+  if (!update || dismissedVersion === update.version) return null;
 
   const install = () => {
     setInstalling(true);
@@ -35,7 +43,7 @@ export function UpdateBanner() {
       <button
         type="button"
         className="btn btn-sm btn-ghost"
-        onClick={() => setDismissed(true)}
+        onClick={() => setDismissedVersion(update.version)}
       >
         Dismiss
       </button>

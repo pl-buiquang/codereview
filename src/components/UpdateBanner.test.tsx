@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 const checkForUpdate = vi.fn();
@@ -9,7 +9,7 @@ vi.mock("../lib/updater", () => ({
   installAndRelaunch: (...a: unknown[]) => installAndRelaunch(...a),
 }));
 
-import { UpdateBanner } from "./UpdateBanner";
+import { UPDATE_CHECK_INTERVAL_MS, UpdateBanner } from "./UpdateBanner";
 import { useToastStore } from "../lib/toast";
 
 const fakeUpdate = { version: "0.2.0" } as never;
@@ -72,5 +72,43 @@ describe("UpdateBanner", () => {
     await userEvent.click(dismiss);
     expect(screen.queryByText(/Update available/)).not.toBeInTheDocument();
     expect(installAndRelaunch).not.toHaveBeenCalled();
+  });
+
+  describe("periodic check", () => {
+    afterEach(() => vi.useRealTimers());
+
+    it("re-checks every interval and shows an update found later", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      checkForUpdate.mockResolvedValueOnce(null).mockResolvedValue(fakeUpdate);
+      render(<UpdateBanner />);
+      await waitFor(() => expect(checkForUpdate).toHaveBeenCalledTimes(1));
+      expect(screen.queryByText(/Update available/)).not.toBeInTheDocument();
+      await act(() => vi.advanceTimersByTimeAsync(UPDATE_CHECK_INTERVAL_MS));
+      expect(await screen.findByText(/Update available: v0\.2\.0/)).toBeInTheDocument();
+    });
+
+    it("keeps a found update when a later check finds nothing", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      checkForUpdate.mockResolvedValueOnce(fakeUpdate).mockResolvedValue(null);
+      render(<UpdateBanner />);
+      expect(await screen.findByText(/Update available/)).toBeInTheDocument();
+      await act(() => vi.advanceTimersByTimeAsync(UPDATE_CHECK_INTERVAL_MS));
+      expect(checkForUpdate).toHaveBeenCalledTimes(2);
+      expect(screen.getByText(/Update available/)).toBeInTheDocument();
+    });
+
+    it("a dismissed version stays hidden but a newer one shows", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      checkForUpdate
+        .mockResolvedValueOnce(fakeUpdate)
+        .mockResolvedValueOnce(fakeUpdate)
+        .mockResolvedValue({ version: "0.3.0" } as never);
+      render(<UpdateBanner />);
+      await userEvent.click(await screen.findByRole("button", { name: "Dismiss" }));
+      await act(() => vi.advanceTimersByTimeAsync(UPDATE_CHECK_INTERVAL_MS));
+      expect(screen.queryByText(/Update available/)).not.toBeInTheDocument();
+      await act(() => vi.advanceTimersByTimeAsync(UPDATE_CHECK_INTERVAL_MS));
+      expect(await screen.findByText(/Update available: v0\.3\.0/)).toBeInTheDocument();
+    });
   });
 });
