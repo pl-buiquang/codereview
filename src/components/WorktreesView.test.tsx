@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { WorktreeGcReport, WorktreeRow } from "../lib/types";
@@ -11,6 +11,8 @@ const removeWorktree = vi.fn();
 const worktreeOpenTerminal = vi.fn();
 const worktreeGcReload = vi.fn();
 const listRepositories = vi.fn();
+const listClaudeSessions = vi.fn();
+const focusClaudeSession = vi.fn();
 const watchAcquire = vi.fn();
 const watchRelease = vi.fn();
 const gitChangedHandlers: (() => void)[] = [];
@@ -32,11 +34,14 @@ vi.mock("../lib/api", () => ({
     removeWorktree: (...a: unknown[]) => removeWorktree(...a),
     worktreeOpenTerminal: (...a: unknown[]) => worktreeOpenTerminal(...a),
     openInVscode: vi.fn(),
+    listClaudeSessions: (...a: unknown[]) => listClaudeSessions(...a),
+    focusClaudeSession: (...a: unknown[]) => focusClaudeSession(...a),
   },
 }));
 vi.mock("../lib/confirm", () => ({ confirmDialog: () => Promise.resolve(true) }));
 
 import { WorktreesView } from "./WorktreesView";
+import { useUIStore } from "../store";
 
 const row = (over: Partial<WorktreeRow>): WorktreeRow => ({
   path: "/wt/a",
@@ -76,6 +81,14 @@ const report: WorktreeGcReport = {
           verdict: { kind: "fast_forward", reason: "3 behind origin/pbq/a" },
         }),
         row({ path: "/wt/dirty", display_path: "~/wt/dirty", verdict: { kind: "flag", reason: "uncommitted or untracked changes" } }),
+        row({ path: "/wt/idle", display_path: "~/wt/idle", verdict: { kind: "keep", reason: "PR #1 open" } }),
+        row({
+          path: "/wt/busy",
+          display_path: "~/wt/busy",
+          branch: "pbq/busy",
+          review_id: 42,
+          verdict: { kind: "in_use", reason: "live Claude session; uncommitted changes" },
+        }),
       ],
     },
   ],
@@ -98,6 +111,13 @@ describe("WorktreesView", () => {
     worktreeSync.mockResolvedValue("fast-forwarded");
     worktreeGcReload.mockResolvedValue(null);
     listRepositories.mockResolvedValue([]);
+    listClaudeSessions.mockResolvedValue({
+      sessions: [
+        { session_id: "abcdef123456", live: true, name: "fixer", cwd: "/wt/busy/src" },
+        { session_id: "dead00000000", live: false, name: null, cwd: "/wt/busy" },
+      ],
+      card_sessions: [],
+    });
     watchAcquire.mockResolvedValue(true);
     gitChangedHandlers.length = 0;
   });
@@ -132,7 +152,7 @@ describe("WorktreesView", () => {
     expect(screen.getByText("#9 merged")).toBeInTheDocument();
     expect(screen.getByText("↓3")).toBeInTheDocument();
     expect(screen.queryByText("~/repo")).not.toBeInTheDocument();
-    expect(screen.getByText(/3 worktrees · 1 need a look · 2 actionable/)).toBeInTheDocument();
+    expect(screen.getByText(/5 worktrees · 1 need a look · 2 actionable/)).toBeInTheDocument();
   });
 
   it("does not scan on its own; Scan runs a dry run", async () => {
@@ -177,5 +197,33 @@ describe("WorktreesView", () => {
     await waitFor(() =>
       expect(worktreeOpenTerminal).toHaveBeenCalledWith(3, "/wt/dirty", "iterm2", "current", "codereview"),
     );
+  });
+
+  it("labels in-use and active worktrees apart", async () => {
+    renderView();
+    expect(await screen.findByText("in use")).toBeInTheDocument();
+    expect(screen.getByText("active")).toBeInTheDocument();
+    expect(screen.getByText("live Claude session; uncommitted changes")).toBeInTheDocument();
+  });
+
+  it("focuses the live Claude session running in a worktree", async () => {
+    focusClaudeSession.mockResolvedValue(undefined);
+    renderView();
+    await screen.findByText("~/wt/busy");
+    const row = screen.getByText("~/wt/busy").closest(".worktrees-row") as HTMLElement;
+    await userEvent.click(await within(row).findByTitle("Focus Claude fixer"));
+    expect(focusClaudeSession).toHaveBeenCalledWith("abcdef123456");
+    expect(within(row).queryByTitle(/Focus Claude dead/)).not.toBeInTheDocument();
+  });
+
+  it("links a worktree to its graph and its review", async () => {
+    renderView();
+    await screen.findByText("~/wt/busy");
+    const row = screen.getByText("~/wt/busy").closest(".worktrees-row") as HTMLElement;
+    await userEvent.click(within(row).getByTitle("Show in the repository graph"));
+    expect(useUIStore.getState().graphFocus).toMatchObject({ repoId: 3, ref: "pbq/busy", worktree: "/wt/busy" });
+    await userEvent.click(within(row).getByTitle("Open the review"));
+    const noReview = screen.getByText("~/wt/dirty").closest(".worktrees-row") as HTMLElement;
+    expect(within(noReview).queryByTitle("Open the review")).not.toBeInTheDocument();
   });
 });

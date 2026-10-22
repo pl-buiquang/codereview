@@ -7,6 +7,7 @@ import { toast } from "../lib/toast";
 import { confirmDialog } from "../lib/confirm";
 import { timeAgo } from "../lib/timeAgo";
 import { useSettingsStore } from "../lib/settings";
+import { useUIStore } from "../store";
 import { GIT_CHANGED_EVENT } from "../lib/gitChanged";
 import { useRepoWatches } from "../lib/useRepoWatch";
 import type { WorktreeGcAction, WorktreeGcReport, WorktreeRow, WorktreeVerdict } from "../lib/types";
@@ -18,10 +19,16 @@ const VERDICT_LABEL: Record<WorktreeVerdict["kind"], string> = {
   fast_forward: "behind",
   resync: "rewritten upstream",
   flag: "needs a look",
-  keep: "keep",
+  keep: "active",
+  in_use: "in use",
 };
 
-const VERDICT_ORDER: WorktreeVerdict["kind"][] = ["flag", "remove", "prune", "fast_forward", "resync", "keep"];
+const VERDICT_TITLE: Partial<Record<WorktreeVerdict["kind"], string>> = {
+  keep: "Clean and pushed. Removing it loses nothing (ignored files aside); the branch is kept.",
+  in_use: "A process, chat or lock is attached. It may have uncommitted changes; removing it pulls the folder out from under it.",
+};
+
+const VERDICT_ORDER: WorktreeVerdict["kind"][] = ["flag", "in_use", "remove", "prune", "fast_forward", "resync", "keep"];
 
 const WORKTREE_GC_KEY = ["worktree-gc"] as const;
 const WORKTREE_SCAN_KEY = ["worktree-gc-run"] as const;
@@ -141,6 +148,17 @@ export function WorktreesView() {
     onError: (e) => toast.error(`Sync failed:\n${String(e)}`),
   });
 
+  const focusGraph = useUIStore((s) => s.focusGraph);
+  const openReview = useUIStore((s) => s.openReview);
+  const sessionsQuery = useQuery({
+    queryKey: ["claude-sessions-live"],
+    queryFn: () => api.listClaudeSessions(0, ""),
+    staleTime: 5_000,
+    refetchInterval: 5_000,
+  });
+  const liveSessions = (sessionsQuery.data?.sessions ?? []).filter((s) => s.live);
+  const sessionsIn = (path: string) => liveSessions.filter((s) => s.cwd === path || s.cwd.startsWith(`${path}/`));
+
   const defaultTerminal = useSettingsStore((s) => s.defaultTerminal);
   const tmuxTarget = useSettingsStore((s) => s.tmuxTarget);
   const tmuxSessionName = useSettingsStore((s) => s.tmuxSessionName);
@@ -165,7 +183,9 @@ export function WorktreesView() {
   const confirmRemove = async (repoId: number, row: WorktreeRow) => {
     const ok = await confirmDialog({
       title: "Remove worktree",
-      message: `Remove ${row.display_path}? Git refuses if it has uncommitted or untracked changes. The branch is kept.`,
+      message: `Remove ${row.display_path}? ${
+        row.verdict.kind === "in_use" ? `${row.verdict.reason}: whatever is using the folder will lose it. ` : ""
+      }Git refuses if it has uncommitted or untracked changes. The branch is kept.`,
       confirmLabel: "Remove",
       danger: true,
     });
@@ -198,7 +218,7 @@ export function WorktreesView() {
         </div>
         <div className="worktrees-head-actions">
           <label className="worktrees-toggle">
-            <input type="checkbox" checked={showKept} onChange={(e) => setShowKept(e.target.checked)} /> Show kept
+            <input type="checkbox" checked={showKept} onChange={(e) => setShowKept(e.target.checked)} /> Show active
           </label>
           <button className="btn btn-sm" disabled={scanning} onClick={rescan}>
             <Icon name="refresh" size={13} /> {scanning ? "Scanning…" : "Scan"}
@@ -227,7 +247,10 @@ export function WorktreesView() {
             {repo.error && <p className="muted">{repo.error}</p>}
             {repo.worktrees.map((w) => (
               <div key={w.path} className="card sessions-row worktrees-row">
-                <span className={`worktrees-verdict worktrees-verdict-${w.verdict.kind}`}>
+                <span
+                  className={`worktrees-verdict worktrees-verdict-${w.verdict.kind}`}
+                  title={VERDICT_TITLE[w.verdict.kind]}
+                >
                   {VERDICT_LABEL[w.verdict.kind]}
                 </span>
                 <div className="sessions-main">
@@ -259,6 +282,36 @@ export function WorktreesView() {
                       onClick={() => sync.mutate({ repoId: repo.repo_id, path: w.path })}
                     >
                       Sync
+                    </button>
+                  )}
+                  {sessionsIn(w.path).map((s) => (
+                    <button
+                      key={s.session_id}
+                      className="btn btn-sm btn-ghost"
+                      title={`Focus Claude ${s.name ?? s.session_id.slice(0, 8)}`}
+                      onClick={() =>
+                        api.focusClaudeSession(s.session_id).catch((e) => toast.error(`Could not focus session: ${String(e)}`))
+                      }
+                    >
+                      <Icon name="bot" size={13} />
+                    </button>
+                  ))}
+                  {w.review_id != null && (
+                    <button
+                      className="btn btn-sm btn-ghost"
+                      title="Open the review"
+                      onClick={() => openReview(w.review_id as number, repo.repo_id)}
+                    >
+                      <Icon name="review" size={13} />
+                    </button>
+                  )}
+                  {w.verdict.kind !== "prune" && (
+                    <button
+                      className="btn btn-sm btn-ghost"
+                      title="Show in the repository graph"
+                      onClick={() => focusGraph({ repoId: repo.repo_id, ref: w.branch, worktree: w.path })}
+                    >
+                      <Icon name="branch" size={13} />
                     </button>
                   )}
                   {w.verdict.kind !== "prune" && (
@@ -297,7 +350,7 @@ export function WorktreesView() {
 }
 
 function countVerdicts(report: WorktreeGcReport | null) {
-  const c = { total: 0, remove: 0, prune: 0, fast_forward: 0, resync: 0, flag: 0, keep: 0 };
+  const c = { total: 0, remove: 0, prune: 0, fast_forward: 0, resync: 0, flag: 0, keep: 0, in_use: 0 };
   for (const repo of report?.repos ?? []) {
     for (const w of repo.worktrees) {
       if (w.is_main) continue;

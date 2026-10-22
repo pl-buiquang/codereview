@@ -5429,6 +5429,7 @@ input[type="range"] {
   color: var(--success);
   border-color: var(--success);
 }
+.worktrees-verdict-in_use,
 .worktrees-verdict-fast_forward,
 .worktrees-verdict-resync {
   color: var(--warning);

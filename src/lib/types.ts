@@ -689,7 +689,8 @@ export type WorktreeVerdict =
   | { kind: "fast_forward"; reason: string }
   | { kind: "resync"; reason: string }
   | { kind: "flag"; reason: string }
-  | { kind: "keep"; reason: string };
+  | { kind: "keep"; reason: string }
+  | { kind: "in_use"; reason: string };
 
 export interface WorktreeRow {
   path: string;
@@ -702,6 +703,8 @@ export interface WorktreeRow {
   upstream: WorktreeUpstream;
   last_commit_at: string | null;
   verdict: WorktreeVerdict;
+  /** Review tied to this worktree (its chat, else its PR's latest review). */
+  review_id?: number | null;
 }
 
 export interface WorktreeRepoReport {

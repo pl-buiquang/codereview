@@ -144,6 +144,45 @@ fn store_scan(conn: &mut Connection, caches: &[RepoCache], report: &GcReport, pr
     Ok(())
 }
 
+/// Fills each row's `review_id`: the review whose chat lives in the worktree,
+/// else the latest review of the row's PR. Two queries for the whole report.
+fn attach_reviews(conn: &Connection, report: &mut GcReport) -> AppResult<()> {
+    let mut by_chat: HashMap<String, i64> = HashMap::new();
+    let mut stmt = conn.prepare(
+        "SELECT worktree_path, MAX(review_id) FROM chat WHERE worktree_path IS NOT NULL GROUP BY worktree_path",
+    )?;
+    for row in stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))? {
+        let (path, id) = row?;
+        by_chat.insert(path, id);
+    }
+    let mut by_pr: HashMap<(i64, i64), i64> = HashMap::new();
+    let mut stmt = conn.prepare(
+        "SELECT t.repo_id, t.github_pr_number, MAX(rv.id) FROM review rv
+         JOIN target t ON t.id = rv.target_id
+         WHERE t.kind = 'github_pr' AND t.github_pr_number IS NOT NULL
+         GROUP BY t.repo_id, t.github_pr_number",
+    )?;
+    for row in stmt.query_map([], |r| Ok(((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?), r.get::<_, i64>(2)?)))? {
+        let (key, id) = row?;
+        by_pr.insert(key, id);
+    }
+    for repo in &mut report.repos {
+        for wt in &mut repo.worktrees {
+            wt.review_id = by_chat
+                .get(&wt.path)
+                .or_else(|| wt.pr.as_ref().and_then(|pr| by_pr.get(&(repo.repo_id, pr.number))))
+                .copied();
+        }
+    }
+    Ok(())
+}
+
+fn with_reviews(db: &Db, report: Option<GcReport>) -> AppResult<Option<GcReport>> {
+    let Some(mut report) = report else { return Ok(None) };
+    attach_reviews(&db.0.lock().unwrap(), &mut report)?;
+    Ok(Some(report))
+}
+
 fn load_last_report(conn: &Connection) -> AppResult<Option<GcReport>> {
     if let Some(report) = worktree_gc::last_report() {
         return Ok(Some(report));
@@ -390,19 +429,23 @@ pub async fn worktree_gc_run(app: tauri::AppHandle, remove: bool, sync: bool) ->
     .await
     .map_err(|e| AppError::Other(format!("worktree gc task failed: {e}")))??;
     emit_refreshed(&app, refreshed);
-    Ok(report)
+    Ok(with_reviews(&app.state::<Db>(), Some(report))?.expect("report was Some"))
 }
 
 #[tauri::command]
 pub async fn worktree_gc_reload(app: tauri::AppHandle) -> AppResult<Option<GcReport>> {
-    tauri::async_runtime::spawn_blocking(move || reload_dirty(&app.state::<Db>(), &app.state::<Watchers>()))
-        .await
-        .map_err(|e| AppError::Other(format!("worktree reload task failed: {e}")))?
+    tauri::async_runtime::spawn_blocking(move || {
+        let report = reload_dirty(&app.state::<Db>(), &app.state::<Watchers>())?;
+        with_reviews(&app.state::<Db>(), report)
+    })
+    .await
+    .map_err(|e| AppError::Other(format!("worktree reload task failed: {e}")))?
 }
 
 #[tauri::command]
 pub fn worktree_gc_last(db: State<Db>) -> AppResult<Option<GcReport>> {
-    load_last_report(&db.0.lock().unwrap())
+    let report = load_last_report(&db.0.lock().unwrap())?;
+    with_reviews(&db, report)
 }
 
 /// Fetches (unless fresh), then fast-forwards (or resyncs after an upstream

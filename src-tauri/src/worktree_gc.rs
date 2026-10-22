@@ -70,7 +70,11 @@ pub enum Verdict {
     /// was pushed before: `git reset --keep @{u}` loses nothing.
     Resync { reason: String },
     Flag { reason: String },
+    /// Clean, pushed and nothing to do. Removing it by hand loses nothing.
     Keep { reason: String },
+    /// Locked, or a Claude session / tmux pane / review chat sits in it. Judged
+    /// before the dirty check, so it may hold uncommitted work.
+    InUse { reason: String },
 }
 
 pub fn classify(f: &Facts) -> Verdict {
@@ -84,11 +88,12 @@ pub fn classify(f: &Facts) -> Verdict {
     if f.is_main {
         return keep("main checkout");
     }
+    let in_use = |r: &str| InUse { reason: if f.dirty { format!("{r}; uncommitted changes") } else { r.into() } };
     if f.is_locked {
-        return keep("locked");
+        return in_use("locked");
     }
     if let Some(r) = &f.in_use {
-        return Keep { reason: r.clone() };
+        return in_use(r);
     }
     if f.dirty {
         return flag("uncommitted or untracked changes".into());
@@ -480,6 +485,10 @@ pub struct WorktreeRow {
     pub upstream: Upstream,
     pub last_commit_at: Option<String>,
     pub verdict: Verdict,
+    /// The review (chat or PR) tied to this worktree. Not part of the scan: the
+    /// commands fill it from the DB on every report they hand out.
+    #[serde(default)]
+    pub review_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -653,6 +662,7 @@ pub fn run(
                 upstream: facts.upstream,
                 last_commit_at,
                 verdict,
+                review_id: None,
             });
         }
         caches.push(RepoCache { repo_id: repo.repo_id, entries });
@@ -767,6 +777,7 @@ mod tests {
             Verdict::Resync { .. } => "resync",
             Verdict::Flag { .. } => "flag",
             Verdict::Keep { .. } => "keep",
+            Verdict::InUse { .. } => "in_use",
         }
     }
 
@@ -776,11 +787,17 @@ mod tests {
     }
 
     #[test]
-    fn main_locked_and_in_use_are_kept() {
+    fn main_is_kept_locked_and_in_use_are_in_use() {
         assert_eq!(kind(&classify(&Facts { is_main: true, pr: pr("MERGED", "aaa"), ..base() })), "keep");
-        assert_eq!(kind(&classify(&Facts { is_locked: true, pr: pr("MERGED", "aaa"), ..base() })), "keep");
+        assert_eq!(kind(&classify(&Facts { is_locked: true, pr: pr("MERGED", "aaa"), ..base() })), "in_use");
         let f = Facts { in_use: Some("live Claude session".into()), pr: pr("MERGED", "aaa"), ..base() };
-        assert_eq!(classify(&f), Verdict::Keep { reason: "live Claude session".into() });
+        assert_eq!(classify(&f), Verdict::InUse { reason: "live Claude session".into() });
+    }
+
+    #[test]
+    fn in_use_and_dirty_says_so() {
+        let f = Facts { in_use: Some("open tmux pane".into()), dirty: true, ..base() };
+        assert_eq!(classify(&f), Verdict::InUse { reason: "open tmux pane; uncommitted changes".into() });
     }
 
     #[test]
