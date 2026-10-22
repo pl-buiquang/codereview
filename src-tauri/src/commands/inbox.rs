@@ -355,7 +355,19 @@ pub async fn open_pr_review(
 ) -> AppResult<Review> {
     let review = crate::commands::review::create_review_for_pr_impl(&db, &owner, &name, number, &base_paths, false)?;
     // Starting a review means working on it. Opening must not fail on this.
-    if let Err(e) = crate::commands::board::board_track_impl(&db, &format!("{owner}/{name}#{number}")) {
+    // The review open just put this PR in the mirror, so track it by id instead of resolving again.
+    let node_id: Option<String> = db
+        .0
+        .lock()
+        .unwrap()
+        .query_row("SELECT gh_pr_id FROM target WHERE id = ?1", [review.target_id], |r| r.get(0))
+        .ok()
+        .flatten();
+    let tracked = match node_id {
+        Some(id) => crate::commands::board::board_track_pr_cached(&db, &id),
+        None => crate::commands::board::board_track_impl(&db, &format!("{owner}/{name}#{number}")).map(|_| ()),
+    };
+    if let Err(e) = tracked {
         crate::logging::warn(&format!("[inbox.open_pr_review] tracking {item_id} failed: {e}"));
     }
     Ok(review)

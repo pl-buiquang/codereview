@@ -61,15 +61,19 @@ pub(crate) const CARD_VIEW: &str = "(
 /// resurrect a discarded card.
 fn track_node(conn: &Connection, node: &Node, ts: &str, clear_discard: bool) -> AppResult<()> {
     mirror::store::upsert_node(conn, node, ts)?;
-    let typ = if node.is_pr() { "pr" } else { "issue" };
+    track_card(conn, &node.id, if node.is_pr() { "pr" } else { "issue" }, ts, clear_discard)
+}
+
+/// The card half of [`track_node`], for an item the mirror already holds.
+fn track_card(conn: &Connection, id: &str, typ: &str, ts: &str, clear_discard: bool) -> AppResult<()> {
     let on_conflict = if clear_discard { "DO UPDATE SET discarded_at = NULL" } else { "DO NOTHING" };
     conn.execute(
         &format!("INSERT INTO board_card (id, type, tracked_at) VALUES (?1, ?2, ?3) ON CONFLICT(id) {on_conflict}"),
-        params![node.id, typ, ts],
+        params![id, typ, ts],
     )?;
     if clear_discard {
         // An explicit Track takes the item out of the Inbox queue.
-        crate::commands::inbox::set_inbox_state(conn, &node.id, "tracked", None)?;
+        crate::commands::inbox::set_inbox_state(conn, id, "tracked", None)?;
     }
     Ok(())
 }
@@ -396,6 +400,14 @@ pub fn board_track_impl(db: &Db, reference: &str) -> AppResult<String> {
     let conn = db.0.lock().unwrap();
     track_node(&conn, &node, &now(), true)?;
     Ok(node.id)
+}
+
+/// [`board_track_impl`] for a PR whose mirror row is already fresh (just
+/// fetched by a review open): skips the second GitHub lookup.
+pub fn board_track_pr_cached(db: &Db, node_id: &str) -> AppResult<()> {
+    crate::commands::inbox::cached_or_fetch_viewer(db)?;
+    let conn = db.0.lock().unwrap();
+    track_card(&conn, node_id, "pr", &now(), true)
 }
 
 #[tauri::command]
