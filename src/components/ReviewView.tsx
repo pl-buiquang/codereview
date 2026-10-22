@@ -1334,7 +1334,10 @@ function ReviewHeader({
               state={prMetaQuery.data ? prMetaQuery.data.state.toLowerCase() : null}
               isDraft={prMetaQuery.data?.isDraft ?? false}
             />
-            <CiBadge state={prMetaQuery.data?.ciState ? prMetaQuery.data.ciState.toLowerCase() : null} />
+            <CiBadge
+              state={prMetaQuery.data?.ciState ? prMetaQuery.data.ciState.toLowerCase() : null}
+              pr={owner && name && prNumber != null ? { owner, name, number: prNumber } : undefined}
+            />
             <ReviewDecisionBadge decision={prMetaQuery.data?.reviewDecision} />
             <AutoMergeBadge
               method={prMetaQuery.data?.autoMerge?.mergeMethod ?? (prMetaQuery.data?.autoMerge ? "MERGE" : null)}

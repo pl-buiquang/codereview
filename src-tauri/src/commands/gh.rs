@@ -61,6 +61,26 @@ pub async fn set_pr_draft(owner: String, name: String, number: i64, draft: bool)
     provider_for().set_pr_draft(&owner, &name, number, draft)
 }
 
+/// Per-check detail of the PR's head commit, for the CI badge popover. `async`
+/// for the same reason as `pr_meta`.
+#[tauri::command]
+pub async fn pr_checks(owner: String, name: String, number: i64) -> AppResult<gh::PrChecks> {
+    gh::pr_checks(&owner, &name, number)
+}
+
+/// Rerun workflow runs (all their jobs, or only the failed ones) from the checks popover.
+#[tauri::command]
+pub async fn rerun_ci_runs(owner: String, name: String, run_ids: Vec<i64>, failed_only: bool) -> AppResult<()> {
+    let repo = format!("{owner}/{name}");
+    run_ids.into_iter().try_for_each(|id| gh::rerun_run(&repo, id, failed_only))
+}
+
+/// Rerun one Actions job from the checks popover.
+#[tauri::command]
+pub async fn rerun_ci_job(owner: String, name: String, job_id: i64) -> AppResult<()> {
+    gh::rerun_job(&format!("{owner}/{name}"), job_id)
+}
+
 #[tauri::command]
 pub async fn set_pr_auto_merge(owner: String, name: String, number: i64, enable: bool) -> AppResult<()> {
     provider_for().set_pr_auto_merge(&owner, &name, number, enable)

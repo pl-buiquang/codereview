@@ -1077,6 +1077,312 @@ pub fn failing_workflow_runs(owner: &str, name: &str, number: i64) -> AppResult<
     Ok(failing_runs_from(pr))
 }
 
+// ---------------------------------------------------------------------------
+// Checks detail (the CI badge popover: GitHub's "Checks" tab, rebuilt)
+// ---------------------------------------------------------------------------
+
+const PR_CHECKS_QUERY: &str = r#"
+query PrChecks($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      url
+      commits(last: 1) {
+        nodes {
+          commit {
+            statusCheckRollup {
+              state
+              contexts(first: 100) {
+                nodes {
+                  __typename
+                  ... on CheckRun {
+                    databaseId name status conclusion detailsUrl startedAt completedAt
+                    isRequired(pullRequestNumber: $number)
+                    steps(first: 100) { nodes { name conclusion } }
+                    annotations(first: 10) { nodes { path message annotationLevel } }
+                    checkSuite { workflowRun { databaseId workflow { name } } }
+                  }
+                  ... on StatusContext {
+                    context state description targetUrl
+                    isRequired(pullRequestNumber: $number)
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+"#;
+
+#[derive(Debug, Deserialize)]
+struct ChecksData {
+    repository: Option<ChecksRepo>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ChecksRepo {
+    #[serde(rename = "pullRequest")]
+    pull_request: Option<ChecksPr>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ChecksPr {
+    url: String,
+    #[serde(default)]
+    commits: ChecksCommits,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct ChecksCommits {
+    #[serde(default)]
+    nodes: Vec<ChecksCommitNode>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ChecksCommitNode {
+    commit: ChecksCommit,
+}
+
+#[derive(Debug, Deserialize)]
+struct ChecksCommit {
+    #[serde(default, rename = "statusCheckRollup")]
+    status_check_rollup: Option<ChecksRollup>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ChecksRollup {
+    #[serde(default)]
+    state: Option<String>,
+    #[serde(default)]
+    contexts: ChecksContexts,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct ChecksContexts {
+    /// GitHub nulls an element it failed to resolve (a partial error), e.g. a
+    /// run being rerun; skip those rather than failing the whole popover.
+    #[serde(default)]
+    nodes: Vec<Option<ChecksContext>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ChecksContext {
+    #[serde(rename = "__typename")]
+    typename: String,
+    #[serde(default)]
+    is_required: bool,
+    // CheckRun
+    #[serde(default)]
+    database_id: Option<i64>,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    status: Option<String>,
+    #[serde(default)]
+    conclusion: Option<String>,
+    #[serde(default)]
+    details_url: Option<String>,
+    #[serde(default)]
+    started_at: Option<String>,
+    #[serde(default)]
+    completed_at: Option<String>,
+    #[serde(default)]
+    steps: Option<StepConn>,
+    #[serde(default)]
+    annotations: Option<AnnotationConn>,
+    #[serde(default)]
+    check_suite: Option<CheckSuiteNode>,
+    // StatusContext
+    #[serde(default)]
+    context: Option<String>,
+    #[serde(default)]
+    state: Option<String>,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    target_url: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct StepConn {
+    #[serde(default)]
+    nodes: Vec<StepNode>,
+}
+
+#[derive(Debug, Deserialize)]
+struct StepNode {
+    name: String,
+    #[serde(default)]
+    conclusion: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct AnnotationConn {
+    #[serde(default)]
+    nodes: Vec<AnnotationNode>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AnnotationNode {
+    #[serde(default)]
+    path: Option<String>,
+    #[serde(default)]
+    message: Option<String>,
+    #[serde(default)]
+    annotation_level: Option<String>,
+}
+
+/// Where a check sits in the popover: failures first, then in-flight, then the
+/// collapsed passing ones.
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "lowercase")]
+pub enum CheckBucket {
+    Failed,
+    Pending,
+    Passed,
+}
+
+#[derive(Debug, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CiAnnotation {
+    pub path: Option<String>,
+    pub message: String,
+}
+
+#[derive(Debug, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CiCheck {
+    pub name: String,
+    /// The Actions job id (a CheckRun's `databaseId`), for rerunning just this job.
+    pub job_id: Option<i64>,
+    /// The workflow run the job belongs to; `None` for app checks and commit statuses.
+    pub run_id: Option<i64>,
+    /// The workflow a CheckRun belongs to; `None` for app checks and commit statuses.
+    pub workflow: Option<String>,
+    /// `conclusion` of a finished run, else its `status`; a StatusContext's `state`.
+    pub state: Option<String>,
+    pub bucket: CheckBucket,
+    pub url: Option<String>,
+    pub required: bool,
+    pub duration_secs: Option<i64>,
+    /// Names of the failed steps (CheckRun only).
+    pub failed_steps: Vec<String>,
+    /// FAILURE-level annotations, or the StatusContext description when it failed.
+    pub annotations: Vec<CiAnnotation>,
+}
+
+#[derive(Debug, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PrChecks {
+    pub state: Option<String>,
+    /// The PR's web URL; the full checks page is `{pr_url}/checks`.
+    pub pr_url: String,
+    pub checks: Vec<CiCheck>,
+}
+
+fn check_bucket(state: Option<&str>) -> CheckBucket {
+    match state {
+        Some(s) if FAILING_CONCLUSIONS.contains(&s) || matches!(s, "ACTION_REQUIRED" | "FAILURE" | "ERROR") => {
+            CheckBucket::Failed
+        }
+        Some("SUCCESS" | "NEUTRAL" | "SKIPPED" | "COMPLETED") => CheckBucket::Passed,
+        _ => CheckBucket::Pending,
+    }
+}
+
+fn duration_secs(start: Option<&str>, end: Option<&str>) -> Option<i64> {
+    let parse = |s: &str| chrono::DateTime::parse_from_rfc3339(s).ok();
+    let secs = (parse(end?)? - parse(start?)?).num_seconds();
+    (secs >= 0).then_some(secs)
+}
+
+fn checks_from(pr: ChecksPr) -> PrChecks {
+    let rollup = pr.commits.nodes.into_iter().next().and_then(|c| c.commit.status_check_rollup);
+    let state = rollup.as_ref().and_then(|r| r.state.clone());
+    let mut checks: Vec<CiCheck> = rollup
+        .map(|r| r.contexts.nodes)
+        .unwrap_or_default()
+        .into_iter()
+        .flatten()
+        .map(|c| {
+            if c.typename == "CheckRun" {
+                let state = c.conclusion.or(c.status);
+                let bucket = check_bucket(state.as_deref());
+                let failed_steps = c
+                    .steps
+                    .map(|s| s.nodes)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter(|s| s.conclusion.as_deref().is_some_and(|c| check_bucket(Some(c)) == CheckBucket::Failed))
+                    .map(|s| s.name)
+                    .collect();
+                let annotations = c
+                    .annotations
+                    .map(|a| a.nodes)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter(|a| a.annotation_level.as_deref() == Some("FAILURE"))
+                    .filter_map(|a| Some(CiAnnotation { path: a.path, message: a.message? }))
+                    .collect();
+                let run = c.check_suite.and_then(|s| s.workflow_run);
+                CiCheck {
+                    name: c.name.unwrap_or_default(),
+                    job_id: run.as_ref().and(c.database_id),
+                    run_id: run.as_ref().map(|r| r.database_id),
+                    workflow: run.and_then(|r| r.workflow).map(|w| w.name),
+                    state,
+                    bucket,
+                    url: c.details_url,
+                    required: c.is_required,
+                    duration_secs: duration_secs(c.started_at.as_deref(), c.completed_at.as_deref()),
+                    failed_steps,
+                    annotations,
+                }
+            } else {
+                let bucket = check_bucket(c.state.as_deref());
+                let annotations = c
+                    .description
+                    .filter(|_| bucket == CheckBucket::Failed)
+                    .map(|message| CiAnnotation { path: None, message })
+                    .into_iter()
+                    .collect();
+                CiCheck {
+                    name: c.context.unwrap_or_default(),
+                    job_id: None,
+                    run_id: None,
+                    workflow: None,
+                    state: c.state,
+                    bucket,
+                    url: c.target_url,
+                    required: c.is_required,
+                    duration_secs: None,
+                    failed_steps: Vec::new(),
+                    annotations,
+                }
+            }
+        })
+        .collect();
+    // Stable: keeps GitHub's order within a bucket.
+    checks.sort_by_key(|c| c.bucket);
+    PrChecks { state, pr_url: pr.url, checks }
+}
+
+pub fn pr_checks(owner: &str, name: &str, number: i64) -> AppResult<PrChecks> {
+    let data: ChecksData = graphql(
+        PR_CHECKS_QUERY,
+        serde_json::json!({ "owner": owner, "name": name, "number": number }),
+    )?;
+    let pr = data
+        .repository
+        .and_then(|r| r.pull_request)
+        .ok_or_else(|| AppError::Gh(format!("{owner}/{name}#{number} not found")))?;
+    Ok(checks_from(pr))
+}
+
 fn remote_ctx(repo: &str) -> GhRepo {
     let (owner, name) = repo.split_once('/').unwrap_or((repo, ""));
     GhRepo::Remote { owner: owner.to_string(), name: name.to_string() }
@@ -1092,6 +1398,13 @@ pub fn run_attempt(repo: &str, run_id: i64) -> AppResult<i64> {
 }
 
 /// Rerun a workflow run: only its failed jobs when `failed_only`, else all jobs.
+/// Rerun a single Actions job (`gh run rerun --job`), not its whole run.
+pub fn rerun_job(repo: &str, job_id: i64) -> AppResult<()> {
+    let id = job_id.to_string();
+    run_gh(&remote_ctx(repo), &["run", "rerun", "--job", &id, "--repo", repo])?;
+    Ok(())
+}
+
 pub fn rerun_run(repo: &str, run_id: i64, failed_only: bool) -> AppResult<()> {
     let id = run_id.to_string();
     let mut args = vec!["run", "rerun", id.as_str(), "--repo", repo];
@@ -1852,6 +2165,51 @@ mod tests {
         assert!(meta.reviews.is_empty());
         assert_eq!(meta.ci_state, None);
         assert!(meta.checks.is_empty());
+    }
+
+    #[test]
+    fn pr_checks_sort_failed_first_and_keep_failure_detail() {
+        let json = r#"{
+          "url": "https://github.com/o/r/pull/7",
+          "commits": { "nodes": [ { "commit": { "statusCheckRollup": { "state": "FAILURE",
+            "contexts": { "nodes": [
+              { "__typename": "CheckRun", "name": "lint", "status": "COMPLETED", "conclusion": "SUCCESS",
+                "isRequired": true, "startedAt": "2026-10-21T10:00:00Z", "completedAt": "2026-10-21T10:01:05Z",
+                "steps": { "nodes": [] }, "annotations": { "nodes": [] },
+                "checkSuite": { "workflowRun": { "databaseId": 1, "workflow": { "name": "CI" } } } },
+              { "__typename": "CheckRun", "databaseId": 99, "name": "e2e", "status": "COMPLETED", "conclusion": "FAILURE",
+                "isRequired": false,
+                "steps": { "nodes": [ { "name": "Set up", "conclusion": "SUCCESS" }, { "name": "Run e2e", "conclusion": "FAILURE" } ] },
+                "annotations": { "nodes": [
+                  { "path": ".github", "message": "exit code 1", "annotationLevel": "FAILURE" },
+                  { "path": ".github", "message": "deprecated", "annotationLevel": "WARNING" } ] },
+                "checkSuite": { "workflowRun": { "databaseId": 1, "workflow": { "name": "CI" } } } },
+              { "__typename": "CheckRun", "name": "build", "status": "IN_PROGRESS", "conclusion": null,
+                "steps": { "nodes": [] }, "annotations": { "nodes": [] }, "checkSuite": { "workflowRun": null } },
+              null,
+              { "__typename": "CheckRun", "name": "queued", "status": "QUEUED", "conclusion": null, "startedAt": null,
+                "completedAt": null, "steps": null, "annotations": null, "checkSuite": null, "detailsUrl": null },
+              { "__typename": "StatusContext", "context": "sonar", "state": "ERROR", "description": "Quality gate failed",
+                "targetUrl": "https://sonar/x", "isRequired": true }
+            ] } } } } ] }
+        }"#;
+        let pr: ChecksPr = serde_json::from_str(json).expect("parses");
+        let out = checks_from(pr);
+        assert_eq!(out.state.as_deref(), Some("FAILURE"));
+        assert_eq!(out.pr_url, "https://github.com/o/r/pull/7");
+        let names: Vec<_> = out.checks.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, ["e2e", "sonar", "build", "queued", "lint"]);
+        let e2e = &out.checks[0];
+        assert_eq!(e2e.failed_steps, ["Run e2e"]);
+        assert_eq!(e2e.annotations, [CiAnnotation { path: Some(".github".into()), message: "exit code 1".into() }]);
+        assert_eq!(e2e.workflow.as_deref(), Some("CI"));
+        assert_eq!((e2e.job_id, e2e.run_id), (Some(99), Some(1)));
+        assert_eq!((out.checks[1].job_id, out.checks[1].run_id), (None, None));
+        assert_eq!(out.checks[1].annotations[0].message, "Quality gate failed");
+        assert_eq!(out.checks[2].bucket, CheckBucket::Pending);
+        assert_eq!(out.checks[3].bucket, CheckBucket::Pending);
+        assert_eq!(out.checks[4].duration_secs, Some(65));
+        assert!(out.checks[4].required);
     }
 
     #[test]

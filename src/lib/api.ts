@@ -36,6 +36,7 @@ import type {
   IgnoreRule,
   InboxMeta,
   PrMeta,
+  PrChecks,
   Routine,
   RoutineContextRef,
   RoutineInput,
@@ -189,6 +190,12 @@ export const api = {
   listPrs: (repoId: number) => invoke<PrSummary[]>("list_prs", { repoId }),
   prMeta: (owner: string, name: string, number: number) =>
     invoke<PrMeta>("pr_meta", { owner, name, number }),
+  prChecks: (owner: string, name: string, number: number) =>
+    invoke<PrChecks>("pr_checks", { owner, name, number }),
+  rerunCiRuns: (owner: string, name: string, runIds: number[], failedOnly: boolean) =>
+    invoke<void>("rerun_ci_runs", { owner, name, runIds, failedOnly }),
+  rerunCiJob: (owner: string, name: string, jobId: number) =>
+    invoke<void>("rerun_ci_job", { owner, name, jobId }),
   /** The PR header as last mirrored (instant, possibly stale). */
   mirrorPrMeta: (owner: string, name: string, number: number) =>
     invoke<PrMeta | null>("mirror_pr_meta", { owner, name, number }),

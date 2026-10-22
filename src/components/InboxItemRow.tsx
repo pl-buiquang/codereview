@@ -60,7 +60,10 @@ export function InboxItemRow({
           <RepoName className="repo mono" name={item.repo} />
           <span className="mono">#{item.number}</span>
           <StatusPill state={item.state} isDraft={item.is_draft} />
-          {item.type === "pr" && <CiBadge state={item.ci_state} />}
+          {item.type === "pr" && <CiBadge
+              state={item.ci_state}
+              pr={{ owner: item.repo.split("/")[0], name: item.repo.split("/")[1], number: item.number }}
+            />}
         </div>
 
         <a className="pr-title" href={item.url} target="_blank" rel="noreferrer">

@@ -8,6 +8,7 @@ import { useAiDisabledReason, useSettingsStore, type BoardBorderSide } from "../
 import { parseSnoozeOptions } from "../lib/snooze";
 import { useUIStore } from "../store";
 import { RepoName } from "./RepoName";
+import type { PrRef } from "./CiChecksPopover";
 import { AutoMergeBadge, CiBadge, CommentsBadge, MergeStateBadge, MergeableBadge, StackBadge } from "./InboxBadges";
 import { Icon } from "./icons";
 import { AgentSessionItems, KebabMenu } from "./KebabMenu";
@@ -242,6 +243,11 @@ export function updateBranchDisabledReason(card: BoardCardT): string | null {
 
 export function canEnableAutoMerge(card: BoardCardT): boolean {
   return card.type === "pr" && card.state === "open" && !card.is_draft && card.auto_merge == null;
+}
+
+function prRef(card: BoardCardT): PrRef | undefined {
+  const [owner, name] = card.repo.split("/");
+  return owner && name ? { owner, name, number: card.number } : undefined;
 }
 
 export function rerunCiDisabledReason(card: BoardCardT): string | null {
@@ -614,7 +620,7 @@ export function BoardCard({
 
       {card.type === "pr" && (
         <div className="board-card-badge-row">
-          <CiBadge state={card.ci_status ? card.ci_status.toLowerCase() : null} />
+          <CiBadge state={card.ci_status ? card.ci_status.toLowerCase() : null} pr={prRef(card)} />
           <MergeableBadge mergeable={card.mergeable} />
           <StackBadge number={card.stack_number} position={card.stack_position} onClick={onFilterStack} />
           <MergeStateBadge state={card.merge_state_status} stacked={card.stack_number != null} />

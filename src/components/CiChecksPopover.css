@@ -1,0 +1,174 @@
+.ci-popover {
+  position: fixed;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  width: 420px;
+  max-height: min(70vh, 560px);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-l);
+  background: var(--surface);
+  box-shadow: var(--shadow-pop);
+  font-size: 12px;
+}
+.ci-popover-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.ci-popover-title {
+  color: var(--text);
+  font-weight: 600;
+}
+.ci-popover-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+}
+.ci-popover-body {
+  overflow-y: auto;
+  padding: 4px 0 6px;
+}
+.ci-popover-note {
+  padding: 10px;
+  color: var(--text-3);
+}
+.ci-popover-err {
+  color: var(--danger);
+}
+.ci-group-title,
+.ci-group-toggle {
+  padding: 6px 10px 2px;
+  color: var(--text-3);
+  font-size: 11px;
+  font-weight: 600;
+}
+.ci-group-toggle {
+  border: none;
+  background: transparent;
+  font-family: inherit;
+  cursor: pointer;
+}
+.ci-check-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ci-check {
+  display: flex;
+  gap: 8px;
+  padding: 4px 10px;
+}
+.ci-check:hover {
+  background: var(--surface-2);
+}
+.ci-check-mark {
+  display: flex;
+  flex: none;
+  padding-top: 2px;
+  color: var(--text-3);
+}
+.ci-failed .ci-check-mark {
+  color: var(--danger);
+}
+.ci-passed .ci-check-mark {
+  color: var(--success);
+}
+.ci-pending .ci-check-mark {
+  color: var(--warning);
+}
+.ci-check-main {
+  min-width: 0;
+  flex: 1;
+}
+.ci-check-line {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.ci-check-line a {
+  overflow: hidden;
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ci-check-required {
+  padding: 0 5px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-3);
+  font-size: 10px;
+}
+.ci-check-dur {
+  margin-left: auto;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.ci-check-detail {
+  overflow: hidden;
+  color: var(--text-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ci-failed .ci-check-detail {
+  color: var(--danger);
+}
+.chip-button {
+  padding: 0;
+  border: none;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+.chip-button:hover .chip {
+  text-decoration: underline;
+}
+.ci-popover-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.ci-popover-actions .ci-popover-note {
+  padding: 0;
+}
+.ci-action,
+.ci-rerun {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  cursor: pointer;
+}
+.ci-action {
+  padding: 2px 8px;
+}
+.ci-rerun {
+  padding: 1px 4px;
+  visibility: hidden;
+}
+.ci-check:hover .ci-rerun {
+  visibility: visible;
+}
+.ci-action:hover:not(:disabled),
+.ci-rerun:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.ci-action:disabled {
+  color: var(--text-3);
+  cursor: default;
+}

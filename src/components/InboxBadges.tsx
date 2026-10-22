@@ -1,4 +1,6 @@
+import { useRef, useState } from "react";
 import type { ItemReasonKind } from "../lib/types";
+import { CiChecksPopover, type PrRef } from "./CiChecksPopover";
 import { Icon } from "./icons";
 
 const REASON_LABEL: Record<ItemReasonKind, string> = {
@@ -49,14 +51,34 @@ export function StatusPill({ state, isDraft }: { state: string | null; isDraft: 
   return <span className={`badge ${kind}`}>{state}</span>;
 }
 
-export function CiBadge({ state }: { state: string | null }) {
+/** The CI chip. With `pr` it becomes a button opening the checks popover. */
+export function CiBadge({ state, pr }: { state: string | null; pr?: PrRef }) {
+  const btn = useRef<HTMLButtonElement>(null);
+  const [anchor, setAnchor] = useState<DOMRect | null>(null);
   if (!state) return null;
   const kind = state === "success" ? "ok" : state === "failure" || state === "error" ? "bad" : "";
   const icon = kind === "ok" ? "check" : kind === "bad" ? "x" : "dot";
-  return (
+  const chip = (
     <span className={`chip ${kind}`.trim()} title={`CI: ${state}`}>
       <Icon name={icon} size={11} /> ci
     </span>
+  );
+  if (!pr) return chip;
+  return (
+    <>
+      <button
+        ref={btn}
+        className="chip-button"
+        title={`CI: ${state} — show checks`}
+        onClick={(e) => {
+          e.stopPropagation();
+          setAnchor(anchor ? null : (btn.current?.getBoundingClientRect() ?? null));
+        }}
+      >
+        {chip}
+      </button>
+      {anchor && <CiChecksPopover pr={pr} anchor={anchor} onClose={() => setAnchor(null)} />}
+    </>
   );
 }
 

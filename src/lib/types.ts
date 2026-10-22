@@ -250,6 +250,32 @@ export interface PrMeta {
   checks: PrCheck[];
 }
 
+export interface CiAnnotation {
+  path: string | null;
+  message: string;
+}
+
+export interface CiCheck {
+  name: string;
+  jobId: number | null; // Actions job id; null for app checks / commit statuses
+  runId: number | null;
+  workflow: string | null;
+  state: string | null;
+  bucket: "failed" | "pending" | "passed";
+  url: string | null;
+  required: boolean;
+  durationSecs: number | null;
+  failedSteps: string[];
+  annotations: CiAnnotation[];
+}
+
+/** Per-check detail of a PR's head commit (the CI badge popover). Failed first. */
+export interface PrChecks {
+  state: string | null;
+  prUrl: string;
+  checks: CiCheck[];
+}
+
 // --- GitHub PR review threads (read-only, ephemeral; not persisted) ---
 
 export interface PrThreadComment {
