@@ -813,10 +813,10 @@ pub async fn create_review_for_pr(
     name: String,
     pr_number: i64,
     base_paths: Vec<String>,
-    reuse_draft: Option<bool>,
     db: State<'_, Db>,
 ) -> AppResult<Review> {
-    create_review_for_pr_impl(&db, &owner, &name, pr_number, &base_paths, reuse_draft.unwrap_or(false))
+    // Opening a PR resumes its draft; starting another round is `new_review_on_target`.
+    create_review_for_pr_impl(&db, &owner, &name, pr_number, &base_paths, true)
 }
 
 enum DiffCommand {

@@ -247,7 +247,7 @@ function PrList({ repo, onOpen }: { repo: Repository; onOpen: (id: number) => vo
             key={pr.number}
             className="card pr-row"
             onClick={() => startPrReview.mutate(pr.number)}
-            title="Start a review of this PR"
+            title="Resume your draft review of this PR, or start one"
           >
             <div className="pr-row-main">
               <span className="pr-title">

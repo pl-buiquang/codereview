@@ -78,8 +78,7 @@ export function ConversationsView() {
     mutationFn: async (c: Conversation) => {
       const { owner, name, number } = c.subject;
       if (c.kind === "thread") requestThreadJump({ owner, name, number, threadId: c.id });
-      // The backend resumes the PR's draft (matched on owner/name, not the repo's display label).
-      const review = await api.createReviewForPr(owner, name, number, parseRepoBasePaths(repoBasePaths), true);
+      const review = await api.createReviewForPr(owner, name, number, parseRepoBasePaths(repoBasePaths));
       queryClient.invalidateQueries({ queryKey: ["reviews"] });
       return review.id;
     },

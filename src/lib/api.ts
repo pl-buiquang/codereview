@@ -233,9 +233,9 @@ export const api = {
     invoke<void>("publish_draft_reply", { commentId }),
   publishDraftReplies: (reviewId: number) =>
     invoke<PublishDraftRepliesResult>("publish_draft_replies", { reviewId }),
-  /** `reuseDraft` resumes the PR's open draft instead of starting a new review. */
-  createReviewForPr: (owner: string, name: string, prNumber: number, basePaths: string[] = [], reuseDraft = false) =>
-    invoke<Review>("create_review_for_pr", { owner, name, prNumber, basePaths, reuseDraft }),
+  /** Resumes the PR's open draft, else starts a review. */
+  createReviewForPr: (owner: string, name: string, prNumber: number, basePaths: string[] = []) =>
+    invoke<Review>("create_review_for_pr", { owner, name, prNumber, basePaths }),
   publishReview: (reviewId: number) => invoke<Review>("publish_review", { reviewId }),
   publishReviewPending: (reviewId: number) =>
     invoke<Review>("publish_review_pending", { reviewId }),

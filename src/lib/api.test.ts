@@ -83,7 +83,6 @@ describe("api command wrappers", () => {
       name: "widget",
       prNumber: 42,
       basePaths: [],
-      reuseDraft: false,
     });
 
     await api.publishReview(9);
