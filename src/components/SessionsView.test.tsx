@@ -17,7 +17,7 @@ vi.mock("../lib/api", () => ({
   },
 }));
 
-import { SessionsView, resumeCommand, tildePath } from "./SessionsView";
+import { SessionsView, matchesSessionSearch, resumeCommand, tildePath } from "./SessionsView";
 import { useUIStore } from "../store";
 import { useSettingsStore } from "../lib/settings";
 
@@ -187,6 +187,30 @@ describe("SessionsView", () => {
     expect(screen.getByText(/App summary/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /generate summary|regenerate summary/i })).not.toBeInTheDocument();
   });
+
+  it("filters history sessions by search text, leaving live ones visible", async () => {
+    const past = { live: false, pid: null, tmux: null, focus: "not_live" as const };
+    listClaudeSessions.mockResolvedValue(snapshot([
+      session({ session_id: "l1", name: "live one" }),
+      session({ ...past, session_id: "h1", name: "Fix login", git_branch: "fix/login" }),
+      session({ ...past, session_id: "h2", name: "Refactor sync", git_branch: "refactor/sync" }),
+    ]));
+    renderView();
+    const box = await screen.findByRole("searchbox", { name: "Filter history" });
+    await userEvent.type(box, "SYNC");
+    expect(screen.getByText("Refactor sync")).toBeInTheDocument();
+    expect(screen.queryByText("Fix login")).not.toBeInTheDocument();
+    expect(screen.getByText("live one")).toBeInTheDocument();
+    expect(screen.getByText("History · 1 of 2")).toBeInTheDocument();
+
+    await userEvent.clear(box);
+    await userEvent.type(box, "nothing here");
+    expect(screen.getByText("No sessions match “nothing here”.")).toBeInTheDocument();
+
+    await userEvent.type(box, "{Escape}");
+    expect(screen.getByText("Fix login")).toBeInTheDocument();
+    expect(screen.getByText("Refactor sync")).toBeInTheDocument();
+  });
 });
 
 describe("helpers", () => {
@@ -199,5 +223,20 @@ describe("helpers", () => {
   it("quotes cwd in resume command", () => {
     expect(resumeCommand({ cwd: "/a/b", session_id: "id" })).toBe("cd /a/b; claude --resume id");
     expect(resumeCommand({ cwd: "/a b/it's", session_id: "id" })).toBe(`cd '/a b/it'\\''s'; claude --resume id`);
+  });
+  it("matches session search on all words, case-insensitively, across fields", () => {
+    const s = session({
+      name: "Fix login",
+      git_branch: "fix/oauth",
+      cwd: "/Users/me/projects/back",
+      summaries: [{ date: null, title: null, body: "Patched the token refresh", generated: false }],
+    });
+    expect(matchesSessionSearch(s, "")).toBe(true);
+    expect(matchesSessionSearch(s, "  ")).toBe(true);
+    expect(matchesSessionSearch(s, "LOGIN")).toBe(true);
+    expect(matchesSessionSearch(s, "oauth")).toBe(true);
+    expect(matchesSessionSearch(s, "~/projects/back")).toBe(true);
+    expect(matchesSessionSearch(s, "token refresh")).toBe(true);
+    expect(matchesSessionSearch(s, "login front")).toBe(false);
   });
 });

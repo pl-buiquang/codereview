@@ -39,6 +39,26 @@ export function resumeCommand(s: Pick<ClaudeSession, "cwd" | "session_id">): str
   return `cd ${shellQuote(s.cwd)}; claude --resume ${s.session_id}`;
 }
 
+/** Every whitespace-separated word of `q` must appear (case-insensitive) in the session's text. */
+export function matchesSessionSearch(s: ClaudeSession, q: string): boolean {
+  const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return true;
+  const haystack = [
+    s.name,
+    s.original_name,
+    s.session_id,
+    s.cwd,
+    tildePath(s.cwd),
+    s.git_branch,
+    s.repo,
+    ...(s.summaries ?? []).map((sum) => sum.body),
+  ]
+    .filter(Boolean)
+    .join("\n")
+    .toLowerCase();
+  return words.every((w) => haystack.includes(w));
+}
+
 function TerminalSessions() {
   const historyDays = useSettingsStore((s) => s.sessionHistoryDays);
   const summaryDir = useSettingsStore((s) => s.sessionSummaryDir);
@@ -100,6 +120,9 @@ function TerminalSessions() {
   const sessions = sessionsQuery.data?.sessions ?? [];
   const live = sessions.filter((s) => s.live);
   const history = sessions.filter((s) => !s.live);
+  const [historySearch, setHistorySearch] = useState("");
+  const filteredHistory = history.filter((s) => matchesSessionSearch(s, historySearch));
+  const filtering = historySearch.trim() !== "";
 
   const copyCommand = (command: string, what: string) =>
     navigator.clipboard.writeText(command).then(
@@ -166,9 +189,29 @@ function TerminalSessions() {
               />
             ))}
 
-            {historyDays > 0 && <h2 className="sessions-group-head">History</h2>}
+            {historyDays > 0 && (
+              <h2 className="sessions-group-head">
+                History{filtering && ` · ${filteredHistory.length} of ${history.length}`}
+              </h2>
+            )}
             {historyDays > 0 && history.length === 0 && <p className="muted faint">No recent sessions.</p>}
-            {history.map((s) => (
+            {historyDays > 0 && history.length > 0 && (
+              <input
+                type="search"
+                className="input archive-search"
+                aria-label="Filter history"
+                placeholder="Filter history by name, folder, branch, repo, or summary…"
+                value={historySearch}
+                onChange={(e) => setHistorySearch(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") setHistorySearch("");
+                }}
+              />
+            )}
+            {filtering && filteredHistory.length === 0 && history.length > 0 && (
+              <p className="muted faint">No sessions match “{historySearch.trim()}”.</p>
+            )}
+            {filteredHistory.map((s) => (
               <SessionRow
                 key={s.session_id}
                 session={s}
