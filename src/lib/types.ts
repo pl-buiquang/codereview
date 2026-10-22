@@ -874,6 +874,8 @@ export interface IgnoreRule {
   subjectMine?: boolean;
   /** I wrote a comment in the conversation. */
   iCommented?: boolean;
+  /** I'm involved in the PR / issue: author, direct reviewer, assignee, mentioned, commented in it, or on my Board. */
+  involved?: boolean;
   /** Case-insensitive text found in the latest comment. */
   bodyContains?: string;
   /** Logins of the latest comment's author. */

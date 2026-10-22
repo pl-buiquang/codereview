@@ -132,6 +132,11 @@ function RuleConditions({ rule, onChange }: { rule: IgnoreRule; onChange: (c: Pa
       <TriSelect label="PR / issue closed or merged" value={rule.subjectClosed} onChange={(subjectClosed) => onChange({ subjectClosed })} />
       <TriSelect label="PR / issue is mine" value={rule.subjectMine} onChange={(subjectMine) => onChange({ subjectMine })} />
       <TriSelect label="I commented in it" value={rule.iCommented} onChange={(iCommented) => onChange({ iCommented })} />
+      <TriSelect
+        label="I'm involved in the PR / issue (author, direct reviewer, assignee, mentioned, commented, on Board)"
+        value={rule.involved}
+        onChange={(involved) => onChange({ involved })}
+      />
       <TriSelect label="Approvals only (discussion)" value={rule.approvalsOnly} onChange={(approvalsOnly) => onChange({ approvalsOnly })} />
       <label className="rule-field">
         <span>Quiet for at least (days)</span>

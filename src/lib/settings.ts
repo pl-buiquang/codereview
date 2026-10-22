@@ -103,6 +103,7 @@ export const DEFAULT_IGNORE_RULES: IgnoreRule[] = [
   { id: "preset-mine-last", name: "My message is the last", enabled: false, lastAuthor: "me" },
   { id: "preset-bot-commands", name: "Commands to bots", enabled: false, kind: "discussion", lastAuthor: "me", bodyContains: "@dependabot" },
   { id: "preset-approvals", name: "Approvals only", enabled: false, approvalsOnly: true },
+  { id: "preset-not-involved", name: "PRs / issues I'm not involved in", enabled: true, involved: false },
 ];
 
 type PersistedSettings = Pick<

@@ -55,6 +55,9 @@ pub struct IgnoreRule {
     pub subject_mine: Option<bool>,
     /// I wrote a comment in the conversation.
     pub i_commented: Option<bool>,
+    /// I'm involved in the PR / issue: author, direct reviewer, assignee,
+    /// mentioned, commented anywhere in it, or tracking it on the Board.
+    pub involved: Option<bool>,
     /// Case-insensitive text found in the latest comment.
     pub body_contains: Option<String>,
     /// Latest comment authors (logins, case-insensitive).
@@ -75,6 +78,7 @@ struct Facts {
     subject_closed: bool,
     subject_mine: bool,
     i_commented: bool,
+    subject_involved: bool,
     approvals_only: bool,
     age_days: Option<i64>,
 }
@@ -89,6 +93,7 @@ impl IgnoreRule {
             || self.older_than_days.is_some()
             || self.subject_mine.is_some()
             || self.i_commented.is_some()
+            || self.involved.is_some()
             || self.body_contains.as_deref().is_some_and(|b| !b.trim().is_empty())
             || !self.authors.is_empty()
             || self.approvals_only.is_some()
@@ -113,6 +118,7 @@ impl IgnoreRule {
             && self.older_than_days.is_none_or(|d| f.age_days.is_some_and(|a| a >= d))
             && self.subject_mine.is_none_or(|v| v == f.subject_mine)
             && self.i_commented.is_none_or(|v| v == f.i_commented)
+            && self.involved.is_none_or(|v| v == f.subject_involved)
             && self
                 .body_contains
                 .as_deref()
@@ -213,7 +219,13 @@ struct SubjectRow {
     discussion_json: Option<String>,
     last_read_at: Option<String>,
     author_login: Option<String>,
+    /// The Inbox surfaced it for me personally (not through a team).
+    inbox_direct: bool,
 }
+
+/// Notification reasons that name me personally; `review_requested` and
+/// `team_mention` can come from a team I'm in.
+const DIRECT_NOTIFICATION_REASONS: &[&str] = &["author", "comment", "mention", "assign", "manual"];
 
 fn read_subjects(conn: &Connection) -> AppResult<Vec<SubjectRow>> {
     let mut stmt = conn.prepare(
@@ -222,7 +234,9 @@ fn read_subjects(conn: &Connection) -> AppResult<Vec<SubjectRow>> {
                 COALESCE(p.title, i.title), COALESCE(p.url, i.url), COALESCE(p.state, i.state),
                 n.reason, n.last_read_at,
                 EXISTS (SELECT 1 FROM board_card b WHERE b.id = s.id AND b.archived_at IS NULL AND b.discarded_at IS NULL),
-                th.threads_json, d.comments_json, COALESCE(p.author_login, i.author_login)
+                th.threads_json, d.comments_json, COALESCE(p.author_login, i.author_login),
+                EXISTS (SELECT 1 FROM item_reasons ir WHERE ir.item_id = s.id
+                        AND ir.reason IN ('direct_review', 'assigned', 'mention', 'author'))
          FROM (SELECT subject_node_id AS id FROM gh_notification WHERE subject_node_id IS NOT NULL
                UNION
                SELECT id FROM board_card WHERE archived_at IS NULL AND discarded_at IS NULL) s
@@ -253,6 +267,7 @@ fn read_subjects(conn: &Connection) -> AppResult<Vec<SubjectRow>> {
                 threads_json: r.get(11)?,
                 discussion_json: r.get(12)?,
                 author_login: r.get(13)?,
+                inbox_direct: r.get(14)?,
             })
         })?
         .collect::<rusqlite::Result<_>>()?;
@@ -296,7 +311,7 @@ impl Ctx {
     }
 }
 
-fn facts_of(c: &Conversation, ctx: &Ctx, subject_mine: bool, now: DateTime<Utc>) -> Facts {
+fn facts_of(c: &Conversation, ctx: &Ctx, subject_mine: bool, subject_involved: bool, now: DateTime<Utc>) -> Facts {
     // (author login, bot?, body, review approving?) of every comment, oldest first.
     let comments: Vec<(Option<String>, bool, &str, bool)> = match &c.thread {
         Some(t) => t
@@ -330,6 +345,7 @@ fn facts_of(c: &Conversation, ctx: &Ctx, subject_mine: bool, now: DateTime<Utc>)
         subject_closed: matches!(c.subject.state.as_deref().map(str::to_lowercase).as_deref(), Some("closed" | "merged")),
         subject_mine,
         i_commented: comments.iter().any(|x| is_me(&x.0)),
+        subject_involved,
         approvals_only: c.kind == "discussion" && !humans.is_empty() && humans.iter().all(|x| x.3),
         age_days: ts(&c.last_comment_at).map(|t| now.signed_duration_since(t).num_days()),
     }
@@ -353,14 +369,23 @@ pub fn list_conversations_impl(conn: &Connection, f: &ConversationFilters, limit
     let mut all: Vec<Conversation> = Vec::new();
     let mut bots = 0usize;
     let mut mine_subject: HashMap<String, bool> = HashMap::new();
+    let mut involved_subject: HashMap<String, bool> = HashMap::new();
+    let is_viewer = |a: Option<&gh::PrActor>| {
+        matches!((a.and_then(|a| a.login.as_deref()), &ctx.viewer), (Some(l), Some(v)) if l.eq_ignore_ascii_case(v))
+    };
     for row in read_subjects(conn)? {
-        mine_subject.insert(
-            row.subject.id.clone(),
-            matches!((&row.author_login, &ctx.viewer), (Some(a), Some(v)) if a.eq_ignore_ascii_case(v)),
-        );
+        let mine = matches!((&row.author_login, &ctx.viewer), (Some(a), Some(v)) if a.eq_ignore_ascii_case(v));
+        mine_subject.insert(row.subject.id.clone(), mine);
         let threads: Vec<PrThread> = row.threads_json.as_deref().and_then(|j| serde_json::from_str(j).ok()).unwrap_or_default();
         let discussion: Vec<DiscussionComment> =
             row.discussion_json.as_deref().and_then(|j| serde_json::from_str(j).ok()).unwrap_or_default();
+        let involved = mine
+            || row.subject.on_board
+            || row.inbox_direct
+            || row.subject.reason.as_deref().is_some_and(|r| DIRECT_NOTIFICATION_REASONS.contains(&r))
+            || threads.iter().flat_map(|t| &t.comments).any(|c| is_viewer(c.author.as_ref()))
+            || discussion.iter().any(|c| is_viewer(c.author.as_ref()));
+        involved_subject.insert(row.subject.id.clone(), involved);
         let notif_read = row.last_read_at.as_deref().and_then(ts);
         let seen_of = |id: &str| {
             let own = state.get(id).and_then(|(_, s)| s.as_deref()).and_then(ts);
@@ -439,7 +464,13 @@ pub fn list_conversations_impl(conn: &Connection, f: &ConversationFilters, limit
     let now = Utc::now();
     let mut rule_hits: HashMap<String, usize> = HashMap::new();
     for c in &mut all {
-        let facts = facts_of(c, &ctx, mine_subject.get(&c.subject.id).copied().unwrap_or(false), now);
+        let facts = facts_of(
+            c,
+            &ctx,
+            mine_subject.get(&c.subject.id).copied().unwrap_or(false),
+            involved_subject.get(&c.subject.id).copied().unwrap_or(false),
+            now,
+        );
         for r in f.rules.iter().filter(|r| r.matches(&facts)) {
             *rule_hits.entry(r.id.clone()).or_default() += 1;
             if r.enabled {
@@ -716,5 +747,51 @@ mod tests {
         assert_eq!(hits(body).get("body"), Some(&1));
         let author = IgnoreRule { authors: vec!["BOB".into()], ..rule("author") };
         assert_eq!(hits(author).get("author"), Some(&2));
+    }
+
+    #[test]
+    fn involved_rule_hides_team_only_review_requests() {
+        let conn = open_memory();
+        seed(&conn, vec![]);
+        // PR_1 is on the Board; PR_2..PR_5 only come from notifications.
+        for (id, n, reason) in [("PR_2", 2, "review_requested"), ("PR_3", 3, "review_requested"), ("PR_4", 4, "review_requested"), ("PR_5", 5, "mention")] {
+            mirror::store::upsert_node(&conn, &pr_node(id, n), "2026-01-01T00:00:00Z").unwrap();
+            conn.execute(
+                "INSERT INTO gh_notification (id, subject_type, subject_node_id, repo, number, title, reason, updated_at, fetched_at)
+                 VALUES (?1, 'PullRequest', ?2, 'acme/widget', ?3, 't', ?4, 'now', 'now')",
+                params![format!("N{n}"), id, n, reason],
+            )
+            .unwrap();
+        }
+        conn.execute("INSERT INTO inbox_entry (id, type, first_seen_at) VALUES ('PR_3', 'pr', 'now')", []).unwrap();
+        conn.execute("INSERT INTO item_reasons (item_id, reason) VALUES ('PR_3', 'direct_review')", []).unwrap();
+        let threads = |id: &str, t: serde_json::Value| {
+            conn.execute(
+                "INSERT OR REPLACE INTO gh_pr_threads (pr_id, threads_json, fetched_at) VALUES (?1, ?2, 'now')",
+                params![id, serde_json::Value::Array(vec![t]).to_string()],
+            )
+            .unwrap();
+        };
+        threads("PR_1", thread("T1", &[("bob", "User", "2026-01-02T00:00:00Z")]));
+        threads("PR_2", thread("T2", &[("bob", "User", "2026-01-02T00:00:00Z")]));
+        threads("PR_3", thread("T3", &[("bob", "User", "2026-01-02T00:00:00Z")]));
+        // Commenting on another thread of the PR makes this one count too.
+        conn.execute(
+            "INSERT OR REPLACE INTO gh_pr_threads (pr_id, threads_json, fetched_at) VALUES ('PR_4', ?1, 'now')",
+            params![serde_json::json!([
+                thread("T4", &[("bob", "User", "2026-01-02T00:00:00Z")]),
+                thread("T4b", &[("me", "User", "2026-01-02T00:00:00Z")])
+            ])
+            .to_string()],
+        )
+        .unwrap();
+        threads("PR_5", thread("T5", &[("bob", "User", "2026-01-02T00:00:00Z")]));
+
+        let rule = IgnoreRule { involved: Some(false), ..rule("not-involved") };
+        let got = list(&conn, ConversationFilters { rules: vec![rule], ..Default::default() }, 10);
+        let mut ids: Vec<&str> = got.items.iter().map(|c| c.id.as_str()).collect();
+        ids.sort();
+        assert_eq!(ids, vec!["T1", "T3", "T4", "T4b", "T5"], "only the team-only review request is hidden");
+        assert_eq!(got.facets.ignored, 1);
     }
 }
