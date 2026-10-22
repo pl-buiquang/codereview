@@ -149,6 +149,8 @@ interface UIState {
   showRoutinesConfig: () => void;
   clearRoutineRunFocus: () => void;
   showBoardCard: (cardId: string) => void;
+  /** Open Inbox → Conversations on a PR's unresolved threads (bots included). */
+  showConversations: (subjectId: string) => void;
   clearBoardHighlight: () => void;
   /** Pending request to open a repo's Graph on a ref/worktree (not persisted). */
   graphFocus: GraphFocus | null;
@@ -288,6 +290,15 @@ export const useUIStore = create<UIState>()(
 
       setHomeSection: (homeSection) =>
         set({ homeSection, homeRepoId: null, activeTabId: HOME_TAB.id }),
+
+      showConversations: (subjectId) =>
+        set((s) => ({
+          homeSection: "inbox",
+          homeRepoId: null,
+          activeTabId: HOME_TAB.id,
+          inboxFilters: { ...s.inboxFilters, bucket: "conversations" },
+          conversationFilters: { ...EMPTY_CONVERSATION_FILTERS, subjectIds: [subjectId], unresolved: true, showBots: true },
+        })),
 
       showBoardCard: (cardId) =>
         set({ homeSection: "board", homeRepoId: null, activeTabId: HOME_TAB.id, boardHighlightCardId: cardId }),

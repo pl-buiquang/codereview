@@ -176,11 +176,24 @@ export function ReviewDecisionBadge({ decision }: { decision: string | null | un
   return null;
 }
 
-export function CommentsBadge({ count }: { count: number | null }) {
+export function CommentsBadge({ count, onClick }: { count: number | null; onClick?: () => void }) {
   if (!count) return null;
-  return (
-    <span className="chip accent" title={`${count} unresolved thread(s)`}>
+  const title = `${count} unresolved thread(s)`;
+  const content = (
+    <>
       <Icon name="comment" size={11} /> {count}
-    </span>
+    </>
+  );
+  if (!onClick) {
+    return (
+      <span className="chip accent" title={title}>
+        {content}
+      </span>
+    );
+  }
+  return (
+    <button type="button" className="chip accent" title={`${title} — show conversations`} onClick={onClick}>
+      {content}
+    </button>
   );
 }

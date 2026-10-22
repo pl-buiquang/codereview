@@ -496,6 +496,7 @@ export function BoardCard({
   const aiOff = useAiDisabledReason();
   const activeRuns = useActiveRoutineRuns().get(cardContextKey(card));
   const showRoutineRun = useUIStore((s) => s.showRoutineRun);
+  const showConversations = useUIStore((s) => s.showConversations);
   const [snoozeMenuOpen, setSnoozeMenuOpen] = useState(false);
   const snoozeRef = useRef<HTMLSpanElement>(null);
   const snoozeOptions = parseSnoozeOptions(useSettingsStore((s) => s.boardSnoozeOptions));
@@ -642,7 +643,7 @@ export function BoardCard({
           <StackBadge number={card.stack_number} position={card.stack_position} onClick={onFilterStack} />
           <MergeStateBadge state={card.merge_state_status} stacked={card.stack_number != null} />
           <AutoMergeBadge method={card.auto_merge} />
-          <CommentsBadge count={card.pending_threads} />
+          <CommentsBadge count={card.pending_threads} onClick={() => showConversations(card.id)} />
         </div>
       )}
 
