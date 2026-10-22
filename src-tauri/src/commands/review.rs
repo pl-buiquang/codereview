@@ -813,9 +813,10 @@ pub async fn create_review_for_pr(
     name: String,
     pr_number: i64,
     base_paths: Vec<String>,
+    reuse_draft: Option<bool>,
     db: State<'_, Db>,
 ) -> AppResult<Review> {
-    create_review_for_pr_impl(&db, &owner, &name, pr_number, &base_paths, false)
+    create_review_for_pr_impl(&db, &owner, &name, pr_number, &base_paths, reuse_draft.unwrap_or(false))
 }
 
 enum DiffCommand {
@@ -4801,6 +4802,8 @@ mod tests {
     fn reopening_a_pr_draft_needs_no_github_call() {
         let conn = open_memory();
         let repo_id = seed_repo(&conn, Some("o"), Some("r"));
+        // A friendly name changes the repo's display label, not how its drafts are found.
+        conn.execute("UPDATE repository SET friendly_name = 'Widget' WHERE id = ?1", params![repo_id]).unwrap();
         seed_mirror_pr(&conn, repo_id, 7, "abc123");
         let info = PrInfo { title: "A title".into(), base_ref: "main".into(), head_ref: "feat".into(), head_sha: "abc123".into() };
         let target = get_or_create_pr_target(&conn, repo_id, 7, &info, Some("PR_node")).unwrap();

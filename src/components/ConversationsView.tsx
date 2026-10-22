@@ -42,18 +42,6 @@ export function ConversationsView() {
     queryFn: () => api.listConversations(filters, bots, rules, limit),
     placeholderData: keepPreviousData,
   });
-  const reviewsQuery = useQuery({ queryKey: ["reviews", null], queryFn: () => api.listReviews(null) });
-
-  const reviewByPr = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const s of reviewsQuery.data ?? []) {
-      if (s.target.kind !== "github_pr" || s.target.github_pr_number == null) continue;
-      const key = `${s.repo_label}#${s.target.github_pr_number}`.toLowerCase();
-      if (!m.has(key)) m.set(key, s.review.id);
-    }
-    return m;
-  }, [reviewsQuery.data]);
-
   const items = query.data?.items ?? [];
   const facets = query.data?.facets;
   const total = query.data?.total ?? 0;
@@ -90,9 +78,8 @@ export function ConversationsView() {
     mutationFn: async (c: Conversation) => {
       const { owner, name, number } = c.subject;
       if (c.kind === "thread") requestThreadJump({ owner, name, number, threadId: c.id });
-      const existing = reviewByPr.get(`${owner}/${name}#${number}`.toLowerCase());
-      if (existing != null) return existing;
-      const review = await api.createReviewForPr(owner, name, number, parseRepoBasePaths(repoBasePaths));
+      // The backend resumes the PR's draft (matched on owner/name, not the repo's display label).
+      const review = await api.createReviewForPr(owner, name, number, parseRepoBasePaths(repoBasePaths), true);
       queryClient.invalidateQueries({ queryKey: ["reviews"] });
       return review.id;
     },
