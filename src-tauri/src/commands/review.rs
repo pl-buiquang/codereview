@@ -50,6 +50,18 @@ fn get_repository(conn: &Connection, id: i64) -> AppResult<Repository> {
     .map_err(Into::into)
 }
 
+fn find_remote_repository_id(conn: &Connection, owner: &str, name: &str) -> AppResult<Option<i64>> {
+    Ok(conn
+        .query_row(
+            "SELECT id FROM repository
+             WHERE remote_owner = ?1 COLLATE NOCASE AND remote_name = ?2 COLLATE NOCASE
+             ORDER BY id LIMIT 1",
+            params![owner, name],
+            |r| r.get(0),
+        )
+        .optional()?)
+}
+
 /// Find a repository row for a GitHub `owner/name`, creating a remote-only row
 /// when neither exists. Reviewing a repo registers it, including one the
 /// mirror auto-added. Attempts auto-link from base_paths before inserting, so
@@ -60,16 +72,7 @@ pub fn get_or_create_remote_repository(
     name: &str,
     base_paths: &[String],
 ) -> AppResult<Repository> {
-    let existing: Option<i64> = conn
-        .query_row(
-            "SELECT id FROM repository
-             WHERE remote_owner = ?1 COLLATE NOCASE AND remote_name = ?2 COLLATE NOCASE
-             ORDER BY id LIMIT 1",
-            params![owner, name],
-            |r| r.get(0),
-        )
-        .optional()?;
-    if let Some(id) = existing {
+    if let Some(id) = find_remote_repository_id(conn, owner, name)? {
         conn.execute(
             "UPDATE repository SET registered_at = ?1 WHERE id = ?2 AND registered_at IS NULL",
             params![now(), id],
@@ -676,19 +679,61 @@ fn new_review_for_target(conn: &Connection, target_id: i64, pin: &LiveShas) -> A
 /// else a fresh one pinned at `pin`.
 fn review_for_target(conn: &Connection, target_id: i64, reuse_draft: bool, pin: &LiveShas) -> AppResult<Review> {
     if reuse_draft {
-        let existing: Option<i64> = conn
-            .query_row(
-                "SELECT id FROM review WHERE target_id = ?1 AND status = 'draft'
-                 ORDER BY updated_at DESC, id DESC LIMIT 1",
-                params![target_id],
-                |r| r.get(0),
-            )
-            .optional()?;
-        if let Some(id) = existing {
-            return get_review_row(conn, id);
+        if let Some(review) = latest_draft(conn, target_id)? {
+            return Ok(review);
         }
     }
     new_review_for_target(conn, target_id, pin)
+}
+
+/// The most recently updated draft review on a target, if any.
+fn latest_draft(conn: &Connection, target_id: i64) -> AppResult<Option<Review>> {
+    let id: Option<i64> = conn
+        .query_row(
+            "SELECT id FROM review WHERE target_id = ?1 AND status = 'draft'
+             ORDER BY updated_at DESC, id DESC LIMIT 1",
+            params![target_id],
+            |r| r.get(0),
+        )
+        .optional()?;
+    id.map(|id| get_review_row(conn, id)).transpose()
+}
+
+/// A PR's existing draft review, found from local rows only: no network, no
+/// mirror refresh. `None` when the repo, target or draft isn't there yet.
+fn existing_pr_draft(conn: &Connection, owner: &str, name: &str, pr_number: i64) -> AppResult<Option<Review>> {
+    let Some(repo_id) = find_remote_repository_id(conn, owner, name)? else {
+        return Ok(None);
+    };
+    let target_id: Option<i64> = conn
+        .query_row(
+            "SELECT id FROM target WHERE repo_id = ?1 AND kind = 'github_pr' AND github_pr_number = ?2",
+            params![repo_id, pr_number],
+            |r| r.get(0),
+        )
+        .optional()?;
+    match target_id {
+        Some(id) => latest_draft(conn, id),
+        None => Ok(None),
+    }
+}
+
+/// A PR's refs and live head as the mirror last saw them; `None` when the
+/// mirror doesn't have the PR (or its refs) yet.
+fn mirror_pr_info(conn: &Connection, repo_id: i64, pr_number: i64) -> AppResult<Option<(PrInfo, String)>> {
+    let row: Option<(String, Option<PrInfo>)> = conn
+        .query_row(
+            "SELECT node_id, title, base_ref, head_ref, head_sha FROM gh_pr WHERE repo_id = ?1 AND number = ?2",
+            params![repo_id, pr_number],
+            |r| {
+                let info = (|| {
+                    Some(PrInfo { title: r.get(1).ok()?, base_ref: r.get(2).ok()?, head_ref: r.get(3).ok()?, head_sha: r.get(4).ok()? })
+                })();
+                Ok((r.get(0)?, info))
+            },
+        )
+        .optional()?;
+    Ok(row.and_then(|(node_id, info)| Some((info?, node_id))))
 }
 
 /// Start a draft review for a local virtual PR (creating/reusing its target).
@@ -707,12 +752,12 @@ pub fn create_review_impl(
 }
 
 #[tauri::command]
-pub fn create_review(
+pub async fn create_review(
     repo_id: i64,
     base_ref: String,
     head_ref: String,
     three_dot: bool,
-    db: State<Db>,
+    db: State<'_, Db>,
 ) -> AppResult<Review> {
     let conn = db.0.lock().unwrap();
     let local_path: Option<String> = conn
@@ -740,8 +785,19 @@ pub fn create_review_for_pr_impl(
     base_paths: &[String],
     reuse_draft: bool,
 ) -> AppResult<Review> {
+    // Reopening a draft needs no GitHub round-trip: the tab refreshes the mirror itself.
+    if reuse_draft {
+        if let Some(review) = existing_pr_draft(&db.0.lock().unwrap(), owner, name, pr_number)? {
+            return Ok(review);
+        }
+    }
     let repo_id = get_or_create_remote_repository(&db.0.lock().unwrap(), owner, name, base_paths)?.id;
-    let (info, node_id) = sync_pr(db, owner, name, pr_number)?;
+    // A new review pins the mirror's head; the tab moves an untouched pin if it was stale.
+    let cached = mirror_pr_info(&db.0.lock().unwrap(), repo_id, pr_number)?;
+    let (info, node_id) = match cached {
+        Some(c) => c,
+        None => sync_pr(db, owner, name, pr_number)?,
+    };
     let merge_base = provider_for()
         .merge_base_sha(owner, name, &info.base_ref, &info.head_sha)
         .ok();
@@ -752,12 +808,12 @@ pub fn create_review_for_pr_impl(
 }
 
 #[tauri::command]
-pub fn create_review_for_pr(
+pub async fn create_review_for_pr(
     owner: String,
     name: String,
     pr_number: i64,
     base_paths: Vec<String>,
-    db: State<Db>,
+    db: State<'_, Db>,
 ) -> AppResult<Review> {
     create_review_for_pr_impl(&db, &owner, &name, pr_number, &base_paths, false)
 }
@@ -4710,5 +4766,64 @@ mod tests {
         let stored = get_review_row(&db.0.lock().unwrap(), review.id).unwrap();
         assert_eq!(stored.head_sha, Some(pinned_head), "head pin preserved");
         assert_eq!(stored.base_sha, Some(pinned_base), "base pin preserved");
+    }
+
+    fn seed_mirror_pr(conn: &Connection, repo_id: i64, number: i64, head_sha: &str) {
+        conn.execute(
+            "INSERT INTO gh_pr (node_id, repo_id, number, title, url, base_ref, head_ref, head_sha, fetched_at)
+             VALUES ('PR_node', ?1, ?2, 'A title', 'https://example.test/pr', 'main', 'feat', ?3, 'now')",
+            params![repo_id, number, head_sha],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn mirror_pr_info_reads_refs_and_head_from_the_mirror() {
+        let conn = open_memory();
+        let repo_id = seed_repo(&conn, Some("o"), Some("r"));
+        assert!(mirror_pr_info(&conn, repo_id, 7).unwrap().is_none(), "no mirror row yet");
+        seed_mirror_pr(&conn, repo_id, 7, "abc123");
+        let (info, node_id) = mirror_pr_info(&conn, repo_id, 7).unwrap().unwrap();
+        assert_eq!((info.base_ref.as_str(), info.head_ref.as_str(), info.head_sha.as_str()), ("main", "feat", "abc123"));
+        assert_eq!(node_id, "PR_node");
+    }
+
+    #[test]
+    fn mirror_pr_info_needs_refs_to_be_usable() {
+        let conn = open_memory();
+        let repo_id = seed_repo(&conn, Some("o"), Some("r"));
+        seed_mirror_pr(&conn, repo_id, 7, "abc123");
+        conn.execute("UPDATE gh_pr SET head_ref = NULL", []).unwrap();
+        assert!(mirror_pr_info(&conn, repo_id, 7).unwrap().is_none(), "falls back to a live fetch");
+    }
+
+    #[test]
+    fn reopening_a_pr_draft_needs_no_github_call() {
+        let conn = open_memory();
+        let repo_id = seed_repo(&conn, Some("o"), Some("r"));
+        seed_mirror_pr(&conn, repo_id, 7, "abc123");
+        let info = PrInfo { title: "A title".into(), base_ref: "main".into(), head_ref: "feat".into(), head_sha: "abc123".into() };
+        let target = get_or_create_pr_target(&conn, repo_id, 7, &info, Some("PR_node")).unwrap();
+        let live = LiveShas { base_sha: Some("base0".into()), head_sha: Some("abc123".into()) };
+        let draft = review_for_target(&conn, target.id, false, &live).unwrap();
+        let db = Db(Mutex::new(conn));
+        // The test has no network: a GitHub lookup here would fail the call.
+        let reopened = create_review_for_pr_impl(&db, "o", "r", 7, &[], true).unwrap();
+        assert_eq!(reopened.id, draft.id);
+        assert_eq!(reopened.head_sha.as_deref(), Some("abc123"), "pin untouched");
+    }
+
+    #[test]
+    fn existing_pr_draft_is_none_without_a_draft() {
+        let conn = open_memory();
+        assert!(existing_pr_draft(&conn, "o", "r", 7).unwrap().is_none(), "unknown repo");
+        let repo_id = seed_repo(&conn, Some("o"), Some("r"));
+        assert!(existing_pr_draft(&conn, "o", "r", 7).unwrap().is_none(), "no target");
+        let info = PrInfo { title: "t".into(), base_ref: "main".into(), head_ref: "feat".into(), head_sha: "abc".into() };
+        let target = get_or_create_pr_target(&conn, repo_id, 7, &info, None).unwrap();
+        assert!(existing_pr_draft(&conn, "o", "r", 7).unwrap().is_none(), "no draft");
+        let live = LiveShas { base_sha: None, head_sha: Some("abc".into()) };
+        let draft = review_for_target(&conn, target.id, false, &live).unwrap();
+        assert_eq!(existing_pr_draft(&conn, "o", "r", 7).unwrap().unwrap().id, draft.id);
     }
 }
