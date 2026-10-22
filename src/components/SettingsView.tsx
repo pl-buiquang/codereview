@@ -259,6 +259,8 @@ function GeneralSection() {
   const boardArchiveDays = useSettingsStore((s) => s.boardArchiveDays);
   const setBoardArchiveDays = useSettingsStore((s) => s.setBoardArchiveDays);
   const boardCountDone = useSettingsStore((s) => s.boardCountDone);
+  const boardNeedsActionSnoozed = useSettingsStore((s) => s.boardNeedsActionSnoozed);
+  const setBoardNeedsActionSnoozed = useSettingsStore((s) => s.setBoardNeedsActionSnoozed);
   const boardBadgeKinds = useSettingsStore((s) => s.boardBadgeKinds);
   const setBoardBadgeKind = useSettingsStore((s) => s.setBoardBadgeKind);
   const boardSnoozeOptions = useSettingsStore((s) => s.boardSnoozeOptions);
@@ -494,6 +496,17 @@ function GeneralSection() {
             />
           </label>
         ))}
+        <label
+          className="settings-row"
+          title="Whether the Board's Needs action filter also shows cards you snoozed. The sidebar badge still leaves them out."
+        >
+          <span>Needs action filter: include snoozed cards</span>
+          <input
+            type="checkbox"
+            checked={boardNeedsActionSnoozed}
+            onChange={(e) => setBoardNeedsActionSnoozed(e.target.checked)}
+          />
+        </label>
         <label
           className="settings-row"
           title="Durations offered by a card's Snooze button, comma-separated: a number then h (hours), d (days) or w (weeks). A snoozed card is left out of the sidebar Board badge until it lapses."

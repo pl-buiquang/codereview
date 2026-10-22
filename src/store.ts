@@ -38,6 +38,8 @@ export interface BoardFilters {
   status: string | null;
   ci: string | null;
   merge: string | null;
+  /** Only cards the sidebar Board badge counts (or could count, see the include-snoozed setting). */
+  needsAction: boolean;
   stack: string | null;
   tags: string[];
   excludeTags: string[];
@@ -48,6 +50,7 @@ export const EMPTY_BOARD_FILTERS: BoardFilters = {
   status: null,
   ci: null,
   merge: null,
+  needsAction: false,
   stack: null,
   tags: [],
   excludeTags: [],

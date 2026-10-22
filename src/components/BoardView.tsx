@@ -8,7 +8,7 @@ import { parseRepoBasePaths, useSettingsStore } from "../lib/settings";
 import { useSyncNow, useSyncScope } from "../lib/sync";
 import { findRepoByFullName } from "../lib/repoLabel";
 import { useUIStore } from "../store";
-import { useBoardBadgeCardIds } from "../lib/boardCounts";
+import { useBoardBadgeCards } from "../lib/boardCounts";
 import { useRefetchOnActivate } from "../lib/useRefetchOnActivate";
 import type { BoardCard as BoardCardT, BoardLane, BoardMetaKind, ClaudeSession } from "../lib/types";
 import {
@@ -75,11 +75,12 @@ export function BoardView() {
   const tmuxSessionName = useSettingsStore((s) => s.tmuxSessionName);
   const filters = useUIStore((s) => s.boardFilters);
   const setBoardFilters = useUIStore((s) => s.setBoardFilters);
-  const { repos: repoFilter, status: statusFilter, ci: ciFilter, merge: mergeFilter, stack: stackFilter, tags: tagFilter, excludeTags: tagExclude } = filters;
+  const { repos: repoFilter, status: statusFilter, ci: ciFilter, merge: mergeFilter, needsAction, stack: stackFilter, tags: tagFilter, excludeTags: tagExclude } = filters;
   const setRepoFilter = (repos: string[]) => setBoardFilters({ repos });
   const setStatusFilter = (status: string | null) => setBoardFilters({ status });
   const setCiFilter = (ci: string | null) => setBoardFilters({ ci });
   const setMergeFilter = (merge: string | null) => setBoardFilters({ merge });
+  const setNeedsAction = (needsAction: boolean) => setBoardFilters({ needsAction });
   const setStackFilter = (stack: string | null) => setBoardFilters({ stack });
   const setTagFilter = (tags: string[]) => setBoardFilters({ tags });
   const setTagExclude = (excludeTags: string[]) => setBoardFilters({ excludeTags });
@@ -99,7 +100,9 @@ export function BoardView() {
   const [batchPending, setBatchPending] = useState(false);
 
   const boardQuery = useQuery({ queryKey: ["board"], queryFn: api.boardList });
-  const badgeCardIds = useBoardBadgeCardIds();
+  const badgeCards = useBoardBadgeCards();
+  const snoozes = useSettingsStore((s) => s.boardSnoozes);
+  const includeSnoozed = useSettingsStore((s) => s.boardNeedsActionSnoozed);
   const tagsQuery = useQuery({ queryKey: ["board-meta-tags"], queryFn: api.boardMetaTags });
   const repositoriesQuery = useQuery({ queryKey: ["repositories"], queryFn: api.listRepositories });
   const lastRefreshQuery = useQuery({ queryKey: ["board-last-refresh"], queryFn: api.boardLastRefreshAt });
@@ -295,11 +298,17 @@ export function BoardView() {
   const effTags = tagFilter.filter((t) => availableTags.has(t));
   const effExcludeTags = tagExclude.filter((t) => availableTags.has(t));
 
+  // Same set as the sidebar badge; snoozed cards only count when the setting includes them.
+  const needsActionCard = (c: BoardCardT) =>
+    badgeCards.has(c.id) && (includeSnoozed || !((snoozes[c.id] ?? 0) > Date.now()));
+  const needsActionCount = allCards.filter((c) => c.lane !== "done" && needsActionCard(c)).length;
+
   const matches = (c: BoardCardT, skip?: "repo" | "status" | "ci" | "merge" | "stack" | "tags") => {
     if (skip !== "repo" && effRepos.length > 0 && !effRepos.includes(c.repo)) return false;
     if (skip !== "status" && effStatus && c.type === "pr" && prStatus(c) !== effStatus) return false;
     if (skip !== "ci" && effCi && ciStatus(c) !== effCi) return false;
     if (skip !== "merge" && effMerge && !mergeFacets(c).includes(effMerge)) return false;
+    if (needsAction && !needsActionCard(c)) return false;
     if (skip !== "stack" && effStack && stackKey(c) !== effStack) return false;
     if (skip !== "tags" && effTags.length > 0 && !cardTags(c).some((t) => effTags.includes(t))) return false;
     if (effExcludeTags.length > 0 && cardTags(c).some((t) => effExcludeTags.includes(t))) return false;
@@ -435,6 +444,17 @@ export function BoardView() {
               title={overviewOpen ? "Hide AI overview" : "Show AI overview"}
             >
               <Icon name="bot" size={13} /> AI Overview
+            </button>
+            <button
+              className={`btn${needsAction ? " active" : ""}`}
+              onClick={() => setNeedsAction(!needsAction)}
+              title={
+                needsAction
+                  ? "Showing only cards that need your action. Click to show all."
+                  : "Show only the cards the sidebar Board badge counts: the ones that need your action"
+              }
+            >
+              <Icon name="flame" size={13} /> Needs action ({needsActionCount})
             </button>
             <button
               className={`btn${monitorOn ? " active" : ""}`}
@@ -606,7 +626,7 @@ export function BoardView() {
                     <BoardCard
                       key={card.id}
                       card={card}
-                      badgeCounted={badgeCardIds.has(card.id)}
+                      badgeCounted={badgeCards.has(card.id)}
                       tags={tags}
                       busy={busy}
                       reviewBusy={openReview.isPending}

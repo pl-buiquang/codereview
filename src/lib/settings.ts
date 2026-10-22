@@ -134,6 +134,7 @@ type PersistedSettings = Pick<
   | "boardBadgeKinds"
   | "boardSnoozeOptions"
   | "boardSnoozes"
+  | "boardNeedsActionSnoozed"
   | "markEdits"
   | "largeDiffMaxLines"
   | "fileTestPatterns"
@@ -174,6 +175,7 @@ const DEFAULTS: PersistedSettings = {
   boardBadgeKinds: DEFAULT_BOARD_BADGE_KINDS,
   boardSnoozeOptions: DEFAULT_SNOOZE_OPTIONS,
   boardSnoozes: {},
+  boardNeedsActionSnoozed: false,
   markEdits: false,
   largeDiffMaxLines: 3000,
   fileTestPatterns: DEFAULT_TEST_PATTERNS,
@@ -241,6 +243,8 @@ interface SettingsState {
   boardSnoozeOptions: string;
   /** Card id → epoch ms until which the card is left out of the Board badge. */
   boardSnoozes: Record<string, number>;
+  /** Whether the Board's "Needs action" filter also shows snoozed cards. */
+  boardNeedsActionSnoozed: boolean;
   /** Newline-separated globs classifying changed files as tests (checked first). */
   fileTestPatterns: string;
   /** Newline-separated globs classifying changed files as config/docs. */
@@ -288,6 +292,7 @@ interface SettingsState {
   setSessionSummaryFork: (on: boolean) => void;
   setOverviewModel: (m: string) => void;
   setBoardOverviewOpen: (open: boolean) => void;
+  setBoardNeedsActionSnoozed: (on: boolean) => void;
   setBoardMonitor: (on: boolean) => void;
   setBoardMonitorLogOpen: (open: boolean) => void;
   setBoardMonitorIntervalMin: (min: number) => void;
@@ -377,6 +382,7 @@ export const useSettingsStore = create<SettingsState>()(
       setBoardMonitorLogOpen: (boardMonitorLogOpen) => set({ boardMonitorLogOpen }),
       setBoardMonitorIntervalMin: (boardMonitorIntervalMin) => set({ boardMonitorIntervalMin }),
       setBoardArchiveDays: (boardArchiveDays) => set({ boardArchiveDays }),
+      setBoardNeedsActionSnoozed: (boardNeedsActionSnoozed) => set({ boardNeedsActionSnoozed }),
       setBoardCountDone: (boardCountDone) => set({ boardCountDone }),
       setBoardBadgeKind: (kind, on) => set((s) => ({ boardBadgeKinds: { ...s.boardBadgeKinds, [kind]: on } })),
       setBoardSnoozeOptions: (boardSnoozeOptions) => set({ boardSnoozeOptions }),
