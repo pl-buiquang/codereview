@@ -427,6 +427,7 @@ function copyCardUrl(url: string) {
 
 export function BoardCard({
   card,
+  badgeCounted,
   tags,
   busy,
   reviewBusy,
@@ -445,6 +446,8 @@ export function BoardCard({
   onFilterStack,
 }: {
   card: BoardCardT;
+  /** The card is one the sidebar Board badge can count (needs my action, kind enabled), snoozed or not. */
+  badgeCounted: boolean;
   tags: string[];
   busy: boolean;
   reviewBusy: boolean;
@@ -641,7 +644,7 @@ export function BoardCard({
             <Icon name="code" size={13} /> <span className="board-card-action-label">VSCode</span>
           </button>
         )}
-        {card.type === "pr" && (
+        {card.type === "pr" && (badgeCounted || snoozed) && (
           <span ref={snoozeRef} className="board-card-title-wrap board-card-snooze">
             <button
               className="btn btn-sm btn-ghost board-card-action-btn"

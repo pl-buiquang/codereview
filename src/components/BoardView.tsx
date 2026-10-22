@@ -8,6 +8,7 @@ import { parseRepoBasePaths, useSettingsStore } from "../lib/settings";
 import { useSyncNow, useSyncScope } from "../lib/sync";
 import { findRepoByFullName } from "../lib/repoLabel";
 import { useUIStore } from "../store";
+import { useBoardBadgeCardIds } from "../lib/boardCounts";
 import { useRefetchOnActivate } from "../lib/useRefetchOnActivate";
 import type { BoardCard as BoardCardT, BoardLane, BoardMetaKind, ClaudeSession } from "../lib/types";
 import {
@@ -98,6 +99,7 @@ export function BoardView() {
   const [batchPending, setBatchPending] = useState(false);
 
   const boardQuery = useQuery({ queryKey: ["board"], queryFn: api.boardList });
+  const badgeCardIds = useBoardBadgeCardIds();
   const tagsQuery = useQuery({ queryKey: ["board-meta-tags"], queryFn: api.boardMetaTags });
   const repositoriesQuery = useQuery({ queryKey: ["repositories"], queryFn: api.listRepositories });
   const lastRefreshQuery = useQuery({ queryKey: ["board-last-refresh"], queryFn: api.boardLastRefreshAt });
@@ -604,6 +606,7 @@ export function BoardView() {
                     <BoardCard
                       key={card.id}
                       card={card}
+                      badgeCounted={badgeCardIds.has(card.id)}
                       tags={tags}
                       busy={busy}
                       reviewBusy={openReview.isPending}
