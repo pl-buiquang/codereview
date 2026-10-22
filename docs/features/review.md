@@ -54,6 +54,7 @@ Each review pins its own `base_sha` / `head_sha` ([ADR 0001](../adr/0001-pin-liv
 
 ## Other
 
+- **Track on board.** For a PR that isn't on the Board (never tracked, or discarded), the review actions menu offers **Track on board**.
 - **One open review per target.** Opening a PR or virtual PR from anywhere (Board, Inbox, Conversations, command palette, repository view, deep links, `cr create`) resumes its unpublished review (draft or pending on GitHub). A new review is created only when the target has none, or all of them are published.
 - **Review switcher.** A target can have several reviews (for example a published round and a new draft). The header switcher appears only when there is more than one, and lets you start a new review on the same target once every review on it is published.
 - **Autosave.** There is no save button. Comment text saves 400 ms after you stop typing; other edits hit the database as you make them.

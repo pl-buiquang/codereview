@@ -294,6 +294,29 @@ describe("ReviewView focus overlay", () => {
     expect(await screen.findByRole("menuitem", { name: "Re-anchor comments" })).toBeDisabled();
   });
 
+  it("offers Track on board in the review actions menu only while the PR is untracked", async () => {
+    const pr = detail();
+    pr.target = { ...pr.target, kind: "github_pr", github_pr_number: 5 };
+    pr.remote_owner = "acme";
+    pr.remote_name = "widget";
+    handlers.getReview = vi.fn(() => Promise.resolve(pr));
+    // Untracked until the Track click; the refetch after it finds the card.
+    handlers.boardCardForPr = vi
+      .fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValue({ card: { id: "PR_5" }, discarded_at: null });
+    handlers.boardTrack = vi.fn(() => Promise.resolve("PR_5"));
+    const user = userEvent.setup();
+    renderReview();
+    await user.click(await screen.findByRole("button", { name: "Review actions" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Track on board" }));
+    expect(handlers.boardTrack).toHaveBeenCalledWith("acme/widget#5");
+    await waitFor(() => expect(handlers.boardCardForPr).toHaveBeenCalledTimes(2));
+    await user.click(screen.getByRole("button", { name: "Review actions" }));
+    await screen.findByRole("menuitem", { name: "Re-anchor comments" });
+    expect(screen.queryByRole("menuitem", { name: "Track on board" })).not.toBeInTheDocument();
+  });
+
   it("disables Generate without the claude CLI", async () => {
     handlers.getFocus = vi.fn(() => Promise.resolve(null));
     handlers.checkEnvironment = vi.fn(() =>

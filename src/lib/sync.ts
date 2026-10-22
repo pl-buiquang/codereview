@@ -23,6 +23,7 @@ const MIRROR_QUERY_KEYS = [
   ["board"],
   ["board-last-refresh"],
   ["board-tracked"],
+  ["board-card-for-pr"],
   ["pr-meta-mirror"],
   ["pr-threads-mirror"],
   ["reviews"],

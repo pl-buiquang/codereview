@@ -1188,6 +1188,25 @@ function ReviewHeader({
     onError: (e) => toast.error(`Auto-merge failed:\n${String(e)}`),
   });
 
+  // Same key as the Context tab, so tracking from either updates both.
+  const boardCardQuery = useQuery({
+    queryKey: ["board-card-for-pr", owner, name, prNumber],
+    queryFn: () => api.boardCardForPr(owner!, name!, prNumber!),
+    enabled: target.kind === "github_pr" && owner != null && name != null && prNumber != null,
+  });
+  const untracked = boardCardQuery.isSuccess && (boardCardQuery.data == null || boardCardQuery.data.discarded_at != null);
+  const trackPr = useMutation({
+    mutationFn: () => api.boardTrack(`${owner}/${name}#${prNumber}`),
+    onSuccess: () => {
+      toast.success("Tracked on the board");
+      queryClient.invalidateQueries({ queryKey: ["board-card-for-pr", owner, name, prNumber] });
+      queryClient.invalidateQueries({ queryKey: ["board"] });
+      queryClient.invalidateQueries({ queryKey: ["board-tracked"] });
+      queryClient.invalidateQueries({ queryKey: ["inbox"] });
+    },
+    onError: (e) => toast.error(`Could not track:\n${String(e)}`),
+  });
+
   const noCloneReason = detail.local_path ? null : "Link a local clone first";
   const defaultTerminal = useSettingsStore((s) => s.defaultTerminal);
   const tmuxTarget = useSettingsStore((s) => s.tmuxTarget);
@@ -1565,6 +1584,16 @@ function ReviewHeader({
                 </button>
                 {isPr && (
                   <>
+                    {untracked && (
+                      <button
+                        role="menuitem"
+                        disabled={trackPr.isPending}
+                        title="Track this PR on the board"
+                        onClick={run(() => trackPr.mutate())}
+                      >
+                        Track on board
+                      </button>
+                    )}
                     <button
                       role="menuitem"
                       disabled={autoMergeDisabledReason != null || setAutoMerge.isPending}
