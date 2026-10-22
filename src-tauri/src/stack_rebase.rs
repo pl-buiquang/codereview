@@ -312,6 +312,10 @@ mod tests {
         commit(&work, "m", "1");
         git(&work, &["push", "-q", "origin", "main"]);
         git(tmp.path(), &["clone", "-q", origin.to_str().unwrap(), clone.to_str().unwrap()]);
+        // `git replay` writes commits from the code under test, which gets no `-c` identity.
+        for (k, v) in [("user.email", "t@t"), ("user.name", "t"), ("commit.gpgsign", "false")] {
+            git(&clone, &["config", k, v]);
+        }
         Fixture { _tmp: tmp, origin, clone }
     }
 
