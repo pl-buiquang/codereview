@@ -509,7 +509,7 @@ export function BoardView() {
               <Icon name="refresh" size={13} /> Auto-merge monitor
             </button>
             <button
-              className={`btn${monitorLogOpen ? " active" : ""}`}
+              className={`btn${monitorOn ? " active" : ""}`}
               onClick={() => setMonitorLogOpen(!monitorLogOpen)}
               title={monitorLogOpen ? "Hide monitor log" : "Show what the monitor has done"}
               aria-expanded={monitorLogOpen}
