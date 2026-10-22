@@ -496,27 +496,28 @@ export function BoardView() {
             >
               <Icon name="flame" size={13} /> Needs action ({needsActionCount})
             </button>
-            <div className="btn-split">
             <button
               className={`btn${monitorOn ? " active" : ""}`}
-              onClick={() => setMonitorOn(!monitorOn)}
+              onClick={() => {
+                if (monitorOn) {
+                  setMonitorLogOpen(!monitorLogOpen);
+                } else {
+                  setMonitorOn(true);
+                  setMonitorLogOpen(true);
+                }
+              }}
+              aria-expanded={monitorOn ? monitorLogOpen : undefined}
               title={
                 monitorOn
-                  ? `Auto-merge monitor on — every ${monitorIntervalMin} min it updates BEHIND branches and reruns failed CI on approved PRs with auto-merge. Click to turn off.`
+                  ? `Auto-merge monitor on — every ${monitorIntervalMin} min it updates BEHIND branches and reruns failed CI on approved PRs with auto-merge. Click to ${monitorLogOpen ? "hide" : "show"} what it has done.`
                   : "Turn on the auto-merge monitor: updates BEHIND branches and reruns failed CI on approved PRs with auto-merge."
               }
             >
               <Icon name="refresh" size={13} /> Auto-merge monitor
+              {monitorOn && (
+                <Icon name="chev" size={13} style={{ transform: monitorLogOpen ? "rotate(180deg)" : undefined }} />
+              )}
             </button>
-            <button
-              className={`btn${monitorOn ? " active" : ""}`}
-              onClick={() => setMonitorLogOpen(!monitorLogOpen)}
-              title={monitorLogOpen ? "Hide monitor log" : "Show what the monitor has done"}
-              aria-expanded={monitorLogOpen}
-            >
-              <Icon name="chev" size={13} style={{ transform: monitorLogOpen ? "rotate(180deg)" : undefined }} />
-            </button>
-            </div>
             <KebabMenu
               title="Act on the PRs matching the current filters"
               label={`Batch (${batchCards.length})`}
@@ -549,7 +550,7 @@ export function BoardView() {
       </header>
 
       {overviewOpen && <BoardOverviewPane cards={boardQuery.data ?? []} visibleIds={visibleIds} />}
-      {monitorLogOpen && <BoardMonitorPane cards={boardQuery.data ?? []} visibleIds={visibleIds} />}
+      {monitorOn && monitorLogOpen && <BoardMonitorPane cards={boardQuery.data ?? []} visibleIds={visibleIds} />}
 
       <div className="inbox-layout">
         <aside className="cr-rail">

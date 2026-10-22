@@ -46,6 +46,7 @@ export function BoardMonitorPane({
 }) {
   const monitorOn = useSettingsStore((s) => s.boardMonitor);
   const setMonitorOn = useSettingsStore((s) => s.setBoardMonitor);
+  const setLogOpen = useSettingsStore((s) => s.setBoardMonitorLogOpen);
   const intervalMin = useSettingsStore((s) => s.boardMonitorIntervalMin);
   const showBoardCard = useUIStore((s) => s.showBoardCard);
   const query = useQuery({
@@ -74,7 +75,13 @@ export function BoardMonitorPane({
             : "off"}
         </span>
         <span className="cr-spacer" />
-        <button className="btn btn-sm" onClick={() => setMonitorOn(!monitorOn)}>
+        <button
+          className="btn btn-sm"
+          onClick={() => {
+            setMonitorOn(!monitorOn);
+            if (monitorOn) setLogOpen(false);
+          }}
+        >
           {monitorOn ? "Turn off" : "Turn on"}
         </button>
       </div>
