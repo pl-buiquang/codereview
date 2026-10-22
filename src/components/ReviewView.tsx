@@ -1273,6 +1273,23 @@ function ReviewHeader({
   const prHead = prMetaQuery.data?.headRefOid ?? null;
   const prHeadMoved = isPr && prHead != null && review.head_sha != null && prHead !== review.head_sha;
   const pinMoved = (live?.moved ?? false) || prHeadMoved;
+
+  // A new PR review pins the mirror's head, which can lag GitHub. While the draft is still untouched
+  // there is nothing to re-anchor, so follow the live head quietly instead of showing "branch moved".
+  const autoPinnedHead = useRef<string | null>(null);
+  const untouchedDraft = review.status === "draft" && detail.comments.length === 0;
+  useEffect(() => {
+    if (!prHeadMoved || !untouchedDraft || prHead == null || autoPinnedHead.current === prHead) return;
+    autoPinnedHead.current = prHead;
+    api
+      .updateReviewPin(review.id)
+      .then(() => {
+        queryClient.invalidateQueries({ queryKey: ["review", review.id] });
+        queryClient.invalidateQueries({ queryKey: ["review-diff"] });
+        queryClient.invalidateQueries({ queryKey: ["reviews"] });
+      })
+      .catch(() => {});
+  }, [prHeadMoved, untouchedDraft, prHead, review.id, queryClient]);
   const movedLabel = newCommitsLabel(live, review.head_sha);
   const prUrl =
     isPr && detail.remote_owner && detail.remote_name && target.github_pr_number != null
