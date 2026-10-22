@@ -496,6 +496,7 @@ export function BoardView() {
             >
               <Icon name="flame" size={13} /> Needs action ({needsActionCount})
             </button>
+            <div className="btn-split">
             <button
               className={`btn${monitorOn ? " active" : ""}`}
               onClick={() => setMonitorOn(!monitorOn)}
@@ -508,13 +509,14 @@ export function BoardView() {
               <Icon name="refresh" size={13} /> Auto-merge monitor
             </button>
             <button
-              className={`btn btn-icon${monitorLogOpen ? " active" : ""}`}
+              className={`btn${monitorLogOpen ? " active" : ""}`}
               onClick={() => setMonitorLogOpen(!monitorLogOpen)}
               title={monitorLogOpen ? "Hide monitor log" : "Show what the monitor has done"}
               aria-expanded={monitorLogOpen}
             >
               <Icon name="chev" size={13} style={{ transform: monitorLogOpen ? "rotate(180deg)" : undefined }} />
             </button>
+            </div>
             <KebabMenu
               title="Act on the PRs matching the current filters"
               label={`Batch (${batchCards.length})`}
