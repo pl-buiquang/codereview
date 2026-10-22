@@ -93,7 +93,9 @@ fn replay(repo: &Path, onto: &str, from: &str, branch: &str, commits: u32) -> Re
     let range = format!("{from}..{}", remote_ref(branch));
     let scratch = "refs/heads/cr-stack-rebase";
     let out = run_git(repo, &["replay", "--ref-action=print", "--ref", scratch, "--onto", onto, &range])
-        .map_err(|_| format!("{branch}: conflicts when rebased onto its new parent — rebase this stack by hand"))?;
+        .map_err(|e| {
+            format!("{branch}: conflicts when rebased onto its new parent — rebase this stack by hand ({e})")
+        })?;
     let prefix = format!("update {scratch} ");
     let new = out
         .lines()
