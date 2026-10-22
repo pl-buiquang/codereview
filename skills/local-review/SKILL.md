@@ -97,7 +97,7 @@ Branch mode: always "mine", no linked issue, size from `git -C <repo> diff --sho
 | Medium | `--focus` |
 | Large: > 600 lines **or** > 20 files | `--focus`; add `--codex` (adversarial) if the PR is mine; add `--critique` if it has a closing issue |
 
-The raw gh numbers pick the tier before creation (so `--reuse-draft` is right). After Step 1c, recompute
+The raw gh numbers pick the tier before creation. After Step 1c, recompute
 the effective size without lockfiles/generated files and only ever **lower** the tier:
 ```bash
 cr focus hunks RID --json | jq '[.[] | select(.rule_tier == null)] | {lines: (map(.additions + .deletions) | add // 0), files: (map(.file_path) | unique | length)}'
@@ -106,11 +106,12 @@ Announce one line and proceed without asking, e.g. `Auto: 420 lines / 14 files, 
 
 **1c. Create.**
 ```bash
-cr create pr <owner> <name> <number> [--reuse-draft] --json
-cr create local <repo-id> <base-ref> <head-ref> --three-dot [--reuse-draft] --json
+cr create pr <owner> <name> <number> --json
+cr create local <repo-id> <base-ref> <head-ref> --three-dot --json
 ```
-Pass `--reuse-draft` when `--focus` is on (given or auto), so the focus lands next to comments the user
-already wrote. For a `<review-id>` target skip creation. Capture the review id `RID` (`id` field). If
+`cr create` reuses the target's unpublished review if there is one (so the analysis lands next to comments
+the user already wrote) and creates one only when none exists or all are published. For a `<review-id>`
+target skip creation. Capture the review id `RID` (`id` field). If
 creation errors with "gh: not found" or similar, tell the user to run `gh auth login`.
 
 **1d. Size guard.**

@@ -138,13 +138,15 @@ export function searchPalette(
 
   const tokens = q.split(/\s+/);
   const pastedPr = parseGithubPrUrl(query.trim());
+  // GitHub "owner/name#number" of a PR review: the label may be a friendly name.
+  const prKey = (s: ReviewSummary) => `${s.repo_remote ?? s.repo_label}#${s.target.github_pr_number}`.toLowerCase();
 
   const matched = reviews
     .filter((s) => {
       if (pastedPr) {
         return (
-          s.target.github_pr_number === pastedPr.prNumber &&
-          s.repo_label.toLowerCase() === `${pastedPr.owner}/${pastedPr.name}`.toLowerCase()
+          s.target.github_pr_number != null &&
+          prKey(s) === `${pastedPr.owner}/${pastedPr.name}#${pastedPr.prNumber}`.toLowerCase()
         );
       }
       const text = buildSearchText(s);
@@ -174,7 +176,7 @@ export function searchPalette(
     const existing = new Set(
       matched
         .filter((s) => s.target.kind === "github_pr" && s.target.github_pr_number != null)
-        .map((s) => `${s.repo_label}#${s.target.github_pr_number}`),
+        .map(prKey),
     );
 
     for (const repo of repos) {
@@ -182,7 +184,7 @@ export function searchPalette(
       const rn = repo.remote_name.toLowerCase();
       if (!rn.includes(word) && !shortName(rn).includes(word)) continue;
       const label = `${repo.remote_owner}/${repo.remote_name}`;
-      if (existing.has(`${label}#${num}`)) continue;
+      if (existing.has(`${label}#${num}`.toLowerCase())) continue;
       createResults.push({
         kind: "create-pr",
         owner: repo.remote_owner,
@@ -198,9 +200,8 @@ export function searchPalette(
   if (pastedPr) {
     const { owner, name, prNumber } = pastedPr;
     const label = `${owner}/${name}`;
-    const alreadyInReviews = reviewResults.some(
-      (r) => r.repoLabel.toLowerCase() === label.toLowerCase() && r.prNumber === prNumber,
-    );
+    // `matched` is exactly the reviews of the pasted PR.
+    const alreadyInReviews = matched.length > 0;
     const alreadyInCreates = createResults.some(
       (r) => r.owner === owner && r.name === name && r.prNumber === prNumber,
     );

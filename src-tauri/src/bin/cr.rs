@@ -208,7 +208,8 @@ enum BoardMetaAction {
 
 #[derive(Subcommand)]
 enum CreateTarget {
-    /// Create a review for a local diff between two refs
+    /// Open the review of a local diff between two refs: its unpublished
+    /// review if any, else a new one
     Local {
         repo_id: i64,
         base_ref: String,
@@ -216,11 +217,11 @@ enum CreateTarget {
         /// Use three-dot diff (merge-base semantics, like GitHub PRs)
         #[arg(long)]
         three_dot: bool,
-        /// Reuse the latest draft review on this target instead of creating one
-        #[arg(long)]
+        /// No-op, kept for old scripts: an unpublished review is always reused
+        #[arg(long, hide = true)]
         reuse_draft: bool,
     },
-    /// Create a review for a GitHub PR.
+    /// Open the review of a GitHub PR: its unpublished review if any, else a new one.
     /// Accepts either a GitHub URL (https://github.com/owner/name/pull/123)
     /// or three positional args: owner name number.
     Pr {
@@ -230,8 +231,8 @@ enum CreateTarget {
         name: Option<String>,
         /// PR number (required when not using a URL)
         number: Option<i64>,
-        /// Reuse the latest draft review on this target instead of creating one
-        #[arg(long)]
+        /// No-op, kept for old scripts: an unpublished review is always reused
+        #[arg(long, hide = true)]
         reuse_draft: bool,
     },
 }
@@ -727,7 +728,7 @@ fn run(cmd: Cmd, json: bool, db: &Db) -> AppResult<()> {
                 base_ref,
                 head_ref,
                 three_dot,
-                reuse_draft,
+                reuse_draft: _,
             } => {
                 let conn = db.0.lock().unwrap();
                 let repos = repo::list_repositories_impl(&conn)?;
@@ -748,19 +749,18 @@ fn run(cmd: Cmd, json: bool, db: &Db) -> AppResult<()> {
                     &base_ref,
                     &head_ref,
                     three_dot,
-                    reuse_draft,
                 )?;
                 if json {
                     println!("{}", serde_json::to_string_pretty(&r)?);
                 } else {
-                    println!("Created review #{}", r.id);
+                    println!("Review #{}", r.id);
                 }
             }
             CreateTarget::Pr {
                 owner_or_url,
                 name,
                 number,
-                reuse_draft,
+                reuse_draft: _,
             } => {
                 let (owner, repo_name, pr_number) =
                     if owner_or_url.contains("github.com/") {
@@ -788,11 +788,11 @@ fn run(cmd: Cmd, json: bool, db: &Db) -> AppResult<()> {
                     .map(|s| s.trim().to_string())
                     .filter(|s| !s.is_empty())
                     .collect();
-                let r = review::create_review_for_pr_impl(db, &owner, &repo_name, pr_number, &base_paths, reuse_draft)?;
+                let r = review::create_review_for_pr_impl(db, &owner, &repo_name, pr_number, &base_paths)?;
                 if json {
                     println!("{}", serde_json::to_string_pretty(&r)?);
                 } else {
-                    println!("Created review #{}", r.id);
+                    println!("Review #{}", r.id);
                 }
             }
         },

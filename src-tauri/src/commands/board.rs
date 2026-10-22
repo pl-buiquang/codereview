@@ -247,14 +247,14 @@ pub fn board_list_impl(conn: &Connection) -> AppResult<Vec<BoardCardWithExtras>>
         }
     }
 
-    let mut draft_reviews: HashMap<(String, i64), i64> = HashMap::new();
+    let mut open_reviews: HashMap<(String, i64), i64> = HashMap::new();
     {
         let mut stmt = conn.prepare(
             "SELECT r.remote_owner, r.remote_name, t.github_pr_number, rv.id
              FROM review rv
              JOIN target t ON t.id = rv.target_id
              JOIN repository r ON r.id = t.repo_id
-             WHERE t.kind = 'github_pr' AND rv.status = 'draft'
+             WHERE t.kind = 'github_pr' AND rv.status != 'published'
              ORDER BY rv.updated_at DESC",
         )?;
         let rows = stmt.query_map([], |r| {
@@ -268,7 +268,7 @@ pub fn board_list_impl(conn: &Connection) -> AppResult<Vec<BoardCardWithExtras>>
         for row in rows {
             let (owner, name, number, review_id) = row?;
             if let (Some(owner), Some(name)) = (owner, name) {
-                draft_reviews.entry((format!("{owner}/{name}"), number)).or_insert(review_id);
+                open_reviews.entry((format!("{owner}/{name}"), number)).or_insert(review_id);
             }
         }
     }
@@ -286,7 +286,7 @@ pub fn board_list_impl(conn: &Connection) -> AppResult<Vec<BoardCardWithExtras>>
                 .flat_map(|iid| meta_by_card.get(iid).cloned().unwrap_or_default())
                 .collect();
             let existing_review_id = if card.typ == "pr" {
-                draft_reviews.get(&(card.repo.clone(), card.number)).copied()
+                open_reviews.get(&(card.repo.clone(), card.number)).copied()
             } else {
                 None
             };
@@ -635,19 +635,19 @@ pub fn board_monitor_log(limit: i64, db: State<Db>) -> AppResult<Vec<crate::boar
 // Review / VSCode actions
 // ---------------------------------------------------------------------------
 
-/// Create-or-resume the draft review for a PR card.
+/// Open the PR card's review: its unpublished one, else a new draft.
 #[tauri::command]
 pub async fn board_open_review(card_id: String, base_paths: Vec<String>, db: State<'_, Db>) -> AppResult<Review> {
     let (owner, name, number) = pr_card_coords(&db, &card_id)?;
-    crate::commands::review::create_review_for_pr_impl(&db, &owner, &name, number, &base_paths, true)
+    crate::commands::review::create_review_for_pr_impl(&db, &owner, &name, number, &base_paths)
 }
 
-/// Create-or-resume the draft review for a PR card, ensure its chat/edit
+/// Open the PR card's review (as `board_open_review`), ensure its chat/edit
 /// worktree exists, then open VSCode on it.
 #[tauri::command]
 pub async fn board_open_vscode(card_id: String, base_paths: Vec<String>, db: State<'_, Db>) -> AppResult<()> {
     let (owner, name, number) = pr_card_coords(&db, &card_id)?;
-    let review = crate::commands::review::create_review_for_pr_impl(&db, &owner, &name, number, &base_paths, true)?;
+    let review = crate::commands::review::create_review_for_pr_impl(&db, &owner, &name, number, &base_paths)?;
     let worktree_path = crate::commands::chat::ensure_chat_worktree(review.id, db).await?;
     crate::commands::worktree::open_in_vscode(worktree_path, None)
 }
@@ -663,7 +663,7 @@ pub async fn board_open_shell(
     db: State<'_, Db>,
 ) -> AppResult<()> {
     let (owner, name, number) = pr_card_coords(&db, &card_id)?;
-    let review = crate::commands::review::create_review_for_pr_impl(&db, &owner, &name, number, &base_paths, true)?;
+    let review = crate::commands::review::create_review_for_pr_impl(&db, &owner, &name, number, &base_paths)?;
     let worktree_path = crate::commands::chat::ensure_chat_worktree(review.id, db).await?;
     crate::terminal::open_shell(
         host,
@@ -687,7 +687,7 @@ pub async fn board_open_agent(
     db: State<'_, Db>,
 ) -> AppResult<()> {
     let (owner, name, number) = pr_card_coords(&db, &card_id)?;
-    let review = crate::commands::review::create_review_for_pr_impl(&db, &owner, &name, number, &base_paths, true)?;
+    let review = crate::commands::review::create_review_for_pr_impl(&db, &owner, &name, number, &base_paths)?;
     let worktree_path = crate::commands::chat::ensure_chat_worktree(review.id, db.clone()).await?;
     let live: std::collections::HashSet<String> =
         crate::claude_sessions::live_sessions().into_iter().map(|s| s.session_id).collect();

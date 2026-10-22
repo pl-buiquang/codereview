@@ -164,6 +164,8 @@ export interface ReviewSummary {
   target: Target;
   repo_id: number;
   repo_label: string;
+  /** `owner/name` on GitHub, when known (a friendly name only changes `repo_label`). */
+  repo_remote: string | null;
   comment_count: number;
 }
 

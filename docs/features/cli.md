@@ -40,15 +40,15 @@ cargo install --path src-tauri --bin cr
 | `cr show <id>` | Review detail: summary, comments with replies, draft thread replies |
 | `cr diff <id>` | Print the review's diff |
 | `cr worktree <id>` | Print the path of a checkout of the review's head branch, creating a worktree if none holds it. Needs a local clone |
-| `cr create local <repo-id> <base> <head> [--three-dot] [--reuse-draft]` | Review of a local diff between two refs (a virtual PR) |
-| `cr create pr <url \| owner name number> [--reuse-draft]` | Review of a GitHub PR |
+| `cr create local <repo-id> <base> <head> [--three-dot]` | Review of a local diff between two refs (a virtual PR): its unpublished review if any, else a new one |
+| `cr create pr <url \| owner name number>` | Review of a GitHub PR: its unpublished review if any, else a new one |
 | `cr update <id> [--body <text>] [--verdict approve\|comment\|request_changes]` | Set the summary and/or verdict |
 | `cr delete <id>` | Delete a draft review |
 | `cr export <id> [--format markdown\|md\|json] [-o <file>]` | Export a review (stdout by default) |
 
 ```bash
 cr list --repo 3 --json
-cr create pr https://github.com/acme/widget/pull/99 --reuse-draft --json
+cr create pr https://github.com/acme/widget/pull/99 --json
 cr create local 3 main my-branch --three-dot
 cr update 12 --body "Looks good overall" --verdict comment
 cr export 12 --format json -o review.json

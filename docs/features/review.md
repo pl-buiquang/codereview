@@ -54,7 +54,8 @@ Each review pins its own `base_sha` / `head_sha` ([ADR 0001](../adr/0001-pin-liv
 
 ## Other
 
-- **Review switcher.** A target can have several reviews (for example a published round and a new draft). The header switcher appears only when there is more than one, and lets you start a new review on the same target.
+- **One open review per target.** Opening a PR or virtual PR from anywhere (Board, Inbox, Conversations, command palette, repository view, deep links, `cr create`) resumes its unpublished review (draft or pending on GitHub). A new review is created only when the target has none, or all of them are published.
+- **Review switcher.** A target can have several reviews (for example a published round and a new draft). The header switcher appears only when there is more than one, and lets you start a new review on the same target once every review on it is published.
 - **Autosave.** There is no save button. Comment text saves 400 ms after you stop typing; other edits hit the database as you make them.
 - **Published reviews are locked.** Once published, edits and deletes are rejected, and a review cannot be published again. A review that is pending on GitHub must be submitted or discarded before editing. Viewed-file state, panel widths and sidebar state still change. Start a new review from the switcher for another round.
 - Export, import and clipboard: see [Import and export](import-export.md).

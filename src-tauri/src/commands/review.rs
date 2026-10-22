@@ -675,22 +675,21 @@ fn new_review_for_target(conn: &Connection, target_id: i64, pin: &LiveShas) -> A
     get_review_row(conn, conn.last_insert_rowid())
 }
 
-/// The most recently updated draft review on a target (its pin untouched),
-/// else a fresh one pinned at `pin`.
-fn review_for_target(conn: &Connection, target_id: i64, reuse_draft: bool, pin: &LiveShas) -> AppResult<Review> {
-    if reuse_draft {
-        if let Some(review) = latest_draft(conn, target_id)? {
-            return Ok(review);
-        }
+/// The target's open review (its pin untouched), else a fresh one pinned at
+/// `pin`: a target only gets a new review once all of its reviews are published.
+fn review_for_target(conn: &Connection, target_id: i64, pin: &LiveShas) -> AppResult<Review> {
+    if let Some(review) = latest_open_review(conn, target_id)? {
+        return Ok(review);
     }
     new_review_for_target(conn, target_id, pin)
 }
 
-/// The most recently updated draft review on a target, if any.
-fn latest_draft(conn: &Connection, target_id: i64) -> AppResult<Option<Review>> {
+/// The most recently updated unpublished review (draft or pending on GitHub)
+/// on a target, if any.
+fn latest_open_review(conn: &Connection, target_id: i64) -> AppResult<Option<Review>> {
     let id: Option<i64> = conn
         .query_row(
-            "SELECT id FROM review WHERE target_id = ?1 AND status = 'draft'
+            "SELECT id FROM review WHERE target_id = ?1 AND status != 'published'
              ORDER BY updated_at DESC, id DESC LIMIT 1",
             params![target_id],
             |r| r.get(0),
@@ -699,9 +698,9 @@ fn latest_draft(conn: &Connection, target_id: i64) -> AppResult<Option<Review>> 
     id.map(|id| get_review_row(conn, id)).transpose()
 }
 
-/// A PR's existing draft review, found from local rows only: no network, no
-/// mirror refresh. `None` when the repo, target or draft isn't there yet.
-fn existing_pr_draft(conn: &Connection, owner: &str, name: &str, pr_number: i64) -> AppResult<Option<Review>> {
+/// A PR's open review, found from local rows only: no network, no mirror
+/// refresh. `None` when the repo, target or open review isn't there yet.
+fn existing_pr_review(conn: &Connection, owner: &str, name: &str, pr_number: i64) -> AppResult<Option<Review>> {
     let Some(repo_id) = find_remote_repository_id(conn, owner, name)? else {
         return Ok(None);
     };
@@ -713,7 +712,7 @@ fn existing_pr_draft(conn: &Connection, owner: &str, name: &str, pr_number: i64)
         )
         .optional()?;
     match target_id {
-        Some(id) => latest_draft(conn, id),
+        Some(id) => latest_open_review(conn, id),
         None => Ok(None),
     }
 }
@@ -736,7 +735,8 @@ fn mirror_pr_info(conn: &Connection, repo_id: i64, pr_number: i64) -> AppResult<
     Ok(row.and_then(|(node_id, info)| Some((info?, node_id))))
 }
 
-/// Start a draft review for a local virtual PR (creating/reusing its target).
+/// Open the review of a local virtual PR (creating/reusing its target): its
+/// open review if any, else a new draft.
 pub fn create_review_impl(
     conn: &Connection,
     repo_id: i64,
@@ -744,11 +744,10 @@ pub fn create_review_impl(
     base_ref: &str,
     head_ref: &str,
     three_dot: bool,
-    reuse_draft: bool,
 ) -> AppResult<Review> {
     let (target, live) =
         get_or_create_local_target(conn, repo_id, repo_path, base_ref, head_ref, three_dot)?;
-    review_for_target(conn, target.id, reuse_draft, &live)
+    review_for_target(conn, target.id, &live)
 }
 
 #[tauri::command]
@@ -770,11 +769,11 @@ pub async fn create_review(
     let repo_path = local_path.ok_or_else(|| {
         AppError::Other("creating a local review requires a local clone".into())
     })?;
-    create_review_impl(&conn, repo_id, &repo_path, &base_ref, &head_ref, three_dot, false)
+    create_review_impl(&conn, repo_id, &repo_path, &base_ref, &head_ref, three_dot)
 }
 
-/// Start a fresh draft review against a real GitHub PR (creating/reusing its
-/// target). Identifies the PR by `owner/name` + number so any inbox PR can be
+/// Open the review of a real GitHub PR (creating/reusing its target): its open
+/// review if any, else a new draft. Identifies the PR by `owner/name` + number so any inbox PR can be
 /// opened, with no local clone required: the repo is resolved to a local clone
 /// if one is added, otherwise a clone-less remote context.
 pub fn create_review_for_pr_impl(
@@ -783,13 +782,10 @@ pub fn create_review_for_pr_impl(
     name: &str,
     pr_number: i64,
     base_paths: &[String],
-    reuse_draft: bool,
 ) -> AppResult<Review> {
-    // Reopening a draft needs no GitHub round-trip: the tab refreshes the mirror itself.
-    if reuse_draft {
-        if let Some(review) = existing_pr_draft(&db.0.lock().unwrap(), owner, name, pr_number)? {
-            return Ok(review);
-        }
+    // Reopening a review needs no GitHub round-trip: the tab refreshes the mirror itself.
+    if let Some(review) = existing_pr_review(&db.0.lock().unwrap(), owner, name, pr_number)? {
+        return Ok(review);
     }
     let repo_id = get_or_create_remote_repository(&db.0.lock().unwrap(), owner, name, base_paths)?.id;
     // A new review pins the mirror's head; the tab moves an untouched pin if it was stale.
@@ -804,7 +800,7 @@ pub fn create_review_for_pr_impl(
     let conn = db.0.lock().unwrap();
     let target = get_or_create_pr_target(&conn, repo_id, pr_number, &info, Some(&node_id))?;
     let live = LiveShas { base_sha: merge_base, head_sha: Some(info.head_sha.clone()) };
-    review_for_target(&conn, target.id, reuse_draft, &live)
+    review_for_target(&conn, target.id, &live)
 }
 
 #[tauri::command]
@@ -815,8 +811,7 @@ pub async fn create_review_for_pr(
     base_paths: Vec<String>,
     db: State<'_, Db>,
 ) -> AppResult<Review> {
-    // Opening a PR resumes its draft; starting another round is `new_review_on_target`.
-    create_review_for_pr_impl(&db, &owner, &name, pr_number, &base_paths, true)
+    create_review_for_pr_impl(&db, &owner, &name, pr_number, &base_paths)
 }
 
 enum DiffCommand {
@@ -1012,10 +1007,12 @@ fn summarize_reviews(conn: &Connection, reviews: Vec<Review>) -> AppResult<Vec<R
     let mut out = Vec::with_capacity(reviews.len());
     for review in reviews {
         let target = get_target(conn, review.target_id)?;
-        let (repo_id_v, label): (i64, String) = conn.query_row(
-            "SELECT id, COALESCE(friendly_name, remote_owner || '/' || remote_name, local_path, 'unknown') FROM repository WHERE id = ?1",
+        let (repo_id_v, label, remote): (i64, String, Option<String>) = conn.query_row(
+            "SELECT id, COALESCE(friendly_name, remote_owner || '/' || remote_name, local_path, 'unknown'),
+                    remote_owner || '/' || remote_name
+             FROM repository WHERE id = ?1",
             params![target.repo_id],
-            |r| Ok((r.get(0)?, r.get(1)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )?;
         let comment_count: i64 = conn.query_row(
             "SELECT COUNT(*) FROM comment WHERE review_id = ?1",
@@ -1027,6 +1024,7 @@ fn summarize_reviews(conn: &Connection, reviews: Vec<Review>) -> AppResult<Vec<R
             target,
             repo_id: repo_id_v,
             repo_label: label,
+            repo_remote: remote,
             comment_count,
         });
     }
@@ -1078,19 +1076,15 @@ pub fn list_target_reviews(target_id: i64, db: State<Db>) -> AppResult<Vec<Revie
     list_target_reviews_impl(&conn, target_id)
 }
 
-/// Start a brand-new review on a target that already has at least one
-/// review — e.g. starting a second round after publishing. Errors if a
-/// draft already exists on the target, since the UI assumes at most one
-/// open draft per target (`review_for_target`'s reuse logic, and the
-/// board's `existing_review_id` resume behavior).
+/// Start a brand-new review on a target whose reviews are all published —
+/// e.g. a second round. Errors while one is still open (draft or pending on
+/// GitHub), since the app keeps at most one open review per target
+/// (`review_for_target`, and the board's `existing_review_id`).
 pub fn new_review_on_target_impl(conn: &Connection, target_id: i64, pin: &LiveShas) -> AppResult<Review> {
-    let has_draft: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM review WHERE target_id = ?1 AND status = 'draft')",
-        params![target_id],
-        |r| r.get(0),
-    )?;
-    if has_draft {
-        return Err(AppError::Other("a draft review already exists on this target".into()));
+    if latest_open_review(conn, target_id)?.is_some() {
+        return Err(AppError::Other(
+            "this target already has an unpublished review — publish or delete it first".into(),
+        ));
     }
     new_review_for_target(conn, target_id, pin)
 }
@@ -2594,7 +2588,7 @@ mod tests {
         let conn = open_memory();
         let repo = seed_repo(&conn, Some("owner"), Some("repo"));
         let target = get_or_create_pr_target(&conn, repo, 7, &pr_info(), None).unwrap();
-        let first = review_for_target(&conn, target.id, true, &pin(Some("mb1"), Some("deadbeef"))).unwrap();
+        let first = review_for_target(&conn, target.id, &pin(Some("mb1"), Some("deadbeef"))).unwrap();
         assert_eq!(first.head_sha.as_deref(), Some("deadbeef"));
         assert_eq!(first.base_sha.as_deref(), Some("mb1"));
 
@@ -2602,13 +2596,14 @@ mod tests {
         let mut moved = pr_info();
         moved.head_sha = "cafe".into();
         let again = get_or_create_pr_target(&conn, repo, 7, &moved, None).unwrap();
-        let reused = review_for_target(&conn, again.id, true, &pin(Some("mb2"), Some("cafe"))).unwrap();
+        let reused = review_for_target(&conn, again.id, &pin(Some("mb2"), Some("cafe"))).unwrap();
         assert_eq!(reused.id, first.id);
         assert_eq!(reused.head_sha.as_deref(), Some("deadbeef"));
         assert_eq!(reused.base_sha.as_deref(), Some("mb1"));
 
-        // A new review on the same target pins at the live head.
-        let fresh = review_for_target(&conn, again.id, false, &pin(Some("mb2"), Some("cafe"))).unwrap();
+        // Once it's published, the next review on the same target pins at the live head.
+        conn.execute("UPDATE review SET status = 'published' WHERE id = ?1", params![first.id]).unwrap();
+        let fresh = review_for_target(&conn, again.id, &pin(Some("mb2"), Some("cafe"))).unwrap();
         assert_ne!(fresh.id, first.id);
         assert_eq!(fresh.head_sha.as_deref(), Some("cafe"));
         assert_eq!(get_review_row(&conn, first.id).unwrap().head_sha.as_deref(), Some("deadbeef"));
@@ -2663,20 +2658,24 @@ mod tests {
     }
 
     #[test]
-    fn review_for_target_reuses_latest_draft_only_when_asked() {
+    fn review_for_target_creates_only_when_every_review_is_published() {
         let conn = open_memory();
         let repo = seed_repo(&conn, None, None);
         let target =
             get_or_create_local_target(&conn, repo, "/nope", "main", "feature", true).unwrap().0;
+        let open = |conn: &Connection| review_for_target(conn, target.id, &LiveShas::default()).unwrap().id;
 
-        let fresh = review_for_target(&conn, target.id, true, &LiveShas::default()).unwrap();
-        let second = review_for_target(&conn, target.id, false, &LiveShas::default()).unwrap();
-        assert_ne!(fresh.id, second.id);
-        assert_eq!(review_for_target(&conn, target.id, true, &LiveShas::default()).unwrap().id, second.id);
+        let first = open(&conn);
+        assert_eq!(open(&conn), first, "the draft is reused");
 
-        conn.execute("UPDATE review SET status = 'published' WHERE id = ?1", params![second.id])
+        conn.execute("UPDATE review SET status = 'published_pending' WHERE id = ?1", params![first])
             .unwrap();
-        assert_eq!(review_for_target(&conn, target.id, true, &LiveShas::default()).unwrap().id, fresh.id);
+        assert_eq!(open(&conn), first, "a review pending on GitHub is reused too");
+
+        conn.execute("UPDATE review SET status = 'published' WHERE id = ?1", params![first]).unwrap();
+        let second = open(&conn);
+        assert_ne!(second, first, "all published: a new review");
+        assert_eq!(open(&conn), second);
     }
 
     #[test]
@@ -2719,6 +2718,9 @@ mod tests {
         let first = new_review_for_target(&conn, target.id, &LiveShas::default()).unwrap();
         let err = new_review_on_target_impl(&conn, target.id, &LiveShas::default()).unwrap_err();
         assert!(matches!(err, AppError::Other(_)));
+        conn.execute("UPDATE review SET status = 'published_pending' WHERE id = ?1", params![first.id])
+            .unwrap();
+        assert!(new_review_on_target_impl(&conn, target.id, &LiveShas::default()).is_err(), "pending");
 
         conn.execute("UPDATE review SET status = 'published' WHERE id = ?1", params![first.id])
             .unwrap();
@@ -4215,7 +4217,7 @@ mod tests {
         let repo = seed_repo_at(&conn, &repo_path);
         // A new review pins at the live head, so refresh finds nothing new.
         let review =
-            create_review_impl(&conn, repo, &repo_path, "main~1", "main", true, false).unwrap();
+            create_review_impl(&conn, repo, &repo_path, "main~1", "main", true).unwrap();
         assert_eq!(review.head_sha.as_deref(), Some(h2.as_str()));
 
         let db = Db(Mutex::new(conn));
@@ -4754,7 +4756,7 @@ mod tests {
         .unwrap();
         let repo_id = conn.last_insert_rowid();
         let review =
-            create_review_impl(&conn, repo_id, &path.to_string_lossy(), "main", "feature", true, false).unwrap();
+            create_review_impl(&conn, repo_id, &path.to_string_lossy(), "main", "feature", true).unwrap();
         let pinned_head = review.head_sha.clone().expect("sha resolves while the branch exists");
         let pinned_base = review.base_sha.clone().expect("merge-base resolves");
 
@@ -4808,25 +4810,27 @@ mod tests {
         let info = PrInfo { title: "A title".into(), base_ref: "main".into(), head_ref: "feat".into(), head_sha: "abc123".into() };
         let target = get_or_create_pr_target(&conn, repo_id, 7, &info, Some("PR_node")).unwrap();
         let live = LiveShas { base_sha: Some("base0".into()), head_sha: Some("abc123".into()) };
-        let draft = review_for_target(&conn, target.id, false, &live).unwrap();
+        let draft = new_review_for_target(&conn, target.id, &live).unwrap();
         let db = Db(Mutex::new(conn));
         // The test has no network: a GitHub lookup here would fail the call.
-        let reopened = create_review_for_pr_impl(&db, "o", "r", 7, &[], true).unwrap();
+        let reopened = create_review_for_pr_impl(&db, "o", "r", 7, &[]).unwrap();
         assert_eq!(reopened.id, draft.id);
         assert_eq!(reopened.head_sha.as_deref(), Some("abc123"), "pin untouched");
     }
 
     #[test]
-    fn existing_pr_draft_is_none_without_a_draft() {
+    fn existing_pr_review_is_none_without_an_open_review() {
         let conn = open_memory();
-        assert!(existing_pr_draft(&conn, "o", "r", 7).unwrap().is_none(), "unknown repo");
+        assert!(existing_pr_review(&conn, "o", "r", 7).unwrap().is_none(), "unknown repo");
         let repo_id = seed_repo(&conn, Some("o"), Some("r"));
-        assert!(existing_pr_draft(&conn, "o", "r", 7).unwrap().is_none(), "no target");
+        assert!(existing_pr_review(&conn, "o", "r", 7).unwrap().is_none(), "no target");
         let info = PrInfo { title: "t".into(), base_ref: "main".into(), head_ref: "feat".into(), head_sha: "abc".into() };
         let target = get_or_create_pr_target(&conn, repo_id, 7, &info, None).unwrap();
-        assert!(existing_pr_draft(&conn, "o", "r", 7).unwrap().is_none(), "no draft");
+        assert!(existing_pr_review(&conn, "o", "r", 7).unwrap().is_none(), "no review");
         let live = LiveShas { base_sha: None, head_sha: Some("abc".into()) };
-        let draft = review_for_target(&conn, target.id, false, &live).unwrap();
-        assert_eq!(existing_pr_draft(&conn, "o", "r", 7).unwrap().unwrap().id, draft.id);
+        let draft = new_review_for_target(&conn, target.id, &live).unwrap();
+        assert_eq!(existing_pr_review(&conn, "o", "r", 7).unwrap().unwrap().id, draft.id);
+        conn.execute("UPDATE review SET status = 'published' WHERE id = ?1", params![draft.id]).unwrap();
+        assert!(existing_pr_review(&conn, "o", "r", 7).unwrap().is_none(), "only published");
     }
 }

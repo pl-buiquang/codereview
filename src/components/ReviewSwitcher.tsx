@@ -57,7 +57,7 @@ export function ReviewSwitcher({ targetId, currentReviewId }: { targetId: number
   if (reviews.length < 2) return null;
 
   const index = reviews.findIndex((r) => r.review.id === currentReviewId);
-  const hasDraft = reviews.some((r) => r.review.status === "draft");
+  const hasOpen = reviews.some((r) => r.review.status !== "published");
 
   return (
     <div ref={ref} className="review-switcher">
@@ -93,10 +93,10 @@ export function ReviewSwitcher({ targetId, currentReviewId }: { targetId: number
           <button
             role="menuitem"
             className="review-switcher-item"
-            disabled={hasDraft || newReview.isPending}
+            disabled={hasOpen || newReview.isPending}
             title={
-              hasDraft
-                ? "Finish or publish the current draft before starting a new review"
+              hasOpen
+                ? "Publish or delete the unpublished review before starting a new one"
                 : "Start a new review round on this PR"
             }
             onClick={() => newReview.mutate()}

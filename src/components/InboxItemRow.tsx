@@ -121,24 +121,14 @@ export function InboxItemRow({
         <div className="pr-actions">
           {item.type === "pr" &&
             (existingReviewId != null ? (
-              <>
-                <button
-                  className="btn btn-sm btn-primary"
-                  disabled={busy}
-                  onClick={onOpenExisting}
-                  title="Open your existing review of this PR"
-                >
-                  Resume review
-                </button>
-                <button
-                  className="btn btn-sm"
-                  disabled={busy}
-                  onClick={onOpenReview}
-                  title="Start a new review of this PR (tracks it on the board)"
-                >
-                  New review
-                </button>
-              </>
+              <button
+                className="btn btn-sm btn-primary"
+                disabled={busy}
+                onClick={onOpenExisting}
+                title="Open your unpublished review of this PR"
+              >
+                Resume review
+              </button>
             ) : (
               <button
                 className="btn btn-sm btn-primary"

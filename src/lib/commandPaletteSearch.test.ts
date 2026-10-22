@@ -2,12 +2,13 @@ import { describe, expect, it } from "vitest";
 import type { BoardCard, Repository, ReviewSummary } from "./types";
 import { searchPalette } from "./commandPaletteSearch";
 
-const review = (id: number, repo: string, pr: number) =>
+const review = (id: number, repo: string, pr: number, label = repo) =>
   ({
     review: { id, updated_at: "2026-10-16T00:00:00Z" },
     target: { title: `PR ${pr}`, kind: "github_pr", github_pr_number: pr },
     repo_id: 1,
-    repo_label: repo,
+    repo_label: label,
+    repo_remote: repo,
     comment_count: 0,
   }) as unknown as ReviewSummary;
 
@@ -27,6 +28,14 @@ describe("searchPalette", () => {
     const r = searchPalette("https://github.com/acme/front/pull/12", reviews, []);
     expect(r.filter((x) => x.kind === "review").map((x) => x.kind === "review" && x.reviewId)).toEqual([1]);
     expect(r.some((x) => x.kind === "create-pr")).toBe(false);
+  });
+
+  it("matches by GitHub owner/name when the repo has a friendly name", () => {
+    const named = [review(7, "acme/cardiologs-front", 99, "front")];
+    const r = searchPalette("https://github.com/acme/cardiologs-front/pull/99", named, []);
+    expect(r).toEqual([expect.objectContaining({ kind: "review", reviewId: 7 })]);
+    const typed = searchPalette("front 99", named, [repo(1, "acme", "cardiologs-front", "front")]);
+    expect(typed.some((x) => x.kind === "create-pr")).toBe(false);
   });
 
   it("offers the board card for a PR or issue URL", () => {

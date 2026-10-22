@@ -118,14 +118,15 @@ export function InboxView() {
   const trackedQuery = useQuery({ queryKey: ["board-tracked"], queryFn: api.boardTrackedIds });
   const trackedIds = useMemo(() => new Set(trackedQuery.data ?? []), [trackedQuery.data]);
 
-  // Latest existing review per GitHub PR, keyed "owner/name#number" (repo_label
-  // is owner/name for remote targets, matching InboxItem.repo). list_reviews is
-  // newest-first, so the first id seen per key is the most recent review.
+  // Latest unpublished review per GitHub PR, keyed "owner/name#number" like
+  // InboxItem.repo. list_reviews is newest-first, so the first id seen per key
+  // is the most recent one.
   const reviewByPr = useMemo(() => {
     const m = new Map<string, number>();
     for (const s of reviewsQuery.data ?? []) {
-      if (s.target.kind !== "github_pr" || s.target.github_pr_number == null) continue;
-      const key = `${s.repo_label}#${s.target.github_pr_number}`;
+      if (s.target.kind !== "github_pr" || s.target.github_pr_number == null || !s.repo_remote) continue;
+      if (s.review.status === "published") continue;
+      const key = `${s.repo_remote}#${s.target.github_pr_number}`;
       if (!m.has(key)) m.set(key, s.review.id);
     }
     return m;

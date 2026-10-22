@@ -252,6 +252,8 @@ pub struct ReviewSummary {
     pub target: Target,
     pub repo_id: i64,
     pub repo_label: String,
+    /// `owner/name` on GitHub, when known: unlike the label, a friendly name never replaces it.
+    pub repo_remote: Option<String>,
     pub comment_count: i64,
 }
 
