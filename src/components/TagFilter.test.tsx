@@ -73,4 +73,29 @@ describe("TagFilter", () => {
     expect(screen.getByText("Exclude tags")).toBeInTheDocument();
     expect(screen.getByPlaceholderText("Exclude tag…")).toBeInTheDocument();
   });
+
+  it("toggles the Untagged row", async () => {
+    const user = userEvent.setup();
+    const onUntagged = vi.fn();
+    render(
+      <TagFilter tags={TAGS} selected={[]} onChange={vi.fn()} untagged={{ on: false, count: 4, onChange: onUntagged }} />,
+    );
+
+    const row = screen.getByRole("button", { name: /Untagged/ });
+    expect(row).toHaveTextContent("4");
+    await user.click(row);
+    expect(onUntagged).toHaveBeenCalledWith(true);
+  });
+
+  it("shows the Untagged row even without tags, and clear resets it", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    const onUntagged = vi.fn();
+    render(<TagFilter tags={[]} selected={[]} onChange={onChange} untagged={{ on: true, count: 2, onChange: onUntagged }} />);
+
+    expect(screen.getByRole("button", { name: /Untagged/ })).toHaveAttribute("aria-pressed", "true");
+    await user.click(screen.getByText("clear"));
+    expect(onChange).toHaveBeenCalledWith([]);
+    expect(onUntagged).toHaveBeenCalledWith(false);
+  });
 });

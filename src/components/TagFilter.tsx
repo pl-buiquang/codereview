@@ -5,7 +5,8 @@ import { Icon } from "./icons";
  *  selected tags within one instance is OR (include: card shows if it
  *  carries any selected tag; exclude: card is hidden if it carries any
  *  selected tag). `unavailable` hides tags already picked in a sibling
- *  filter (e.g. the exclude list hides tags already included). */
+ *  filter (e.g. the exclude list hides tags already included). `untagged`
+ *  adds an "Untagged" toggle row, OR'd with the selected tags by the caller. */
 export function TagFilter({
   tags,
   selected,
@@ -15,6 +16,7 @@ export function TagFilter({
   placeholder = "Filter by tag…",
   variant = "include",
   label = (key) => key,
+  untagged,
 }: {
   tags: [string, number][];
   selected: string[];
@@ -25,6 +27,7 @@ export function TagFilter({
   variant?: "include" | "exclude";
   /** Display (and search) text for a key, when the key itself isn't readable. */
   label?: (key: string) => string;
+  untagged?: { on: boolean; count: number; onChange: (on: boolean) => void };
 }) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
@@ -41,7 +44,7 @@ export function TagFilter({
     return () => document.removeEventListener("mousedown", onDown);
   }, [open]);
 
-  if (tags.length === 0 && selected.length === 0) return null;
+  if (tags.length === 0 && selected.length === 0 && !untagged) return null;
 
   const q = query.trim().toLowerCase();
   const options = tags.filter(
@@ -81,8 +84,14 @@ export function TagFilter({
     <div className="cr-rail-group tag-filter" ref={rootRef}>
       <div className="cr-rail-h">
         <span>{title}</span>
-        {selected.length > 0 && (
-          <button className="cr-rail-clear" onClick={() => onChange([])}>
+        {(selected.length > 0 || untagged?.on) && (
+          <button
+            className="cr-rail-clear"
+            onClick={() => {
+              onChange([]);
+              if (untagged?.on) untagged.onChange(false);
+            }}
+          >
             clear
           </button>
         )}
@@ -134,6 +143,17 @@ export function TagFilter({
             </span>
           ))}
         </div>
+      )}
+      {untagged && (
+        <button
+          className={`cr-rail-item${untagged.on ? " on" : ""}`}
+          aria-pressed={untagged.on}
+          title="Cards with no notes (own or inherited from the linked issue)"
+          onClick={() => untagged.onChange(!untagged.on)}
+        >
+          <span className="lbl">Untagged</span>
+          <span className="count">{untagged.count}</span>
+        </button>
       )}
     </div>
   );

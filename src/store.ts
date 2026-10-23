@@ -42,6 +42,8 @@ export interface BoardFilters {
   needsAction: boolean;
   stack: string | null;
   tags: string[];
+  /** Also show cards with no note (OR'd with `tags`). */
+  untagged: boolean;
   excludeTags: string[];
 }
 
@@ -53,6 +55,7 @@ export const EMPTY_BOARD_FILTERS: BoardFilters = {
   needsAction: false,
   stack: null,
   tags: [],
+  untagged: false,
   excludeTags: [],
 };
 

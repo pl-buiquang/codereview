@@ -14,6 +14,7 @@ import type { BoardCard as BoardCardT, BoardLane, BoardMetaKind, ClaudeSession }
 import {
   BoardCard,
   canEnableAutoMerge,
+  cardIsUntagged,
   cardTags,
   ciStatus,
   MERGE_FACET_LABEL,
@@ -75,7 +76,7 @@ export function BoardView() {
   const tmuxSessionName = useSettingsStore((s) => s.tmuxSessionName);
   const filters = useUIStore((s) => s.boardFilters);
   const setBoardFilters = useUIStore((s) => s.setBoardFilters);
-  const { repos: repoFilter, status: statusFilter, ci: ciFilter, merge: mergeFilter, needsAction, stack: stackFilter, tags: tagFilter, excludeTags: tagExclude } = filters;
+  const { repos: repoFilter, status: statusFilter, ci: ciFilter, merge: mergeFilter, needsAction, stack: stackFilter, tags: tagFilter, untagged: untaggedFilter, excludeTags: tagExclude } = filters;
   const setRepoFilter = (repos: string[]) => setBoardFilters({ repos });
   const setStatusFilter = (status: string | null) => setBoardFilters({ status });
   const setCiFilter = (ci: string | null) => setBoardFilters({ ci });
@@ -84,6 +85,7 @@ export function BoardView() {
   const setStackFilter = (stack: string | null) => setBoardFilters({ stack });
   const setTagFilter = (tags: string[]) => setBoardFilters({ tags });
   const setTagExclude = (excludeTags: string[]) => setBoardFilters({ excludeTags });
+  const setUntaggedFilter = (untagged: boolean) => setBoardFilters({ untagged });
   const [addingLane, setAddingLane] = useState<BoardLane | null>(null);
   const [addValue, setAddValue] = useState("");
   const [showTrackDialog, setShowTrackDialog] = useState(false);
@@ -337,6 +339,8 @@ export function BoardView() {
   const availableTags = new Set(tagEntries.map(([t]) => t));
   const effTags = tagFilter.filter((t) => availableTags.has(t));
   const effExcludeTags = tagExclude.filter((t) => availableTags.has(t));
+  const anyUntagged = allCards.some(cardIsUntagged);
+  const effUntagged = untaggedFilter && anyUntagged;
 
   // Same set as the sidebar badge; snoozed cards only count when the setting includes them.
   const needsActionCard = (c: BoardCardT) =>
@@ -350,7 +354,13 @@ export function BoardView() {
     if (skip !== "merge" && effMerge && !mergeFacets(c).includes(effMerge)) return false;
     if (needsAction && !needsActionCard(c)) return false;
     if (skip !== "stack" && effStack && stackKey(c) !== effStack) return false;
-    if (skip !== "tags" && effTags.length > 0 && !cardTags(c).some((t) => effTags.includes(t))) return false;
+    if (
+      skip !== "tags" &&
+      (effTags.length > 0 || effUntagged) &&
+      !(effUntagged && cardIsUntagged(c)) &&
+      !cardTags(c).some((t) => effTags.includes(t))
+    )
+      return false;
     if (effExcludeTags.length > 0 && cardTags(c).some((t) => effExcludeTags.includes(t))) return false;
     return true;
   };
@@ -377,6 +387,7 @@ export function BoardView() {
   const mergeShown = withCounts(mergeEntries, facetCounts("merge", mergeFacets));
   const stackShown = withCounts(stackEntries, facetCounts("stack", (c) => [stackKey(c)]));
   const tagsShown = withCounts(tagEntries, facetCounts("tags", cardTags));
+  const untaggedCount = facetCounts("tags", (c) => [cardIsUntagged(c) ? "untagged" : null]).get("untagged") ?? 0;
 
   const byLane = useMemo(() => {
     const m = new Map<BoardLane, BoardCardT[]>();
@@ -582,7 +593,15 @@ export function BoardView() {
             onChange={setRepoFilter}
             renderLabel={(k) => <RepoName className="lbl mono" name={k} />}
           />
-          <TagFilter tags={tagsShown} selected={effTags} onChange={setTagFilter} unavailable={effExcludeTags} />
+          <TagFilter
+            tags={tagsShown}
+            selected={effTags}
+            onChange={setTagFilter}
+            unavailable={effExcludeTags}
+            untagged={
+              anyUntagged ? { on: effUntagged, count: untaggedCount, onChange: setUntaggedFilter } : undefined
+            }
+          />
           <TagFilter
             tags={tagsShown}
             selected={effExcludeTags}

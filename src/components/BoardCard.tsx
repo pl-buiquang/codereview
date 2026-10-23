@@ -77,6 +77,12 @@ export function cardTags(card: BoardCardT): string[] {
   return [...tags];
 }
 
+/** True when neither the card nor its linked issue carries a note, for the
+ *  board's Untagged filter. */
+export function cardIsUntagged(card: BoardCardT): boolean {
+  return ![...card.meta, ...card.inherited_meta].some((m) => m.kind === "note");
+}
+
 // Drafts live only in the "in progress" lane (redundant to call out) and
 // "ready" has nothing to flag yet, so only these four get a color.
 const STATUS_BORDER_COLOR: Record<string, string> = {
