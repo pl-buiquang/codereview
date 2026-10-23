@@ -4,6 +4,7 @@ import { useUIStore } from "../../store";
 import type { RefInfo, Repository } from "../../lib/types";
 import { GitRefItems } from "./GitRefItems";
 import { ReviewVsDialog, useStartReview } from "./ReviewVsDialog";
+import { copyToClipboard } from "./CopyRefDialog";
 import "./RepoSidebar.css";
 
 export { useStartReview };
@@ -80,8 +81,19 @@ export function BranchActionsMenu({
       onClick={(e) => e.stopPropagation()}
     >
       <div className="rs-menu-title mono">{branch}</div>
+      <button
+        className="rs-menu-item"
+        role="menuitem"
+        onClick={() => {
+          onClose();
+          copyToClipboard(branch);
+        }}
+      >
+        Copy name
+      </button>
       {!isTag && (
         <>
+          <div className="rs-menu-sep" role="separator" />
           <button
             className="rs-menu-item"
             role="menuitem"

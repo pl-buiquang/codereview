@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../../lib/api";
@@ -6,6 +6,7 @@ import { toast } from "../../lib/toast";
 import type { RefInfo } from "../../lib/types";
 import { useGitOps } from "./GitOps";
 import type { MenuAnchor } from "./BranchActionsMenu";
+import { CopyRefDialog, copyToClipboard } from "./CopyRefDialog";
 import "./RepoSidebar.css";
 
 export type GitTarget = { kind: "ref"; ref: RefInfo } | { kind: "commit"; sha: string };
@@ -44,6 +45,7 @@ export function GitRefItems({ target, close }: { target: GitTarget; close: () =>
     const label = target.sha.slice(0, 7);
     return (
       <>
+        <div className="rs-menu-sep" role="separator" />
         {item("Checkout (detached)", () => ops.checkoutCommit(target.sha))}
         {item("Create branch here…", () => ops.createBranchAt(target.sha, label))}
         {item("Create tag here…", () => ops.createTagAt(target.sha, label))}
@@ -55,6 +57,7 @@ export function GitRefItems({ target, close }: { target: GitTarget; close: () =>
   if (ref.kind === "tag") {
     return (
       <>
+        <div className="rs-menu-sep" role="separator" />
         {item("Checkout (detached)", () => ops.checkout(ref))}
         {item("Create branch here…", () => ops.createBranchAt(ref.sha, ref.name))}
         {item("Delete tag", () => ops.deleteTag(ref.name))}
@@ -64,6 +67,7 @@ export function GitRefItems({ target, close }: { target: GitTarget; close: () =>
   if (ref.kind === "remote") {
     return (
       <>
+        <div className="rs-menu-sep" role="separator" />
         {item("Checkout as local branch", () => ops.checkout(ref))}
         {item("Create branch here…", () => ops.createBranchAt(ref.sha, ref.name))}
         {item("Create tag here…", () => ops.createTagAt(ref.sha, ref.name))}
@@ -106,15 +110,20 @@ export function GitRefItems({ target, close }: { target: GitTarget; close: () =>
 
 export function CommitActionsMenu({
   sha,
+  refs = [],
   anchor,
   onClose,
 }: {
   sha: string;
+  /** Branches and tags pointing at `sha`, offered by "Copy name". */
+  refs?: RefInfo[];
   anchor: MenuAnchor;
   onClose: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
   useEffect(() => {
+    if (pickerOpen) return;
     const onDown = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) onClose();
     };
@@ -127,7 +136,14 @@ export function CommitActionsMenu({
       document.removeEventListener("mousedown", onDown);
       document.removeEventListener("keydown", onKey);
     };
-  }, [onClose]);
+  }, [onClose, pickerOpen]);
+
+  if (pickerOpen) return <CopyRefDialog refs={refs} onClose={onClose} />;
+
+  const copy = (text: string) => {
+    onClose();
+    copyToClipboard(text);
+  };
 
   return createPortal(
     <div
@@ -139,6 +155,19 @@ export function CommitActionsMenu({
       onClick={(e) => e.stopPropagation()}
     >
       <div className="rs-menu-title mono">{sha.slice(0, 7)}</div>
+      <button className="rs-menu-item" role="menuitem" onClick={() => copy(sha)}>
+        Copy SHA
+      </button>
+      {refs.length === 1 && (
+        <button className="rs-menu-item" role="menuitem" onClick={() => copy(refs[0].name)}>
+          Copy <span className="mono">{refs[0].name}</span>
+        </button>
+      )}
+      {refs.length > 1 && (
+        <button className="rs-menu-item" role="menuitem" onClick={() => setPickerOpen(true)}>
+          Copy branch/tag name…
+        </button>
+      )}
       <GitRefItems target={{ kind: "commit", sha }} close={onClose} />
     </div>,
     document.body,

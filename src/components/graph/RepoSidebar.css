@@ -321,6 +321,18 @@
   cursor: default;
 }
 
+/* Copy name dialog */
+.crd-list {
+  display: flex;
+  flex-direction: column;
+  margin-top: var(--sp-3);
+  overflow: auto;
+}
+.crd-kind {
+  margin-left: auto;
+  font-size: 11px;
+}
+
 /* Review vs… dialog */
 .rvd-modal {
   width: min(440px, 90vw);

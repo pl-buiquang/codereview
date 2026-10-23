@@ -418,7 +418,7 @@ export function GraphView({ repo }: { repo: Repository }) {
         onSelect={select}
         onEndReached={onEndReached}
         onRefContextMenu={onRefContextMenu}
-        onCommitContextMenu={hasClone ? onCommitContextMenu : undefined}
+        onCommitContextMenu={onCommitContextMenu}
       />
     );
   }
@@ -589,6 +589,7 @@ export function GraphView({ repo }: { repo: Repository }) {
       {commitMenu && (
         <CommitActionsMenu
           sha={commitMenu.sha}
+          refs={refs.filter((r) => r.sha === commitMenu.sha)}
           anchor={commitMenu.anchor}
           onClose={() => setCommitMenu(null)}
         />
