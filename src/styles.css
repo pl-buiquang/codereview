@@ -3750,6 +3750,9 @@ input[type="range"] {
   align-items: center;
   gap: 6px;
 }
+.repo-pagehead {
+  align-items: center;
+}
 .repo-title-edit {
   display: inline-flex;
   align-items: center;
@@ -3761,15 +3764,14 @@ input[type="range"] {
   color: var(--accent);
   background: var(--surface-2);
 }
-.repo-github-link {
+.repo-link-btn {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  margin-top: 2px;
   font-size: 12px;
   color: var(--text-3);
 }
-.repo-github-link:hover {
+.repo-link-btn:hover {
   color: var(--accent);
   background: var(--surface-2);
 }

@@ -63,7 +63,7 @@ export function RepoView({ repo }: { repo: Repository }) {
 
   return (
     <section className="cr-main">
-      <header className="cr-pagehead">
+      <header className="cr-pagehead repo-pagehead">
         {editingName ? (
           <input
             className="input repo-title-input"
@@ -87,7 +87,7 @@ export function RepoView({ repo }: { repo: Repository }) {
         )}
         {repo.remote_owner && repo.remote_name && (
           <button
-            className="btn-icon repo-github-link"
+            className="btn-icon repo-link-btn"
             title={`${repo.remote_owner}/${repo.remote_name} on GitHub`}
             onClick={() =>
               api
@@ -96,6 +96,19 @@ export function RepoView({ repo }: { repo: Repository }) {
             }
           >
             <Icon name="ext" size={13} /> GitHub
+          </button>
+        )}
+        {repo.local_path && (
+          <button
+            className="btn-icon repo-link-btn"
+            title={`Open ${repo.local_path} in VSCode`}
+            onClick={() =>
+              api
+                .openInVscode(repo.local_path!)
+                .catch((e) => toast.error(`Could not open VSCode:\n${String(e)}`))
+            }
+          >
+            <Icon name="code" size={13} /> VSCode
           </button>
         )}
       </header>
