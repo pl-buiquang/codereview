@@ -7,6 +7,7 @@ import { DashboardPanel } from "./components/DashboardPanel";
 import { HomeNav } from "./components/HomeNav";
 import { ReviewView } from "./components/ReviewView";
 import { Toaster } from "./components/Toaster";
+import { TooltipLayer } from "./components/TooltipLayer";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { CommandPalette } from "./components/CommandPalette";
 import { UpdateBanner } from "./components/UpdateBanner";
@@ -249,6 +250,7 @@ function App() {
         <TabPanes />
       </div>
       <Toaster />
+      <TooltipLayer />
       <ConfirmDialog />
       <CommandPalette />
     </div>

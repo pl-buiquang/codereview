@@ -3264,6 +3264,13 @@ tr.search-current {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 }
 
+.cr-tooltip-float {
+  transform: none;
+  white-space: pre-line;
+  max-width: min(560px, 90vw);
+  overflow-wrap: anywhere;
+}
+
 .cr-tooltip-card {
   background: var(--surface);
   color: var(--text);

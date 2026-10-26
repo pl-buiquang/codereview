@@ -2375,7 +2375,7 @@ function FileReview({
     <div className="diff-file" id={`file-${index}`} ref={rootRef}>
       <div className="diff-file-header">
         <span className="file-path-group">
-          <span className="file-path mono" title={path}>{path}</span>
+          <span className="file-path mono" title={path} data-cr-title-when="clipped">{path}</span>
           <button
             className="btn-icon copy-path-btn"
             title="Copy relative file path"
