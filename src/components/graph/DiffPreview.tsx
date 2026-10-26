@@ -25,6 +25,7 @@ export function DiffPreview({
   index,
   onNavigate,
   onClose,
+  keyboard = true,
 }: {
   target: DiffPreviewTarget;
   /** Display paths of the list being cycled; only its length and order matter for prev/next. */
@@ -32,6 +33,8 @@ export function DiffPreview({
   index: number;
   onNavigate: (index: number) => void;
   onClose: () => void;
+  /** Listen for Escape/↑/↓; off while this preview's repo pane is hidden. */
+  keyboard?: boolean;
 }) {
   const defaultViewType = useSettingsStore((s) => s.defaultViewType);
   const [viewType, setViewType] = useState<DiffViewType>(defaultViewType);
@@ -74,6 +77,7 @@ export function DiffPreview({
   stepRef.current = step;
 
   useEffect(() => {
+    if (!keyboard) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
@@ -89,7 +93,7 @@ export function DiffPreview({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose, count]);
+  }, [onClose, count, keyboard]);
 
   let title: string;
   if (target.kind === "commit") {

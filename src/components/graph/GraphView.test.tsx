@@ -36,6 +36,7 @@ vi.mock("../../lib/toast", () => ({
 }));
 
 import { GraphView, GRAPH_PAGE_SIZE, fetchLabel } from "./GraphView";
+import { useUIStore } from "../../store";
 
 const repo: Repository = {
   id: 3,
@@ -121,6 +122,23 @@ describe("GraphView", () => {
     await user.click(screen.getByRole("button", { name: "Close preview" }));
     expect(screen.queryByRole("button", { name: "Close preview" })).not.toBeInTheDocument();
     expect(graphWrap.style.display).toBe("");
+  });
+
+  it("arrow keys drive only the graph of the repo on screen", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const other: Repository = { ...repo, id: 4, local_path: "/home/me/other" };
+    useUIStore.setState({ activeTabId: "home", homeRepoId: repo.id });
+    render(
+      <QueryClientProvider client={client}>
+        <GraphView repo={other} />
+        <GraphView repo={repo} />
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(screen.getAllByText("subject 0")).toHaveLength(2));
+    fireEvent.keyDown(window, { key: "ArrowDown" });
+    await waitFor(() => expect(commitDetail).toHaveBeenCalledWith(repo.id, sha(0)));
+    expect(commitDetail).not.toHaveBeenCalledWith(other.id, expect.anything());
+    useUIStore.setState({ homeRepoId: null });
   });
 
   it("requests graph pages with the selected scope", async () => {

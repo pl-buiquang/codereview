@@ -142,6 +142,20 @@ describe("DiffPreview", () => {
     expect(onNavigate).not.toHaveBeenCalled();
   });
 
+  it("ignores keys when keyboard is off", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const onNavigate = vi.fn();
+    const onClose = vi.fn();
+    render(
+      <QueryClientProvider client={client}>
+        <DiffPreview target={commitTarget} files={["a", "b"]} index={0} onNavigate={onNavigate} onClose={onClose} keyboard={false} />
+      </QueryClientProvider>,
+    );
+    await userEvent.keyboard("{ArrowDown}{Escape}");
+    expect(onNavigate).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
   it("toggles between split and unified", async () => {
     renderPreview(commitTarget);
     const unified = screen.getByRole("button", { name: "Unified" });

@@ -416,7 +416,7 @@ export function GraphView({ repo }: { repo: Repository }) {
         wip={wipCount > 0 ? { count: wipCount } : null}
         selectedSha={selected}
         onSelect={select}
-        arrowKeys={!previewOpen}
+        arrowKeys={visible && !previewOpen}
         onEndReached={onEndReached}
         onRefContextMenu={onRefContextMenu}
         onCommitContextMenu={onCommitContextMenu}
@@ -569,6 +569,7 @@ export function GraphView({ repo }: { repo: Repository }) {
               index={previewTarget.kind === "stash" ? 0 : previewIndex!}
               onNavigate={setPreviewIndex}
               onClose={closePreview}
+              keyboard={visible}
             />
           )}
         </div>
