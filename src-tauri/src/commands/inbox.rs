@@ -64,7 +64,7 @@ const ITEM_VIEW: &str = "(
         LOWER(s.ci_state) AS ci_state,
         p.review_decision,
         e.state AS inbox_state, e.archive_cause, COALESCE(e.state_at, e.first_seen_at) AS state_at,
-        e.first_seen_at, COALESCE(u.is_bot, 0) AS author_is_bot,
+        e.first_seen_at, e.viewed_at, COALESCE(u.is_bot, 0) AS author_is_bot,
         CASE WHEN e.state = 'new'
               AND (SELECT value FROM meta WHERE key = 'last_complete_discovery_at') IS NOT NULL
               AND NOT EXISTS (SELECT 1 FROM item_reasons x WHERE x.item_id = e.id
@@ -96,8 +96,8 @@ pub(crate) fn upsert_entry(conn: &Connection, node: &Node, ts: &str) -> AppResul
 
 /// Record the reasons a discovery found for an item. A reason that is new, or
 /// that lapsed (not found since `prev_discovery`, the last complete one) and
-/// is back, brings an archived item back to New. Reasons that stop matching
-/// are kept so the item can show as stale.
+/// is back, brings an archived item back to New and makes it unviewed again.
+/// Reasons that stop matching are kept so the item can show as stale.
 pub(crate) fn record_reasons(
     conn: &Connection,
     item_id: &str,
@@ -127,6 +127,7 @@ pub(crate) fn record_reasons(
         )?;
     }
     if gained {
+        conn.execute("UPDATE inbox_entry SET viewed_at = NULL WHERE id = ?1", params![item_id])?;
         conn.execute(
             "UPDATE inbox_entry SET state = 'new', archive_cause = NULL, state_at = ?1
              WHERE id = ?2 AND state = 'archived'",
@@ -136,11 +137,12 @@ pub(crate) fn record_reasons(
     Ok(())
 }
 
-/// Move an item between triage states. A no-op for items the inbox never saw
-/// (board-only cards).
+/// Move an item between triage states; triaging it also counts as viewing it.
+/// A no-op for items the inbox never saw (board-only cards).
 pub(crate) fn set_inbox_state(conn: &Connection, id: &str, state: &str, cause: Option<&str>) -> AppResult<()> {
     conn.execute(
-        "UPDATE inbox_entry SET state = ?1, archive_cause = ?2, state_at = ?3 WHERE id = ?4",
+        "UPDATE inbox_entry SET state = ?1, archive_cause = ?2, state_at = ?3, viewed_at = COALESCE(viewed_at, ?3)
+         WHERE id = ?4",
         params![state, cause, now(), id],
     )?;
     Ok(())
@@ -330,6 +332,20 @@ pub fn restore_item_impl(conn: &Connection, id: &str) -> AppResult<()> {
     set_inbox_state(conn, id, "new", None)
 }
 
+/// Stop counting a New item in the badge; it stays on the New tab.
+pub fn mark_item_viewed_impl(conn: &Connection, id: &str) -> AppResult<()> {
+    conn.execute(
+        "UPDATE inbox_entry SET viewed_at = COALESCE(viewed_at, ?1) WHERE id = ?2",
+        params![now(), id],
+    )?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn mark_item_viewed(id: String, db: State<Db>) -> AppResult<()> {
+    mark_item_viewed_impl(&db.0.lock().unwrap(), &id)
+}
+
 #[tauri::command]
 pub fn archive_item(id: String, db: State<Db>) -> AppResult<()> {
     archive_item_impl(&db.0.lock().unwrap(), &id)
@@ -378,33 +394,13 @@ pub async fn open_pr_review(
 pub struct InboxMeta {
     pub last_refresh_at: Option<String>,
     pub viewer_login: Option<String>,
-    /// When the New tab was last on screen; items first seen after it are
-    /// "new" for the sidebar badge. Starts at the first read.
-    pub new_seen_at: String,
 }
 
-const NEW_SEEN_KEY: &str = "inbox_new_seen_at";
-
 pub fn inbox_meta_impl(conn: &Connection) -> AppResult<InboxMeta> {
-    let new_seen_at = match get_meta(conn, NEW_SEEN_KEY) {
-        Some(t) => t,
-        None => {
-            let t = now();
-            set_meta(conn, NEW_SEEN_KEY, &t)?;
-            t
-        }
-    };
     Ok(InboxMeta {
         last_refresh_at: get_meta(conn, "last_refresh_at"),
         viewer_login: get_meta(conn, "viewer_login"),
-        new_seen_at,
     })
-}
-
-/// The New tab is on screen: everything in the inbox now counts as seen.
-#[tauri::command]
-pub fn mark_inbox_new_seen(db: State<Db>) -> AppResult<()> {
-    set_meta(&db.0.lock().unwrap(), NEW_SEEN_KEY, &now())
 }
 
 #[tauri::command]
@@ -424,15 +420,6 @@ mod tests {
             params![id, typ],
         )
         .unwrap();
-    }
-
-    #[test]
-    fn new_seen_marker_starts_at_first_read_and_is_stable() {
-        let conn = open_memory();
-        let first = inbox_meta_impl(&conn).unwrap().new_seen_at;
-        assert_eq!(inbox_meta_impl(&conn).unwrap().new_seen_at, first);
-        set_meta(&conn, NEW_SEEN_KEY, "2030-01-01T00:00:00+00:00").unwrap();
-        assert_eq!(inbox_meta_impl(&conn).unwrap().new_seen_at, "2030-01-01T00:00:00+00:00");
     }
 
     fn reason(name: &str) -> inbox::Reason {
@@ -484,6 +471,42 @@ mod tests {
         assert_eq!(state_of(&conn, "PR_1"), "archived", "mention was seen at t3");
         record_reasons(&conn, "PR_1", &[reason("direct_review")], Some("t4"), "t5").unwrap();
         assert_eq!(state_of(&conn, "PR_1"), "new", "direct_review was last seen at t3, before t4");
+    }
+
+    fn viewed_at(conn: &Connection, id: &str) -> Option<String> {
+        conn.query_row("SELECT viewed_at FROM inbox_entry WHERE id = ?1", params![id], |r| r.get(0)).unwrap()
+    }
+
+    #[test]
+    fn viewed_item_stays_new_until_a_new_reason_unviews_it() {
+        let conn = open_memory();
+        entry(&conn, "PR_1", "pr");
+        record_reasons(&conn, "PR_1", &[reason("mention")], None, "t1").unwrap();
+        assert!(viewed_at(&conn, "PR_1").is_none());
+        mark_item_viewed_impl(&conn, "PR_1").unwrap();
+        let first = viewed_at(&conn, "PR_1");
+        assert!(first.is_some());
+        mark_item_viewed_impl(&conn, "PR_1").unwrap();
+        assert_eq!(viewed_at(&conn, "PR_1"), first, "marking again keeps the first time");
+        assert_eq!(new_ids(&conn), ["PR_1"], "viewed items stay on the New tab");
+
+        record_reasons(&conn, "PR_1", &[reason("mention")], Some("t1"), "t2").unwrap();
+        assert!(viewed_at(&conn, "PR_1").is_some(), "same reason again keeps it viewed");
+        record_reasons(&conn, "PR_1", &[reason("mention"), reason("direct_review")], Some("t2"), "t3").unwrap();
+        assert!(viewed_at(&conn, "PR_1").is_none(), "a new reason makes it unviewed");
+    }
+
+    #[test]
+    fn triaging_an_item_marks_it_viewed() {
+        let conn = open_memory();
+        entry(&conn, "PR_1", "pr");
+        entry(&conn, "PR_2", "pr");
+        archive_item_impl(&conn, "PR_1").unwrap();
+        set_inbox_state(&conn, "PR_2", "tracked", None).unwrap();
+        assert!(viewed_at(&conn, "PR_1").is_some());
+        assert!(viewed_at(&conn, "PR_2").is_some());
+        restore_item_impl(&conn, "PR_1").unwrap();
+        assert!(viewed_at(&conn, "PR_1").is_some(), "a restored item doesn't count as unviewed");
     }
 
     #[test]

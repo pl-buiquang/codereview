@@ -271,8 +271,8 @@ export const api = {
   replyToDiscussion: (subjectId: string, owner: string, name: string, number: number, body: string) =>
     invoke<void>("reply_to_discussion", { subjectId, owner, name, number, body }),
   inboxMeta: () => invoke<InboxMeta>("inbox_meta"),
-  /** The New tab is on screen: its items stop counting as new in the sidebar badge. */
-  markInboxNewSeen: () => invoke<void>("mark_inbox_new_seen"),
+  /** Stop counting a New item in the sidebar badge; it stays on the New tab. */
+  markItemViewed: (id: string) => invoke<void>("mark_item_viewed", { id }),
   archiveItem: (id: string) => invoke<void>("archive_item", { id }),
   restoreItem: (id: string) => invoke<void>("restore_item", { id }),
   openPrReview: (itemId: string, owner: string, name: string, number: number, basePaths: string[] = []) =>

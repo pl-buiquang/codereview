@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { toast } from "../lib/toast";
@@ -140,21 +140,10 @@ export function InboxView() {
 
   const sync = useSyncNow("inbox");
 
-  // While the New tab is on screen its items count as seen, including ones
-  // that arrive meanwhile (the sidebar badge counts only what came after).
-  const viewingNew = onHome && active === "new";
-  const newCount = inboxQuery.data?.length ?? 0;
-  useEffect(() => {
-    if (!viewingNew) return;
-    api
-      .markInboxNewSeen()
-      .then(() => queryClient.invalidateQueries({ queryKey: ["inbox-meta"] }))
-      .catch(() => {});
-  }, [viewingNew, newCount, queryClient]);
-
   const onErr = (e: unknown) => toast.error(String(e));
   const archive = useMutation({ mutationFn: api.archiveItem, onSuccess: invalidate, onError: onErr });
   const restore = useMutation({ mutationFn: api.restoreItem, onSuccess: invalidate, onError: onErr });
+  const markViewed = useMutation({ mutationFn: api.markItemViewed, onSuccess: invalidate, onError: onErr });
   const track = useMutation({
     mutationFn: (item: InboxItem) => api.boardTrack(item.url),
     onSuccess: () => {
@@ -253,7 +242,7 @@ export function InboxView() {
   const visibleIds = items.map((i) => i.id);
   useSyncScope("inbox", onHome, visibleIds);
 
-  const busy = archive.isPending || restore.isPending || openPr.isPending || track.isPending;
+  const busy = archive.isPending || restore.isPending || markViewed.isPending || openPr.isPending || track.isPending;
   const lastRefresh = metaQuery.data?.lastRefreshAt;
   const loading = active === "archive" ? archiveQuery.isLoading : inboxQuery.isLoading;
   const tab = TABS.find((t) => t.key === active)!;
@@ -385,8 +374,13 @@ export function InboxView() {
                 existingReviewId={existingReviewId}
                 onArchive={() => archive.mutate(item.id)}
                 onRestore={() => restore.mutate(item.id)}
+                onMarkViewed={() => markViewed.mutate(item.id)}
                 onOpenReview={() => openPr.mutate(item)}
-                onOpenExisting={() => existingReviewId != null && openReview(existingReviewId)}
+                onOpenExisting={() => {
+                  if (existingReviewId == null) return;
+                  if (!item.viewed_at) markViewed.mutate(item.id);
+                  openReview(existingReviewId);
+                }}
                 boardTracked={trackedIds.has(item.id)}
                 onBoardTrack={() => track.mutate(item)}
               />

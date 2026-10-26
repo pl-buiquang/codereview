@@ -7,13 +7,13 @@ import type { ReactNode } from "react";
 const listRepositories = vi.fn();
 const listClaudeSessions = vi.fn();
 const boardList = vi.fn();
+const listInbox = vi.fn();
 vi.mock("../lib/api", () => ({
   api: {
     listRepositories: () => listRepositories(),
     listClaudeSessions: () => listClaudeSessions(),
     boardList: () => boardList(),
-    listInbox: () => Promise.resolve([]),
-    inboxMeta: () => Promise.resolve({ newSeenAt: "2000-01-01T00:00:00Z" }),
+    listInbox: () => listInbox(),
     listConversations: () => Promise.resolve({ items: [], total: 0, facets: { unread: 0 } }),
   },
 }));
@@ -46,6 +46,7 @@ beforeEach(() => {
   ]);
   listClaudeSessions.mockResolvedValue({ sessions: [], card_sessions: [] });
   boardList.mockResolvedValue([]);
+  listInbox.mockResolvedValue([]);
 });
 
 describe("HomeNav", () => {
@@ -110,6 +111,16 @@ describe("HomeNav", () => {
     renderNav(false);
 
     expect(await screen.findByTitle(/Waiting for input/)).toHaveTextContent("1");
+  });
+
+  it("badges Inbox with the New items not viewed yet", async () => {
+    listInbox.mockResolvedValue([
+      { id: "viewed", viewed_at: "2026-01-01T00:00:00Z", reasons: [] },
+      { id: "unviewed", viewed_at: null, reasons: [] },
+    ]);
+    renderNav(false);
+
+    expect(await screen.findByTitle("1 new item, 0 unread conversations")).toHaveTextContent("1");
   });
 
   it("badges Board with the cards that need my action", async () => {

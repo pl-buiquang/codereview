@@ -325,7 +325,7 @@ pub fn run() {
             commands::inbox::restore_item,
             commands::inbox::open_pr_review,
             commands::inbox::inbox_meta,
-            commands::inbox::mark_inbox_new_seen,
+            commands::inbox::mark_item_viewed,
             commands::board::board_last_refresh_at,
             commands::board::board_list,
             commands::board::board_tracked_ids,

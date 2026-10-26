@@ -289,6 +289,8 @@ pub struct ItemRow {
     pub author_is_bot: bool,
     /// A New item no search in the last complete discovery still found.
     pub stale: bool,
+    /// When it was marked viewed or triaged; a New item without it counts in the badge.
+    pub viewed_at: Option<String>,
     pub first_seen_at: String,
     pub last_refreshed: String,
 }
@@ -320,6 +322,7 @@ impl ItemRow {
             state_at: row.get("state_at")?,
             author_is_bot: row.get::<_, i64>("author_is_bot")? != 0,
             stale: row.get::<_, i64>("stale")? != 0,
+            viewed_at: row.get("viewed_at")?,
             first_seen_at: row.get("first_seen_at")?,
             last_refreshed: row.get("last_refreshed")?,
         })

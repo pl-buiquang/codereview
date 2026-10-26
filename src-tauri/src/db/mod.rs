@@ -54,6 +54,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("migrations/0035_conversations.sql"),
     include_str!("migrations/0036_review_pr_details_collapsed.sql"),
     include_str!("migrations/0037_routines.sql"),
+    include_str!("migrations/0038_inbox_viewed.sql"),
 ];
 
 pub fn open(path: &Path) -> AppResult<Connection> {
@@ -297,6 +298,35 @@ mod tests {
         assert_eq!(q("mine_issue"), ("new".into(), None), "own issues stay");
         assert_eq!(q("onboard"), ("tracked".into(), None), "on the board beats done");
         assert_eq!(q("discarded"), ("new".into(), None));
+    }
+
+    #[test]
+    fn migration_0038_marks_items_seen_before_the_old_marker_viewed() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        for script in &MIGRATIONS[..37] {
+            conn.execute_batch(script).unwrap();
+        }
+        conn.pragma_update(None, "user_version", 37_i64).unwrap();
+        conn.execute_batch(
+            "INSERT INTO meta (key, value) VALUES ('inbox_new_seen_at', '2026-01-02T00:00:00+00:00');
+             INSERT INTO inbox_entry (id, type, first_seen_at, state) VALUES
+                ('old', 'pr', '2026-01-01T00:00:00+00:00', 'new'),
+                ('fresh', 'pr', '2026-01-03T00:00:00+00:00', 'new');",
+        )
+        .unwrap();
+
+        migrate(&conn).unwrap();
+
+        let viewed = |id: &str| -> Option<String> {
+            conn.query_row("SELECT viewed_at FROM inbox_entry WHERE id = ?1", [id], |r| r.get(0)).unwrap()
+        };
+        assert_eq!(viewed("old").as_deref(), Some("2026-01-02T00:00:00+00:00"));
+        assert_eq!(viewed("fresh"), None, "arrived after the marker: still counts");
+        let marker: i64 = conn
+            .query_row("SELECT COUNT(*) FROM meta WHERE key = 'inbox_new_seen_at'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(marker, 0);
     }
 
     #[test]

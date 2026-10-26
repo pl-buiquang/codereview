@@ -362,6 +362,8 @@ export interface InboxItem {
   author_is_bot: boolean;
   /** A New item no search in the last complete discovery still found. */
   stale: boolean;
+  /** When it was marked viewed or triaged; a New item without it counts in the badge. */
+  viewed_at: string | null;
   first_seen_at: string;
   last_refreshed: string;
   reasons: ItemReason[];
@@ -449,8 +451,6 @@ export interface ReanchorResult {
 export interface InboxMeta {
   lastRefreshAt: string | null;
   viewerLogin: string | null;
-  /** When the New tab was last on screen. */
-  newSeenAt: string;
 }
 
 export type WorktreeSource = "claude" | "codex" | "codereview" | "manual";

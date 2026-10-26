@@ -21,6 +21,7 @@ export function InboxItemRow({
   existingReviewId,
   onArchive,
   onRestore,
+  onMarkViewed,
   onOpenReview,
   onOpenExisting,
   boardTracked,
@@ -34,6 +35,8 @@ export function InboxItemRow({
   existingReviewId?: number;
   onArchive: () => void;
   onRestore: () => void;
+  /** Stops it counting in the sidebar badge; shown on unviewed New items. */
+  onMarkViewed?: () => void;
   /** Opens the PR as a review; this also tracks it on the board. */
   onOpenReview: () => void;
   onOpenExisting?: () => void;
@@ -43,6 +46,7 @@ export function InboxItemRow({
   onBoardTrack?: () => void;
 }) {
   const tracked = boardTracked || item.inbox_state === "tracked";
+  const unviewed = variant === "new" && !item.viewed_at;
 
   return (
     <div className="card pr-card">
@@ -74,6 +78,11 @@ export function InboxItemRow({
           {item.reasons.map((r, i) => (
             <ReasonBadge key={i} reason={r.reason} detail={r.detail} />
           ))}
+          {unviewed && (
+            <span className="chip accent" title="Counts in the Inbox badge until viewed, tracked, reviewed or archived">
+              new
+            </span>
+          )}
           {isBot && <BotBadge />}
           {item.stale && <StaleBadge />}
           {variant === "archive" &&
@@ -147,6 +156,16 @@ export function InboxItemRow({
               title="Track on the board — leaves the inbox"
             >
               Track
+            </button>
+          )}
+          {unviewed && onMarkViewed && (
+            <button
+              className="btn btn-sm btn-ghost"
+              disabled={busy}
+              onClick={onMarkViewed}
+              title="Mark viewed — stays in New but stops counting in the Inbox badge"
+            >
+              Mark viewed
             </button>
           )}
           {variant === "new" ? (
