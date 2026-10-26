@@ -117,6 +117,31 @@ describe("DiffPreview", () => {
     expect(onNavigate).toHaveBeenCalledWith(0);
   });
 
+  it("cycles files with the arrow keys", async () => {
+    const { onNavigate } = renderPreview(commitTarget, { index: 0 });
+    await userEvent.keyboard("{ArrowDown}");
+    expect(onNavigate).toHaveBeenLastCalledWith(1);
+    await userEvent.keyboard("{ArrowUp}");
+    expect(onNavigate).toHaveBeenLastCalledWith(2);
+  });
+
+  it("ignores arrow keys with modifiers or in fields", async () => {
+    const { onNavigate } = renderPreview(commitTarget, { index: 0 });
+    await userEvent.keyboard("{Meta>}{ArrowDown}{/Meta}");
+    const field = document.createElement("textarea");
+    document.body.appendChild(field);
+    field.focus();
+    await userEvent.keyboard("{ArrowDown}");
+    field.remove();
+    expect(onNavigate).not.toHaveBeenCalled();
+  });
+
+  it("ignores arrow keys with a single file", async () => {
+    const { onNavigate } = renderPreview(commitTarget, { index: 0, files: ["a"] });
+    await userEvent.keyboard("{ArrowDown}");
+    expect(onNavigate).not.toHaveBeenCalled();
+  });
+
   it("toggles between split and unified", async () => {
     renderPreview(commitTarget);
     const unified = screen.getByRole("button", { name: "Unified" });

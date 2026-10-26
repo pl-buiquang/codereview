@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../../lib/api";
+import { isEditableTarget } from "../../lib/keyboard";
 import { useSettingsStore, type DiffViewType } from "../../lib/settings";
 import type { ChangedFile, WipKind } from "../../lib/types";
 import { DiffViewer } from "../DiffViewer";
@@ -64,22 +65,31 @@ export function DiffPreview({
     },
   });
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        onClose();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
   const count = files.length;
   const step = (delta: number) => {
     if (count === 0) return;
     onNavigate((((index + delta) % count) + count) % count);
   };
+  const stepRef = useRef(step);
+  stepRef.current = step;
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose();
+        return;
+      }
+      // ↑/↓ cycle files (like ‹ / ›) instead of scrolling the diff.
+      if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+      if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || isEditableTarget(e.target)) return;
+      if (count < 2) return;
+      e.preventDefault();
+      stepRef.current(e.key === "ArrowUp" ? -1 : 1);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose, count]);
 
   let title: string;
   if (target.kind === "commit") {
