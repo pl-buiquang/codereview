@@ -13,6 +13,7 @@ import {
 import type { GraphCommit, RefInfo, WorktreeInfo } from "../../lib/types";
 import { PALETTE_SIZE, type Edge, type GraphRow } from "../../lib/graphLayout";
 import { identicon } from "../../lib/avatar";
+import { isEditableTarget } from "../../lib/keyboard";
 import "./CommitGraph.css";
 
 export const WIP_SELECTION = "WIP";
@@ -47,6 +48,8 @@ export interface CommitGraphProps {
   /** A commit sha, `WIP_SELECTION`, or null. */
   selectedSha: string | null;
   onSelect: (sha: string) => void;
+  /** When true, ↑/↓ select the previous/next row (off while something else owns the arrows). */
+  arrowKeys?: boolean;
   /** Fired once per `commits.length` when the viewport nears the end of the list. */
   onEndReached?: () => void;
   onRefContextMenu?: (ref: RefInfo, event: ReactMouseEvent) => void;
@@ -88,6 +91,7 @@ export const CommitGraph = forwardRef<CommitGraphHandle, CommitGraphProps>(funct
     wip = null,
     selectedSha,
     onSelect,
+    arrowKeys = false,
     onEndReached,
     onRefContextMenu,
     onCommitContextMenu,
@@ -164,6 +168,25 @@ export const CommitGraph = forwardRef<CommitGraphHandle, CommitGraphProps>(funct
     },
     [viewportHeight],
   );
+
+  useEffect(() => {
+    if (!arrowKeys) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+      if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+      if (isEditableTarget(e.target) || items.length === 0) return;
+      e.preventDefault();
+      const shaOf = (it: Item) => (it.type === "wip" ? WIP_SELECTION : commits[it.index].sha);
+      const cur = selectedSha == null ? -1 : items.findIndex((it) => shaOf(it) === selectedSha);
+      const next =
+        cur === -1 ? 0 : Math.min(items.length - 1, Math.max(0, cur + (e.key === "ArrowUp" ? -1 : 1)));
+      if (next === cur) return;
+      onSelect(shaOf(items[next]));
+      scrollToIndex(next);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [arrowKeys, items, commits, selectedSha, onSelect, scrollToIndex]);
 
   useImperativeHandle(
     ref,

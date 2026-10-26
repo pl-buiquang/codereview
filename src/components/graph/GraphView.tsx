@@ -416,6 +416,7 @@ export function GraphView({ repo }: { repo: Repository }) {
         wip={wipCount > 0 ? { count: wipCount } : null}
         selectedSha={selected}
         onSelect={select}
+        arrowKeys={!previewOpen}
         onEndReached={onEndReached}
         onRefContextMenu={onRefContextMenu}
         onCommitContextMenu={onCommitContextMenu}

@@ -9,7 +9,7 @@ export const BINDINGS: Binding[] = [
   { keys: ["⌘/Ctrl + W"], description: "Close current tab" },
   { keys: ["⌘/Alt + ←", "⌘/Alt + →"], description: "Navigate back / forward" },
   { keys: ["]", "["], description: "Next / previous file" },
-  { keys: ["↑", "↓"], description: "Previous / next file (repository diff preview)" },
+  { keys: ["↑", "↓"], description: "Previous / next commit (repository graph) or file (diff preview)" },
   { keys: ["n", "p"], description: "Next / previous comment thread" },
   { keys: ["j", "k"], description: "Move line cursor down / up (active file)" },
   { keys: ["c"], description: "Comment on the focused line" },

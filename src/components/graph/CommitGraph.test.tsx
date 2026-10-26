@@ -131,6 +131,41 @@ describe("CommitGraph", () => {
     expect(props.onSelect).toHaveBeenCalledWith(WIP_SELECTION);
   });
 
+  it("moves the selection with the arrow keys when enabled", () => {
+    const { props, commits, rerender, handle } = setup({ arrowKeys: true, selectedSha: null });
+    fireEvent.keyDown(window, { key: "ArrowDown" });
+    expect(props.onSelect).toHaveBeenLastCalledWith(commits[0].sha);
+    rerender(<CommitGraph ref={handle} {...props} selectedSha={commits[1].sha} />);
+    fireEvent.keyDown(window, { key: "ArrowDown" });
+    expect(props.onSelect).toHaveBeenLastCalledWith(commits[2].sha);
+    fireEvent.keyDown(window, { key: "ArrowUp" });
+    expect(props.onSelect).toHaveBeenLastCalledWith(commits[0].sha);
+  });
+
+  it("steps from the first commit up to the WIP row and stops at the ends", () => {
+    const first = setup({ arrowKeys: true, wip: { count: 1 }, selectedSha: linearFixture(5).commits[0].sha });
+    fireEvent.keyDown(window, { key: "ArrowUp" });
+    expect(first.props.onSelect).toHaveBeenLastCalledWith(WIP_SELECTION);
+    first.unmount();
+    const atTop = setup({ arrowKeys: true, wip: { count: 1 }, selectedSha: WIP_SELECTION });
+    fireEvent.keyDown(window, { key: "ArrowUp" });
+    expect(atTop.props.onSelect).not.toHaveBeenCalled();
+    atTop.unmount();
+    const atBottom = setup({ arrowKeys: true, selectedSha: linearFixture(5).commits[4].sha });
+    fireEvent.keyDown(window, { key: "ArrowDown" });
+    expect(atBottom.props.onSelect).not.toHaveBeenCalled();
+  });
+
+  it("ignores arrow keys when disabled or with modifiers", () => {
+    const off = setup({ selectedSha: null });
+    fireEvent.keyDown(window, { key: "ArrowDown" });
+    expect(off.props.onSelect).not.toHaveBeenCalled();
+    off.unmount();
+    const on = setup({ arrowKeys: true, selectedSha: null });
+    fireEvent.keyDown(window, { key: "ArrowDown", metaKey: true });
+    expect(on.props.onSelect).not.toHaveBeenCalled();
+  });
+
   it("renders ref, HEAD and worktree pills and forwards right-click on ref pills", () => {
     const { commits } = linearFixture(5);
     const main: RefInfo = { name: "main", kind: "local", sha: commits[0].sha, is_head: true, updated_at: 0 };
