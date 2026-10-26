@@ -251,11 +251,13 @@ export function GraphView({ repo }: { repo: Repository }) {
 
   const jumpSeq = useRef(0);
   const jumpToSha = useCallback(
-    async (sha: string, notFoundMessage: string) => {
+    /** Resolves false when not found (toasting `notFoundMessage` if given). */
+    async (sha: string, notFoundMessage: string | null): Promise<boolean> => {
       const seq = ++jumpSeq.current;
       const found = () => {
         select(sha);
         setPendingScroll(sha);
+        return true;
       };
       if (commits.some((c) => c.sha === sha)) return found();
 
@@ -263,14 +265,15 @@ export function GraphView({ repo }: { repo: Repository }) {
       let pageCount = pages?.length ?? 0;
       while (hasNext && pageCount < MAX_JUMP_PAGES) {
         const res = await graphQuery.fetchNextPage();
-        if (seq !== jumpSeq.current) return;
+        if (seq !== jumpSeq.current) return true;
         const loaded = res.data?.pages ?? [];
         if (loaded.length <= pageCount) break;
         pageCount = loaded.length;
         if (loaded.some((page) => page.some((c) => c.sha === sha))) return found();
         hasNext = res.hasNextPage;
       }
-      toast.error(notFoundMessage);
+      if (notFoundMessage) toast.error(notFoundMessage);
+      return false;
     },
     [commits, pages, graphQuery, select],
   );
@@ -302,11 +305,34 @@ export function GraphView({ repo }: { repo: Repository }) {
 
   const graphFocus = useUIStore((s) => (s.graphFocus?.repoId === repo.id ? s.graphFocus : null));
   const clearGraphFocus = useUIStore((s) => s.clearGraphFocus);
+  const focusGraph = useUIStore((s) => s.focusGraph);
   const graphLoaded = graphQuery.data != null && !graphQuery.isFetching;
   useEffect(() => {
     if (!graphFocus) return;
     if (graphFocus.worktree !== ctx) {
       resetContext(graphFocus.worktree);
+      return;
+    }
+    if (graphFocus.sha) {
+      // A PR head may sit only on a remote branch, or not be fetched yet.
+      if (scope !== "all") {
+        setScope("all");
+        return;
+      }
+      if (!graphLoaded) return;
+      const { sha, fetched } = graphFocus;
+      const short = sha.slice(0, 7);
+      clearGraphFocus();
+      void jumpToSha(sha, fetched ? `Commit ${short} is not on any branch of this clone` : null).then((found) => {
+        if (found || fetched) return;
+        api
+          .fetchRepo(repo.id, 0)
+          .then(() => {
+            afterFetch();
+            focusGraph({ repoId: repo.id, ref: null, worktree: ctx, sha, fetched: true });
+          })
+          .catch((e) => toast.error(`Commit ${short} not found locally and fetch failed:\n${String(e)}`));
+      });
       return;
     }
     if (!graphFocus.ref) {
@@ -336,7 +362,7 @@ export function GraphView({ repo }: { repo: Repository }) {
     if (!graphLoaded) return;
     onJumpToRef(ref);
     clearGraphFocus();
-  }, [graphFocus, ctx, scope, refsQuery.data, refsQuery.isFetching, refsQuery.isError, refsQuery.error, graphLoaded, resetContext, onJumpToRef, clearGraphFocus]);
+  }, [graphFocus, ctx, scope, refsQuery.data, refsQuery.isFetching, refsQuery.isError, refsQuery.error, graphLoaded, resetContext, onJumpToRef, clearGraphFocus, jumpToSha, focusGraph, afterFetch, repo.id]);
 
   const onEndReached = useCallback(() => {
     if (graphQuery.hasNextPage && !graphQuery.isFetchingNextPage) void graphQuery.fetchNextPage();

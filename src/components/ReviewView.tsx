@@ -967,6 +967,8 @@ function ReviewHeader({
   const queryClient = useQueryClient();
   const closeReview = useUIStore((s) => s.closeReview);
   const openRepo = useUIStore((s) => s.openRepo);
+  const focusGraph = useUIStore((s) => s.focusGraph);
+  const showBoardCard = useUIStore((s) => s.showBoardCard);
   const { review, target } = detail;
   const isActiveTab = useUIStore((s) => s.activeTabId === `review-${review.id}`);
   const [showExport, setShowExport] = useState(false);
@@ -1315,6 +1317,9 @@ function ReviewHeader({
       ? githubPrUrl(detail.remote_owner, detail.remote_name, target.github_pr_number)
       : null;
   const sourceRepo = owner && name ? `${owner}/${name}` : null;
+  // The repo link selects the live PR head (falling back to the pin) in the Graph.
+  const headSha = (isPr ? prHead : null) ?? review.head_sha ?? null;
+  const boardCard = untracked || !boardCardQuery.data ? null : boardCardQuery.data;
   const displayRepo = detail.friendly_name?.trim() || sourceRepo;
 
   return (
@@ -1344,21 +1349,29 @@ function ReviewHeader({
               {sourceRepo && (
                 <button
                   className="review-repo-link"
-                  title={`Open ${sourceRepo}`}
-                  onClick={() => openRepo(detail.target.repo_id)}
+                  title={headSha && detail.local_path ? `Show ${headSha.slice(0, 7)} in the ${sourceRepo} graph` : `Open ${sourceRepo}`}
+                  onClick={() =>
+                    headSha && detail.local_path
+                      ? focusGraph({ repoId: target.repo_id, ref: null, worktree: null, sha: headSha })
+                      : openRepo(target.repo_id)
+                  }
                 >
                   {displayRepo}
                 </button>
               )}
-              {prNumber != null && prUrl ? (
+              {prNumber != null && boardCard ? (
                 <>
                   {" "}
-                  <PrLink prUrl={prUrl} className="review-repo-link review-pr-link">
+                  <button
+                    className="review-repo-link review-pr-link"
+                    title="Show on the board"
+                    onClick={() => showBoardCard(boardCard.id)}
+                  >
                     #{prNumber}
-                  </PrLink>
+                  </button>
                 </>
               ) : prNumber != null ? (
-                <span> #{prNumber}</span>
+                <span title="Not tracked on the board"> #{prNumber}</span>
               ) : null}
             </span>
           )}

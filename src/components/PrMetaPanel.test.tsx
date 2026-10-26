@@ -6,10 +6,14 @@ import type { ReactNode } from "react";
 
 const prMeta = vi.fn();
 const openUrl = vi.fn();
+const setPrLabel = vi.fn();
+const setPrReviewer = vi.fn();
 vi.mock("../lib/api", () => ({
   api: {
     prMeta: (owner: string, name: string, number: number) => prMeta(owner, name, number),
     openUrl: (url: string) => openUrl(url),
+    setPrLabel: (...args: unknown[]) => setPrLabel(...args),
+    setPrReviewer: (...args: unknown[]) => setPrReviewer(...args),
   },
 }));
 
@@ -35,6 +39,7 @@ const meta = (over: Partial<PrMeta> = {}): PrMeta => ({
   author: { login: "octocat", avatarUrl: null },
   labels: [],
   reviews: [],
+  reviewRequests: [],
   ciState: null,
   checks: [],
   ...over,
@@ -108,5 +113,36 @@ describe("PrMetaPanel", () => {
 
     rerender(<PrMetaPanel owner="acme" name="widget" number={42} active />);
     await waitFor(() => expect(prMeta).toHaveBeenCalledTimes(1));
+  });
+
+  it("shows the author and pending review requests, and removes a request", async () => {
+    prMeta
+      .mockResolvedValueOnce(meta({ reviewRequests: [{ login: "core", avatarUrl: null, isTeam: true }] }))
+      .mockResolvedValue(meta());
+    setPrReviewer.mockResolvedValue(undefined);
+    renderPanel();
+
+    expect(await screen.findByText("octocat")).toBeInTheDocument();
+    await userEvent.click(screen.getByTitle("Remove review request for @core"));
+    expect(setPrReviewer).toHaveBeenCalledWith("acme", "widget", 42, "core", true, false);
+    await waitFor(() => expect(screen.queryByText("@core")).not.toBeInTheDocument());
+  });
+
+  it("hides reviewer editing on a merged PR but keeps labels editable", async () => {
+    prMeta.mockResolvedValue(
+      meta({
+        state: "MERGED",
+        labels: [{ name: "bug", color: "d73a4a" }],
+        reviewRequests: [{ login: "rev", avatarUrl: null, isTeam: false }],
+      }),
+    );
+    setPrLabel.mockResolvedValue(undefined);
+    renderPanel();
+
+    expect(await screen.findByText("rev")).toBeInTheDocument();
+    expect(screen.queryByTitle("Remove review request for rev")).not.toBeInTheDocument();
+    expect(screen.queryByTitle("Request reviewers")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByTitle("Remove bug"));
+    expect(setPrLabel).toHaveBeenCalledWith("acme", "widget", 42, "bug", false);
   });
 });

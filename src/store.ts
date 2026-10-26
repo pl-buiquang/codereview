@@ -28,6 +28,10 @@ export interface GraphFocus {
   repoId: number;
   ref: string | null;
   worktree: string | null;
+  /** Commit to select instead of a ref (e.g. a review's head). */
+  sha?: string | null;
+  /** Set on the retry after a fetch, so a still-missing sha errors instead of refetching. */
+  fetched?: boolean;
   nonce: number;
 }
 

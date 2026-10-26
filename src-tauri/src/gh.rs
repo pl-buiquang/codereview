@@ -591,6 +591,15 @@ query PrMeta($owner: String!, $name: String!, $number: Int!) {
       body
       labels(first: 50) { nodes { name color } }
       latestReviews(first: 20) { nodes { author { login avatarUrl } state } }
+      reviewRequests(first: 30) {
+        nodes {
+          requestedReviewer {
+            __typename
+            ... on User { login avatarUrl }
+            ... on Team { slug name avatarUrl }
+          }
+        }
+      }
       commits(last: 1) {
         nodes {
           commit {
@@ -635,6 +644,8 @@ pub struct PrMeta {
     pub author: Option<PrActor>,
     pub labels: Vec<PrLabel>,
     pub reviews: Vec<PrReviewer>,
+    /// Pending review requests. Live fetch only: the mirror has no copy.
+    pub review_requests: Vec<PrReviewRequest>,
     pub ci_state: Option<String>,
     pub checks: Vec<PrCheck>,
 }
@@ -669,6 +680,15 @@ pub struct PrLabel {
 pub struct PrReviewer {
     pub author: Option<PrActor>,
     pub state: String,
+}
+
+/// A pending review request: a user (`login`) or a team (`login` = its slug).
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrReviewRequest {
+    pub login: String,
+    pub avatar_url: Option<String>,
+    pub is_team: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -724,6 +744,8 @@ struct PrMetaPr {
     #[serde(default)]
     latest_reviews: ReviewConn,
     #[serde(default)]
+    review_requests: ReviewRequestConn,
+    #[serde(default)]
     commits: CommitMetaConn,
 }
 
@@ -750,6 +772,33 @@ struct ReviewNode {
     #[serde(default)]
     author: Option<PrActor>,
     state: String,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct ReviewRequestConn {
+    #[serde(default)]
+    nodes: Vec<ReviewRequestNode>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ReviewRequestNode {
+    #[serde(default)]
+    requested_reviewer: Option<RequestedReviewer>,
+}
+
+/// `User`/`Team` union member; bots and mannequins have neither field and are dropped.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RequestedReviewer {
+    #[serde(rename = "__typename")]
+    typename: String,
+    #[serde(default)]
+    login: Option<String>,
+    #[serde(default)]
+    slug: Option<String>,
+    #[serde(default)]
+    avatar_url: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -851,6 +900,17 @@ fn map_pr_meta(pr: PrMetaPr) -> PrMeta {
             state: r.state,
         })
         .collect();
+    let review_requests = pr
+        .review_requests
+        .nodes
+        .into_iter()
+        .filter_map(|n| n.requested_reviewer)
+        .filter_map(|r| {
+            let is_team = r.typename == "Team";
+            let login = if is_team { r.slug } else { r.login }?;
+            Some(PrReviewRequest { login, avatar_url: r.avatar_url, is_team })
+        })
+        .collect();
     let rollup = pr
         .commits
         .nodes
@@ -902,6 +962,7 @@ fn map_pr_meta(pr: PrMetaPr) -> PrMeta {
         author: pr.author,
         labels,
         reviews,
+        review_requests,
         ci_state,
         checks,
     }
@@ -984,6 +1045,78 @@ pub fn update_pr_branch(owner: &str, name: &str, number: i64, rebase: bool) -> A
     args.extend(suffix.iter().map(String::as_str));
     run_gh(&ctx, &args)?;
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// PR labels / reviewers (review header pickers). REST, not `gh pr edit`, which
+// trips over the projects-classic deprecation on some gh versions.
+// ---------------------------------------------------------------------------
+
+/// One percent-encoded path segment (label names may hold spaces, `/`, emoji).
+fn path_segment(s: &str) -> String {
+    let mut u = url::Url::parse("https://x/").expect("static url");
+    u.path_segments_mut().expect("base url").push(s);
+    u.path()[1..].to_string()
+}
+
+/// Add (`on`) or remove a label on a PR.
+pub fn set_pr_label(owner: &str, name: &str, number: i64, label: &str, on: bool) -> AppResult<()> {
+    let ctx = remote_ctx(&format!("{owner}/{name}"));
+    if on {
+        let endpoint = format!("repos/{owner}/{name}/issues/{number}/labels");
+        let payload = serde_json::json!({ "labels": [label] }).to_string();
+        run_gh_stdin(&ctx, &["api", &endpoint, "--method", "POST", "--input", "-"], &payload)?;
+    } else {
+        let endpoint = format!("repos/{owner}/{name}/issues/{number}/labels/{}", path_segment(label));
+        run_gh(&ctx, &["api", &endpoint, "--method", "DELETE"])?;
+    }
+    Ok(())
+}
+
+/// Request (`on`) or withdraw a review request. A team is passed as its slug.
+/// Requesting someone who already reviewed re-requests their review.
+pub fn set_pr_reviewer(owner: &str, name: &str, number: i64, reviewer: &str, team: bool, on: bool) -> AppResult<()> {
+    let endpoint = format!("repos/{owner}/{name}/pulls/{number}/requested_reviewers");
+    let key = if team { "team_reviewers" } else { "reviewers" };
+    let payload = serde_json::json!({ key: [reviewer] }).to_string();
+    let method = if on { "POST" } else { "DELETE" };
+    run_gh_stdin(
+        &remote_ctx(&format!("{owner}/{name}")),
+        &["api", &endpoint, "--method", method, "--input", "-"],
+        &payload,
+    )?;
+    Ok(())
+}
+
+/// Every label defined on the repo, for the label picker.
+pub fn repo_labels(owner: &str, name: &str) -> AppResult<Vec<PrLabel>> {
+    let endpoint = format!("repos/{owner}/{name}/labels?per_page=100");
+    let out = run_gh(&remote_ctx(&format!("{owner}/{name}")), &["api", &endpoint, "--paginate", "--jq", ".[] | {name, color}"])?;
+    out.lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| serde_json::from_str(l).map_err(|e| AppError::Gh(format!("failed to parse labels: {e}"))))
+        .collect()
+}
+
+const ASSIGNABLE_USERS_QUERY: &str = r#"
+query AssignableUsers($owner: String!, $name: String!, $query: String) {
+  repository(owner: $owner, name: $name) {
+    assignableUsers(first: 20, query: $query) { nodes { login avatarUrl } }
+  }
+}
+"#;
+
+/// Up to 20 users matching `query` (login or name) who can be requested as
+/// reviewers. The reviewer picker searches as you type: big orgs have too many
+/// users to list up front.
+pub fn repo_assignable_users(owner: &str, name: &str, query: &str) -> AppResult<Vec<PrActor>> {
+    let vars = serde_json::json!({ "owner": owner, "name": name, "query": query });
+    let data: serde_json::Value = graphql(ASSIGNABLE_USERS_QUERY, vars)?;
+    let nodes = data
+        .pointer("/repository/assignableUsers/nodes")
+        .cloned()
+        .unwrap_or(serde_json::Value::Array(vec![]));
+    serde_json::from_value(nodes).map_err(|e| AppError::Gh(format!("failed to parse assignable users: {e}")))
 }
 
 // ---------------------------------------------------------------------------
@@ -2083,6 +2216,12 @@ mod tests {
             { "author": { "login": "rev1", "avatarUrl": "https://example.com/r1.png" }, "state": "APPROVED" },
             { "author": { "login": "rev2", "avatarUrl": null }, "state": "CHANGES_REQUESTED" }
           ] },
+          "reviewRequests": { "nodes": [
+            { "requestedReviewer": { "__typename": "User", "login": "rev3", "avatarUrl": "https://example.com/r3.png" } },
+            { "requestedReviewer": { "__typename": "Team", "slug": "core", "name": "Core", "avatarUrl": null } },
+            { "requestedReviewer": { "__typename": "Mannequin" } },
+            { "requestedReviewer": null }
+          ] },
           "commits": { "nodes": [
             { "commit": { "statusCheckRollup": {
               "state": "FAILURE",
@@ -2098,6 +2237,12 @@ mod tests {
     }"#;
 
     #[test]
+    fn path_segment_percent_encodes_label_names() {
+        assert_eq!(path_segment("good first issue"), "good%20first%20issue");
+        assert_eq!(path_segment("area/ui"), "area%2Fui");
+    }
+
+    #[test]
     fn pr_meta_maps_fixture() {
         let data: PrMetaData = serde_json::from_str(FIXTURE).expect("fixture parses");
         let pr = data.repository.unwrap().pull_request.unwrap();
@@ -2110,6 +2255,8 @@ mod tests {
         assert_eq!(meta.review_decision, None);
         assert_eq!(meta.additions, 120);
         assert_eq!(meta.changed_files, 5);
+        let requests: Vec<_> = meta.review_requests.iter().map(|r| (r.login.as_str(), r.is_team)).collect();
+        assert_eq!(requests, [("rev3", false), ("core", true)]);
         assert_eq!(meta.author.as_ref().and_then(|a| a.login.as_deref()), Some("octocat"));
 
         let labels: Vec<&str> = meta.labels.iter().map(|l| l.name.as_str()).collect();

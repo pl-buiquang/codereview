@@ -37,6 +37,8 @@ import type {
   ConversationList,
   IgnoreRule,
   InboxMeta,
+  PrActor,
+  PrLabel,
   PrMeta,
   PrChecks,
   Routine,
@@ -207,6 +209,13 @@ export const api = {
     invoke<void>("update_pr_branch", { owner, name, number, rebase }),
   setPrAutoMerge: (owner: string, name: string, number: number, enable: boolean) =>
     invoke<void>("set_pr_auto_merge", { owner, name, number, enable }),
+  setPrLabel: (owner: string, name: string, number: number, label: string, on: boolean) =>
+    invoke<void>("set_pr_label", { owner, name, number, label, on }),
+  setPrReviewer: (owner: string, name: string, number: number, reviewer: string, team: boolean, on: boolean) =>
+    invoke<void>("set_pr_reviewer", { owner, name, number, reviewer, team, on }),
+  repoLabels: (owner: string, name: string) => invoke<PrLabel[]>("repo_labels", { owner, name }),
+  repoAssignableUsers: (owner: string, name: string, query: string) =>
+    invoke<PrActor[]>("repo_assignable_users", { owner, name, query }),
   prReviewThreads: (owner: string, name: string, number: number) =>
     invoke<PrThread[]>("pr_review_threads", { owner, name, number }),
   /** A PR's review threads as last mirrored (instant, possibly stale). */

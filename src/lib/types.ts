@@ -223,6 +223,13 @@ export interface PrReviewer {
   state: string; // APPROVED | CHANGES_REQUESTED | COMMENTED | DISMISSED | PENDING
 }
 
+/** A pending review request: a user, or a team (`login` = its slug). */
+export interface PrReviewRequest {
+  login: string;
+  avatarUrl: string | null;
+  isTeam: boolean;
+}
+
 export interface PrCheck {
   name: string;
   state: string | null; // conclusion/status or StatusContext.state
@@ -248,6 +255,8 @@ export interface PrMeta {
   author: PrActor | null;
   labels: PrLabel[];
   reviews: PrReviewer[];
+  /** Live fetch only; empty in the mirrored placeholder. */
+  reviewRequests: PrReviewRequest[];
   ciState: string | null;
   checks: PrCheck[];
 }

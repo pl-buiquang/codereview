@@ -87,6 +87,33 @@ pub async fn set_pr_auto_merge(owner: String, name: String, number: i64, enable:
 }
 
 #[tauri::command]
+pub async fn set_pr_label(owner: String, name: String, number: i64, label: String, on: bool) -> AppResult<()> {
+    provider_for().set_pr_label(&owner, &name, number, &label, on)
+}
+
+#[tauri::command]
+pub async fn set_pr_reviewer(
+    owner: String,
+    name: String,
+    number: i64,
+    reviewer: String,
+    team: bool,
+    on: bool,
+) -> AppResult<()> {
+    provider_for().set_pr_reviewer(&owner, &name, number, &reviewer, team, on)
+}
+
+#[tauri::command]
+pub async fn repo_labels(owner: String, name: String) -> AppResult<Vec<gh::PrLabel>> {
+    provider_for().repo_labels(&owner, &name)
+}
+
+#[tauri::command]
+pub async fn repo_assignable_users(owner: String, name: String, query: String) -> AppResult<Vec<gh::PrActor>> {
+    provider_for().repo_assignable_users(&owner, &name, &query)
+}
+
+#[tauri::command]
 pub async fn update_pr_branch(owner: String, name: String, number: i64, rebase: bool) -> AppResult<()> {
     provider_for().update_pr_branch(&owner, &name, number, rebase)
 }

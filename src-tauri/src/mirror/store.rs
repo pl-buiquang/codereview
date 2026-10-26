@@ -323,6 +323,7 @@ pub fn read_pr_meta(conn: &Connection, owner: &str, name: &str, number: i64) -> 
                 author: author_login.map(|login| PrActor { login: Some(login), avatar_url: r.get(17).ok().flatten(), typename: None }),
                 labels: parse_json(r.get(18)?),
                 reviews: parse_json(r.get(19)?),
+                review_requests: Vec::new(),
                 ci_state: r.get(20)?,
                 checks: parse_json(r.get(21)?),
             })
