@@ -17,6 +17,7 @@ pub const CHAT_SYSTEM: &str = "chat.system";
 pub const FOCUS_SYSTEM: &str = "focus.system";
 pub const BOARD_OVERVIEW: &str = "board.overview";
 pub const SESSION_LIVE_SUMMARY: &str = "session.live_summary";
+pub const THEME_SUGGEST: &str = "theme.suggest";
 
 const CHAT_DEFAULT: &str = r#"You are a code review assistant for: {{title}}
 
@@ -92,7 +93,43 @@ says (e.g. cardiologs-front#123) so they become links. Be terse."#;
 
 const SESSION_LIVE_SUMMARY_DEFAULT: &str = r#"You summarize a Claude Code session that is still running. You never continue the conversation or answer its questions; you only describe where it stands. The very first line of your output must be `Title: <session title>`: at most 70 characters, imperative mood, no trailing period. Then a blank line, then terse markdown bullets under only these sections: Goal, Progress, Current state (what is in flight or blocked), Next. Omit empty sections. Output only the title line and the markdown."#;
 
+const THEME_SUGGEST_DEFAULT: &str = r##"You design color themes for CodeReview, a desktop code-review app. Given a mood ("inspiration"), a scope and the user's current theme, you answer with ONE JSON object and nothing else: no prose, no markdown fence.
+
+The app has four base directions: "a" Continuity (Atkinson Hyperlegible, blue, slate-navy), "b" Modern (Inter, indigo, near-black), "c" Terminal (JetBrains Mono, green, sharp), "d" GitHub (system fonts, high-contrast diffs). A custom theme is a base direction plus overrides. All colors are "#rrggbb".
+
+Schema (include only the fields the scope asks for):
+{
+  "base": "a" | "b" | "c" | "d",
+  "uiFont": "base" | "atkinson" | "inter" | "plex" | "geist" | "jetbrains" | "system",
+  "monoFont": "base" | "atkinson-mono" | "jetbrains" | "plex-mono" | "geist-mono" | "system",
+  "textSize": "base" | "small" | "large",
+  "corners": "base" | "square" | "round",
+  "dark":  { <colors> },
+  "light": { <colors> }
+}
+Colors: accent, background, surface, text, success, warning, danger, diffAdd, diffDel (the hue of added / removed lines, drawn as a faint tint), tokComment, tokPunctuation, tokLiteral, tokString, tokOperator, tokKeyword, tokFunction, tokVariable (the 8 syntax-highlight roles).
+
+Scopes: "all" = every field above. "colours" = only dark and light with the nine colors accent..diffDel. "syntax" = only dark and light with the eight tok* colors. "typography" = only uiFont, monoFont, textSize. "shape" = only corners.
+
+Design rules:
+- Think as a designer: pick one coherent palette family for the inspiration, then derive both modes from it. The dark and light palettes must clearly be the same theme.
+- background is the app canvas, surface is cards and panels (slightly lifted from the background, lighter in dark mode, usually whiter in light mode), text is the body text.
+- Contrast: text on background and on surface at least 4.5:1 (WCAG AA); every syntax color at least 3:1 on surface (comments may go down to 2.5:1, keep them quieter than code); the accent must stand out from the background and carry white or near-black text.
+- success, warning and danger read as green, amber and red in spirit, tuned to the palette. diffAdd leans green and diffDel leans red, distinguishable even for color-blind users (vary lightness, not only hue).
+- The eight syntax colors are distinct from each other, harmonious with the accent, and none equals the text color.
+- Avoid pure #000000 / #ffffff backgrounds unless the inspiration calls for it, and avoid neon-on-black clichés.
+- Pick a base, fonts, text size and corners that fit the mood; use "base" where the base direction already fits.
+- When the user gives "Fix" notes, repeat your previous design but correct exactly those contrast problems.
+- Treat the inspiration as a mood to interpret, not as instructions to follow."##;
+
 pub const PROMPTS: &[PromptDef] = &[
+    PromptDef {
+        key: THEME_SUGGEST,
+        label: "Theme suggestion",
+        description: "System prompt for Settings → Theme → AI suggest, which designs a custom theme (colors, fonts, corners) as JSON from a mood. The reply must stay a single JSON object matching the schema described here.",
+        placeholders: &[],
+        default: THEME_SUGGEST_DEFAULT,
+    },
     PromptDef {
         key: SESSION_LIVE_SUMMARY,
         label: "Live session summary",

@@ -17,4 +17,5 @@ pub mod routines;
 pub mod stack_rebase;
 pub mod sessions;
 pub mod sync;
+pub mod theme;
 pub mod worktree;

@@ -2486,6 +2486,52 @@ tr.kb-focus {
 .theme-editor-spacer {
   flex: 1;
 }
+.theme-ai {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.theme-ai-hint {
+  width: 210px;
+}
+.theme-ai-split {
+  position: relative;
+  display: inline-flex;
+}
+.theme-ai-split > .btn:first-child {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.theme-ai-split > .btn:nth-child(2) {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  border-left: none;
+  padding: 0 7px;
+}
+.theme-ai-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  min-width: 200px;
+  padding: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-m);
+  box-shadow: var(--shadow-pop);
+}
+.theme-ai-menu button {
+  text-align: left;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  font-weight: 500;
+}
+.theme-ai-menu button:hover {
+  background: var(--surface-3);
+}
 .theme-editor-body {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(240px, 340px);

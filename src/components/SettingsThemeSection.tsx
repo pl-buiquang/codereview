@@ -1,5 +1,6 @@
 import { useEffect, useId, useState, useSyncExternalStore, type CSSProperties } from "react";
-import { effectiveTheme, useSettingsStore, type ThemeMode } from "../lib/settings";
+import { useMutation } from "@tanstack/react-query";
+import { effectiveTheme, useAiDisabledReason, useSettingsStore, type ThemeMode } from "../lib/settings";
 import { DIRECTIONS, type Direction } from "../lib/themes";
 import {
   COLOUR_TOKEN,
@@ -10,13 +11,17 @@ import {
   STATUS_COLOURS,
   SYNTAX_COLOURS,
   customThemeStyle,
+  mergeScope,
   resetScope,
   toHexColour,
   type CustomColour,
   type CustomKnob,
   type CustomMode,
+  type CustomScope,
 } from "../lib/customTheme";
 import { confirmDialog } from "../lib/confirm";
+import { suggestTheme } from "../lib/themeSuggest";
+import { toast } from "../lib/toast";
 import {
   editCustomTheme,
   ownsUndo,
@@ -249,6 +254,7 @@ function CustomThemeEditor() {
           ))}
         </span>
         <span className="theme-editor-spacer" />
+        <AiSuggest tab={tab} />
         <button className="btn btn-sm" onClick={undoCustomTheme} disabled={!canUndo} title="Undo (⌘Z)">
           Undo
         </button>
@@ -308,6 +314,89 @@ function CustomThemeEditor() {
         <ThemeSample />
       </div>
     </section>
+  );
+}
+
+/** Which scope the "This tab only" AI suggestion works on, per sub-tab. */
+const TAB_SCOPE: Record<SubTab, CustomScope> = {
+  colours: "colours",
+  syntax: "syntax",
+  typography: "typography",
+  shape: "shape",
+};
+
+/** Hint input + split button: design a whole theme, or only the open tab, from a mood. */
+function AiSuggest({ tab }: { tab: SubTab }) {
+  const disabledReason = useAiDisabledReason();
+  const [hint, setHint] = useState("");
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const close = () => setMenuOpen(false);
+    window.addEventListener("click", close);
+    return () => window.removeEventListener("click", close);
+  }, [menuOpen]);
+
+  const suggest = useMutation({
+    mutationFn: (scope: CustomScope) =>
+      suggestTheme({ scope, current: useSettingsStore.getState().customTheme, hint }).then((r) => ({ ...r, scope })),
+    onSuccess: ({ suggested, inspiration, issues, scope }) => {
+      editCustomTheme((t) => mergeScope(t, suggested, scope));
+      toast.success(`Applied “${inspiration}” — ⌘Z to undo`);
+      if (issues.length > 0) toast.error(`Some contrast is still low:\n${issues.join("\n")}`);
+    },
+    onError: (err) => toast.error(`AI suggest failed:\n${err instanceof Error ? err.message : String(err)}`),
+  });
+
+  const run = (scope: CustomScope) => {
+    setMenuOpen(false);
+    suggest.mutate(scope);
+  };
+  const disabled = disabledReason !== null || suggest.isPending;
+  const tabLabel = SUB_TABS.find((t) => t.key === tab)?.label ?? "";
+
+  return (
+    <span className="theme-ai">
+      <input
+        type="text"
+        className="input theme-ai-hint"
+        placeholder="Mood (optional): warm, low contrast…"
+        value={hint}
+        disabled={disabled}
+        onChange={(e) => setHint(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && !disabled) run("all");
+        }}
+      />
+      <span className="theme-ai-split">
+        <button className="btn btn-sm" disabled={disabled} title={disabledReason ?? "Design a whole theme"} onClick={() => run("all")}>
+          {suggest.isPending ? "Suggesting…" : "✨ AI suggest"}
+        </button>
+        <button
+          className="btn btn-sm"
+          disabled={disabled}
+          aria-label="More AI suggest options"
+          aria-expanded={menuOpen}
+          onClick={(e) => {
+            e.stopPropagation();
+            setMenuOpen((o) => !o);
+          }}
+        >
+          ▾
+        </button>
+        {menuOpen && (
+          <span className="theme-ai-menu" role="menu">
+            <button role="menuitem" onClick={() => run("all")}>
+              Whole theme
+            </button>
+            <button role="menuitem" onClick={() => run(TAB_SCOPE[tab])}>
+              This tab only ({tabLabel})
+            </button>
+          </span>
+        )}
+      </span>
+    </span>
   );
 }
 

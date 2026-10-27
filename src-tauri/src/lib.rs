@@ -353,6 +353,7 @@ pub fn run() {
             commands::board::board_open_agent,
             commands::sessions::list_claude_sessions,
             commands::sessions::generate_live_session_summary,
+            commands::theme::theme_suggest,
             commands::sessions::focus_claude_session,
             commands::sessions::resume_claude_session,
             commands::sessions::stop_claude_session,

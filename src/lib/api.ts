@@ -304,6 +304,9 @@ export const api = {
   promptsList: () => invoke<PromptInfo[]>("prompts_list"),
   promptSet: (key: string, body: string) => invoke<void>("prompt_set", { key, body }),
   promptReset: (key: string) => invoke<void>("prompt_reset", { key }),
+  /** Raw model reply for a custom-theme suggestion (see `lib/themeSuggest.ts`). */
+  themeSuggest: (current: unknown, scope: string, inspiration: string, feedback?: string) =>
+    invoke<string>("theme_suggest", { current, scope, inspiration, feedback: feedback ?? null }),
   boardTrackedIds: () => invoke<string[]>("board_tracked_ids"),
   boardTrack: (reference: string) => invoke<string>("board_track", { reference }),
   boardTrackPr: (reference: string) => invoke<string>("board_track_pr", { reference }),
