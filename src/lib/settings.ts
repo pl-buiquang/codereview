@@ -325,6 +325,20 @@ function writeMirror(value: string) {
   }
 }
 
+/** Colour pickers change settings on every drag frame: coalesce the file writes. */
+const MIRROR_DEBOUNCE_MS = 300;
+let mirrorTimer: ReturnType<typeof setTimeout> | undefined;
+let mirrorPending: string | null = null;
+
+function writeMirrorDebounced(value: string) {
+  mirrorPending = value;
+  clearTimeout(mirrorTimer);
+  mirrorTimer = setTimeout(() => {
+    if (mirrorPending !== null) writeMirror(mirrorPending);
+    mirrorPending = null;
+  }, MIRROR_DEBOUNCE_MS);
+}
+
 /** localStorage, mirrored to a file in the app-data dir so a wiped webview store can recover. */
 const mirroredStorage: StateStorage = {
   getItem: (name) => {
@@ -341,7 +355,7 @@ const mirroredStorage: StateStorage = {
   },
   setItem: (name, value) => {
     localStorage.setItem(name, value);
-    writeMirror(value);
+    writeMirrorDebounced(value);
   },
   removeItem: (name) => localStorage.removeItem(name),
 };
