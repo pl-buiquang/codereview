@@ -127,6 +127,16 @@ pub fn routine_max_concurrency(db: State<Db>) -> i64 {
 }
 
 #[tauri::command]
+pub fn routine_settings(db: State<Db>) -> manager::RoutineSettings {
+    manager::routine_settings(&db.0.lock().unwrap())
+}
+
+#[tauri::command]
+pub fn routine_set_settings(settings: manager::RoutineSettings, db: State<Db>) -> AppResult<()> {
+    manager::set_routine_settings(&db.0.lock().unwrap(), &settings)
+}
+
+#[tauri::command]
 pub fn routine_set_max_concurrency(n: i64, app: AppHandle, db: State<Db>, manager: State<RoutineManager>) -> AppResult<()> {
     manager::set_max_concurrency(&db.0.lock().unwrap(), n)?;
     // A higher cap may let queued runs start.

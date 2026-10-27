@@ -195,6 +195,43 @@ pub fn set_max_concurrency(conn: &Connection, n: i64) -> AppResult<()> {
     Ok(())
 }
 
+/// Where the issue-plan routine writes plans for repos without a tracker root, and the folder it
+/// may write to at all. Both are stored with a leading `~/` and expanded on read.
+#[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct RoutineSettings {
+    pub plans_dir: String,
+    pub notes_root: String,
+}
+
+const PLANS_DIR_KEY: &str = "routine_plans_dir";
+const NOTES_ROOT_KEY: &str = "routine_notes_root";
+pub const DEFAULT_PLANS_DIR: &str = "~/Nextcloud/Notes/_work/plans";
+pub const DEFAULT_NOTES_ROOT: &str = "~/Nextcloud/Notes";
+
+fn meta_value(conn: &Connection, key: &str) -> Option<String> {
+    conn.query_row("SELECT value FROM meta WHERE key = ?1", params![key], |r| r.get::<_, String>(0))
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+}
+
+pub fn routine_settings(conn: &Connection) -> RoutineSettings {
+    RoutineSettings {
+        plans_dir: meta_value(conn, PLANS_DIR_KEY).unwrap_or_else(|| DEFAULT_PLANS_DIR.into()),
+        notes_root: meta_value(conn, NOTES_ROOT_KEY).unwrap_or_else(|| DEFAULT_NOTES_ROOT.into()),
+    }
+}
+
+pub fn set_routine_settings(conn: &Connection, s: &RoutineSettings) -> AppResult<()> {
+    for (key, value) in [(PLANS_DIR_KEY, &s.plans_dir), (NOTES_ROOT_KEY, &s.notes_root)] {
+        conn.execute(
+            "INSERT INTO meta (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![key, value.trim()],
+        )?;
+    }
+    Ok(())
+}
+
 fn now() -> String {
     chrono::Utc::now().to_rfc3339()
 }
@@ -844,6 +881,19 @@ mod tests {
         assert_eq!(max_concurrency(&conn), 1);
         set_max_concurrency(&conn, 99).unwrap();
         assert_eq!(max_concurrency(&conn), 16);
+    }
+
+    #[test]
+    fn routine_settings_default_and_round_trip() {
+        let conn = open_memory();
+        let s = routine_settings(&conn);
+        assert_eq!((s.plans_dir.as_str(), s.notes_root.as_str()), (DEFAULT_PLANS_DIR, DEFAULT_NOTES_ROOT));
+        let custom = RoutineSettings { plans_dir: " ~/plans ".into(), notes_root: "".into() };
+        set_routine_settings(&conn, &custom).unwrap();
+        let s = routine_settings(&conn);
+        assert_eq!(s.plans_dir, "~/plans");
+        // A cleared field falls back to the default.
+        assert_eq!(s.notes_root, DEFAULT_NOTES_ROOT);
     }
 
     #[test]

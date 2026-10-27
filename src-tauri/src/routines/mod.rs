@@ -117,6 +117,52 @@ message (no body), and `git push` (never a plain `--force`). Then go back to ste
 Stop when the goal holds, or when you cannot make progress without a human (a failure you cannot fix, a decision only the \
 author can take, repeated reruns of the same failure). In that last case finish with `NEEDS_ATTENTION: <one-sentence diagnosis>`.";
 
+const ISSUE_PLAN_SYSTEM: &str = concat!(include_str!("builtin/preamble.md"), "\n", include_str!("builtin/issue_plan.md"));
+
+const ISSUE_PLAN_TOOLS: &[&str] = &[
+    "Read",
+    "Glob",
+    "Grep",
+    "Agent",
+    "Skill",
+    "Bash(gh issue view:*)",
+    "Bash(gh pr list:*)",
+    "Bash(gh search:*)",
+    "Bash(gh api:*)",
+    "Bash(gh repo view:*)",
+    "Bash(git log:*)",
+    "Bash(git show:*)",
+    "Bash(git grep:*)",
+    "Bash(git fetch:*)",
+    "Bash(cr:*)",
+    "Bash(jq:*)",
+    "Bash(ls:*)",
+    "Bash(mkdir:*)",
+    "Bash(notify:*)",
+];
+
+const ISSUE_IMPLEMENT_SYSTEM: &str = concat!(
+    include_str!("builtin/preamble.md"),
+    "\n",
+    include_str!("builtin/issue_implement.md"),
+    "\n",
+    include_str!("builtin/worktree.md"),
+    "\n",
+    include_str!("builtin/pr_tail.md"),
+);
+
+const SMALL_ISSUE_KEY: &str = "address-small-issue";
+
+const SMALL_ISSUE_SYSTEM: &str = concat!(
+    include_str!("builtin/preamble.md"),
+    "\n",
+    include_str!("builtin/small_issue.md"),
+    "\n",
+    include_str!("builtin/worktree.md"),
+    "\n",
+    include_str!("builtin/pr_tail.md"),
+);
+
 const AI_REVIEW_SYSTEM: &str = "\
 Headless app mode. Review id = {{review_id}} already exists: do not create or open reviews. \
 The `cr` CLI on PATH already points at the app's database. Nobody can answer questions, so \
@@ -194,6 +240,52 @@ pub const DEFAULTS: &[Defaults] = &[
         timeout_min: 30,
         handler: Some("focus"),
     },
+    Defaults {
+        key: "issue_plan",
+        name: "Plan issue",
+        description: "Analyse an issue and write a plan file (tracker ticket format), linked to the card with the `plan` tag. Refine it in an agent session, then run Implement plan.",
+        context_type: "issue",
+        prompt_template: "Write the implementation plan for issue {{repo}}#{{number}} ({{url}}), following the routine instructions.",
+        system_prompt: ISSUE_PLAN_SYSTEM,
+        system_prompt_mode: "append",
+        needs_worktree: true,
+        // Explicit so the user's own settings never leak in; writes are granted by the handler.
+        permission_mode: "default",
+        allowed_tools: ISSUE_PLAN_TOOLS,
+        extra_args: &[],
+        timeout_min: 30,
+        handler: Some("issue_plan"),
+    },
+    Defaults {
+        key: "issue_implement",
+        name: "Implement plan",
+        description: "Implement the issue's linked plan (status ready-for-agent) in a worktree: tdd, code review, draft PR linked to the issue, local review.",
+        context_type: "issue",
+        prompt_template: "Implement the approved plan for issue {{repo}}#{{number}} ({{url}}) and open a draft PR, following the routine instructions.",
+        system_prompt: ISSUE_IMPLEMENT_SYSTEM,
+        system_prompt_mode: "append",
+        needs_worktree: true,
+        permission_mode: "bypassPermissions",
+        allowed_tools: &[],
+        extra_args: &[],
+        timeout_min: 240,
+        handler: None,
+    },
+    Defaults {
+        key: SMALL_ISSUE_KEY,
+        name: "Draft PR (small issue)",
+        description: "Fix a small issue in a worktree, open a draft PR linked to it, tag it automated, local-review it, notify.",
+        context_type: "issue",
+        prompt_template: "Fix issue {{repo}}#{{number}} ({{url}}) end to end and open a draft PR, following the routine instructions.",
+        system_prompt: SMALL_ISSUE_SYSTEM,
+        system_prompt_mode: "append",
+        needs_worktree: true,
+        permission_mode: "bypassPermissions",
+        allowed_tools: &[],
+        extra_args: &[],
+        timeout_min: 60,
+        handler: None,
+    },
     ai_review("ai_review_explain", "AI review: explain", "Headless `/local-review`: one explanatory comment per change.", "/local-review {{review_id}}"),
     ai_review("ai_review_critique", "AI review: critique", "Headless `/local-review --critique` (Standards + Spec sub-agents).", "/local-review {{review_id}} --critique"),
     ai_review("ai_review_codex", "AI review: codex", "Headless `/local-review --codex` (Codex adversarial review).", "/local-review {{review_id}} --codex"),
@@ -226,6 +318,23 @@ pub fn seed(conn: &Connection) -> AppResult<()> {
                 now
             ],
         )?;
+    }
+    Ok(())
+}
+
+/// Routines that began as user-made rows and now ship built in. A row with such a key and
+/// `builtin = 0` is adopted: flagged built-in and set to the shipped definition (a Reset would
+/// do the same). Its id, and so its run history, is kept. Idempotent.
+const ADOPTED_KEYS: &[&str] = &[SMALL_ISSUE_KEY];
+
+pub fn adopt_builtin_keys(conn: &Connection) -> AppResult<()> {
+    for d in DEFAULTS.iter().filter(|d| ADOPTED_KEYS.contains(&d.key)) {
+        let id: Option<i64> =
+            conn.query_row("SELECT id FROM routine WHERE key = ?1 AND builtin = 0", params![d.key], |r| r.get(0)).optional()?;
+        if let Some(id) = id {
+            conn.execute("UPDATE routine SET builtin = 1, handler = ?2 WHERE id = ?1", params![id, d.handler])?;
+            reset(conn, id)?;
+        }
     }
     Ok(())
 }
@@ -477,6 +586,42 @@ mod tests {
 
     fn system_of(conn: &Connection, key: &str) -> String {
         conn.query_row("SELECT system_prompt FROM routine WHERE key = ?1", params![key], |r| r.get(0)).unwrap()
+    }
+
+    #[test]
+    fn adopts_a_user_made_row_with_a_shipped_key() {
+        let conn = open_memory();
+        let now = chrono::Utc::now().to_rfc3339();
+        conn.execute(
+            "INSERT INTO routine (key, name, context_type, prompt_template, system_prompt, needs_worktree, builtin, created_at, updated_at)
+             VALUES ('address-small-issue', 'Draft PR (small issue)', 'issue', 'old', 'old text', 0, 0, ?1, ?1)",
+            params![now],
+        )
+        .unwrap();
+        let id: i64 = conn.query_row("SELECT id FROM routine WHERE key = 'address-small-issue'", [], |r| r.get(0)).unwrap();
+        seed(&conn).unwrap();
+        for _ in 0..2 {
+            adopt_builtin_keys(&conn).unwrap();
+        }
+        let r = get(&conn, id).unwrap();
+        assert!(r.builtin);
+        assert!(r.needs_worktree);
+        assert!(r.system_prompt.contains("Local review"));
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM routine WHERE key = 'address-small-issue'", [], |r| r.get(0)).unwrap();
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn shipped_issue_prompts_have_no_unknown_placeholders() {
+        let known = ["repo", "number", "url", "title", "plans_dir", "head_ref", "base_ref", "worktree", "review_id"];
+        for d in DEFAULTS.iter().filter(|d| d.context_type == "issue") {
+            for text in [d.system_prompt, d.prompt_template] {
+                for part in text.split("{{").skip(1) {
+                    let name = part.split("}}").next().unwrap();
+                    assert!(known.contains(&name), "{}: unknown placeholder {{{{{name}}}}}", d.key);
+                }
+            }
+        }
     }
 
     fn override_count(conn: &Connection) -> i64 {

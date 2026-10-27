@@ -176,6 +176,7 @@ pub fn run() {
             let conn = db::open(&db_path)?;
             commands::focus::fail_interrupted(&conn)?;
             routines::seed(&conn)?;
+            routines::adopt_builtin_keys(&conn)?;
             routines::adopt_prompt_overrides(&conn)?;
             routines::manager::mark_interrupted(&conn)?;
             app.manage(Db(Mutex::new(conn)));
@@ -254,6 +255,8 @@ pub fn run() {
             commands::routines::routine_run_relaunch,
             commands::routines::routine_max_concurrency,
             commands::routines::routine_set_max_concurrency,
+            commands::routines::routine_settings,
+            commands::routines::routine_set_settings,
             commands::review::create_review,
             commands::review::list_reviews,
             commands::review::list_target_reviews,

@@ -13,7 +13,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
 use super::context::{ContextRef, Light};
-use super::manager::{get_run, RoutineRun};
+use super::manager::{get_run, routine_settings, RoutineRun};
 use super::Routine;
 use crate::ai_usage::{RunTag, RunUsage};
 use crate::commands::chat::resolve_model;
@@ -219,9 +219,30 @@ pub fn prepare(app: &AppHandle, routine: &Routine, run: &RoutineRun) -> AppResul
                 prep.extra_dirs.push(home.join(".claude/plugins/cache/openai-codex"));
             }
         }
+        Some("issue_plan") => {
+            // The plan lands in the notes vault, outside the clone the run starts in: grant exactly that tree.
+            let s = routine_settings(&app.state::<Db>().0.lock().unwrap());
+            let root = canonical_dir(&s.notes_root)?;
+            let plans = canonical_dir(&s.plans_dir)?;
+            for dir in [&root, &plans] {
+                prep.extra_tools.push(format!("Write(/{}/**)", dir.display()));
+                prep.extra_tools.push(format!("Edit(/{}/**)", dir.display()));
+            }
+            prep.extra_dirs.push(root.clone());
+            if !plans.starts_with(&root) {
+                prep.extra_dirs.push(plans);
+            }
+        }
         _ => {}
     }
     Ok(prep)
+}
+
+/// A configured directory (`~/` allowed), created when missing, in canonical form so path rules match.
+fn canonical_dir(configured: &str) -> AppResult<PathBuf> {
+    let dir = PathBuf::from(crate::commands::repo::expand_home(configured));
+    std::fs::create_dir_all(&dir)?;
+    Ok(dir.canonicalize()?)
 }
 
 /// Post-process a run that ended (not on app exit: the row is settled elsewhere).

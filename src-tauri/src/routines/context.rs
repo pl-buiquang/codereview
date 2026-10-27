@@ -7,7 +7,7 @@ use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
-use super::Routine;
+use super::{manager, Routine};
 use crate::commands::{board, chat, review};
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
@@ -204,7 +204,9 @@ pub fn resolve(app: &AppHandle, routine: &Routine, r: &ContextRef) -> AppResult<
     };
 
     let worktree = if routine.needs_worktree { cwd.to_string_lossy().into_owned() } else { String::new() };
+    let plans_dir = crate::commands::repo::expand_home(&manager::routine_settings(&db.0.lock().unwrap()).plans_dir);
     let vars = vec![
+        ("plans_dir".to_string(), plans_dir),
         ("repo".to_string(), facts.repo.clone()),
         ("number".to_string(), facts.number.clone()),
         ("url".to_string(), facts.url.clone()),
