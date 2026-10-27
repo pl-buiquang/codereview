@@ -102,6 +102,30 @@ export function parseCustomTheme(raw: unknown): CustomTheme {
   return theme;
 }
 
+/** The theme as a shareable JSON document. */
+export function exportCustomTheme(theme: CustomTheme): string {
+  return JSON.stringify(
+    { app: "codereview", kind: "custom-theme", exportedAt: new Date().toISOString(), theme },
+    null,
+    2,
+  );
+}
+
+/** The theme in an exported document (or a bare theme object). Invalid fields take their
+ *  default; throws when the text isn't JSON or holds no theme. */
+export function importCustomTheme(json: string): CustomTheme {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch {
+    throw new Error("Not a valid JSON file");
+  }
+  const root = typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : null;
+  const raw = root && typeof root.theme === "object" ? root.theme : root;
+  if (!raw || !("dark" in raw || "light" in raw || "base" in raw)) throw new Error("No custom theme found in file");
+  return parseCustomTheme(raw);
+}
+
 /** WCAG relative luminance of a `#rrggbb` colour. */
 function luminance(hex: string): number {
   const [r, g, b] = [1, 3, 5].map((i) => {

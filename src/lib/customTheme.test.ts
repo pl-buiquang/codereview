@@ -5,6 +5,8 @@ import {
   contrastIssues,
   contrastRatio,
   customThemeStyle,
+  exportCustomTheme,
+  importCustomTheme,
   mergeScope,
   parseCustomTheme,
   resetScope,
@@ -143,5 +145,25 @@ describe("mergeScope / resetScope", () => {
     expect(r.light).toEqual({});
     expect(r.base).toBe("b");
     expect(resetScope(current, "shape").corners).toBe("base");
+  });
+});
+
+describe("exportCustomTheme / importCustomTheme", () => {
+  const theme = { ...DEFAULT_CUSTOM_THEME, base: "c" as const, dark: { accent: "#112233" }, corners: "base" as const };
+
+  it("round-trips a theme", () => {
+    expect(importCustomTheme(exportCustomTheme(theme))).toEqual(theme);
+  });
+
+  it("accepts a bare theme object and defaults invalid fields", () => {
+    const imported = importCustomTheme(JSON.stringify({ base: "zzz", light: { accent: "red", bg: "#fff" } }));
+    expect(imported.base).toBe(DEFAULT_CUSTOM_THEME.base);
+    expect(imported.light).toEqual({ bg: "#ffffff" });
+  });
+
+  it("rejects non-JSON and files without a theme", () => {
+    expect(() => importCustomTheme("nope")).toThrow("Not a valid JSON file");
+    expect(() => importCustomTheme(JSON.stringify({ settings: {} }))).toThrow("No custom theme found");
+    expect(() => importCustomTheme("null")).toThrow("No custom theme found");
   });
 });

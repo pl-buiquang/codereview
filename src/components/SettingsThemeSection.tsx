@@ -11,6 +11,8 @@ import {
   STATUS_COLOURS,
   SYNTAX_COLOURS,
   customThemeStyle,
+  exportCustomTheme,
+  importCustomTheme,
   mergeScope,
   resetScope,
   toHexColour,
@@ -19,6 +21,7 @@ import {
   type CustomMode,
   type CustomScope,
 } from "../lib/customTheme";
+import { api, pickJsonFile, pickSavePath } from "../lib/api";
 import { confirmDialog } from "../lib/confirm";
 import { suggestTheme } from "../lib/themeSuggest";
 import { toast } from "../lib/toast";
@@ -238,6 +241,29 @@ function CustomThemeEditor() {
     if (ok) editCustomTheme((t) => ({ ...DEFAULT_CUSTOM_THEME, base: t.base }));
   };
 
+  const onExport = async () => {
+    try {
+      const dest = await pickSavePath("codereview-theme.json", "json");
+      if (!dest) return;
+      await api.writeSettingsFile(dest, exportCustomTheme(useSettingsStore.getState().customTheme));
+      toast.success("Theme exported");
+    } catch (err) {
+      toast.error(`Export failed:\n${String(err)}`);
+    }
+  };
+
+  const onImport = async () => {
+    try {
+      const src = await pickJsonFile();
+      if (!src) return;
+      const imported = importCustomTheme(await api.readSettingsFile(src));
+      editCustomTheme(() => imported);
+      toast.success("Theme imported (undo to revert)");
+    } catch (err) {
+      toast.error(`Import failed:\n${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+
   return (
     <section className="settings-group theme-editor">
       <h3>Custom theme</h3>
@@ -261,6 +287,12 @@ function CustomThemeEditor() {
         </button>
         <button className="btn btn-sm" onClick={redoCustomTheme} disabled={!canRedo} title="Redo (⌘⇧Z)">
           Redo
+        </button>
+        <button className="btn btn-sm" onClick={onImport} title="Replace the custom theme with one from a JSON file">
+          Import…
+        </button>
+        <button className="btn btn-sm" onClick={onExport} title="Save the custom theme to a JSON file">
+          Export…
         </button>
         <button className="btn btn-sm" onClick={onReset}>
           Reset…
