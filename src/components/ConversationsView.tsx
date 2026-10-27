@@ -10,7 +10,7 @@ import { useUIStore } from "../store";
 import type { Conversation, DiscussionComment } from "../lib/types";
 import { GithubThread, ThreadComment } from "./GithubThread";
 import { Icon } from "./icons";
-import { MultiFilterList } from "./RailFilters";
+import { FilterRail, MultiFilterList, RailSection } from "./RailFilters";
 import { Composer } from "./ReviewView";
 import { RepoName } from "./RepoName";
 import { TagFilter } from "./TagFilter";
@@ -99,11 +99,8 @@ export function ConversationsView() {
 
   return (
     <div className="inbox-layout">
-      <aside className="cr-rail">
-        <div className="cr-rail-group">
-          <div className="cr-rail-h">
-            <span>Show</span>
-          </div>
+      <FilterRail id="conversations">
+        <RailSection title="Show">
           {flag("Pinned", facets?.pinned, filters.pinned, () => setFilters({ pinned: !filters.pinned }))}
           {flag("Unread", facets?.unread, filters.unread, () => setFilters({ unread: !filters.unread }))}
           {flag("Unresolved threads", facets?.unresolved, filters.unresolved, () =>
@@ -113,7 +110,7 @@ export function ConversationsView() {
           {flag("Ignored by rules", facets?.ignored, filters.showIgnored, () =>
             setFilters({ showIgnored: !filters.showIgnored }),
           )}
-        </div>
+        </RailSection>
         <TagFilter
           title="Pull requests / issues"
           placeholder="Search PR or issue…"
@@ -132,7 +129,7 @@ export function ConversationsView() {
           onChange={(repos) => setFilters({ repos })}
           renderLabel={(key) => <RepoName className="lbl ident" name={key} />}
         />
-      </aside>
+      </FilterRail>
 
       <div className="cr-list">
         {query.isLoading && <p className="muted">Loading…</p>}

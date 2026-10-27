@@ -10,7 +10,7 @@ import { useUIStore } from "../store";
 import type { InboxItem } from "../lib/types";
 import { InboxItemRow, type RowVariant } from "./InboxItemRow";
 import { ConversationsView } from "./ConversationsView";
-import { FilterList, MultiFilterList } from "./RailFilters";
+import { FilterList, FilterRail, MultiFilterList } from "./RailFilters";
 import { RepoName } from "./RepoName";
 import { Icon, type IconName } from "./icons";
 import { SyncButton } from "./SyncButton";
@@ -308,7 +308,7 @@ export function InboxView() {
         <ConversationsView />
       ) : (
       <div className="inbox-layout">
-        <aside className="cr-rail">
+        <FilterRail id="inbox">
           <FilterList
             title="Show"
             entries={unreadEntries}
@@ -340,7 +340,7 @@ export function InboxView() {
             renderLabel={(key) => <RepoName className="lbl ident" name={key} />}
           />
           <MultiFilterList title="Users" entries={authorEntries} selected={effAuthors} onChange={setAuthorFilter} />
-        </aside>
+        </FilterRail>
 
         <div className="cr-list">
           {active === "archive" && (

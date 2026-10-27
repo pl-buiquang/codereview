@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { Icon } from "./icons";
+import { RailSection } from "./RailFilters";
 
 /** Tag autocomplete + chip filter for the board rail. Matching across
  *  selected tags within one instance is OR (include: card shows if it
@@ -81,22 +82,19 @@ export function TagFilter({
   };
 
   return (
-    <div className="cr-rail-group tag-filter" ref={rootRef}>
-      <div className="cr-rail-h">
-        <span>{title}</span>
-        {(selected.length > 0 || untagged?.on) && (
-          <button
-            className="cr-rail-clear"
-            onClick={() => {
+    <RailSection
+      title={title}
+      className="tag-filter"
+      onClear={
+        selected.length > 0 || untagged?.on
+          ? () => {
               onChange([]);
               if (untagged?.on) untagged.onChange(false);
-            }}
-          >
-            clear
-          </button>
-        )}
-      </div>
-      <div className="tag-filter-combobox">
+            }
+          : undefined
+      }
+    >
+      <div className="tag-filter-combobox" ref={rootRef}>
         <input
           className="input tag-filter-input"
           role="combobox"
@@ -155,6 +153,6 @@ export function TagFilter({
           <span className="count">{untagged.count}</span>
         </button>
       )}
-    </div>
+    </RailSection>
   );
 }

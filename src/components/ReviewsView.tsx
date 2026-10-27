@@ -10,6 +10,7 @@ import type { ReviewSummary } from "../lib/types";
 import { statusLabel, statusBadgeClass } from "../lib/status";
 import { OpenPrButton } from "./OpenPrButton";
 import { Icon } from "./icons";
+import { FilterList, FilterRail } from "./RailFilters";
 
 type SortKey = "modified" | "created" | "comments" | "title";
 
@@ -124,9 +125,8 @@ export function ReviewsView() {
         const k = get(r);
         m.set(k, (m.get(k) ?? 0) + 1);
       }
-      return [...m.entries()]
-        .map(([key, count]) => ({ key, label: labels?.[key] ?? key, count }))
-        .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+      const label = (k: string) => labels?.[k] ?? k;
+      return [...m.entries()].sort((a, b) => b[1] - a[1] || label(a[0]).localeCompare(label(b[0])));
     };
     return {
       statusEntries: tally(statusOf, STATUS_LABELS),
@@ -206,12 +206,30 @@ export function ReviewsView() {
       </header>
 
       <div className="inbox-layout">
-        <aside className="cr-rail">
-          <FilterGroup title="Status" entries={statusEntries} selected={statusFilter} onSelect={setStatusFilter} />
-          <FilterGroup title="Origin" entries={originEntries} selected={originFilter} onSelect={setOriginFilter} />
-          <FilterGroup title="Repositories" entries={repoEntries} selected={repoFilter} onSelect={setRepoFilter} ident />
-          <FilterGroup title="Verdict" entries={verdictEntries} selected={verdictFilter} onSelect={setVerdictFilter} />
-        </aside>
+        <FilterRail id="reviews">
+          <FilterList
+            title="Status"
+            entries={statusEntries}
+            selected={statusFilter}
+            onSelect={setStatusFilter}
+            renderLabel={(k) => <span className="lbl">{STATUS_LABELS[k] ?? k}</span>}
+          />
+          <FilterList
+            title="Origin"
+            entries={originEntries}
+            selected={originFilter}
+            onSelect={setOriginFilter}
+            renderLabel={(k) => <span className="lbl">{ORIGIN_LABELS[k] ?? k}</span>}
+          />
+          <FilterList title="Repositories" entries={repoEntries} selected={repoFilter} onSelect={setRepoFilter} ident />
+          <FilterList
+            title="Verdict"
+            entries={verdictEntries}
+            selected={verdictFilter}
+            onSelect={setVerdictFilter}
+            renderLabel={(k) => <span className="lbl">{VERDICT_LABELS[k] ?? k}</span>}
+          />
+        </FilterRail>
 
         <div className="cr-list">
           {reviewsQuery.isLoading && <p className="muted">Loading…</p>}
@@ -288,44 +306,6 @@ function ReviewRow({
       >
         <Icon name="x" size={12} />
       </button>
-    </div>
-  );
-}
-
-function FilterGroup({
-  title,
-  entries,
-  selected,
-  onSelect,
-  ident,
-}: {
-  title: string;
-  entries: { key: string; label: string; count: number }[];
-  selected: string | null;
-  onSelect: (v: string | null) => void;
-  ident?: boolean;
-}) {
-  if (entries.length === 0) return null;
-  return (
-    <div className="cr-rail-group">
-      <div className="cr-rail-h">
-        <span>{title}</span>
-        {selected && (
-          <button className="cr-rail-clear" onClick={() => onSelect(null)}>
-            clear
-          </button>
-        )}
-      </div>
-      {entries.map(({ key, label, count }) => (
-        <button
-          key={key}
-          className={`cr-rail-item${key === selected ? " on" : ""}`}
-          onClick={() => onSelect(key === selected ? null : key)}
-        >
-          <span className={ident ? "lbl ident" : "lbl"}>{label}</span>
-          <span className="count">{count}</span>
-        </button>
-      ))}
     </div>
   );
 }

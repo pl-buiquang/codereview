@@ -1,4 +1,43 @@
+import { createContext } from "react";
 import type { ReactNode } from "react";
+
+const RailIdContext = createContext("");
+
+/** The filter rail of a view. `id` scopes per-section state to the view. */
+export function FilterRail({ id, children }: { id: string; children: ReactNode }) {
+  return (
+    <RailIdContext.Provider value={id}>
+      <aside className="cr-rail">{children}</aside>
+    </RailIdContext.Provider>
+  );
+}
+
+/** One titled section of a filter rail, with a "clear" action when `onClear` is given. */
+export function RailSection({
+  title,
+  onClear,
+  className,
+  children,
+}: {
+  title: string;
+  onClear?: () => void;
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className={`cr-rail-group${className ? ` ${className}` : ""}`}>
+      <div className="cr-rail-h">
+        <span>{title}</span>
+        {onClear && (
+          <button className="cr-rail-clear" onClick={onClear}>
+            clear
+          </button>
+        )}
+      </div>
+      {children}
+    </div>
+  );
+}
 
 export function MultiFilterList({
   title,
@@ -15,15 +54,7 @@ export function MultiFilterList({
 }) {
   if (entries.length === 0) return null;
   return (
-    <div className="cr-rail-group">
-      <div className="cr-rail-h">
-        <span>{title}</span>
-        {selected.length > 0 && (
-          <button className="cr-rail-clear" onClick={() => onChange([])}>
-            clear
-          </button>
-        )}
-      </div>
+    <RailSection title={title} onClear={selected.length > 0 ? () => onChange([]) : undefined}>
       {entries.map(([key, count]) => {
         const on = selected.includes(key);
         return (
@@ -38,7 +69,7 @@ export function MultiFilterList({
           </button>
         );
       })}
-    </div>
+    </RailSection>
   );
 }
 
@@ -59,15 +90,7 @@ export function FilterList({
 }) {
   if (entries.length === 0) return null;
   return (
-    <div className="cr-rail-group">
-      <div className="cr-rail-h">
-        <span>{title}</span>
-        {selected && (
-          <button className="cr-rail-clear" onClick={() => onSelect(null)}>
-            clear
-          </button>
-        )}
-      </div>
+    <RailSection title={title} onClear={selected ? () => onSelect(null) : undefined}>
       {entries.map(([key, count]) => (
         <button
           key={key}
@@ -78,6 +101,6 @@ export function FilterList({
           <span className="count">{count}</span>
         </button>
       ))}
-    </div>
+    </RailSection>
   );
 }
