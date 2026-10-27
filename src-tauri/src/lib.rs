@@ -44,6 +44,8 @@ use db::Db;
 pub struct CrNote(pub Mutex<Option<String>>);
 
 const CLOSE_TAB_MENU_ID: &str = "close_tab";
+#[cfg(target_os = "macos")]
+const QUIT_MENU_ID: &str = "quit";
 const CLOSE_ACTIVE_TAB_EVENT: &str = "close-active-tab";
 
 fn handle_deep_link_url<R: tauri::Runtime>(app: &tauri::AppHandle<R>, raw_url: &str) {
@@ -151,6 +153,15 @@ pub fn run() {
         .on_menu_event(|app, event| {
             if event.id() == CLOSE_TAB_MENU_ID {
                 let _ = app.emit(CLOSE_ACTIVE_TAB_EVENT, ());
+            }
+            // The native Quit item (`terminate:`) bypasses `ExitRequested` on macOS, so it would kill
+            // running routines without asking: ⌘Q goes through the same prompt instead.
+            #[cfg(target_os = "macos")]
+            if event.id() == QUIT_MENU_ID {
+                match app.state::<routines::manager::RoutineManager>().active_count(app) {
+                    0 => app.exit(0),
+                    active => show_quit_prompt(app, active),
+                }
             }
         })
         .manage(CrNote(Mutex::new(cr_note)))
@@ -448,42 +459,49 @@ pub fn run() {
                         return;
                     }
                     api.prevent_exit();
-                    if !manager.begin_quit_prompt() {
-                        return;
-                    }
-                    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogResult};
-                    const STOP_AND_QUIT: &str = "Stop and quit";
-                    const LEAVE_RUNNING: &str = "Leave running";
-                    let handle = app.clone();
-                    app.dialog()
-                        .message(format!(
-                            "{active} routine run{} in progress. Stop {}, or leave {} running and pick {} up on the next launch?",
-                            if active == 1 { " is" } else { "s are" },
-                            if active == 1 { "it" } else { "them" },
-                            if active == 1 { "it" } else { "them" },
-                            if active == 1 { "it" } else { "them" },
-                        ))
-                        .title("Routines are running")
-                        .buttons(MessageDialogButtons::YesNoCancelCustom(
-                            STOP_AND_QUIT.into(),
-                            LEAVE_RUNNING.into(),
-                            "Cancel".into(),
-                        ))
-                        .show_with_result(move |choice| {
-                            let manager = handle.state::<routines::manager::RoutineManager>();
-                            manager.end_quit_prompt();
-                            match choice {
-                                MessageDialogResult::Custom(c) if c == STOP_AND_QUIT => handle.exit(0),
-                                MessageDialogResult::Custom(c) if c == LEAVE_RUNNING => {
-                                    manager.detach_all(&handle);
-                                    handle.exit(0);
-                                }
-                                _ => {}
-                            }
-                        });
+                    show_quit_prompt(app, active);
                 }
                 // Routine runs lead their own process groups, so they'd outlive us unless killed here.
                 tauri::RunEvent::Exit => app.state::<routines::manager::RoutineManager>().kill_all(app),
+                _ => {}
+            }
+        });
+}
+
+/// Ask what to do with the `active` routine runs a quit would interrupt: stop them, leave them
+/// running to be re-adopted on the next launch, or cancel the quit.
+fn show_quit_prompt(app: &tauri::AppHandle, active: usize) {
+    let manager = app.state::<routines::manager::RoutineManager>();
+    if !manager.begin_quit_prompt() {
+        return;
+    }
+    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogResult};
+    const STOP_AND_QUIT: &str = "Stop and quit";
+    const LEAVE_RUNNING: &str = "Leave running";
+    let handle = app.clone();
+    app.dialog()
+        .message(format!(
+            "{active} routine run{} in progress. Stop {}, or leave {} running and pick {} up on the next launch?",
+            if active == 1 { " is" } else { "s are" },
+            if active == 1 { "it" } else { "them" },
+            if active == 1 { "it" } else { "them" },
+            if active == 1 { "it" } else { "them" },
+        ))
+        .title("Routines are running")
+        .buttons(MessageDialogButtons::YesNoCancelCustom(
+            STOP_AND_QUIT.into(),
+            LEAVE_RUNNING.into(),
+            "Cancel".into(),
+        ))
+        .show_with_result(move |choice| {
+            let manager = handle.state::<routines::manager::RoutineManager>();
+            manager.end_quit_prompt();
+            match choice {
+                MessageDialogResult::Custom(c) if c == STOP_AND_QUIT => handle.exit(0),
+                MessageDialogResult::Custom(c) if c == LEAVE_RUNNING => {
+                    manager.detach_all(&handle);
+                    handle.exit(0);
+                }
                 _ => {}
             }
         });
@@ -545,7 +563,13 @@ fn app_menu<R: tauri::Runtime>(
                     &PredefinedMenuItem::hide(app, None)?,
                     &PredefinedMenuItem::hide_others(app, None)?,
                     &PredefinedMenuItem::separator(app)?,
-                    &PredefinedMenuItem::quit(app, None)?,
+                    &MenuItem::with_id(
+                        app,
+                        QUIT_MENU_ID,
+                        format!("Quit {}", pkg_info.name),
+                        true,
+                        Some("CmdOrCtrl+Q"),
+                    )?,
                 ],
             )?,
             &Submenu::with_items(
