@@ -117,7 +117,7 @@ export function CommitReviewMenu({ repo, detail, tipRefs, pullRequests }: Commit
                 GitHub PR #{pr.number}
               </button>
             ))}
-            <div className="rs-menu-title mono">{headLabel}</div>
+            <div className="rs-menu-title">{headLabel}</div>
             <button className="rs-menu-item" role="menuitem" disabled={!canVsDefault} onClick={reviewVsDefault}>
               vs <span className="mono">{defaultBranch ?? "default branch"}</span>
             </button>

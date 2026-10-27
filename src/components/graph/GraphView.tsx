@@ -577,7 +577,7 @@ export function GraphView({ repo }: { repo: Repository }) {
         </label>
         <span className={`gv-ctx-chip${ctx ? " is-worktree" : ""}`} title={ctx ?? repo.local_path ?? undefined}>
           <Icon name="branch" size={12} />
-          <span className="gv-ctx-label mono">{ctxLabel}</span>
+          <span className="gv-ctx-label">{ctxLabel}</span>
           {ctxBranch && <span className="gv-ctx-branch mono">{ctxBranch}</span>}
           {ctx && (
             <button

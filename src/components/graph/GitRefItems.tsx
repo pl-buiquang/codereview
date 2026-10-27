@@ -154,7 +154,7 @@ export function CommitActionsMenu({
       style={{ top: anchor.y, left: anchor.x }}
       onClick={(e) => e.stopPropagation()}
     >
-      <div className="rs-menu-title mono">{sha.slice(0, 7)}</div>
+      <div className="rs-menu-title">{sha.slice(0, 7)}</div>
       <button className="rs-menu-item" role="menuitem" onClick={() => copy(sha)}>
         Copy SHA
       </button>

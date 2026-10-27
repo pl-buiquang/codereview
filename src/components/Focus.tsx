@@ -305,7 +305,7 @@ export function FocusDigest({
                   {g.items.map((it) => (
                     <button
                       key={it.hunk.entry!.hunk_id}
-                      className="focus-item mono"
+                      className="focus-item"
                       title={it.hunk.entry!.header || "whole file"}
                       onClick={() => {
                         onReveal([it.hunk.entry!.hunk_id]);

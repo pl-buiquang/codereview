@@ -16,6 +16,9 @@
 .cr {
   /* shared structural tokens */
   --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 20px; --sp-6: 24px;
+  /* Names of files/repos in lists and headers: not code, not prose. Follows the
+     UI font; point it at var(--font-mono) to get the code look back. */
+  --font-ident: var(--font-ui);
   font-family: var(--font-ui);
   color: var(--text);
   background: var(--bg);
@@ -27,7 +30,7 @@
 /* ---------------- Direction A · Continuity ---------------- */
 .cr-a {
   --font-ui: "Atkinson Hyperlegible", sans-serif;
-  --font-display: "Atkinson Hyperlegible Mono", monospace;
+  --font-display: "Atkinson Hyperlegible", sans-serif;
   --font-mono: "Atkinson Hyperlegible Mono", monospace;
   --radius-s: 4px; --radius-m: 6px; --radius-l: 8px;
 }

@@ -80,7 +80,7 @@ export function BranchActionsMenu({
       style={{ top: anchor.y, left: anchor.x }}
       onClick={(e) => e.stopPropagation()}
     >
-      <div className="rs-menu-title mono">{branch}</div>
+      <div className="rs-menu-title">{branch}</div>
       <button
         className="rs-menu-item"
         role="menuitem"

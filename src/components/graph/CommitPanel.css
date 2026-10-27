@@ -95,12 +95,14 @@
 .cp-counts {
   display: inline-flex;
   gap: var(--sp-2);
-  font-family: var(--font-mono);
+  font-family: var(--font-ui);
+  font-variant-numeric: tabular-nums;
   font-weight: 400;
 }
 
 .cp-group-count {
-  font-family: var(--font-mono);
+  font-family: var(--font-ui);
+  font-variant-numeric: tabular-nums;
   color: var(--text-3);
 }
 
@@ -138,14 +140,15 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-family: var(--font-mono);
+  font-family: var(--font-ident);
   font-size: 12px;
 }
 
 .cp-numstat {
   display: inline-flex;
   gap: var(--sp-1);
-  font-family: var(--font-mono);
+  font-family: var(--font-ui);
+  font-variant-numeric: tabular-nums;
   font-size: 11px;
 }
 
@@ -219,7 +222,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-family: var(--font-mono);
+  font-family: var(--font-ident);
   font-size: 12px;
 }
 
@@ -237,7 +240,8 @@
 
 .dp-pos {
   color: var(--text-2);
-  font-family: var(--font-mono);
+  font-family: var(--font-ui);
+  font-variant-numeric: tabular-nums;
   font-size: 11px;
 }
 
