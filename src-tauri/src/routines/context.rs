@@ -115,7 +115,7 @@ fn pr_refs(conn: &Connection, node_id: &str) -> (String, String) {
     .unwrap_or_default()
 }
 
-fn repo_local_path(conn: &Connection, repo: &str) -> Option<String> {
+pub(crate) fn repo_local_path(conn: &Connection, repo: &str) -> Option<String> {
     let (owner, name) = repo.split_once('/')?;
     conn.query_row(
         "SELECT local_path FROM repository WHERE LOWER(remote_owner) = LOWER(?1) AND LOWER(remote_name) = LOWER(?2)",

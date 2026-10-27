@@ -354,6 +354,7 @@ pub fn run() {
             commands::board::board_open_vscode,
             commands::board::board_open_shell,
             commands::board::board_open_agent,
+            commands::issue_session::board_open_issue_agent,
             commands::sessions::list_claude_sessions,
             commands::sessions::generate_live_session_summary,
             commands::theme::theme_suggest,
