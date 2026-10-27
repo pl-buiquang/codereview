@@ -90,6 +90,9 @@ export function ConversationsView() {
     .map((s) => [s.subject.id, s.count] as [string, number])
     .sort((a, b) => b[1] - a[1]);
   const subjectById = new Map((facets?.subjects ?? []).map((s) => [s.subject.id, s.subject]));
+  const activeFlags = [filters.pinned, filters.unread, filters.unresolved, filters.showBots, filters.showIgnored].filter(
+    Boolean,
+  ).length;
   const flag = (label: string, count: number | undefined, on: boolean, toggleFlag: () => void) => (
     <button className={`cr-rail-item${on ? " on" : ""}`} aria-pressed={on} onClick={toggleFlag}>
       <span className="lbl">{label}</span>
@@ -100,7 +103,7 @@ export function ConversationsView() {
   return (
     <div className="inbox-layout">
       <FilterRail id="conversations">
-        <RailSection title="Show">
+        <RailSection title="Show" summary={activeFlags || undefined}>
           {flag("Pinned", facets?.pinned, filters.pinned, () => setFilters({ pinned: !filters.pinned }))}
           {flag("Unread", facets?.unread, filters.unread, () => setFilters({ unread: !filters.unread }))}
           {flag("Unresolved threads", facets?.unresolved, filters.unresolved, () =>

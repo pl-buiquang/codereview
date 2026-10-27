@@ -1,5 +1,7 @@
-import { createContext } from "react";
+import { createContext, useContext } from "react";
 import type { ReactNode } from "react";
+import { useUIStore } from "../store";
+import { Icon } from "./icons";
 
 const RailIdContext = createContext("");
 
@@ -12,29 +14,46 @@ export function FilterRail({ id, children }: { id: string; children: ReactNode }
   );
 }
 
-/** One titled section of a filter rail, with a "clear" action when `onClear` is given. */
+/** One titled, collapsible section of a filter rail, with a "clear" action when `onClear` is
+ *  given. The fold state is persisted per rail + title; `summary` stands in for the hidden
+ *  selection while folded. */
 export function RailSection({
   title,
+  summary,
   onClear,
   className,
   children,
 }: {
   title: string;
+  summary?: ReactNode;
   onClear?: () => void;
   className?: string;
   children: ReactNode;
 }) {
+  const railId = useContext(RailIdContext);
+  const key = `${railId}:${title}`;
+  const collapsed = useUIStore((s) => s.collapsedRailSections.includes(key));
+  const toggle = useUIStore((s) => s.toggleRailSection);
   return (
     <div className={`cr-rail-group${className ? ` ${className}` : ""}`}>
       <div className="cr-rail-h">
-        <span>{title}</span>
+        <button
+          className={`cr-rail-toggle${collapsed ? " collapsed" : ""}`}
+          aria-expanded={!collapsed}
+          title={`${collapsed ? "Expand" : "Collapse"} ${title}`}
+          onClick={() => toggle(key)}
+        >
+          <Icon name="chev" size={10} className="cr-rail-chev" />
+          <span className="cr-rail-title">{title}</span>
+          {collapsed && summary != null && <span className="cr-rail-summary">· {summary}</span>}
+        </button>
         {onClear && (
           <button className="cr-rail-clear" onClick={onClear}>
             clear
           </button>
         )}
       </div>
-      {children}
+      {!collapsed && children}
     </div>
   );
 }
@@ -54,7 +73,11 @@ export function MultiFilterList({
 }) {
   if (entries.length === 0) return null;
   return (
-    <RailSection title={title} onClear={selected.length > 0 ? () => onChange([]) : undefined}>
+    <RailSection
+      title={title}
+      summary={selected.length > 0 ? selected.length : undefined}
+      onClear={selected.length > 0 ? () => onChange([]) : undefined}
+    >
       {entries.map(([key, count]) => {
         const on = selected.includes(key);
         return (
@@ -90,7 +113,11 @@ export function FilterList({
 }) {
   if (entries.length === 0) return null;
   return (
-    <RailSection title={title} onClear={selected ? () => onSelect(null) : undefined}>
+    <RailSection
+      title={title}
+      summary={selected ? (renderLabel ? renderLabel(selected) : selected) : undefined}
+      onClear={selected ? () => onSelect(null) : undefined}
+    >
       {entries.map(([key, count]) => (
         <button
           key={key}

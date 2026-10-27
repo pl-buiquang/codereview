@@ -85,6 +85,7 @@ export function TagFilter({
     <RailSection
       title={title}
       className="tag-filter"
+      summary={selected.length + (untagged?.on ? 1 : 0) || undefined}
       onClear={
         selected.length > 0 || untagged?.on
           ? () => {

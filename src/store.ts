@@ -138,6 +138,8 @@ interface UIState {
   sidebarCollapsed: boolean;
   /** Board lanes collapsed to a slim column, by lane key. */
   collapsedLanes: string[];
+  /** Filter rail sections the user folded, as `${railId}:${title}` keys. */
+  collapsedRailSections: string[];
   boardFilters: BoardFilters;
   setBoardFilters: (patch: Partial<BoardFilters>) => void;
   inboxFilters: InboxFilters;
@@ -178,6 +180,7 @@ interface UIState {
   forgetRepo: (repoId: number) => void;
   toggleSidebar: () => void;
   toggleLane: (lane: string) => void;
+  toggleRailSection: (key: string) => void;
   moveTab: (fromId: string, toId: string) => void;
   moveOpenRepo: (fromId: number, toId: number) => void;
 }
@@ -191,6 +194,7 @@ type Persisted = Pick<
   | "openRepoIds"
   | "sidebarCollapsed"
   | "collapsedLanes"
+  | "collapsedRailSections"
   | "boardFilters"
   | "inboxFilters"
   | "conversationFilters"
@@ -210,6 +214,7 @@ export const useUIStore = create<UIState>()(
       openRepoIds: [],
       sidebarCollapsed: false,
       collapsedLanes: [],
+      collapsedRailSections: [],
       boardFilters: EMPTY_BOARD_FILTERS,
       inboxFilters: EMPTY_INBOX_FILTERS,
       conversationFilters: EMPTY_CONVERSATION_FILTERS,
@@ -334,6 +339,12 @@ export const useUIStore = create<UIState>()(
             ? s.collapsedLanes.filter((l) => l !== lane)
             : [...s.collapsedLanes, lane],
         })),
+      toggleRailSection: (key) =>
+        set((s) => ({
+          collapsedRailSections: s.collapsedRailSections.includes(key)
+            ? s.collapsedRailSections.filter((k) => k !== key)
+            : [...s.collapsedRailSections, key],
+        })),
 
       // Reorder by dropping `fromId` onto `toId`. The home tab is pinned first:
       // it never moves and nothing can be dropped onto or before it.
@@ -376,6 +387,7 @@ export const useUIStore = create<UIState>()(
         openRepoIds: s.openRepoIds,
         sidebarCollapsed: s.sidebarCollapsed,
         collapsedLanes: s.collapsedLanes,
+        collapsedRailSections: s.collapsedRailSections,
         boardFilters: s.boardFilters,
         inboxFilters: s.inboxFilters,
         conversationFilters: s.conversationFilters,
