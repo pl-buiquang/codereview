@@ -437,9 +437,38 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app, event| {
-            // Routine runs lead their own process groups, so they'd outlive us unless killed here.
-            if let tauri::RunEvent::Exit = event {
-                app.state::<routines::manager::RoutineManager>().kill_all(app);
+            match event {
+                // A user-initiated quit (no exit code) with routines running asks first.
+                // `app.exit(..)` and the updater's restart carry a code and go straight through.
+                tauri::RunEvent::ExitRequested { code: None, api, .. } => {
+                    let manager = app.state::<routines::manager::RoutineManager>();
+                    let active = manager.active_count(app);
+                    if active == 0 {
+                        return;
+                    }
+                    api.prevent_exit();
+                    if !manager.begin_quit_prompt() {
+                        return;
+                    }
+                    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
+                    let handle = app.clone();
+                    app.dialog()
+                        .message(format!(
+                            "{active} routine run{} will be stopped if you quit.",
+                            if active == 1 { "" } else { "s" }
+                        ))
+                        .title("Routines are running")
+                        .buttons(MessageDialogButtons::OkCancelCustom("Stop and quit".into(), "Cancel".into()))
+                        .show(move |stop_and_quit| {
+                            handle.state::<routines::manager::RoutineManager>().end_quit_prompt();
+                            if stop_and_quit {
+                                handle.exit(0);
+                            }
+                        });
+                }
+                // Routine runs lead their own process groups, so they'd outlive us unless killed here.
+                tauri::RunEvent::Exit => app.state::<routines::manager::RoutineManager>().kill_all(app),
+                _ => {}
             }
         });
 }

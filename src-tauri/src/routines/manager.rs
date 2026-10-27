@@ -42,6 +42,8 @@ struct Inner {
     /// Stop requests (`killed` / `timeout`), consumed when the run finishes.
     stops: HashMap<i64, &'static str>,
     shutting_down: bool,
+    /// The quit confirmation is on screen: a second quit request must not stack another.
+    quit_prompt_open: bool,
 }
 
 struct Live {
@@ -447,6 +449,27 @@ impl RoutineManager {
         if let Some(pgid) = pgid {
             terminate(pgid);
         }
+    }
+
+    /// Runs a quit would interrupt: started ones plus those still queued.
+    pub fn active_count(&self, app: &AppHandle) -> usize {
+        let Some(db) = app.try_state::<Db>() else { return self.inner.lock().unwrap().live.len() };
+        let n: i64 = db
+            .0
+            .lock()
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM routine_run WHERE status IN ('queued', 'running')", [], |r| r.get(0))
+            .unwrap_or(0);
+        n as usize
+    }
+
+    /// Claim the quit prompt; false when one is already open.
+    pub fn begin_quit_prompt(&self) -> bool {
+        !std::mem::replace(&mut self.inner.lock().unwrap().quit_prompt_open, true)
+    }
+
+    pub fn end_quit_prompt(&self) {
+        self.inner.lock().unwrap().quit_prompt_open = false;
     }
 
     /// App is exiting: terminate every process group and settle the rows ourselves (the worker
