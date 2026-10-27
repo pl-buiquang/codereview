@@ -26,7 +26,7 @@ pub async fn list_claude_sessions(
 ) -> AppResult<SessionsSnapshot> {
     let ((cards, meta), generated) = {
         let conn = db.0.lock().unwrap();
-        (load_pr_cards(&conn)?, load_generated_summaries(&conn)?)
+        (load_session_cards(&conn)?, load_generated_summaries(&conn)?)
     };
     let agents = claude_sessions::agents();
     let (mut sessions, mut exclude) = claude_sessions::live_sessions_and_hidden(&agents);
@@ -212,21 +212,21 @@ pub struct CardSession {
 
 type SessionIdsByCard = HashMap<String, HashSet<String>>;
 
-struct PrCard {
+struct SessionCard {
     id: String,
     repo: String,
     number: i64,
     head_ref: Option<String>,
 }
 
-fn load_pr_cards(conn: &Connection) -> AppResult<(Vec<PrCard>, SessionIdsByCard)> {
+fn load_session_cards(conn: &Connection) -> AppResult<(Vec<SessionCard>, SessionIdsByCard)> {
     let mut stmt = conn.prepare(&format!(
-        "SELECT id, repo, number, head_ref FROM {}
-         WHERE type = 'pr' AND archived_at IS NULL AND discarded_at IS NULL",
+        "SELECT id, repo, number, CASE WHEN type = 'pr' THEN head_ref END FROM {}
+         WHERE archived_at IS NULL AND discarded_at IS NULL",
         crate::commands::board::CARD_VIEW
     ))?;
     let cards = stmt
-        .query_map([], |r| Ok(PrCard { id: r.get(0)?, repo: r.get(1)?, number: r.get(2)?, head_ref: r.get(3)? }))?
+        .query_map([], |r| Ok(SessionCard { id: r.get(0)?, repo: r.get(1)?, number: r.get(2)?, head_ref: r.get(3)? }))?
         .collect::<Result<Vec<_>, _>>()?;
     let mut meta = SessionIdsByCard::new();
     let mut stmt = conn.prepare("SELECT card_id, value FROM board_meta WHERE kind = 'claude_session'")?;
@@ -237,11 +237,11 @@ fn load_pr_cards(conn: &Connection) -> AppResult<(Vec<PrCard>, SessionIdsByCard)
     Ok((cards, meta))
 }
 
-/// A live session belongs to a PR card when the card records it as `claude_session` metadata,
-/// or when it runs in a checkout of the card's head branch. Sessions arrive most-recent first,
+/// A live session belongs to a card when the card records it as `claude_session` metadata, or, for
+/// a PR card, when it runs in a checkout of the card's head branch (issue cards have no branch). Sessions arrive most-recent first,
 /// and that order is preserved per card.
 fn match_card_sessions(
-    cards: &[PrCard],
+    cards: &[SessionCard],
     meta: &SessionIdsByCard,
     sessions: &[ClaudeSession],
 ) -> Vec<CardSession> {
@@ -294,7 +294,7 @@ fn in_dir(cwd: &str, dir: &str) -> bool {
 /// to the review's PR board card.
 fn match_review_sessions(
     worktree: Option<&str>,
-    card: Option<&PrCard>,
+    card: Option<&SessionCard>,
     meta: &SessionIdsByCard,
     sessions: Vec<ClaudeSession>,
 ) -> Vec<ClaudeSession> {
@@ -314,7 +314,7 @@ fn match_review_sessions(
 struct ReviewSessionCtx {
     detail: crate::db::models::ReviewDetail,
     worktree: Option<String>,
-    card: Option<PrCard>,
+    card: Option<SessionCard>,
 }
 
 fn review_session_ctx(conn: &Connection, review_id: i64) -> AppResult<ReviewSessionCtx> {
@@ -331,7 +331,7 @@ fn review_session_ctx(conn: &Connection, review_id: i64) -> AppResult<ReviewSess
                     crate::commands::board::CARD_VIEW
                 ),
                 params![format!("{owner}/{name}"), number],
-                |r| Ok(PrCard { id: r.get(0)?, repo: r.get(1)?, number: r.get(2)?, head_ref: r.get(3)? }),
+                |r| Ok(SessionCard { id: r.get(0)?, repo: r.get(1)?, number: r.get(2)?, head_ref: r.get(3)? }),
             )
             .optional()?,
         _ => None,
@@ -344,7 +344,7 @@ pub async fn review_agent_sessions(review_id: i64, db: State<'_, Db>) -> AppResu
     let (ctx, meta) = {
         let conn = db.0.lock().unwrap();
         let ctx = review_session_ctx(&conn, review_id)?;
-        let (_, meta) = load_pr_cards(&conn)?;
+        let (_, meta) = load_session_cards(&conn)?;
         (ctx, meta)
     };
     let sessions = claude_sessions::live_sessions();
@@ -417,8 +417,8 @@ mod tests {
         }
     }
 
-    fn card(id: &str, repo: &str, head_ref: Option<&str>) -> PrCard {
-        PrCard { id: id.into(), repo: repo.into(), number: 1, head_ref: head_ref.map(Into::into) }
+    fn card(id: &str, repo: &str, head_ref: Option<&str>) -> SessionCard {
+        SessionCard { id: id.into(), repo: repo.into(), number: 1, head_ref: head_ref.map(Into::into) }
     }
 
     #[test]
@@ -443,6 +443,16 @@ mod tests {
         let cards = vec![card("a", "org/repo", None)];
         let sessions = vec![session("s1", Some("org/repo"), None)];
         assert!(match_card_sessions(&cards, &HashMap::new(), &sessions).is_empty());
+    }
+
+    #[test]
+    fn issue_card_matches_its_recorded_session_only() {
+        // Same repo and a branch named like the issue's, yet only the recorded id counts.
+        let cards = vec![card("i", "org/repo", None)];
+        let meta = HashMap::from([("i".to_string(), HashSet::from(["s2".to_string()]))]);
+        let sessions = vec![session("s1", Some("org/repo"), Some("pbq/issue-1")), session("s2", Some("org/repo"), Some("main"))];
+        let got: Vec<_> = match_card_sessions(&cards, &meta, &sessions).into_iter().map(|c| c.session_id).collect();
+        assert_eq!(got, vec!["s2".to_string()]);
     }
 
     #[test]

@@ -719,8 +719,8 @@ export function BoardView() {
                             }
                           : card.type === "issue"
                             ? {
-                                sessions: [],
-                                busy: openIssueAgent.isPending,
+                                sessions: focusableByCard.get(card.id) ?? [],
+                                busy: openIssueAgent.isPending || focusSession.isPending,
                                 onFocus: (id) => focusSession.mutate(id),
                                 onOpenAgent: () => openIssueAgent.mutate(card.id),
                               }
