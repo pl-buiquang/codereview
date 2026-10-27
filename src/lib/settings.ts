@@ -417,8 +417,14 @@ export const useSettingsStore = create<SettingsState>()(
       version: 10,
       storage: createJSONStorage(() => mirroredStorage),
       partialize: (s) => pickPersisted(s),
-      // Adding a key needs no version bump: the default merge fills it from DEFAULTS.
+      // Adding a key needs no version bump: the merge fills it from DEFAULTS.
       // Only bump for renames/reshapes, and keep every other persisted value.
+      // The custom theme is nested, so it is normalized instead: a theme saved before a field
+      // existed would otherwise come back without it.
+      merge: (persisted, current) => {
+        const p = (persisted ?? {}) as Partial<PersistedSettings>;
+        return { ...current, ...p, customTheme: parseCustomTheme(p.customTheme) };
+      },
       migrate: (persisted, version) => {
         const p = (persisted ?? {}) as Record<string, unknown>;
         const out: PersistedSettings = { ...DEFAULTS, ...sanitizeSettings(p) };

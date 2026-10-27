@@ -8,7 +8,7 @@ import {
   exportSettings,
   importSettings,
 } from "./settings";
-import { DEFAULT_CUSTOM_THEME } from "./customTheme";
+import { DEFAULT_CUSTOM_THEME, customThemeStyle } from "./customTheme";
 
 beforeEach(() => {
   useSettingsStore.setState({
@@ -302,5 +302,20 @@ describe("effectiveTheme", () => {
     expect(effectiveTheme("system")).toBe("light");
     vi.stubGlobal("matchMedia", () => ({ matches: false }));
     expect(effectiveTheme("system")).toBe("dark");
+  });
+});
+
+describe("rehydrating a stored custom theme", () => {
+  it("fills the fields the stored theme predates, so painting it doesn't throw", async () => {
+    const legacy = { base: "b", dark: { accent: "#112233" }, light: {}, uiFont: "inter", monoFont: "base", textSize: "base", corners: "base" };
+    localStorage.setItem(
+      "codereview-settings",
+      JSON.stringify({ state: { direction: "custom", customTheme: legacy }, version: 10 }),
+    );
+    await useSettingsStore.persist.rehydrate();
+    const theme = useSettingsStore.getState().customTheme;
+    expect(theme).toMatchObject({ base: "b", uiFont: "inter", identFont: "base", shadows: "base", scrim: "base" });
+    expect(() => customThemeStyle(theme, "dark")).not.toThrow();
+    localStorage.removeItem("codereview-settings");
   });
 });
