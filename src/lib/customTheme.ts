@@ -19,10 +19,8 @@ export const CUSTOM_KNOB_NAMES = Object.keys(CUSTOM_KNOBS) as CustomKnob[];
 
 /** Colours of the Colours sub-tab, by group. */
 export const CORE_COLOURS = ["accent", "background", "surface", "text"] as const;
-export const STATUS_COLOURS = ["success", "warning", "danger"] as const;
+export const STATUS_COLOURS = ["success", "warning", "danger", "info"] as const;
 export const DIFF_COLOURS = ["diffAdd", "diffDel"] as const;
-/** Board card border of PRs awaiting review (`--review-required`). */
-export const BOARD_COLOURS = ["reviewRequired"] as const;
 /** The 8 syntax roles (`--tok-*`). */
 export const SYNTAX_COLOURS = [
   "tokComment",
@@ -35,7 +33,7 @@ export const SYNTAX_COLOURS = [
   "tokVariable",
 ] as const;
 
-export const PALETTE_COLOURS = [...CORE_COLOURS, ...STATUS_COLOURS, ...DIFF_COLOURS, ...BOARD_COLOURS] as const;
+export const PALETTE_COLOURS = [...CORE_COLOURS, ...STATUS_COLOURS, ...DIFF_COLOURS] as const;
 export const CUSTOM_COLOURS = [...PALETTE_COLOURS, ...SYNTAX_COLOURS] as const;
 
 export type CustomColour = (typeof CUSTOM_COLOURS)[number];
@@ -84,7 +82,8 @@ function parsePalette(raw: unknown): CustomPalette {
   if (typeof raw !== "object" || raw === null) return palette;
   const value = raw as Record<string, unknown>;
   for (const colour of CUSTOM_COLOURS) {
-    const v = value[colour];
+    // `info` was briefly saved as `reviewRequired`.
+    const v = value[colour] ?? (colour === "info" ? value.reviewRequired : undefined);
     const hex = typeof v === "string" ? toHexColour(v) : null;
     if (hex) palette[colour] = hex;
   }
@@ -182,9 +181,9 @@ export const COLOUR_TOKEN: Record<CustomColour, string> = {
   success: "--success",
   warning: "--warning",
   danger: "--danger",
+  info: "--info",
   diffAdd: "--diff-add-strong",
   diffDel: "--diff-del-strong",
-  reviewRequired: "--review-required",
   tokComment: "--tok-comment",
   tokPunctuation: "--tok-punctuation",
   tokLiteral: "--tok-literal",
@@ -236,6 +235,10 @@ export function customThemeStyle(
     if (!c) continue;
     s[`--${status}`] = c;
     s[`--${status}-soft`] = tint(c, 13);
+    if (status === "info") {
+      s["--info-border"] = tint(c, 42);
+      s["--on-info"] = accentTone(c) === "light" ? "#15181d" : "#ffffff";
+    }
   }
   if (p.diffAdd) {
     s["--diff-add-bg"] = tint(p.diffAdd, 12);
@@ -245,7 +248,6 @@ export function customThemeStyle(
     s["--diff-del-bg"] = tint(p.diffDel, 12);
     s["--diff-del-strong"] = tint(p.diffDel, 28);
   }
-  if (p.reviewRequired) s["--review-required"] = p.reviewRequired;
   for (const role of SYNTAX_COLOURS) {
     const c = p[role];
     if (c) s[`--tok-${role.slice(3).toLowerCase()}`] = c;

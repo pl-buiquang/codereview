@@ -86,7 +86,7 @@ export function cardIsUntagged(card: BoardCardT): boolean {
 // Drafts live only in the "in progress" lane (redundant to call out) and
 // "ready" has nothing to flag yet, so only these four get a color.
 const STATUS_BORDER_COLOR: Record<string, string> = {
-  review_required: "var(--review-required)",
+  review_required: "var(--info)",
   commented: "var(--warning)",
   approved: "var(--success)",
   changes_requested: "var(--danger)",

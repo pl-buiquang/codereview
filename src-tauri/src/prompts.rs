@@ -107,15 +107,15 @@ Schema (include only the fields the scope asks for):
   "dark":  { <colors> },
   "light": { <colors> }
 }
-Colors: accent, background, surface, text, success, warning, danger, diffAdd, diffDel (the hue of added / removed lines, drawn as a faint tint), reviewRequired (the border of board cards awaiting review: a blue distinct from the accent), tokComment, tokPunctuation, tokLiteral, tokString, tokOperator, tokKeyword, tokFunction, tokVariable (the 8 syntax-highlight roles).
+Colors: accent, background, surface, text, success, warning, danger, info (a calm blue, a second accent for comment tags and comment borders, review-required cards: distinct from the accent), diffAdd, diffDel (the hue of added / removed lines, drawn as a faint tint), tokComment, tokPunctuation, tokLiteral, tokString, tokOperator, tokKeyword, tokFunction, tokVariable (the 8 syntax-highlight roles).
 
-Scopes: "all" = every field above. "colours" = only dark and light with the ten colors accent..reviewRequired. "syntax" = only dark and light with the eight tok* colors. "typography" = only uiFont, monoFont, textSize. "shape" = only corners.
+Scopes: "all" = every field above. "colours" = only dark and light with the ten colors accent..diffDel. "syntax" = only dark and light with the eight tok* colors. "typography" = only uiFont, monoFont, textSize. "shape" = only corners.
 
 Design rules:
 - Think as a designer: pick one coherent palette family for the inspiration, then derive both modes from it. The dark and light palettes must clearly be the same theme.
 - background is the app canvas, surface is cards and panels (slightly lifted from the background, lighter in dark mode, usually whiter in light mode), text is the body text.
 - Contrast: text on background and on surface at least 4.5:1 (WCAG AA); every syntax color at least 3:1 on surface (comments may go down to 2.5:1, keep them quieter than code); the accent must stand out from the background and carry white or near-black text.
-- success, warning and danger read as green, amber and red in spirit, tuned to the palette. diffAdd leans green and diffDel leans red, distinguishable even for color-blind users (vary lightness, not only hue).
+- success, warning, danger and info read as green, amber and red in spirit, tuned to the palette. diffAdd leans green and diffDel leans red, distinguishable even for color-blind users (vary lightness, not only hue).
 - The eight syntax colors are distinct from each other, harmonious with the accent, and none equals the text color.
 - Avoid pure #000000 / #ffffff backgrounds unless the inspiration calls for it, and avoid neon-on-black clichés.
 - Pick a base, fonts, text size and corners that fit the mood; use "base" where the base direction already fits.

@@ -62,10 +62,18 @@ describe("customThemeStyle", () => {
     expect(light["--tok-keyword"]).toBeUndefined();
   });
 
-  it("sets the review-required color on its own token", () => {
-    const t = parseCustomTheme({ dark: { reviewRequired: "#3366ff" } });
-    expect(customThemeStyle(t, "dark")["--review-required"]).toBe("#3366ff");
-    expect(customThemeStyle(t, "light")["--review-required"]).toBeUndefined();
+  it("sets info and its derived soft/border/on colors", () => {
+    const t = parseCustomTheme({ dark: { info: "#3366ff" } });
+    const dark = customThemeStyle(t, "dark");
+    expect(dark["--info"]).toBe("#3366ff");
+    expect(dark["--info-soft"]).toContain("#3366ff");
+    expect(dark["--info-border"]).toContain("#3366ff");
+    expect(dark["--on-info"]).toBe("#ffffff");
+    expect(customThemeStyle(t, "light")["--info"]).toBeUndefined();
+  });
+
+  it("reads the legacy reviewRequired key as info", () => {
+    expect(parseCustomTheme({ dark: { reviewRequired: "#3366ff" } }).dark).toEqual({ info: "#3366ff" });
   });
 
   it("applies fonts, corners and scale; a preview leaves the scale out", () => {

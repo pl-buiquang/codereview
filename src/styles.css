@@ -928,7 +928,7 @@ button:disabled,
 }
 .file-comments {
   padding: 8px 12px;
-  background: var(--accent-soft);
+  background: var(--info-soft);
   border-bottom: 1px solid var(--border);
 }
 
@@ -1543,7 +1543,7 @@ td.diff-code {
 .line-widget {
   padding: 8px 12px;
   background: var(--surface-2);
-  border-left: 2px solid var(--accent-border);
+  border-left: 2px solid var(--info-border);
   border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
 }
@@ -1675,7 +1675,7 @@ td.diff-code {
 .github-thread {
   padding: 8px 12px;
   background: var(--surface-2);
-  border-left: 2px solid var(--accent-border);
+  border-left: 2px solid var(--info-border);
   border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
 }
@@ -4745,9 +4745,9 @@ input[type="range"] {
   font-weight: 700;
   letter-spacing: 0.05em;
   font-family: var(--font-mono);
-  color: var(--accent);
-  background: var(--accent-soft);
-  border: 1px solid var(--accent-border);
+  color: var(--info);
+  background: var(--info-soft);
+  border: 1px solid var(--info-border);
   flex: none;
 }
 /* Comment tags: `ai` reuses .ai-pill; `local` gets a neutral twin. */
