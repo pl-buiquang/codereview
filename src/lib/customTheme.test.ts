@@ -62,6 +62,12 @@ describe("customThemeStyle", () => {
     expect(light["--tok-keyword"]).toBeUndefined();
   });
 
+  it("sets the review-required color on its own token", () => {
+    const t = parseCustomTheme({ dark: { reviewRequired: "#3366ff" } });
+    expect(customThemeStyle(t, "dark")["--review-required"]).toBe("#3366ff");
+    expect(customThemeStyle(t, "light")["--review-required"]).toBeUndefined();
+  });
+
   it("applies fonts, corners and scale; a preview leaves the scale out", () => {
     const t = parseCustomTheme({ uiFont: "plex", monoFont: "geist-mono", corners: "square", textSize: "large" });
     const s = customThemeStyle(t, "dark");

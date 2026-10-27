@@ -107,9 +107,9 @@ Schema (include only the fields the scope asks for):
   "dark":  { <colors> },
   "light": { <colors> }
 }
-Colors: accent, background, surface, text, success, warning, danger, diffAdd, diffDel (the hue of added / removed lines, drawn as a faint tint), tokComment, tokPunctuation, tokLiteral, tokString, tokOperator, tokKeyword, tokFunction, tokVariable (the 8 syntax-highlight roles).
+Colors: accent, background, surface, text, success, warning, danger, diffAdd, diffDel (the hue of added / removed lines, drawn as a faint tint), reviewRequired (the border of board cards awaiting review: a blue distinct from the accent), tokComment, tokPunctuation, tokLiteral, tokString, tokOperator, tokKeyword, tokFunction, tokVariable (the 8 syntax-highlight roles).
 
-Scopes: "all" = every field above. "colours" = only dark and light with the nine colors accent..diffDel. "syntax" = only dark and light with the eight tok* colors. "typography" = only uiFont, monoFont, textSize. "shape" = only corners.
+Scopes: "all" = every field above. "colours" = only dark and light with the ten colors accent..reviewRequired. "syntax" = only dark and light with the eight tok* colors. "typography" = only uiFont, monoFont, textSize. "shape" = only corners.
 
 Design rules:
 - Think as a designer: pick one coherent palette family for the inspiration, then derive both modes from it. The dark and light palettes must clearly be the same theme.

@@ -4,6 +4,7 @@ import { effectiveTheme, useAiDisabledReason, useSettingsStore, type ThemeMode }
 import { DIRECTIONS, type Direction } from "../lib/themes";
 import {
   COLOUR_TOKEN,
+  BOARD_COLOURS,
   CORE_COLOURS,
   CUSTOM_KNOBS,
   DEFAULT_CUSTOM_THEME,
@@ -158,6 +159,7 @@ const COLOUR_LABELS: Record<CustomColour, string> = {
   danger: "Danger",
   diffAdd: "Added lines",
   diffDel: "Removed lines",
+  reviewRequired: "Review required",
   tokComment: "Comments",
   tokPunctuation: "Punctuation",
   tokLiteral: "Literals & tags",
@@ -296,6 +298,7 @@ function CustomThemeEditor() {
               <ColourGroup title="Core" colours={CORE_COLOURS} mode={shown} />
               <ColourGroup title="Status" colours={STATUS_COLOURS} mode={shown} />
               <ColourGroup title="Diff" colours={DIFF_COLOURS} mode={shown} />
+              <ColourGroup title="Board" colours={BOARD_COLOURS} mode={shown} />
             </>
           )}
           {tab === "syntax" && <ColourGroup title="Syntax" colours={SYNTAX_COLOURS} mode={shown} />}

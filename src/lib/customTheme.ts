@@ -21,6 +21,8 @@ export const CUSTOM_KNOB_NAMES = Object.keys(CUSTOM_KNOBS) as CustomKnob[];
 export const CORE_COLOURS = ["accent", "background", "surface", "text"] as const;
 export const STATUS_COLOURS = ["success", "warning", "danger"] as const;
 export const DIFF_COLOURS = ["diffAdd", "diffDel"] as const;
+/** Board card border of PRs awaiting review (`--review-required`). */
+export const BOARD_COLOURS = ["reviewRequired"] as const;
 /** The 8 syntax roles (`--tok-*`). */
 export const SYNTAX_COLOURS = [
   "tokComment",
@@ -33,7 +35,7 @@ export const SYNTAX_COLOURS = [
   "tokVariable",
 ] as const;
 
-export const PALETTE_COLOURS = [...CORE_COLOURS, ...STATUS_COLOURS, ...DIFF_COLOURS] as const;
+export const PALETTE_COLOURS = [...CORE_COLOURS, ...STATUS_COLOURS, ...DIFF_COLOURS, ...BOARD_COLOURS] as const;
 export const CUSTOM_COLOURS = [...PALETTE_COLOURS, ...SYNTAX_COLOURS] as const;
 
 export type CustomColour = (typeof CUSTOM_COLOURS)[number];
@@ -182,6 +184,7 @@ export const COLOUR_TOKEN: Record<CustomColour, string> = {
   danger: "--danger",
   diffAdd: "--diff-add-strong",
   diffDel: "--diff-del-strong",
+  reviewRequired: "--review-required",
   tokComment: "--tok-comment",
   tokPunctuation: "--tok-punctuation",
   tokLiteral: "--tok-literal",
@@ -242,6 +245,7 @@ export function customThemeStyle(
     s["--diff-del-bg"] = tint(p.diffDel, 12);
     s["--diff-del-strong"] = tint(p.diffDel, 28);
   }
+  if (p.reviewRequired) s["--review-required"] = p.reviewRequired;
   for (const role of SYNTAX_COLOURS) {
     const c = p[role];
     if (c) s[`--tok-${role.slice(3).toLowerCase()}`] = c;
