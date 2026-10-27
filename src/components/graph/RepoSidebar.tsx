@@ -135,7 +135,7 @@ export function RepoSidebar({
     onSettled: () => queryClient.invalidateQueries({ queryKey: ["repo-sync", repo.id] }),
     onSuccess: (outcome) => {
       if (outcome === null) {
-        toast.success("No gone branches.");
+        toast.info("No gone branches.");
         return;
       }
       if (!outcome) return;

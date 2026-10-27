@@ -344,7 +344,7 @@ function AiSuggest({ tab }: { tab: SubTab }) {
       suggestTheme({ scope, current: useSettingsStore.getState().customTheme, hint }).then((r) => ({ ...r, scope })),
     onSuccess: ({ suggested, inspiration, issues, scope }) => {
       editCustomTheme((t) => mergeScope(t, suggested, scope));
-      toast.success(`Applied “${inspiration}” — ⌘Z to undo`);
+      toast.info(`Applied “${inspiration}” — ⌘Z to undo`);
       if (issues.length > 0) toast.error(`Some contrast is still low:\n${issues.join("\n")}`);
     },
     onError: (err) => toast.error(`AI suggest failed:\n${err instanceof Error ? err.message : String(err)}`),

@@ -188,7 +188,7 @@ export function BoardView() {
         return null;
       }
       if (preview.noop) {
-        toast.success("Stack is already up to date");
+        toast.info("Stack is already up to date");
         return null;
       }
       const lines = preview.branches.map(

@@ -1122,7 +1122,7 @@ function ReviewHeader({
       queryClient.invalidateQueries({ queryKey: liveKey });
       queryClient.invalidateQueries({ queryKey: ["reviews"] });
       if (!r.moved) {
-        toast.success("Review is already on the latest commits.");
+        toast.info("Review is already on the latest commits.");
         return;
       }
       const { reanchored, lost } = r.reanchor;

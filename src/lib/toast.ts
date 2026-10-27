@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-export type ToastKind = "error" | "success";
+export type ToastKind = "error" | "success" | "info";
 
 export interface Toast {
   id: number;
@@ -39,4 +39,6 @@ function show(kind: ToastKind, message: string, ttlMs: number): number {
 export const toast = {
   error: (message: string) => show("error", message, 8000),
   success: (message: string) => show("success", message, 4000),
+  /** Neutral notice: nothing failed, nothing was changed or needs attention. */
+  info: (message: string) => show("info", message, 4000),
 };

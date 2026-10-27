@@ -1698,8 +1698,8 @@ td.diff-code {
   letter-spacing: 0.05em;
   text-transform: uppercase;
   font-family: var(--font-mono);
-  color: var(--on-accent);
-  background: var(--accent);
+  color: var(--on-info);
+  background: var(--info);
   cursor: help;
 }
 .github-thread-badge {
@@ -2192,8 +2192,8 @@ tr.kb-focus {
   align-items: center;
   gap: 10px;
   padding: 6px 12px;
-  background: var(--accent-soft);
-  border-bottom: 1px solid var(--border);
+  background: var(--info-soft);
+  border-bottom: 1px solid var(--info-border);
   font-size: 12px;
 }
 .update-banner-text {
@@ -2229,6 +2229,9 @@ tr.kb-focus {
 }
 .toast.success {
   border-left: 3px solid var(--accent);
+}
+.toast.info {
+  border-left: 3px solid var(--info);
 }
 .toast-message {
   flex: 1;
