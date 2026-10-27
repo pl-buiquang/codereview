@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import { toast } from "../../lib/toast";
 import { confirmDialog } from "../../lib/confirm";
-import type { Routine, RoutineContextKind, RoutineInput } from "../../lib/types";
+import type { Routine, RoutineContextKind, RoutineInput, RoutineSettings } from "../../lib/types";
 
 const PERMISSION_MODES = ["bypassPermissions", "acceptEdits", "auto", "dontAsk", "default", "plan"];
 const CONTEXTS: RoutineContextKind[] = ["pr", "review", "issue", "board"];
@@ -29,6 +29,47 @@ const toInput = (r: Routine): RoutineInput => ({ ...r });
 const lines = (s: string) => s.split("\n").map((l) => l.trim()).filter(Boolean);
 
 /** Sessions → Config: routine definitions (CRUD) and the concurrency cap. */
+/** Where the Plan routine writes: saved when a field loses focus, so typing doesn't write per key. */
+function PlanSettings() {
+  const queryClient = useQueryClient();
+  const settings = useQuery({ queryKey: ["routine-settings"], queryFn: api.routineSettings });
+  const [draft, setDraft] = useState<RoutineSettings | null>(null);
+  useEffect(() => {
+    if (settings.data) setDraft(settings.data);
+  }, [settings.data]);
+  const save = useMutation({
+    mutationFn: api.routineSetSettings,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["routine-settings"] }),
+    onError: (e) => toast.error(String(e)),
+  });
+  if (!draft) return null;
+  const commit = () => {
+    if (JSON.stringify(draft) !== JSON.stringify(settings.data)) save.mutate(draft);
+  };
+  return (
+    <>
+      <label className="routines-cap" title="Plans of repos without a tracker root (CLAUDE.local.md) go here. Exposed to routines as {{plans_dir}}.">
+        Plans directory
+        <input
+          className="input"
+          value={draft.plans_dir}
+          onChange={(e) => setDraft({ ...draft, plans_dir: e.target.value })}
+          onBlur={commit}
+        />
+      </label>
+      <label className="routines-cap" title="The Plan issue routine may write anywhere under this folder, and nowhere else outside the repository.">
+        Notes root
+        <input
+          className="input"
+          value={draft.notes_root}
+          onChange={(e) => setDraft({ ...draft, notes_root: e.target.value })}
+          onBlur={commit}
+        />
+      </label>
+    </>
+  );
+}
+
 export function RoutinesConfigTab() {
   const queryClient = useQueryClient();
   const routines = useQuery({ queryKey: ["routines"], queryFn: api.routineList });
@@ -128,6 +169,7 @@ export function RoutinesConfigTab() {
             onChange={(e) => setCap.mutate(Number(e.target.value) || 1)}
           />
         </label>
+        <PlanSettings />
       </div>
 
       {draft && (
@@ -189,7 +231,7 @@ export function RoutinesConfigTab() {
             </label>
           </div>
           <label>
-            Prompt <span className="muted">— placeholders: {"{{repo}} {{number}} {{url}} {{title}} {{head_ref}} {{base_ref}} {{worktree}} {{review_id}}"}</span>
+            Prompt <span className="muted">— placeholders: {"{{repo}} {{number}} {{url}} {{title}} {{head_ref}} {{base_ref}} {{worktree}} {{review_id}} {{plans_dir}}"}</span>
             <textarea
               className="input mono"
               rows={4}

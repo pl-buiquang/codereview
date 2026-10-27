@@ -48,6 +48,7 @@ import type {
   RoutineRun,
   RoutineRunEvent,
   RoutineRunFilter,
+  RoutineSettings,
   PrSummary,
   PrThread,
   PublishDraftRepliesResult,
@@ -142,6 +143,8 @@ export const api = {
   routineRunRelaunch: (runId: number) => invoke<RoutineRun>("routine_run_relaunch", { runId }),
   routineMaxConcurrency: () => invoke<number>("routine_max_concurrency"),
   routineSetMaxConcurrency: (n: number) => invoke<void>("routine_set_max_concurrency", { n }),
+  routineSettings: () => invoke<RoutineSettings>("routine_settings"),
+  routineSetSettings: (settings: RoutineSettings) => invoke<void>("routine_set_settings", { settings }),
 
   // AI usage log
   aiUsageSummary: (range: UsageRange) => invoke<AiUsageSummary>("ai_usage_summary", { range }),
@@ -345,6 +348,8 @@ export const api = {
     tmuxSession: string,
     basePaths: string[] = [],
   ) => invoke<void>("board_open_agent", { cardId, basePaths, host, tmuxTarget, tmuxSession }),
+  boardOpenIssueAgent: (cardId: string, host: TerminalHost, tmuxTarget: TmuxTarget, tmuxSession: string) =>
+    invoke<void>("board_open_issue_agent", { cardId, host, tmuxTarget, tmuxSession }),
   reviewAgentSessions: (reviewId: number) => invoke<ClaudeSession[]>("review_agent_sessions", { reviewId }),
   reviewOpenAgent: (reviewId: number, host: TerminalHost, tmuxTarget: TmuxTarget, tmuxSession: string) =>
     invoke<void>("review_open_agent", { reviewId, host, tmuxTarget, tmuxSession }),

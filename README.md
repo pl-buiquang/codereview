@@ -38,6 +38,9 @@ Each area has a page under [`docs/features/`](docs/features/).
 - **Focus & AI** — AI-tiered hunks so you read what matters, in-app review runs, a chat panel and
   editable prompts, via the `claude` CLI.
   → [focus & AI](docs/features/focus-and-ai.md)
+- **Routines** — unattended `claude -p` runs on PRs, issues and the board: babysit CI, plan an issue,
+  refine the plan in an agent session, implement it into a draft PR.
+  → [routines](docs/features/routines.md)
 - **`cr` CLI and deep links** — script the same database from a terminal; `codereview://` links.
   → [CLI](docs/features/cli.md)
 - **Settings & themes** — 4 design directions × dark/light/system, sync modes, AI models and

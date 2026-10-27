@@ -279,6 +279,14 @@ export function BoardView() {
     },
     onError: (e) => toast.error(`Could not open agent session:\n${String(e)}`),
   });
+  const openIssueAgent = useMutation({
+    mutationFn: (cardId: string) => api.boardOpenIssueAgent(cardId, defaultTerminal, tmuxTarget, tmuxSessionName),
+    onSuccess: () => {
+      invalidate();
+      queryClient.invalidateQueries({ queryKey: ["claude-sessions"] });
+    },
+    onError: (e) => toast.error(`Could not open agent session:\n${String(e)}`),
+  });
   const metaAdd = useMutation({
     mutationFn: (args: { cardId: string; kind: BoardMetaKind; value: string; tag: string | null; label: string | null }) =>
       api.boardMetaAdd(args),
@@ -709,7 +717,14 @@ export function BoardView() {
                               onOpenShell: () => openShell.mutate(card.id),
                               onOpenAgent: () => openAgent.mutate(card.id),
                             }
-                          : null
+                          : card.type === "issue"
+                            ? {
+                                sessions: [],
+                                busy: openIssueAgent.isPending,
+                                onFocus: (id) => focusSession.mutate(id),
+                                onOpenAgent: () => openIssueAgent.mutate(card.id),
+                              }
+                            : null
                       }
                       onAddMeta={(args) => metaAdd.mutate({ cardId: card.id, ...args })}
                       onDeleteMeta={(id) => metaDelete.mutate(id)}

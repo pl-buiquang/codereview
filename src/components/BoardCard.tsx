@@ -284,7 +284,8 @@ export interface TerminalAction {
   sessions: ClaudeSession[];
   busy: boolean;
   onFocus: (sessionId: string) => void;
-  onOpenShell: () => void;
+  /** Absent for issue cards, which have no worktree to open a shell in. */
+  onOpenShell?: () => void;
   onOpenAgent: () => void;
 }
 
@@ -373,14 +374,16 @@ function PrActionsMenu({
             {terminal && (
               <>
                 <hr className="btn-split-menu-separator" />
-                <button
-                  role="menuitem"
-                  disabled={terminal.busy}
-                  title="Open a shell in the chat worktree"
-                  onClick={run(terminal.onOpenShell)}
-                >
-                  Open in terminal
-                </button>
+                {terminal.onOpenShell && (
+                  <button
+                    role="menuitem"
+                    disabled={terminal.busy}
+                    title="Open a shell in the chat worktree"
+                    onClick={run(terminal.onOpenShell)}
+                  >
+                    Open in terminal
+                  </button>
+                )}
                 <AgentSessionItems
                   sessions={terminal.sessions}
                   busy={terminal.busy}
@@ -630,6 +633,19 @@ export function BoardCard({
                 >
                   Routines…
                 </button>
+                {terminal && (
+                  <button
+                    role="menuitem"
+                    disabled={terminal.busy}
+                    title="Open Claude in the repository's main clone with this card's notes, files and plan, to refine the plan"
+                    onClick={() => {
+                      close();
+                      terminal.onOpenAgent();
+                    }}
+                  >
+                    Agent session
+                  </button>
+                )}
               </>
             )}
           </KebabMenu>

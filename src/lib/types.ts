@@ -977,6 +977,12 @@ export interface RoutineOption {
   active_run: RoutineRun | null;
 }
 
+/** Where the Plan routine writes plans for repos without a tracker root, and the vault tree it may write to. */
+export interface RoutineSettings {
+  plans_dir: string;
+  notes_root: string;
+}
+
 export interface RoutineRunFilter {
   statuses?: RoutineRunStatus[];
   routine_id?: number;
