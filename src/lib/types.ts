@@ -373,6 +373,8 @@ export interface InboxItem {
   stale: boolean;
   /** When it was marked read or triaged; a New item without it is unread and counts in the badge. */
   viewed_at: string | null;
+  /** Archived and forgotten: a new reason doesn't bring it back to New. */
+  forgotten_at: string | null;
   first_seen_at: string;
   last_refreshed: string;
   reasons: ItemReason[];

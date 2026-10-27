@@ -388,6 +388,8 @@ enum InboxAction {
     List,
     /// Archive an inbox item (URL or `owner/repo#n`)
     Archive { reference: String },
+    /// Archive an inbox item for good: a new reason won't bring it back
+    Forget { reference: String },
     /// Bring an archived item back to New
     Restore { reference: String },
     /// Sync the inbox from GitHub
@@ -1118,6 +1120,7 @@ fn run(cmd: Cmd, json: bool, db: &Db) -> AppResult<()> {
                 }
             }
             InboxAction::Archive { reference } => set_inbox_archived(db, &reference, true)?,
+            InboxAction::Forget { reference } => forget_inbox_item(db, &reference)?,
             InboxAction::Restore { reference } => set_inbox_archived(db, &reference, false)?,
             InboxAction::Sync => print_sync(&sync_once(db, Scope::Inbox, Mode::Forced)?, json)?,
         },
@@ -1187,6 +1190,16 @@ fn set_inbox_archived(db: &Db, reference: &str, archive: bool) -> AppResult<()> 
         inbox::restore_item_impl(&conn, &id)?;
     }
     println!("{owner}/{name}#{number} {}.", if archive { "archived" } else { "restored to New" });
+    Ok(())
+}
+
+fn forget_inbox_item(db: &Db, reference: &str) -> AppResult<()> {
+    let (owner, name, number) = board::parse_ref(reference)?;
+    let conn = db.0.lock().unwrap();
+    let id = inbox::find_item_id(&conn, &owner, &name, number)?
+        .ok_or_else(|| AppError::Other(format!("{owner}/{name}#{number} isn't in the inbox")))?;
+    inbox::forget_item_impl(&conn, &id)?;
+    println!("{owner}/{name}#{number} archived and forgotten.");
     Ok(())
 }
 

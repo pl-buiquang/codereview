@@ -291,6 +291,8 @@ pub struct ItemRow {
     pub stale: bool,
     /// When it was marked viewed or triaged; a New item without it counts in the badge.
     pub viewed_at: Option<String>,
+    /// Archived and forgotten: a new reason doesn't bring it back to New.
+    pub forgotten_at: Option<String>,
     pub first_seen_at: String,
     pub last_refreshed: String,
 }
@@ -323,6 +325,7 @@ impl ItemRow {
             author_is_bot: row.get::<_, i64>("author_is_bot")? != 0,
             stale: row.get::<_, i64>("stale")? != 0,
             viewed_at: row.get("viewed_at")?,
+            forgotten_at: row.get("forgotten_at")?,
             first_seen_at: row.get("first_seen_at")?,
             last_refreshed: row.get("last_refreshed")?,
         })

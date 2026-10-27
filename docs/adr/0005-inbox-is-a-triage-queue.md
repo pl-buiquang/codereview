@@ -7,6 +7,8 @@ An inbox entry now has exactly one `state`: `new`, `tracked` (put on the Board, 
 Two rules are not obvious from the code:
 
 - **Resurfacing needs a new reason.** An archived entry returns to New only when discovery finds a reason it didn't have, or one that lapsed (not found in the last *complete* discovery) and came back, such as a re-requested review. Activity on the item never resurfaces it; the old "Visited comes back on any update" behaviour was the noise being removed. Reasons that stop matching are kept, and the entry shows as *stale* instead of vanishing. Staleness is only evaluated after a discovery in which every search succeeded, because search failures are swallowed.
+- **Forgetting overrides resurfacing.** *Archive and forget* sets `forgotten_at` (migration 0039):
+  no new reason brings the entry back. Any later state change (restore, track, discard) clears it.
 - **Own PRs are never queued**, at query time rather than by state writes: the Board tracks them automatically, and a state write would race with discovery re-inserting them.
 
 The old timestamp columns stay in the table, unread (dropping columns in SQLite rebuilds the table). Migration 0034 maps them: archived if any was set, tracked if the item has a live Board card, own PRs archived.

@@ -64,7 +64,7 @@ const ITEM_VIEW: &str = "(
         LOWER(s.ci_state) AS ci_state,
         p.review_decision,
         e.state AS inbox_state, e.archive_cause, COALESCE(e.state_at, e.first_seen_at) AS state_at,
-        e.first_seen_at, e.viewed_at, COALESCE(u.is_bot, 0) AS author_is_bot,
+        e.first_seen_at, e.viewed_at, e.forgotten_at, COALESCE(u.is_bot, 0) AS author_is_bot,
         CASE WHEN e.state = 'new'
               AND (SELECT value FROM meta WHERE key = 'last_complete_discovery_at') IS NOT NULL
               AND NOT EXISTS (SELECT 1 FROM item_reasons x WHERE x.item_id = e.id
@@ -96,8 +96,9 @@ pub(crate) fn upsert_entry(conn: &Connection, node: &Node, ts: &str) -> AppResul
 
 /// Record the reasons a discovery found for an item. A reason that is new, or
 /// that lapsed (not found since `prev_discovery`, the last complete one) and
-/// is back, brings an archived item back to New and makes it unviewed again.
-/// Reasons that stop matching are kept so the item can show as stale.
+/// is back, brings an archived item back to New and makes it unviewed again,
+/// unless it was archived and forgotten. Reasons that stop matching are kept so
+/// the item can show as stale.
 pub(crate) fn record_reasons(
     conn: &Connection,
     item_id: &str,
@@ -127,21 +128,25 @@ pub(crate) fn record_reasons(
         )?;
     }
     if gained {
-        conn.execute("UPDATE inbox_entry SET viewed_at = NULL WHERE id = ?1", params![item_id])?;
+        conn.execute(
+            "UPDATE inbox_entry SET viewed_at = NULL WHERE id = ?1 AND forgotten_at IS NULL",
+            params![item_id],
+        )?;
         conn.execute(
             "UPDATE inbox_entry SET state = 'new', archive_cause = NULL, state_at = ?1
-             WHERE id = ?2 AND state = 'archived'",
+             WHERE id = ?2 AND state = 'archived' AND forgotten_at IS NULL",
             params![ts, item_id],
         )?;
     }
     Ok(())
 }
 
-/// Move an item between triage states; triaging it also counts as viewing it.
-/// A no-op for items the inbox never saw (board-only cards).
+/// Move an item between triage states; triaging it also counts as viewing it
+/// and ends any "forgotten". A no-op for items the inbox never saw (board-only cards).
 pub(crate) fn set_inbox_state(conn: &Connection, id: &str, state: &str, cause: Option<&str>) -> AppResult<()> {
     conn.execute(
-        "UPDATE inbox_entry SET state = ?1, archive_cause = ?2, state_at = ?3, viewed_at = COALESCE(viewed_at, ?3)
+        "UPDATE inbox_entry SET state = ?1, archive_cause = ?2, state_at = ?3, viewed_at = COALESCE(viewed_at, ?3),
+             forgotten_at = NULL
          WHERE id = ?4",
         params![state, cause, now(), id],
     )?;
@@ -272,7 +277,7 @@ pub fn list_inbox(db: State<Db>) -> AppResult<Vec<ItemWithReasons>> {
 }
 
 /// Everything triaged: archived items and items put on the Board. `cause`
-/// narrows to `dismissed` / `closed` / `discarded` / `tracked`.
+/// narrows to `dismissed` / `closed` / `discarded` / `tracked` / `forgotten`.
 pub fn list_inbox_archive_impl(
     conn: &Connection,
     search: Option<&str>,
@@ -283,6 +288,7 @@ pub fn list_inbox_archive_impl(
     let mut args: Vec<String> = Vec::new();
     match cause {
         Some("tracked") => clauses.push("inbox_state = 'tracked'".into()),
+        Some("forgotten") => clauses.push("forgotten_at IS NOT NULL".into()),
         Some(c) => {
             args.push(c.to_string());
             clauses.push(format!("archive_cause = ?{}", args.len()));
@@ -328,6 +334,16 @@ pub fn archive_item_impl(conn: &Connection, id: &str) -> AppResult<()> {
     set_inbox_state(conn, id, "archived", Some("dismissed"))
 }
 
+/// Archive an item for good: unlike a plain archive, no new reason brings it back.
+pub fn forget_item_impl(conn: &Connection, id: &str) -> AppResult<()> {
+    set_inbox_state(conn, id, "archived", Some("dismissed"))?;
+    conn.execute(
+        "UPDATE inbox_entry SET forgotten_at = state_at WHERE id = ?1 AND state = 'archived'",
+        params![id],
+    )?;
+    Ok(())
+}
+
 pub fn restore_item_impl(conn: &Connection, id: &str) -> AppResult<()> {
     set_inbox_state(conn, id, "new", None)
 }
@@ -360,6 +376,11 @@ pub fn mark_item_unread(id: String, db: State<Db>) -> AppResult<()> {
 #[tauri::command]
 pub fn archive_item(id: String, db: State<Db>) -> AppResult<()> {
     archive_item_impl(&db.0.lock().unwrap(), &id)
+}
+
+#[tauri::command]
+pub fn forget_item(id: String, db: State<Db>) -> AppResult<()> {
+    forget_item_impl(&db.0.lock().unwrap(), &id)
 }
 
 #[tauri::command]
@@ -528,6 +549,29 @@ mod tests {
         assert!(viewed_at(&conn, "PR_2").is_some());
         restore_item_impl(&conn, "PR_1").unwrap();
         assert!(viewed_at(&conn, "PR_1").is_some(), "a restored item doesn't count as unviewed");
+    }
+
+    #[test]
+    fn forgotten_item_stays_archived_on_a_new_reason_until_restored() {
+        let conn = open_memory();
+        entry(&conn, "PR_1", "pr");
+        record_reasons(&conn, "PR_1", &[reason("mention")], None, "t1").unwrap();
+        forget_item_impl(&conn, "PR_1").unwrap();
+        assert_eq!(state_of(&conn, "PR_1"), "archived");
+
+        record_reasons(&conn, "PR_1", &[reason("mention"), reason("direct_review")], Some("t1"), "t2").unwrap();
+        assert_eq!(state_of(&conn, "PR_1"), "archived", "a new reason doesn't bring a forgotten item back");
+        assert!(viewed_at(&conn, "PR_1").is_some());
+        assert_eq!(list_inbox_archive_impl(&conn, None, Some("forgotten"), 100).unwrap().len(), 1);
+
+        restore_item_impl(&conn, "PR_1").unwrap();
+        assert_eq!(state_of(&conn, "PR_1"), "new");
+        assert!(list_inbox_archive_impl(&conn, None, Some("forgotten"), 100).unwrap().is_empty());
+
+        // A plain archive afterwards resurfaces again.
+        archive_item_impl(&conn, "PR_1").unwrap();
+        record_reasons(&conn, "PR_1", &[reason("team_review")], Some("t2"), "t3").unwrap();
+        assert_eq!(state_of(&conn, "PR_1"), "new");
     }
 
     #[test]

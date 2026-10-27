@@ -13,16 +13,21 @@ The Inbox is a triage queue, not a monitor ([ADR 0005](../adr/0005-inbox-is-a-tr
   assignments and issues you opened. Your own PRs are never queued.
 - Per item:
   - **Track** (or **Open as review**, which also tracks) moves it to the Board and out of the queue.
-  - **Archive** dismisses it.
+  - **Archive** dismisses it. Its menu has **Archive and forget**, which also stops it from ever
+    coming back, even with a new reason.
+  - The check/dot button marks it **read** or **unread**. Unread items have an accent border and
+    count in the tab and sidebar badges; read ones stay in New without counting. The rail's
+    **Show → Unread** filter lists only the unread ones.
 - Items that close on GitHub archive themselves. An archived item comes back only when it gains a
   new reason (e.g. you are re-requested as reviewer), never on plain activity.
 - An item no search finds any more is marked **stale** and stays until triaged.
 - Bot-authored items are tagged **bot** (GitHub's account type plus the list in Settings) and
   filterable.
 - **Archive** tab: everything triaged (dismissed, closed, discarded from the Board, tracked), with
-  search and no cap. Archived items have a **Restore** button that moves them back to New.
+  search and no cap. Archived items have a **Restore** button that moves them back to New; forgotten
+  ones carry a **forgotten** chip and have their own filter.
 - Discovery runs as soon as a conditional `GET /notifications` poll (about every 60s) sees a change; the interval in Settings → Sync (5 minutes by default, at least 30 minutes while notifications work) is a fallback, since notifications record events, not current state.
-- CLI: `cr inbox list|archive|restore|sync`.
+- CLI: `cr inbox list|archive|forget|restore|sync`.
 
 ## Board
 

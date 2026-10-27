@@ -39,6 +39,7 @@ const CAUSES: { key: string; label: string }[] = [
   { key: "closed", label: "closed" },
   { key: "discarded", label: "discarded" },
   { key: "tracked", label: "tracked" },
+  { key: "forgotten", label: "forgotten" },
 ];
 
 // GitHub's PullRequestReviewDecision enum (null for issues / draft PRs / repos
@@ -144,6 +145,7 @@ export function InboxView() {
 
   const onErr = (e: unknown) => toast.error(String(e));
   const archive = useMutation({ mutationFn: api.archiveItem, onSuccess: invalidate, onError: onErr });
+  const forget = useMutation({ mutationFn: api.forgetItem, onSuccess: invalidate, onError: onErr });
   const restore = useMutation({ mutationFn: api.restoreItem, onSuccess: invalidate, onError: onErr });
   const markViewed = useMutation({ mutationFn: api.markItemViewed, onSuccess: invalidate, onError: onErr });
   const markUnread = useMutation({ mutationFn: api.markItemUnread, onSuccess: invalidate, onError: onErr });
@@ -259,7 +261,7 @@ export function InboxView() {
   const visibleIds = items.map((i) => i.id);
   useSyncScope("inbox", onHome, visibleIds);
 
-  const busy = archive.isPending || restore.isPending || markViewed.isPending || markUnread.isPending || openPr.isPending || track.isPending;
+  const busy = archive.isPending || forget.isPending || restore.isPending || markViewed.isPending || markUnread.isPending || openPr.isPending || track.isPending;
   const lastRefresh = metaQuery.data?.lastRefreshAt;
   const loading = active === "archive" ? archiveQuery.isLoading : inboxQuery.isLoading;
   const tab = TABS.find((t) => t.key === active)!;
@@ -396,6 +398,7 @@ export function InboxView() {
                 isBot={isBot(item)}
                 existingReviewId={existingReviewId}
                 onArchive={() => archive.mutate(item.id)}
+                onForget={() => forget.mutate(item.id)}
                 onRestore={() => restore.mutate(item.id)}
                 onMarkViewed={() => markViewed.mutate(item.id)}
                 onMarkUnread={() => markUnread.mutate(item.id)}

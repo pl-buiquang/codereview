@@ -287,6 +287,8 @@ export const api = {
   markItemViewed: (id: string) => invoke<void>("mark_item_viewed", { id }),
   markItemUnread: (id: string) => invoke<void>("mark_item_unread", { id }),
   archiveItem: (id: string) => invoke<void>("archive_item", { id }),
+  /** Archive for good: a new reason doesn't bring it back to New. */
+  forgetItem: (id: string) => invoke<void>("forget_item", { id }),
   restoreItem: (id: string) => invoke<void>("restore_item", { id }),
   openPrReview: (itemId: string, owner: string, name: string, number: number, basePaths: string[] = []) =>
     invoke<Review>("open_pr_review", { itemId, owner, name, number, basePaths }),

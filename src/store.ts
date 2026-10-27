@@ -75,7 +75,7 @@ export interface InboxFilters {
   reason: string | null;
   /** bot | human | stale */
   flag: string | null;
-  /** Archive tab only: dismissed | closed | discarded | tracked. */
+  /** Archive tab only: dismissed | closed | discarded | tracked | forgotten. */
   cause: string | null;
   /** New tab only: just the unread items. */
   unread: boolean;

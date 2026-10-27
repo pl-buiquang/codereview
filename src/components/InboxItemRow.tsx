@@ -1,5 +1,6 @@
 import { timeAgo } from "../lib/timeAgo";
 import type { InboxItem } from "../lib/types";
+import { ArchiveButton } from "./ArchiveButton";
 import { BotBadge, CiBadge, ReasonBadge, StaleBadge, StatusPill, TypeBadge } from "./InboxBadges";
 import { RepoName } from "./RepoName";
 import { Icon } from "./icons";
@@ -20,6 +21,7 @@ export function InboxItemRow({
   isBot,
   existingReviewId,
   onArchive,
+  onForget,
   onRestore,
   onMarkViewed,
   onMarkUnread,
@@ -35,6 +37,8 @@ export function InboxItemRow({
   isBot: boolean;
   existingReviewId?: number;
   onArchive: () => void;
+  /** Archive for good: a new reason won't bring it back. */
+  onForget: () => void;
   onRestore: () => void;
   /** Mark read: stops it counting in the badges. New items only. */
   onMarkViewed?: () => void;
@@ -98,6 +102,11 @@ export function InboxItemRow({
                 {CAUSE_LABEL[item.archive_cause ?? "dismissed"] ?? "archived"}
               </span>
             ))}
+          {variant === "archive" && item.forgotten_at && (
+            <span className="chip" title="Never comes back to New; Restore to undo">
+              forgotten
+            </span>
+          )}
           <span className="faint">by {item.author_login ?? "unknown"}</span>
         </div>
 
@@ -176,14 +185,7 @@ export function InboxItemRow({
             </button>
           )}
           {variant === "new" ? (
-            <button
-              className="btn btn-sm btn-ghost"
-              disabled={busy}
-              onClick={onArchive}
-              title="Archive — hide from New; comes back only if GitHub gives it a new reason"
-            >
-              Archive
-            </button>
+            <ArchiveButton busy={busy} onArchive={onArchive} onForget={onForget} />
           ) : (
             item.inbox_state === "archived" && (
               <button className="btn btn-sm btn-ghost" disabled={busy} onClick={onRestore} title="Move back to New">
