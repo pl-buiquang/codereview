@@ -156,9 +156,9 @@ describe("exportCustomTheme / importCustomTheme", () => {
   });
 
   it("accepts a bare theme object and defaults invalid fields", () => {
-    const imported = importCustomTheme(JSON.stringify({ base: "zzz", light: { accent: "red", bg: "#fff" } }));
+    const imported = importCustomTheme(JSON.stringify({ base: "zzz", light: { accent: "red", background: "#fff" } }));
     expect(imported.base).toBe(DEFAULT_CUSTOM_THEME.base);
-    expect(imported.light).toEqual({ bg: "#ffffff" });
+    expect(imported.light).toEqual({ background: "#ffffff" });
   });
 
   it("rejects non-JSON and files without a theme", () => {
