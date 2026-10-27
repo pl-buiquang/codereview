@@ -5,6 +5,9 @@
    B · Modern      — Inter + JetBrains Mono, indigo accent, near-black darks, soft radii
    C · Terminal    — JetBrains Mono everywhere, green accent, sharp
 
+   `--review-required` (board card border for PRs awaiting review) is Continuity's blue in every
+   theme, independent of --accent.
+
    Derived from the original design handoff with two
    additions per spec 22: the 8 `--tok-*` syntax-highlight values inside each
    theme block, and the COMPAT alias block at the end (removed in Phase 8).
@@ -44,6 +47,7 @@
   --on-accent: #06121F;
   --accent-soft: rgba(76, 158, 248, 0.13);
   --accent-border: rgba(76, 158, 248, 0.45);
+  --review-required: #4C9EF8;
   --success: #46C26B;
   --success-soft: rgba(70, 194, 107, 0.13);
   --warning: #E3B341;
@@ -83,6 +87,7 @@
   --on-accent: #FFFFFF;
   --accent-soft: rgba(11, 107, 217, 0.09);
   --accent-border: rgba(11, 107, 217, 0.38);
+  --review-required: #0B6BD9;
   --success: #168A3F;
   --success-soft: rgba(22, 138, 63, 0.10);
   --warning: #9A6700;
@@ -130,6 +135,7 @@
   --on-accent: #0B0B14;
   --accent-soft: rgba(130, 140, 248, 0.13);
   --accent-border: rgba(130, 140, 248, 0.45);
+  --review-required: #4C9EF8;
   --success: #34D399;
   --success-soft: rgba(52, 211, 153, 0.12);
   --warning: #FBBF24;
@@ -169,6 +175,7 @@
   --on-accent: #FFFFFF;
   --accent-soft: rgba(79, 70, 229, 0.08);
   --accent-border: rgba(79, 70, 229, 0.35);
+  --review-required: #0B6BD9;
   --success: #0E9F6E;
   --success-soft: rgba(14, 159, 110, 0.10);
   --warning: #B45309;
@@ -217,6 +224,7 @@
   --on-accent: #0B1510;
   --accent-soft: rgba(63, 207, 142, 0.12);
   --accent-border: rgba(63, 207, 142, 0.45);
+  --review-required: #4C9EF8;
   --success: #3FCF8E;
   --success-soft: rgba(63, 207, 142, 0.12);
   --warning: #E0AF68;
@@ -256,6 +264,7 @@
   --on-accent: #FFFFFF;
   --accent-soft: rgba(14, 159, 110, 0.09);
   --accent-border: rgba(14, 159, 110, 0.40);
+  --review-required: #0B6BD9;
   --success: #0E9F6E;
   --success-soft: rgba(14, 159, 110, 0.10);
   --warning: #B7791F;
@@ -304,6 +313,7 @@
   --on-accent: #0D1117;
   --accent-soft: rgba(56, 139, 253, 0.15);
   --accent-border: rgba(56, 139, 253, 0.40);
+  --review-required: #4C9EF8;
   --success: #3FB950;
   --success-soft: rgba(63, 185, 80, 0.15);
   --warning: #D29922;
@@ -343,6 +353,7 @@
   --on-accent: #FFFFFF;
   --accent-soft: rgba(9, 105, 218, 0.08);
   --accent-border: rgba(9, 105, 218, 0.40);
+  --review-required: #0B6BD9;
   --success: #1A7F37;
   --success-soft: rgba(26, 127, 55, 0.10);
   --warning: #9A6700;
