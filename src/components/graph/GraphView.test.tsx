@@ -35,7 +35,7 @@ vi.mock("../../lib/toast", () => ({
   toast: { error: (m: string) => toastError(m), success: vi.fn() },
 }));
 
-import { GraphView, GRAPH_PAGE_SIZE, fetchLabel } from "./GraphView";
+import { GraphView, GRAPH_PAGE_SIZE, fetchLabel, commitMatches } from "./GraphView";
 import { useUIStore } from "../../store";
 
 const repo: Repository = {
@@ -243,6 +243,46 @@ describe("GraphView", () => {
     await user.click(screen.getByRole("button", { name: /Fetch/ }));
     await waitFor(() => expect(fetchRepo).toHaveBeenCalledWith(repo.id, undefined));
     await waitFor(() => expect(listRefs).toHaveBeenCalledTimes(2));
+  });
+});
+
+describe("commit search", () => {
+  it("selects the first match, steps with Enter and clears with Escape", async () => {
+    const user = userEvent.setup();
+    graphLog.mockResolvedValue(
+      chain(0, 4).map((c, i) => ({ ...c, subject: i % 2 ? `fix bug ${i}` : `feat ${i}` })),
+    );
+    renderView();
+    await waitFor(() => expect(screen.getByText("fix bug 1")).toBeInTheDocument());
+
+    const box = screen.getByRole("searchbox", { name: "Search commits" });
+    await user.type(box, "fix");
+    expect(screen.getByText("1 / 2")).toBeInTheDocument();
+    await waitFor(() => expect(commitDetail).toHaveBeenCalledWith(repo.id, sha(1)));
+
+    await user.keyboard("{Enter}");
+    expect(screen.getByText("2 / 2")).toBeInTheDocument();
+    await waitFor(() => expect(commitDetail).toHaveBeenCalledWith(repo.id, sha(3)));
+
+    await user.keyboard("{Escape}");
+    expect(box).toHaveValue("");
+    expect(screen.queryByText("2 / 2")).not.toBeInTheDocument();
+  });
+
+  it("reports no match", async () => {
+    const user = userEvent.setup();
+    renderView();
+    await waitFor(() => expect(screen.getByText("subject 1")).toBeInTheDocument());
+    await user.type(screen.getByRole("searchbox", { name: "Search commits" }), "zzz");
+    expect(screen.getByText("no match")).toBeInTheDocument();
+  });
+
+  it("matches words across subject, author and sha prefix", () => {
+    const c = { ...chain(0, 1)[0], subject: "Add search", author_name: "Ada" };
+    expect(commitMatches(c, "add ada")).toBe(true);
+    expect(commitMatches(c, sha(0).slice(0, 7))).toBe(true);
+    expect(commitMatches(c, "add nobody")).toBe(false);
+    expect(commitMatches(c, "  ")).toBe(false);
   });
 });
 

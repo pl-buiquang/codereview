@@ -31,6 +31,10 @@
   background: var(--surface-2);
 }
 
+.cg-row.is-match {
+  box-shadow: inset 3px 0 0 var(--accent, #d4a72c);
+}
+
 .cg-row.is-selected {
   background: var(--accent-soft);
   border-left-color: var(--accent);

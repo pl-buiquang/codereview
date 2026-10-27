@@ -47,6 +47,8 @@ export interface CommitGraphProps {
   wip?: { count: number } | null;
   /** A commit sha, `WIP_SELECTION`, or null. */
   selectedSha: string | null;
+  /** Commits matching the search box; their rows are highlighted. */
+  matchShas?: ReadonlySet<string>;
   onSelect: (sha: string) => void;
   /** When true, ↑/↓ select the previous/next row (off while something else owns the arrows). */
   arrowKeys?: boolean;
@@ -90,6 +92,7 @@ export const CommitGraph = forwardRef<CommitGraphHandle, CommitGraphProps>(funct
     headSha,
     wip = null,
     selectedSha,
+    matchShas,
     onSelect,
     arrowKeys = false,
     onEndReached,
@@ -293,7 +296,7 @@ export const CommitGraph = forwardRef<CommitGraphHandle, CommitGraphProps>(funct
         role="row"
         aria-selected={selected}
         data-sha={commit.sha}
-        className={`cg-row${selected ? " is-selected" : ""}${isHead ? " is-head" : ""}`}
+        className={`cg-row${selected ? " is-selected" : ""}${isHead ? " is-head" : ""}${matchShas?.has(commit.sha) ? " is-match" : ""}`}
         style={{ top, height: ROW_HEIGHT }}
         onClick={() => onSelect(commit.sha)}
         onContextMenu={

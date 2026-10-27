@@ -9,7 +9,7 @@ import { useUIStore } from "../../store";
 import type { RepoSyncState } from "../../lib/types";
 import { KebabMenu } from "../KebabMenu";
 import { layoutGraph } from "../../lib/graphLayout";
-import type { ChangedFile, GraphScope, RefInfo, Repository, WipKind } from "../../lib/types";
+import type { ChangedFile, GraphCommit, GraphScope, RefInfo, Repository, WipKind } from "../../lib/types";
 import { Icon } from "../icons";
 import { CommitGraph, WIP_SELECTION, type CommitGraphHandle } from "./CommitGraph";
 import { CommitPanel } from "./CommitPanel";
@@ -23,6 +23,14 @@ import "./GraphView.css";
 
 export const GRAPH_PAGE_SIZE = 400;
 export const MAX_JUMP_PAGES = 20;
+
+/** Case-insensitive match on subject, body preview, author or sha prefix; every word must match. */
+export function commitMatches(c: GraphCommit, query: string): boolean {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return false;
+  const hay = `${c.subject}\n${c.body_preview}\n${c.author_name} ${c.author_email}`.toLowerCase();
+  return words.every((w) => hay.includes(w) || c.sha.startsWith(w));
+}
 const OUT_OF_SCOPE_MESSAGE = "Switch to All to see this branch";
 
 const SCOPE_OPTIONS: { value: GraphScope; label: string }[] = [
@@ -59,6 +67,9 @@ export function GraphView({ repo }: { repo: Repository }) {
   const [pillMenu, setPillMenu] = useState<{ ref: RefInfo; anchor: MenuAnchor } | null>(null);
   const [commitMenu, setCommitMenu] = useState<{ sha: string; anchor: MenuAnchor } | null>(null);
   const [stashPreview, setStashPreview] = useState<number | null>(null);
+  const [search, setSearch] = useState("");
+  const [matchIndex, setMatchIndex] = useState(0);
+  const searchRef = useRef<HTMLInputElement>(null);
   const [leftWidth, setLeftWidth] = useState(240);
   const [rightWidth, setRightWidth] = useState(340);
   const hasClone = repo.local_path != null;
@@ -153,6 +164,12 @@ export function GraphView({ repo }: { repo: Repository }) {
   const pages = graphQuery.data?.pages;
   const commits = useMemo(() => (pages ?? []).flat(), [pages]);
   const layout = useMemo(() => layoutGraph(commits), [commits]);
+
+  const matches = useMemo(
+    () => (search.trim() ? commits.filter((c) => commitMatches(c, search)).map((c) => c.sha) : []),
+    [commits, search],
+  );
+  const matchSet = useMemo(() => new Set(matches), [matches]);
 
   // Oldest loaded commit per author: the likeliest to be pushed, so GitHub can map it to a user.
   const authorShas = useMemo(() => {
@@ -277,6 +294,51 @@ export function GraphView({ repo }: { repo: Repository }) {
     },
     [commits, pages, graphQuery, select],
   );
+
+  const goToMatch = useCallback(
+    (index: number) => {
+      if (matches.length === 0) return;
+      const i = ((index % matches.length) + matches.length) % matches.length;
+      setMatchIndex(i);
+      select(matches[i]);
+      setPendingScroll(matches[i]);
+    },
+    [matches, select],
+  );
+
+  // Cmd/Ctrl+F focuses the search box while the graph tab is showing.
+  useEffect(() => {
+    if (!visible) return;
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        searchRef.current?.focus();
+        searchRef.current?.select();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [visible]);
+
+  // Jump to the first match once the query yields one (it may come from a later page).
+  const awaitingFirst = useRef(false);
+  useEffect(() => {
+    awaitingFirst.current = true;
+    setMatchIndex(0);
+  }, [search]);
+  useEffect(() => {
+    if (!awaitingFirst.current || matches.length === 0) return;
+    awaitingFirst.current = false;
+    goToMatch(0);
+  }, [matches, goToMatch]);
+
+  // Matches may live beyond the loaded pages: keep loading (capped) until one shows up.
+  useEffect(() => {
+    if (!search.trim() || matches.length > 0) return;
+    if (graphQuery.hasNextPage && !graphQuery.isFetchingNextPage && (pages?.length ?? 0) < MAX_JUMP_PAGES) {
+      void graphQuery.fetchNextPage();
+    }
+  }, [search, matches.length, graphQuery, pages?.length]);
 
   const onJumpToRef = useCallback(
     (ref: RefInfo) => {
@@ -441,6 +503,7 @@ export function GraphView({ repo }: { repo: Repository }) {
         headSha={headSha}
         wip={wipCount > 0 ? { count: wipCount } : null}
         selectedSha={selected}
+        matchShas={matchSet}
         onSelect={select}
         arrowKeys={visible && !previewOpen}
         onEndReached={onEndReached}
@@ -528,6 +591,55 @@ export function GraphView({ repo }: { repo: Repository }) {
           )}
         </span>
         <span className="cr-spacer" />
+        <div className="gv-search" role="search">
+          <input
+            ref={searchRef}
+            className="input"
+            type="search"
+            placeholder="Search commits…"
+            aria-label="Search commits"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                goToMatch(matchIndex + (e.shiftKey ? -1 : 1));
+              } else if (e.key === "Escape") {
+                setSearch("");
+                e.currentTarget.blur();
+              }
+            }}
+          />
+          {search.trim() && (
+            <>
+              <span className="gv-search-count" aria-live="polite">
+                {matches.length > 0
+                  ? `${matchIndex + 1} / ${matches.length}${graphQuery.hasNextPage ? "+" : ""}`
+                  : graphQuery.isFetchingNextPage || graphQuery.hasNextPage
+                    ? "searching…"
+                    : "no match"}
+              </span>
+              <button
+                className="btn-icon"
+                title="Previous match (Shift+Enter)"
+                aria-label="Previous match"
+                disabled={matches.length === 0}
+                onClick={() => goToMatch(matchIndex - 1)}
+              >
+                ↑
+              </button>
+              <button
+                className="btn-icon"
+                title="Next match (Enter)"
+                aria-label="Next match"
+                disabled={matches.length === 0}
+                onClick={() => goToMatch(matchIndex + 1)}
+              >
+                ↓
+              </button>
+            </>
+          )}
+        </div>
         {reloading && <span className="spinner" aria-label="Reloading" />}
         {hasClone && (
           <>

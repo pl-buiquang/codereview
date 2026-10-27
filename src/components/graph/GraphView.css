@@ -94,3 +94,19 @@
 .gv-msg {
   padding: var(--sp-3);
 }
+
+.gv-search {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.gv-search input {
+  width: 200px;
+}
+
+.gv-search-count {
+  font-size: 12px;
+  color: var(--text-2);
+  white-space: nowrap;
+}
