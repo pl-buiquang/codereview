@@ -2300,6 +2300,12 @@ tr.kb-focus {
   align-items: center;
   gap: 12px;
 }
+/* The panel itself doesn't scroll: the sidebar stays put and only .settings-content scrolls. */
+.settings-panel {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
 .settings-layout {
   flex: 1;
   min-height: 0;
@@ -2314,6 +2320,7 @@ tr.kb-focus {
   flex-direction: column;
   padding: 14px 10px;
   gap: 2px;
+  overflow-y: auto;
 }
 .settings-content {
   flex: 1;
