@@ -178,11 +178,12 @@ pub fn run() {
             routines::seed(&conn)?;
             routines::adopt_builtin_keys(&conn)?;
             routines::adopt_prompt_overrides(&conn)?;
-            routines::manager::mark_interrupted(&conn)?;
+            routines::manager::mark_interrupted(&conn, &db_path)?;
             app.manage(Db(Mutex::new(conn)));
             ai_usage::init(app.handle().clone());
-            routines::manager::RoutineManager::start_ticker(app.handle().clone());
             app.manage(db::DbPath(db_path.clone()));
+            routines::manager::RoutineManager::start_ticker(app.handle().clone());
+            routines::manager::RoutineManager::adopt_detached(app.handle());
             app.manage(sync::SyncEngine::start(app.handle().clone()));
 
             let log_dir = db_path
@@ -450,19 +451,34 @@ pub fn run() {
                     if !manager.begin_quit_prompt() {
                         return;
                     }
-                    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
+                    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogResult};
+                    const STOP_AND_QUIT: &str = "Stop and quit";
+                    const LEAVE_RUNNING: &str = "Leave running";
                     let handle = app.clone();
                     app.dialog()
                         .message(format!(
-                            "{active} routine run{} will be stopped if you quit.",
-                            if active == 1 { "" } else { "s" }
+                            "{active} routine run{} in progress. Stop {}, or leave {} running and pick {} up on the next launch?",
+                            if active == 1 { " is" } else { "s are" },
+                            if active == 1 { "it" } else { "them" },
+                            if active == 1 { "it" } else { "them" },
+                            if active == 1 { "it" } else { "them" },
                         ))
                         .title("Routines are running")
-                        .buttons(MessageDialogButtons::OkCancelCustom("Stop and quit".into(), "Cancel".into()))
-                        .show(move |stop_and_quit| {
-                            handle.state::<routines::manager::RoutineManager>().end_quit_prompt();
-                            if stop_and_quit {
-                                handle.exit(0);
+                        .buttons(MessageDialogButtons::YesNoCancelCustom(
+                            STOP_AND_QUIT.into(),
+                            LEAVE_RUNNING.into(),
+                            "Cancel".into(),
+                        ))
+                        .show_with_result(move |choice| {
+                            let manager = handle.state::<routines::manager::RoutineManager>();
+                            manager.end_quit_prompt();
+                            match choice {
+                                MessageDialogResult::Custom(c) if c == STOP_AND_QUIT => handle.exit(0),
+                                MessageDialogResult::Custom(c) if c == LEAVE_RUNNING => {
+                                    manager.detach_all(&handle);
+                                    handle.exit(0);
+                                }
+                                _ => {}
                             }
                         });
                 }

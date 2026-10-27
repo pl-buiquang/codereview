@@ -1,10 +1,14 @@
 //! Owns the `claude -p` processes of routine runs: FIFO queue under a concurrency cap, streaming of
-//! the `stream-json` transcript into `routine_run_event`, stop / timeout, and killing everything
-//! when the app exits. Each run's process leads its own process group, so one signal reaches the
-//! tools it spawned.
+//! the `stream-json` transcript into `routine_run_event`, stop / timeout, and either killing
+//! everything when the app exits or leaving the runs behind (detaching) for the next launch to
+//! re-adopt. Each run's process leads its own process group, so one signal reaches the tools it
+//! spawned. Its stdout / stderr go to files in a per-run directory and the transcript is tailed from
+//! there, so a run does not depend on the app that started it staying alive.
 
 use std::collections::HashMap;
+use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Write};
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -30,6 +34,20 @@ const CONCURRENCY_KEY: &str = "routine_max_concurrency";
 const MAX_EVENT_BYTES: usize = 100_000;
 const KEEP_RUNS: i64 = 200;
 const STOP_GRACE: Duration = Duration::from_secs(5);
+const TAIL_POLL: Duration = Duration::from_millis(200);
+const PROMPT_FILE: &str = "system.txt";
+const STDOUT_FILE: &str = "stdout.jsonl";
+const STDERR_FILE: &str = "stderr.log";
+const STDERR_MAX_BYTES: usize = 16_384;
+
+/// `<db dir>/routine_runs`: one subdirectory per live run (prompt, stdout, stderr).
+fn runs_root(db_path: &Path) -> PathBuf {
+    db_path.parent().unwrap_or(Path::new(".")).join("routine_runs")
+}
+
+fn run_dir(app: &AppHandle, run_id: i64) -> PathBuf {
+    runs_root(&app.state::<DbPath>().0).join(run_id.to_string())
+}
 
 #[derive(Default)]
 pub struct RoutineManager {
@@ -42,6 +60,8 @@ struct Inner {
     /// Stop requests (`killed` / `timeout`), consumed when the run finishes.
     stops: HashMap<i64, &'static str>,
     shutting_down: bool,
+    /// Exiting with the runs left alive: workers stop tailing without finalizing and nothing is killed.
+    detaching: bool,
     /// The quit confirmation is on screen: a second quit request must not stack another.
     quit_prompt_open: bool,
 }
@@ -256,33 +276,59 @@ fn emit_updated(app: &AppHandle, run_id: i64, status: &str) {
     let _ = app.emit("routine-run-updated", RunUpdated { run_id, status: status.to_string() });
 }
 
-/// Runs left `running` / `queued` by a previous session never finished: they are `interrupted`. A
-/// process that outlived a crashed app (it leads its own group, so it isn't killed with us) is
-/// terminated first when it still looks like our `claude -p`.
-pub fn mark_interrupted(conn: &Connection) -> AppResult<usize> {
-    let mut stmt = conn.prepare("SELECT pid FROM routine_run WHERE status = 'running' AND pid IS NOT NULL")?;
-    let pids: Vec<i64> = stmt.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
-    for pid in pids {
-        kill_leftover(pid as i32);
+/// Runs left `running` / `queued` by a previous session never finished: they are `interrupted`.
+/// Except a `running` one whose output file is still there: it may have outlived the app (detached
+/// on quit, or the app crashed), and `adopt_detached` decides once the app state is up. A process
+/// that left no output file (older runs) is terminated first when it still looks like our `claude -p`.
+pub fn mark_interrupted(conn: &Connection, db_path: &Path) -> AppResult<usize> {
+    let root = runs_root(db_path);
+    let mut stmt = conn.prepare("SELECT id, pid FROM routine_run WHERE status = 'running'")?;
+    let rows: Vec<(i64, Option<i64>)> = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<_>>()?;
+    let mut n = conn.execute("UPDATE routine_run SET status = 'interrupted', ended_at = ?1 WHERE status = 'queued'", params![now()])?;
+    for (id, pid) in rows {
+        if root.join(id.to_string()).join(STDOUT_FILE).exists() {
+            continue;
+        }
+        if let Some(pid) = pid {
+            kill_leftover(pid as i32);
+        }
+        n += conn.execute(
+            "UPDATE routine_run SET status = 'interrupted', ended_at = ?2 WHERE id = ?1",
+            params![id, now()],
+        )?;
     }
-    let n = conn.execute(
-        "UPDATE routine_run SET status = 'interrupted', ended_at = ?1 WHERE status IN ('queued', 'running')",
-        params![now()],
-    )?;
     Ok(n)
 }
 
+/// Whether `pid` is still a `claude -p` (of that session, when known): guards against pid reuse.
 #[cfg(unix)]
-fn kill_leftover(pid: i32) {
-    let Ok(out) = Command::new("ps").args(["-o", "command=", "-p", &pid.to_string()]).output() else { return };
+fn is_our_claude(pid: i32, session_id: Option<&str>) -> bool {
+    let Ok(out) = Command::new("ps").args(["-o", "command=", "-p", &pid.to_string()]).output() else { return false };
     let cmd = String::from_utf8_lossy(&out.stdout);
-    if cmd.contains("claude") && cmd.contains(" -p") {
-        signal_group(pid, libc::SIGTERM);
-    }
+    cmd.contains("claude") && cmd.contains(" -p") && session_id.is_none_or(|s| cmd.contains(s))
 }
 
 #[cfg(not(unix))]
-fn kill_leftover(_pid: i32) {}
+fn is_our_claude(_pid: i32, _session_id: Option<&str>) -> bool {
+    false
+}
+
+#[cfg(unix)]
+fn process_alive(pid: i32) -> bool {
+    // SAFETY: signal 0 only probes for existence.
+    unsafe { libc::kill(pid, 0) == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM) }
+}
+
+#[cfg(not(unix))]
+fn process_alive(_pid: i32) -> bool {
+    false
+}
+
+fn kill_leftover(pid: i32) {
+    if is_our_claude(pid, None) {
+        signal_group(pid, SIGTERM);
+    }
+}
 
 #[cfg(unix)]
 fn signal_group(pgid: i32, sig: i32) {
@@ -472,12 +518,59 @@ impl RoutineManager {
         self.inner.lock().unwrap().quit_prompt_open = false;
     }
 
+    /// App is exiting but the runs go on: workers stop tailing (leaving their rows `running` for the
+    /// next launch to adopt) and nothing is signalled. Runs that never started are dropped.
+    pub fn detach_all(&self, app: &AppHandle) {
+        {
+            let mut inner = self.inner.lock().unwrap();
+            inner.shutting_down = true;
+            inner.detaching = true;
+        }
+        if let Some(db) = app.try_state::<Db>() {
+            let _ = db.0.lock().unwrap().execute(
+                "UPDATE routine_run SET status = 'killed', ended_at = ?1 WHERE status = 'queued'",
+                params![now()],
+            );
+        }
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < deadline && !self.inner.lock().unwrap().live.is_empty() {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    /// Startup: pick up the runs a previous session left alive (`mark_interrupted` spared them) and
+    /// sweep the files of every other run.
+    pub fn adopt_detached(app: &AppHandle) {
+        let db = app.state::<Db>();
+        let running: Vec<i64> = {
+            let conn = db.0.lock().unwrap();
+            let Ok(mut stmt) = conn.prepare("SELECT id FROM routine_run WHERE status = 'running'") else { return };
+            let ids = stmt.query_map([], |r| r.get(0)).map(|rows| rows.flatten().collect()).unwrap_or_default();
+            ids
+        };
+        if let Ok(entries) = std::fs::read_dir(runs_root(&app.state::<DbPath>().0)) {
+            for entry in entries.flatten() {
+                let Some(id) = entry.file_name().to_str().and_then(|n| n.parse::<i64>().ok()) else { continue };
+                if !running.contains(&id) {
+                    discard_run_files(app, id);
+                }
+            }
+        }
+        for id in running {
+            let app = app.clone();
+            std::thread::spawn(move || adopt(app, id));
+        }
+    }
+
     /// App is exiting: terminate every process group and settle the rows ourselves (the worker
     /// threads won't get to).
     pub fn kill_all(&self, app: &AppHandle) {
         let pgids: Vec<i32> = {
             let mut inner = self.inner.lock().unwrap();
             inner.shutting_down = true;
+            if inner.detaching {
+                return;
+            }
             inner.live.values().map(|l| l.pgid).collect()
         };
         if let Some(db) = app.try_state::<Db>() {
@@ -518,6 +611,8 @@ struct Outcome {
     usage: RunUsage,
     /// Why there is no usable result: spawn failure, context resolution failure, exit status…
     failure: Option<String>,
+    /// The app is quitting with this run left alive: nothing to settle, the next launch adopts it.
+    detached: bool,
 }
 
 fn execute(app: AppHandle, run_id: i64) {
@@ -536,16 +631,24 @@ fn execute(app: AppHandle, run_id: i64) {
         }
     };
     let outcome = run_process(&app, &run, &routine);
-    let status = finalize(&app, run_id, Some(&routine), Some(&run), &outcome);
+    if outcome.detached {
+        return;
+    }
+    settle(&app, &run, &routine, &outcome, started, &started_at);
+}
+
+/// Finalize a finished run, record its usage and start the next queued one.
+fn settle(app: &AppHandle, run: &RoutineRun, routine: &Routine, outcome: &Outcome, started: Instant, started_at: &str) {
+    let status = finalize(app, run.id, Some(routine), Some(run), outcome);
     let usage_error = match status.as_str() {
         "ok" | "needs_attention" => None,
         "error" => Some(outcome.failure.clone().unwrap_or_else(|| "error".into())),
         other => Some(other.to_string()),
     };
-    let mut tag = handlers::usage_tag(&routine, &run);
+    let mut tag = handlers::usage_tag(routine, run);
     tag.model = if run.model.is_empty() { routine.model.clone() } else { run.model.clone() };
-    ai_usage::record(&tag, &started_at, started.elapsed().as_millis() as i64, &outcome.usage, usage_error.as_deref());
-    app.state::<RoutineManager>().pump(&app);
+    ai_usage::record(&tag, started_at, started.elapsed().as_millis() as i64, &outcome.usage, usage_error.as_deref());
+    app.state::<RoutineManager>().pump(app);
 }
 
 fn run_process(app: &AppHandle, run: &RoutineRun, routine: &Routine) -> Outcome {
@@ -564,6 +667,12 @@ fn run_process(app: &AppHandle, run: &RoutineRun, routine: &Routine) -> Outcome 
         Ok(p) => p,
         Err(e) => return fail(e.to_string()),
     };
+    if !prep.cleanup.is_empty() {
+        let _ = app.state::<Db>().0.lock().unwrap().execute(
+            "UPDATE routine_run SET cleanup_json = ?2 WHERE id = ?1",
+            params![run.id, serde_json::to_string(&prep.cleanup).unwrap_or_default()],
+        );
+    }
     let cleanup = || prep.cleanup.iter().for_each(|d| drop(std::fs::remove_dir_all(d)));
     let cwd = prep.cwd.clone().unwrap_or_else(|| resolved.cwd.clone());
     let vars: Vec<(&str, &str)> =
@@ -581,11 +690,18 @@ fn run_process(app: &AppHandle, run: &RoutineRun, routine: &Routine) -> Outcome 
     if !run.note.trim().is_empty() {
         system.push_str(&format!("\n\n## Extra instructions for this run\n{}", run.note.trim()));
     }
-    let prompt_path = std::env::temp_dir().join(format!("codereview_routine_{}.txt", run.id));
-    if let Err(e) = std::fs::write(&prompt_path, &system) {
-        cleanup();
-        return fail(format!("failed to write system prompt: {e}"));
-    }
+    let dir = run_dir(app, run.id);
+    let prompt_path = dir.join(PROMPT_FILE);
+    let files = std::fs::create_dir_all(&dir)
+        .and_then(|_| std::fs::write(&prompt_path, &system))
+        .and_then(|_| Ok((File::create(dir.join(STDOUT_FILE))?, File::create(dir.join(STDERR_FILE))?)));
+    let (stdout_file, stderr_file) = match files {
+        Ok(f) => f,
+        Err(e) => {
+            cleanup();
+            return fail(format!("failed to prepare the run directory: {e}"));
+        }
+    };
 
     let session_id = new_session_id();
     let model = handlers::effective_model(run, routine);
@@ -615,7 +731,8 @@ fn run_process(app: &AppHandle, run: &RoutineRun, routine: &Routine) -> Outcome 
     if let Some(path) = child_path() {
         cmd.env("PATH", path);
     }
-    cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    // Files, not pipes: the process must outlive us when the app quits with runs left alive.
+    cmd.stdin(Stdio::piped()).stdout(Stdio::from(stdout_file)).stderr(Stdio::from(stderr_file));
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
@@ -654,49 +771,180 @@ fn run_process(app: &AppHandle, run: &RoutineRun, routine: &Routine) -> Outcome 
     if let Some(mut stdin) = child.stdin.take() {
         let _ = stdin.write_all(prompt.as_bytes());
     }
-    let stderr_handle = child.stderr.take().map(|mut s| {
-        std::thread::spawn(move || {
-            let mut buf = Vec::new();
-            let _ = (&mut s).take(16_384).read_to_end(&mut buf);
-            // Keep draining so the child never blocks on a full pipe.
-            let _ = std::io::copy(&mut s, &mut std::io::sink());
-            String::from_utf8_lossy(&buf).into_owned()
-        })
-    });
-
-    let mut result: Option<Value> = None;
-    let mut seq = 0i64;
-    if let Some(stdout) = child.stdout.take() {
-        for line in BufReader::new(stdout).lines() {
-            let Ok(line) = line else { break };
-            if line.trim().is_empty() {
-                continue;
-            }
-            let (kind, value) = parse_line(&line);
-            seq += 1;
-            record_event(app, run.id, seq, &kind, &line);
-            if kind == "result" {
-                result = value;
-            }
+    let tail = tail_events(app, run.id, &dir.join(STDOUT_FILE), 0, &mut || matches!(child.try_wait(), Ok(None)));
+    let result = match tail {
+        Tail::Detached => {
+            // Dropping `child` neither kills nor reaps it; the next launch adopts the run.
+            manager.inner.lock().unwrap().live.remove(&run.id);
+            return Outcome { detached: true, ..Outcome::default() };
         }
-    }
-    let status = child.wait();
+        Tail::Done(result) => result,
+    };
+    let status = child.wait().map(|s| s.to_string()).map_err(|e| e.to_string());
     manager.inner.lock().unwrap().live.remove(&run.id);
     let _ = std::fs::remove_file(&prompt_path);
     cleanup();
-    let stderr = stderr_handle.and_then(|h| h.join().ok()).unwrap_or_default();
+    outcome_from(result, read_stderr(&dir), status)
+}
 
+/// Usage and failure reason of a run that produced `result` (if it did) and then ended with `exit`.
+fn outcome_from(result: Option<Value>, stderr: String, exit: Result<String, String>) -> Outcome {
     let usage = result
         .as_ref()
         .and_then(|v| serde_json::from_value::<ClaudeEnvelope>(v.clone()).ok())
         .map(|e| e.run_usage())
         .unwrap_or_default();
-    let failure = match (&result, status) {
+    let failure = match (&result, exit) {
         (Some(_), _) => None,
         (None, Ok(s)) => Some(format!("claude exited with {s} without a result. {}", stderr.trim())),
         (None, Err(e)) => Some(format!("claude process error: {e}")),
     };
-    Outcome { result, usage, failure }
+    Outcome { result, usage, failure, detached: false }
+}
+
+fn read_stderr(dir: &Path) -> String {
+    let mut buf = Vec::new();
+    if let Ok(f) = File::open(dir.join(STDERR_FILE)) {
+        let _ = f.take(STDERR_MAX_BYTES as u64).read_to_end(&mut buf);
+    }
+    String::from_utf8_lossy(&buf).into_owned()
+}
+
+enum Tail {
+    /// The process ended and the file is drained: the `result` line, if there was one.
+    Done(Option<Value>),
+    /// The app is quitting with the run left alive.
+    Detached,
+}
+
+/// Follow the run's stdout file into `routine_run_event` until `alive` turns false. The first `skip`
+/// lines were recorded by an earlier session (the `seq` numbering is continuous across adoption).
+fn tail_events(app: &AppHandle, run_id: i64, path: &Path, skip: i64, alive: &mut dyn FnMut() -> bool) -> Tail {
+    let manager = app.state::<RoutineManager>();
+    let Ok(file) = File::open(path) else { return Tail::Done(None) };
+    let mut reader = BufReader::new(file);
+    let mut result: Option<Value> = None;
+    let mut seq = 0i64;
+    let mut pending = String::new();
+    let mut handle = |line: &str, result: &mut Option<Value>| {
+        if line.trim().is_empty() {
+            return;
+        }
+        let (kind, value) = parse_line(line);
+        seq += 1;
+        if seq > skip {
+            record_event(app, run_id, seq, &kind, line);
+        }
+        if kind == "result" {
+            *result = value;
+        }
+    };
+    loop {
+        // Sampled before reading, so output written just before the exit is still drained.
+        let dead = !alive();
+        loop {
+            match reader.read_line(&mut pending) {
+                Ok(0) | Err(_) => break,
+                Ok(_) if pending.ends_with('\n') => {
+                    handle(&pending, &mut result);
+                    pending.clear();
+                }
+                Ok(_) => {}
+            }
+        }
+        if dead {
+            handle(&pending, &mut result);
+            return Tail::Done(result);
+        }
+        if manager.inner.lock().unwrap().detaching {
+            return Tail::Detached;
+        }
+        std::thread::sleep(TAIL_POLL);
+    }
+}
+
+/// Take over a run a previous session left alive: keep tailing it, then settle it like any other.
+fn adopt(app: AppHandle, run_id: i64) {
+    let started = Instant::now();
+    let started_at = ai_usage::now_stamp();
+    let db = app.state::<Db>();
+    let loaded = {
+        let conn = db.0.lock().unwrap();
+        get_run(&conn, run_id).and_then(|run| get_routine(&conn, run.routine_id).map(|r| (run, r)))
+    };
+    let Ok((run, routine)) = loaded else { return settle_lost(&app, run_id) };
+    let pid = db
+        .0
+        .lock()
+        .unwrap()
+        .query_row("SELECT pid FROM routine_run WHERE id = ?1", params![run_id], |r| r.get::<_, Option<i64>>(0))
+        .ok()
+        .flatten()
+        .unwrap_or(0) as i32;
+    let dir = run_dir(&app, run_id);
+    let out = dir.join(STDOUT_FILE);
+    let alive = pid > 0 && is_our_claude(pid, run.session_id.as_deref());
+    // Gone without a result: it died with the app, or was killed meanwhile.
+    if !alive && !file_has_result(&out) {
+        return settle_lost(&app, run_id);
+    }
+    log::info!(target: "routines", "run {run_id}: adopted (process {})", if alive { "alive" } else { "finished" });
+    let manager = app.state::<RoutineManager>();
+    if alive {
+        let spent = run
+            .started_at
+            .as_deref()
+            .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
+            .and_then(|t| (chrono::Utc::now() - t.with_timezone(&chrono::Utc)).to_std().ok())
+            .unwrap_or_default();
+        let left = Duration::from_secs(routine.timeout_min.max(1) as u64 * 60).saturating_sub(spent);
+        manager.inner.lock().unwrap().live.insert(run_id, Live { pgid: pid, deadline: Instant::now() + left });
+    }
+    let skip: i64 = db
+        .0
+        .lock()
+        .unwrap()
+        .query_row("SELECT COALESCE(MAX(seq), 0) FROM routine_run_event WHERE run_id = ?1", params![run_id], |r| r.get(0))
+        .unwrap_or(0);
+    let tail = tail_events(&app, run_id, &out, skip, &mut || alive && process_alive(pid));
+    manager.inner.lock().unwrap().live.remove(&run_id);
+    let Tail::Done(result) = tail else { return };
+    let outcome = outcome_from(result, read_stderr(&dir), Ok("an unknown status".into()));
+    settle(&app, &run, &routine, &outcome, started, &started_at);
+}
+
+fn file_has_result(path: &Path) -> bool {
+    std::fs::read_to_string(path)
+        .map(|text| text.lines().rev().any(|l| parse_line(l).0 == "result"))
+        .unwrap_or(false)
+}
+
+/// A run that can't be picked up again: it ended with the app.
+fn settle_lost(app: &AppHandle, run_id: i64) {
+    let _ = app.state::<Db>().0.lock().unwrap().execute(
+        "UPDATE routine_run SET status = 'interrupted', ended_at = ?2 WHERE id = ?1 AND status = 'running'",
+        params![run_id, now()],
+    );
+    discard_run_files(app, run_id);
+    emit_updated(app, run_id, "interrupted");
+}
+
+/// Remove a run's directory and the scratch dirs it created.
+fn discard_run_files(app: &AppHandle, run_id: i64) {
+    let json: Option<String> = app
+        .state::<Db>()
+        .0
+        .lock()
+        .unwrap()
+        .query_row("SELECT cleanup_json FROM routine_run WHERE id = ?1", params![run_id], |r| r.get(0))
+        .ok()
+        .flatten();
+    if let Some(dirs) = json.and_then(|j| serde_json::from_str::<Vec<PathBuf>>(&j).ok()) {
+        for d in dirs {
+            let _ = std::fs::remove_dir_all(d);
+        }
+    }
+    let _ = std::fs::remove_dir_all(run_dir(app, run_id));
 }
 
 /// `(type, parsed line)` of one stream-json line; unparseable lines are kept as `raw`.
@@ -757,6 +1005,7 @@ fn finalize(app: &AppHandle, run_id: i64, routine: Option<&Routine>, run: Option
         let mut inner = manager.inner.lock().unwrap();
         (inner.stops.remove(&run_id), inner.shutting_down)
     };
+    discard_run_files(app, run_id);
     let text = outcome.result.as_ref().and_then(result_text).unwrap_or_default();
     let status = final_status(stop, outcome.result.as_ref(), &text);
     let error = match status {
@@ -891,9 +1140,47 @@ mod tests {
         insert_run(&conn, rid, "a", "queued").unwrap();
         insert_run(&conn, rid, "b", "running").unwrap();
         insert_run(&conn, rid, "c", "ok").unwrap();
-        assert_eq!(mark_interrupted(&conn).unwrap(), 2);
+        assert_eq!(mark_interrupted(&conn, Path::new("/nonexistent/db.sqlite")).unwrap(), 2);
         let statuses: Vec<String> = list_runs(&conn, &RunFilter::default()).unwrap().into_iter().map(|r| r.status).collect();
         assert_eq!(statuses, ["ok", "interrupted", "interrupted"]);
+    }
+
+    #[test]
+    fn mark_interrupted_spares_runs_that_left_an_output_file() {
+        let (conn, rid) = seeded();
+        insert_run(&conn, rid, "a", "running").unwrap();
+        insert_run(&conn, rid, "b", "running").unwrap();
+        let tmp = std::env::temp_dir().join(format!("cr_detach_test_{}", std::process::id()));
+        let kept = list_runs(&conn, &RunFilter::default()).unwrap()[1].id; // "a"
+        let dir = runs_root(&tmp.join("db.sqlite")).join(kept.to_string());
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(STDOUT_FILE), "").unwrap();
+        assert_eq!(mark_interrupted(&conn, &tmp.join("db.sqlite")).unwrap(), 1);
+        let by_key: Vec<(String, String)> =
+            list_runs(&conn, &RunFilter::default()).unwrap().into_iter().map(|r| (r.context_key, r.status)).collect();
+        assert!(by_key.contains(&("a".into(), "running".into())));
+        assert!(by_key.contains(&("b".into(), "interrupted".into())));
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn file_has_result_looks_for_a_result_line() {
+        let path = std::env::temp_dir().join(format!("cr_result_test_{}.jsonl", std::process::id()));
+        std::fs::write(&path, "{\"type\":\"assistant\"}\n").unwrap();
+        assert!(!file_has_result(&path));
+        std::fs::write(&path, "{\"type\":\"assistant\"}\n{\"type\":\"result\",\"result\":\"x\"}\n").unwrap();
+        assert!(file_has_result(&path));
+        let _ = std::fs::remove_file(&path);
+        assert!(!file_has_result(&path));
+    }
+
+    #[test]
+    fn outcome_without_a_result_reports_the_exit() {
+        let o = outcome_from(None, " boom \n".into(), Ok("exit status: 1".into()));
+        assert_eq!(o.failure.as_deref(), Some("claude exited with exit status: 1 without a result. boom"));
+        assert!(!o.detached);
+        let ok = outcome_from(Some(serde_json::json!({"type": "result"})), String::new(), Ok("0".into()));
+        assert!(ok.failure.is_none());
     }
 
     #[test]

@@ -56,6 +56,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("migrations/0037_routines.sql"),
     include_str!("migrations/0038_inbox_viewed.sql"),
     include_str!("migrations/0039_inbox_forget.sql"),
+    include_str!("migrations/0040_routine_run_detach.sql"),
 ];
 
 pub fn open(path: &Path) -> AppResult<Connection> {
