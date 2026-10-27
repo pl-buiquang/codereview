@@ -177,6 +177,9 @@ const KNOB_LABELS: Record<CustomKnob, string> = {
   monoFont: "Code font",
   textSize: "Text size",
   corners: "Corners",
+  identFont: "Identifier font",
+  shadows: "Shadows",
+  scrim: "Dialog backdrop",
 };
 
 const OPTION_LABELS: Record<string, string> = {
@@ -194,6 +197,12 @@ const OPTION_LABELS: Record<string, string> = {
   large: "Large",
   square: "Square",
   round: "Round",
+  ui: "Same as UI font",
+  mono: "Same as code font",
+  flat: "Flat",
+  soft: "Soft",
+  strong: "Strong",
+  light: "Light",
 };
 
 /** Changes whenever <html>'s class or style does: a cue to read the base theme's values again. */
@@ -336,13 +345,20 @@ function CustomThemeEditor() {
             <>
               <KnobSelect knob="uiFont" />
               <KnobSelect knob="monoFont" />
+              <KnobSelect knob="identFont" />
               <KnobToggle knob="textSize" />
               <p className="muted settings-hint">
                 Text size scales the whole interface; the diff font size above is separate.
               </p>
             </>
           )}
-          {tab === "shape" && <KnobToggle knob="corners" />}
+          {tab === "shape" && (
+            <>
+              <KnobToggle knob="corners" />
+              <KnobToggle knob="shadows" />
+              <KnobToggle knob="scrim" />
+            </>
+          )}
         </div>
         <ThemeSample />
       </div>
@@ -483,7 +499,7 @@ function ColourField({ colour, mode }: { colour: CustomColour; mode: CustomMode 
   );
 }
 
-function KnobSelect({ knob }: { knob: "uiFont" | "monoFont" }) {
+function KnobSelect({ knob }: { knob: "uiFont" | "monoFont" | "identFont" }) {
   const value = useSettingsStore((s) => s.customTheme[knob]);
   return (
     <label className="settings-row">
@@ -503,7 +519,7 @@ function KnobSelect({ knob }: { knob: "uiFont" | "monoFont" }) {
   );
 }
 
-function KnobToggle({ knob }: { knob: "textSize" | "corners" }) {
+function KnobToggle({ knob }: { knob: "textSize" | "corners" | "shadows" | "scrim" }) {
   const value = useSettingsStore((s) => s.customTheme[knob]);
   return (
     <div className="settings-row">

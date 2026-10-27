@@ -155,6 +155,20 @@ describe("exportCustomTheme / importCustomTheme", () => {
     expect(importCustomTheme(exportCustomTheme(theme))).toEqual(theme);
   });
 
+  it("round-trips the identifier font, shadows and scrim", () => {
+    const t = { ...DEFAULT_CUSTOM_THEME, identFont: "mono" as const, shadows: "flat" as const, scrim: "strong" as const };
+    expect(importCustomTheme(exportCustomTheme(t))).toEqual(t);
+    expect(parseCustomTheme({ identFont: "bogus", shadows: "nope" })).toMatchObject({ identFont: "base", shadows: "base" });
+  });
+
+  it("styles the identifier font, shadows and scrim only when set", () => {
+    expect(customThemeStyle(DEFAULT_CUSTOM_THEME, "dark")).not.toHaveProperty("--font-ident");
+    const s = customThemeStyle({ ...DEFAULT_CUSTOM_THEME, identFont: "mono", shadows: "flat", scrim: "light" }, "dark");
+    expect(s["--font-ident"]).toBe("var(--font-mono)");
+    expect(s["--shadow-card"]).toBe("none");
+    expect(s["--scrim"]).toBe("rgba(0,0,0,0.25)");
+  });
+
   it("accepts a bare theme object and defaults invalid fields", () => {
     const imported = importCustomTheme(JSON.stringify({ base: "zzz", light: { accent: "red", background: "#fff" } }));
     expect(imported.base).toBe(DEFAULT_CUSTOM_THEME.base);

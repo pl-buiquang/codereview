@@ -12,6 +12,11 @@ export const CUSTOM_KNOBS = {
   monoFont: ["base", "atkinson-mono", "jetbrains", "plex-mono", "geist-mono", "system"],
   textSize: ["base", "small", "large"],
   corners: ["base", "square", "round"],
+  /** Font of repo names, branches and other identifiers: the UI font or the code font. */
+  identFont: ["base", "ui", "mono"],
+  shadows: ["base", "flat", "soft", "strong"],
+  /** Backdrop behind dialogs and popovers. */
+  scrim: ["base", "light", "strong"],
 } as const;
 
 export type CustomKnob = keyof typeof CUSTOM_KNOBS;
@@ -55,6 +60,9 @@ export const DEFAULT_CUSTOM_THEME: CustomTheme = {
   monoFont: "base",
   textSize: "base",
   corners: "base",
+  identFont: "base",
+  shadows: "base",
+  scrim: "base",
 };
 
 /** The scopes the Theme editor (and AI suggest) work on. */
@@ -192,6 +200,15 @@ const RADII = {
   round: ["8px", "12px", "18px"],
 } as const;
 
+/** `[--shadow-card, --shadow-pop]` per level; black at an alpha reads on both modes. */
+const SHADOWS = {
+  flat: ["none", "0 0 0 1px var(--border-strong)"],
+  soft: ["0 1px 2px rgba(0,0,0,0.12)", "0 8px 24px rgba(0,0,0,0.25)"],
+  strong: ["0 2px 6px rgba(0,0,0,0.3)", "0 16px 40px rgba(0,0,0,0.55)"],
+} as const;
+const SCRIMS = { light: "rgba(0,0,0,0.25)", strong: "rgba(0,0,0,0.7)" } as const;
+const IDENT_FONTS = { ui: "var(--font-ui)", mono: "var(--font-mono)" } as const;
+
 const mix = (colour: string, pct: number, other: string, space = "oklab") =>
   `color-mix(in ${space}, ${colour} ${pct}%, ${other})`;
 const tint = (colour: string, pct: number) => mix(colour, pct, "transparent", "srgb");
@@ -287,6 +304,9 @@ export function customThemeStyle(
     s["--radius-m"] = md;
     s["--radius-l"] = lg;
   }
+  if (theme.identFont !== "base") s["--font-ident"] = IDENT_FONTS[theme.identFont];
+  if (theme.shadows !== "base") [s["--shadow-card"], s["--shadow-pop"]] = SHADOWS[theme.shadows];
+  if (theme.scrim !== "base") s["--scrim"] = SCRIMS[theme.scrim];
   if (theme.textSize !== "base" && !opts.preview) s["zoom"] = SCALE[theme.textSize];
   return s;
 }
@@ -304,8 +324,8 @@ const SCOPE_KNOBS: Record<CustomScope, readonly CustomKnob[]> = {
   all: CUSTOM_KNOB_NAMES,
   colours: [],
   syntax: [],
-  typography: ["uiFont", "monoFont", "textSize"],
-  shape: ["corners"],
+  typography: ["uiFont", "monoFont", "identFont", "textSize"],
+  shape: ["corners", "shadows", "scrim"],
 };
 
 /** `current` with the fields `scope` covers taken from `suggested` (both modes' colours). */

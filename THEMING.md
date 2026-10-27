@@ -102,7 +102,9 @@ app restart with no FOUC flash.
 - **Colours, per mode** (`dark` / `light` palettes, so following the OS keeps working): accent,
   background, surface, text, success/warning/danger, added/removed diff lines and the 8 `--tok-*`
   syntax roles. An absent colour keeps the base theme's value.
-- **Knobs** (both modes): UI font, code font, text size (a `zoom` on `<html>`), corners (`--radius-*`).
+- **Knobs** (both modes): UI font, code font, identifier font (`--font-ident`), text size (a `zoom` on
+  `<html>`), corners (`--radius-*`), shadows (`--shadow-card` / `--shadow-pop`) and the dialog
+  backdrop (`--scrim`).
 
 `customThemeStyle(theme, mode)` turns it into inline properties on `<html>`, over the base's
 `cr cr-{base} {mode}` classes; the derived shades (hover, soft, borders, sunken…) are mixed from the
