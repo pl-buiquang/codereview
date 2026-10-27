@@ -1,7 +1,8 @@
 # Theming
 
-CodeReview ships **4 design directions × 2 modes = 8 fixed themes**, all driven by one
-CSS-custom-property contract. There are no user-editable themes.
+CodeReview ships **4 design directions × 2 modes = 8 preset themes**, all driven by one
+CSS-custom-property contract, plus one user-editable **Custom** theme (see below). It is edited in
+Settings → Theme.
 
 ## How it works
 
@@ -92,3 +93,22 @@ Each must render with no transparent backgrounds or default-black text, every `-
 visibly distinct on a code diff, and light-mode text ≥ 4.5:1 contrast on its background. `System`
 mode must follow an OS dark/light flip live, and the chosen direction+mode must persist across an
 app restart with no FOUC flash.
+
+## Custom theme
+
+`direction: "custom"` selects the user's theme, stored in the `customTheme` setting
+([`src/lib/customTheme.ts`](src/lib/customTheme.ts)). It is a base direction (`base`) plus overrides:
+
+- **Colours, per mode** (`dark` / `light` palettes, so following the OS keeps working): accent,
+  background, surface, text, success/warning/danger, added/removed diff lines and the 8 `--tok-*`
+  syntax roles. An absent colour keeps the base theme's value.
+- **Knobs** (both modes): UI font, code font, text size (a `zoom` on `<html>`), corners (`--radius-*`).
+
+`customThemeStyle(theme, mode)` turns it into inline properties on `<html>`, over the base's
+`cr cr-{base} {mode}` classes; the derived shades (hover, soft, borders, sunken…) are mixed from the
+picked colours with `color-mix`. `useApplySettings` applies it and keeps a copy in
+`localStorage["codereview-custom-theme"]` that the FOUC script in `index.html` replays before first
+paint. The picker card and the editor's sample use the same style object.
+
+It is part of the settings backup (`customTheme` is a persisted key); on import and on load it is
+normalized field by field (`parseCustomTheme`), so a malformed file can't break the theme.

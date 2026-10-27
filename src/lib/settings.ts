@@ -1,7 +1,8 @@
 import { create } from "zustand";
 import { createJSONStorage, persist, type StateStorage } from "zustand/middleware";
 import { api } from "./api";
-import { DIRECTIONS, type Direction } from "./themes";
+import { DIRECTIONS, type ThemeChoice } from "./themes";
+import { DEFAULT_CUSTOM_THEME, parseCustomTheme, type CustomTheme } from "./customTheme";
 import { DEFAULT_CONFIG_PATTERNS, DEFAULT_TEST_PATTERNS } from "./fileCategory";
 import type { AutoSync, IgnoreRule } from "./types";
 import type { ActionKind } from "./boardDigest";
@@ -109,6 +110,7 @@ export const DEFAULT_IGNORE_RULES: IgnoreRule[] = [
 type PersistedSettings = Pick<
   SettingsState,
   | "direction"
+  | "customTheme"
   | "mode"
   | "diffFontSize"
   | "defaultViewType"
@@ -151,6 +153,7 @@ type PersistedSettings = Pick<
 
 const DEFAULTS: PersistedSettings = {
   direction: "a",
+  customTheme: DEFAULT_CUSTOM_THEME,
   mode: "system",
   diffFontSize: DEFAULT_DIFF_FONT_SIZE,
   defaultViewType: "split",
@@ -193,8 +196,10 @@ const DEFAULTS: PersistedSettings = {
 const PERSISTED_KEYS = Object.keys(DEFAULTS) as (keyof PersistedSettings)[];
 
 interface SettingsState {
-  /** Design direction (A/B/C) — selects the `cr-{a|b|c}` token block. */
-  direction: Direction;
+  /** Design direction (A/B/C/D) — selects the `cr-{a|b|c|d}` token block — or `"custom"`. */
+  direction: ThemeChoice;
+  /** The user's custom theme, applied when `direction` is `"custom"`. */
+  customTheme: CustomTheme;
   /** Color mode; `"system"` follows the OS `prefers-color-scheme`. */
   mode: ThemeMode;
   diffFontSize: number;
@@ -264,7 +269,8 @@ interface SettingsState {
   sessionSummaryDir: string;
   /** Summarize live sessions by forking them (reuses the prompt cache when warm; cost varies). */
   sessionSummaryFork: boolean;
-  setDirection: (d: Direction) => void;
+  setDirection: (d: ThemeChoice) => void;
+  setCustomTheme: (theme: CustomTheme) => void;
   setMode: (m: ThemeMode) => void;
   setDiffFontSize: (n: number) => void;
   setDefaultViewType: (v: DiffViewType) => void;
@@ -306,7 +312,7 @@ interface SettingsState {
 }
 
 const ENUMS: Partial<Record<keyof PersistedSettings, readonly string[]>> = {
-  direction: DIRECTIONS.map((d) => d.id),
+  direction: [...DIRECTIONS.map((d) => d.id), "custom"],
   mode: ["dark", "light", "system"],
   defaultViewType: ["split", "unified"],
   boardStatusBorderSide: ["left", "right", "top", "bottom"],
@@ -365,6 +371,7 @@ export const useSettingsStore = create<SettingsState>()(
     (set) => ({
       ...DEFAULTS,
       setDirection: (direction) => set({ direction }),
+      setCustomTheme: (customTheme) => set({ customTheme }),
       setMode: (mode) => set({ mode }),
       setDiffFontSize: (diffFontSize) => set({ diffFontSize }),
       setDefaultViewType: (defaultViewType) => set({ defaultViewType }),
@@ -491,7 +498,8 @@ function sanitizeSettings(source: Record<string, unknown>): Partial<PersistedSet
     if (typeof value === "number" && !Number.isFinite(value)) continue;
     const allowed = ENUMS[key];
     if (allowed && !allowed.includes(value as string)) continue;
-    picked[key] = value;
+    // Nested value: normalize field by field instead of trusting its shape.
+    picked[key] = key === "customTheme" ? parseCustomTheme(value) : value;
   }
   return picked as Partial<PersistedSettings>;
 }

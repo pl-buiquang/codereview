@@ -1005,49 +1005,49 @@ button:disabled,
   font-size: 0.85em;
 }
 /* Prism syntax tokens — colors come from the active theme's `--tok-*` vars. */
-.diff .token.comment,
-.diff .token.prolog,
-.diff .token.doctype,
-.diff .token.cdata {
+:is(.diff, .theme-sample) .token.comment,
+:is(.diff, .theme-sample) .token.prolog,
+:is(.diff, .theme-sample) .token.doctype,
+:is(.diff, .theme-sample) .token.cdata {
   color: var(--tok-comment);
 }
-.diff .token.punctuation {
+:is(.diff, .theme-sample) .token.punctuation {
   color: var(--tok-punctuation);
 }
-.diff .token.property,
-.diff .token.tag,
-.diff .token.boolean,
-.diff .token.number,
-.diff .token.constant,
-.diff .token.symbol,
-.diff .token.deleted {
+:is(.diff, .theme-sample) .token.property,
+:is(.diff, .theme-sample) .token.tag,
+:is(.diff, .theme-sample) .token.boolean,
+:is(.diff, .theme-sample) .token.number,
+:is(.diff, .theme-sample) .token.constant,
+:is(.diff, .theme-sample) .token.symbol,
+:is(.diff, .theme-sample) .token.deleted {
   color: var(--tok-literal);
 }
-.diff .token.selector,
-.diff .token.attr-name,
-.diff .token.string,
-.diff .token.char,
-.diff .token.builtin,
-.diff .token.inserted {
+:is(.diff, .theme-sample) .token.selector,
+:is(.diff, .theme-sample) .token.attr-name,
+:is(.diff, .theme-sample) .token.string,
+:is(.diff, .theme-sample) .token.char,
+:is(.diff, .theme-sample) .token.builtin,
+:is(.diff, .theme-sample) .token.inserted {
   color: var(--tok-string);
 }
-.diff .token.operator,
-.diff .token.entity,
-.diff .token.url {
+:is(.diff, .theme-sample) .token.operator,
+:is(.diff, .theme-sample) .token.entity,
+:is(.diff, .theme-sample) .token.url {
   color: var(--tok-operator);
 }
-.diff .token.atrule,
-.diff .token.attr-value,
-.diff .token.keyword {
+:is(.diff, .theme-sample) .token.atrule,
+:is(.diff, .theme-sample) .token.attr-value,
+:is(.diff, .theme-sample) .token.keyword {
   color: var(--tok-keyword);
 }
-.diff .token.function,
-.diff .token.class-name {
+:is(.diff, .theme-sample) .token.function,
+:is(.diff, .theme-sample) .token.class-name {
   color: var(--tok-function);
 }
-.diff .token.regex,
-.diff .token.important,
-.diff .token.variable {
+:is(.diff, .theme-sample) .token.regex,
+:is(.diff, .theme-sample) .token.important,
+:is(.diff, .theme-sample) .token.variable {
   color: var(--tok-variable);
 }
 
@@ -2468,6 +2468,118 @@ tr.kb-focus {
 .theme-card-blurb {
   font-size: 11px;
   color: var(--text-2);
+}
+
+/* --- Settings: custom theme editor ---------------------------------------- */
+.settings-section-narrow.theme-settings {
+  max-width: 920px;
+}
+.theme-editor .view-toggle {
+  margin-left: 0;
+}
+.theme-editor-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.theme-editor-spacer {
+  flex: 1;
+}
+.theme-editor-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 340px);
+  gap: 18px;
+  align-items: start;
+}
+@media (max-width: 900px) {
+  .theme-editor-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.theme-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.theme-colour-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.theme-colour-group h4 {
+  margin: 0 0 2px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-3);
+}
+.theme-colour {
+  display: grid;
+  grid-template-columns: 130px 40px 100px auto;
+  align-items: center;
+  gap: 10px;
+}
+.theme-colour input[type="color"] {
+  width: 36px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-s);
+  background: none;
+  cursor: pointer;
+}
+.theme-colour code {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+.theme-sample {
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-m);
+}
+.theme-sample-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-3);
+}
+.theme-sample-buttons,
+.theme-sample-badges {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12px;
+}
+.theme-sample-code {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  font-family: var(--font-mono);
+  font-size: var(--diff-font-size);
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-s);
+  overflow: hidden;
+}
+.theme-sample-line {
+  padding: 1px 8px;
+  white-space: pre;
+}
+.theme-sample-line.add {
+  background: var(--diff-add-bg);
+}
+.theme-sample-line.del {
+  background: var(--diff-del-bg);
 }
 
 /* --- Settings: AI usage ---------------------------------------------------- */

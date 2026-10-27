@@ -11,3 +11,6 @@ export const DIRECTIONS: { id: Direction; label: string; blurb: string }[] = [
   { id: "c", label: "Terminal", blurb: "JetBrains Mono · green · sharp" },
   { id: "d", label: "GitHub", blurb: "System fonts · high-contrast diffs · crisp" },
 ];
+
+/** The `direction` setting: a built-in direction, or the user's custom theme (`lib/customTheme.ts`). */
+export type ThemeChoice = Direction | "custom";

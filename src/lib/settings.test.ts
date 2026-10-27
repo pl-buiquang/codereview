@@ -8,10 +8,12 @@ import {
   exportSettings,
   importSettings,
 } from "./settings";
+import { DEFAULT_CUSTOM_THEME } from "./customTheme";
 
 beforeEach(() => {
   useSettingsStore.setState({
     direction: "a",
+    customTheme: DEFAULT_CUSTOM_THEME,
     mode: "system",
     diffFontSize: DEFAULT_DIFF_FONT_SIZE,
     defaultViewType: "split",
@@ -85,6 +87,7 @@ describe("useSettingsStore", () => {
         "botLogins",
         "conversationIgnoreRules",
         "chatModel",
+        "customTheme",
         "defaultTerminal",
         "defaultThreeDot",
         "defaultViewType",
@@ -125,10 +128,27 @@ describe("exportSettings / importSettings", () => {
     s.setFileTestPatterns("");
     const applied = importSettings(json);
     const n = useSettingsStore.getState();
-    expect(applied).toBe(38);
+    expect(applied).toBe(39);
     expect(n.mode).toBe("light");
     expect(n.diffFontSize).toBe(15);
     expect(n.fileTestPatterns).toBe("*.spec.rb");
+  });
+
+  it("round-trips the custom theme and normalizes a malformed one", () => {
+    const s = useSettingsStore.getState();
+    s.setDirection("custom");
+    s.setCustomTheme({ ...DEFAULT_CUSTOM_THEME, base: "c", corners: "round", dark: { accent: "#112233" } });
+    const json = exportSettings();
+
+    s.setDirection("a");
+    s.setCustomTheme(DEFAULT_CUSTOM_THEME);
+    importSettings(json);
+    const n = useSettingsStore.getState();
+    expect(n.direction).toBe("custom");
+    expect(n.customTheme).toMatchObject({ base: "c", corners: "round", dark: { accent: "#112233" } });
+
+    importSettings(JSON.stringify({ settings: { customTheme: { base: "zzz", dark: { accent: "red" }, uiFont: 3 } } }));
+    expect(useSettingsStore.getState().customTheme).toEqual(DEFAULT_CUSTOM_THEME);
   });
 
   it("accepts a bare settings object and skips unknown or mistyped keys", () => {
