@@ -508,7 +508,7 @@ function StashRow({
         aria-label={`Preview stash ${index}`}
       >
         <Icon name="branch" size={12} />
-        <span className="rs-row-name mono">{message}</span>
+        <span className="rs-row-name">{message}</span>
       </button>
       <button className="btn-icon rs-row-more" title="Apply" aria-label={`Apply stash ${index}`} onClick={onApply}>
         ↩

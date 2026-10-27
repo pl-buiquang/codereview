@@ -599,7 +599,7 @@ export function BoardView() {
             entries={repoShown}
             selected={effRepos}
             onChange={setRepoFilter}
-            renderLabel={(k) => <RepoName className="lbl mono" name={k} />}
+            renderLabel={(k) => <RepoName className="lbl ident" name={k} />}
           />
           <TagFilter
             tags={tagsShown}
@@ -628,7 +628,7 @@ export function BoardView() {
               const i = k.lastIndexOf("#");
               return (
                 <span className="lbl">
-                  <RepoName className="mono" name={k.slice(0, i)} /> #{k.slice(i + 1)}
+                  <RepoName className="ident" name={k.slice(0, i)} /> #{k.slice(i + 1)}
                 </span>
               );
             }}

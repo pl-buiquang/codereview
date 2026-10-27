@@ -337,7 +337,7 @@ export function InboxView() {
             entries={repoEntries}
             selected={effRepos}
             onChange={setRepoFilter}
-            renderLabel={(key) => <RepoName className="lbl mono" name={key} />}
+            renderLabel={(key) => <RepoName className="lbl ident" name={key} />}
           />
           <MultiFilterList title="Users" entries={authorEntries} selected={effAuthors} onChange={setAuthorFilter} />
         </aside>

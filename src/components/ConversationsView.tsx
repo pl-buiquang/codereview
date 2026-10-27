@@ -130,7 +130,7 @@ export function ConversationsView() {
           entries={facets?.repos ?? []}
           selected={filters.repos}
           onChange={(repos) => setFilters({ repos })}
-          renderLabel={(key) => <RepoName className="lbl mono" name={key} />}
+          renderLabel={(key) => <RepoName className="lbl ident" name={key} />}
         />
       </aside>
 
@@ -200,8 +200,8 @@ function ConversationRow({
           <Icon name="chev" size={12} className={open ? "" : "conv-chev-closed"} />
           <div className="conv-title">
             <div className="conv-meta">
-              <RepoName className="repo mono" name={`${subject.owner}/${subject.name}`} />
-              <span className="mono">#{subject.number}</span>
+              <RepoName className="repo ident" name={`${subject.owner}/${subject.name}`} />
+              <span>#{subject.number}</span>
               <span className="conv-subject">{subject.title}</span>
             </div>
             <div className="conv-meta">

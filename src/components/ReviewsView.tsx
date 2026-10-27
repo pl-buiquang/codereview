@@ -209,7 +209,7 @@ export function ReviewsView() {
         <aside className="cr-rail">
           <FilterGroup title="Status" entries={statusEntries} selected={statusFilter} onSelect={setStatusFilter} />
           <FilterGroup title="Origin" entries={originEntries} selected={originFilter} onSelect={setOriginFilter} />
-          <FilterGroup title="Repositories" entries={repoEntries} selected={repoFilter} onSelect={setRepoFilter} mono />
+          <FilterGroup title="Repositories" entries={repoEntries} selected={repoFilter} onSelect={setRepoFilter} ident />
           <FilterGroup title="Verdict" entries={verdictEntries} selected={verdictFilter} onSelect={setVerdictFilter} />
         </aside>
 
@@ -265,7 +265,7 @@ function ReviewRow({
       <div className="rev-main">
         <span className="rev-title">{target.title}</span>
         <div className="rev-meta">
-          <span className="mono">{repo_label}</span>
+          <span className="ident">{repo_label}</span>
           <span className="sep">{kindLabel}</span>
           <span className="sep">
             {comment_count} comment{comment_count === 1 ? "" : "s"}
@@ -297,13 +297,13 @@ function FilterGroup({
   entries,
   selected,
   onSelect,
-  mono,
+  ident,
 }: {
   title: string;
   entries: { key: string; label: string; count: number }[];
   selected: string | null;
   onSelect: (v: string | null) => void;
-  mono?: boolean;
+  ident?: boolean;
 }) {
   if (entries.length === 0) return null;
   return (
@@ -322,7 +322,7 @@ function FilterGroup({
           className={`cr-rail-item${key === selected ? " on" : ""}`}
           onClick={() => onSelect(key === selected ? null : key)}
         >
-          <span className={mono ? "lbl mono" : "lbl"}>{label}</span>
+          <span className={ident ? "lbl ident" : "lbl"}>{label}</span>
           <span className="count">{count}</span>
         </button>
       ))}

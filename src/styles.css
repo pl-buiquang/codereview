@@ -291,6 +291,9 @@ button:hover {
 .select .mono {
   font-family: var(--font-mono);
 }
+.ident {
+  font-family: var(--font-ident);
+}
 .textarea {
   width: 100%;
   border-radius: var(--radius-m);

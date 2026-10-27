@@ -68,8 +68,8 @@ export function InboxItemRow({
       <div className="pr-main">
         <div className="pr-meta">
           <TypeBadge type={item.type} />
-          <RepoName className="repo mono" name={item.repo} />
-          <span className="mono">#{item.number}</span>
+          <RepoName className="repo ident" name={item.repo} />
+          <span>#{item.number}</span>
           <StatusPill state={item.state} isDraft={item.is_draft} />
           {item.type === "pr" && <CiBadge
               state={item.ci_state}

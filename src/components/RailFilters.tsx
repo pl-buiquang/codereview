@@ -47,14 +47,14 @@ export function FilterList({
   entries,
   selected,
   onSelect,
-  mono,
+  ident,
   renderLabel,
 }: {
   title: string;
   entries: [string, number][];
   selected: string | null;
   onSelect: (v: string | null) => void;
-  mono?: boolean;
+  ident?: boolean;
   renderLabel?: (key: string) => ReactNode;
 }) {
   if (entries.length === 0) return null;
@@ -74,7 +74,7 @@ export function FilterList({
           className={`cr-rail-item${key === selected ? " on" : ""}`}
           onClick={() => onSelect(key === selected ? null : key)}
         >
-          {renderLabel ? renderLabel(key) : <span className={mono ? "lbl mono" : "lbl"}>{key}</span>}
+          {renderLabel ? renderLabel(key) : <span className={ident ? "lbl ident" : "lbl"}>{key}</span>}
           <span className="count">{count}</span>
         </button>
       ))}
