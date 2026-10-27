@@ -3722,6 +3722,13 @@ tr.search-current {
   background: transparent;
   color: var(--text-2);
 }
+.cr-rail-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
 .cr-rail-chev {
   flex: none;
   transition: transform 0.12s;
@@ -3730,8 +3737,8 @@ tr.search-current {
   transform: rotate(-90deg);
 }
 .cr-rail-summary {
+  flex: 0 1 auto;
   min-width: 0;
-  display: flex;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -3741,14 +3748,15 @@ tr.search-current {
   color: var(--text-2);
 }
 .cr-rail-clear {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
   border: none;
   background: transparent;
   box-shadow: none;
   padding: 0;
   color: var(--text-3);
-  font-size: 10px;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
   cursor: pointer;
 }
 .cr-rail-clear:hover {

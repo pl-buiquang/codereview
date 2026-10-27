@@ -68,7 +68,7 @@ describe("RailSection", () => {
         <FilterList title="Status" entries={ENTRIES} selected="open" onSelect={onSelect} />
       </FilterRail>,
     );
-    await user.click(screen.getByRole("button", { name: "clear" }));
+    await user.click(screen.getByRole("button", { name: "Clear Status" }));
     expect(onSelect).toHaveBeenCalledWith(null);
     expect(useUIStore.getState().collapsedRailSections).toEqual(["board:Status"]);
   });

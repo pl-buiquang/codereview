@@ -48,8 +48,8 @@ export function RailSection({
           {collapsed && summary != null && <span className="cr-rail-summary">· {summary}</span>}
         </button>
         {onClear && (
-          <button className="cr-rail-clear" onClick={onClear}>
-            clear
+          <button className="cr-rail-clear" title={`Clear ${title}`} aria-label={`Clear ${title}`} onClick={onClear}>
+            <Icon name="trash" size={12} />
           </button>
         )}
       </div>

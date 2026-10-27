@@ -94,7 +94,7 @@ describe("TagFilter", () => {
     render(<TagFilter tags={[]} selected={[]} onChange={onChange} untagged={{ on: true, count: 2, onChange: onUntagged }} />);
 
     expect(screen.getByRole("button", { name: /Untagged/ })).toHaveAttribute("aria-pressed", "true");
-    await user.click(screen.getByText("clear"));
+    await user.click(screen.getByRole("button", { name: "Clear Tags" }));
     expect(onChange).toHaveBeenCalledWith([]);
     expect(onUntagged).toHaveBeenCalledWith(false);
   });
