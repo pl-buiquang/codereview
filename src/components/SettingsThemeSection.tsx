@@ -1,4 +1,4 @@
-import { useId, useState, useSyncExternalStore, type CSSProperties } from "react";
+import { useEffect, useId, useState, useSyncExternalStore, type CSSProperties } from "react";
 import { effectiveTheme, useSettingsStore, type ThemeMode } from "../lib/settings";
 import { DIRECTIONS, type Direction } from "../lib/themes";
 import {
@@ -15,9 +15,15 @@ import {
   type CustomColour,
   type CustomKnob,
   type CustomMode,
-  type CustomTheme,
 } from "../lib/customTheme";
 import { confirmDialog } from "../lib/confirm";
+import {
+  editCustomTheme,
+  ownsUndo,
+  redoCustomTheme,
+  undoCustomTheme,
+  useThemeHistory,
+} from "../lib/themeHistory";
 
 const MODES: { value: ThemeMode; label: string }[] = [
   { value: "dark", label: "Dark" },
@@ -196,17 +202,25 @@ function useRootRevision() {
   return useSyncExternalStore(subscribeRoot, () => rootRevision);
 }
 
-/** Edit the custom theme: `next` computed from the latest value, as colour drags come faster than renders. */
-function editCustom(update: (theme: CustomTheme) => CustomTheme) {
-  const { customTheme, setCustomTheme } = useSettingsStore.getState();
-  setCustomTheme(update(customTheme));
-}
-
 function CustomThemeEditor() {
   const customTheme = useSettingsStore((s) => s.customTheme);
   const mode = useSettingsStore((s) => s.mode);
   const [tab, setTab] = useState<SubTab>("colours");
   const shown: CustomMode = effectiveTheme(mode);
+  const canUndo = useThemeHistory((h) => h.past.length > 0);
+  const canRedo = useThemeHistory((h) => h.future.length > 0);
+
+  // ⌘Z / ⌘⇧Z (Ctrl on other platforms) while the editor is open; text fields keep their own undo.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.altKey || e.key.toLowerCase() !== "z" || ownsUndo(e.target)) return;
+      e.preventDefault();
+      if (e.shiftKey) redoCustomTheme();
+      else undoCustomTheme();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   const onReset = async () => {
     const ok = await confirmDialog({
@@ -215,7 +229,7 @@ function CustomThemeEditor() {
       confirmLabel: "Reset",
       danger: true,
     });
-    if (ok) editCustom((t) => ({ ...DEFAULT_CUSTOM_THEME, base: t.base }));
+    if (ok) editCustomTheme((t) => ({ ...DEFAULT_CUSTOM_THEME, base: t.base }));
   };
 
   return (
@@ -228,13 +242,19 @@ function CustomThemeEditor() {
             <button
               key={d.id}
               className={customTheme.base === d.id ? "active" : ""}
-              onClick={() => editCustom((t) => ({ ...t, base: d.id }))}
+              onClick={() => editCustomTheme((t) => ({ ...t, base: d.id }))}
             >
               {d.label}
             </button>
           ))}
         </span>
         <span className="theme-editor-spacer" />
+        <button className="btn btn-sm" onClick={undoCustomTheme} disabled={!canUndo} title="Undo (⌘Z)">
+          Undo
+        </button>
+        <button className="btn btn-sm" onClick={redoCustomTheme} disabled={!canRedo} title="Redo (⌘⇧Z)">
+          Redo
+        </button>
         <button className="btn btn-sm" onClick={onReset}>
           Reset…
         </button>
@@ -256,7 +276,7 @@ function CustomThemeEditor() {
         <span className="theme-editor-spacer" />
         <button
           className="btn btn-sm"
-          onClick={() => editCustom((t) => resetScope(t, tab))}
+          onClick={() => editCustomTheme((t) => resetScope(t, tab))}
           title="Clear this tab's overrides"
         >
           Clear tab
@@ -318,12 +338,15 @@ function ColourField({ colour, mode }: { colour: CustomColour; mode: CustomMode 
   const base = toHexColour(getComputedStyle(document.documentElement).getPropertyValue(COLOUR_TOKEN[colour]));
   const shown = value ?? base ?? "#000000";
   const set = (hex: string | null) =>
-    editCustom((t) => {
-      const palette = { ...t[mode] };
-      if (hex) palette[colour] = hex;
-      else delete palette[colour];
-      return { ...t, [mode]: palette };
-    });
+    editCustomTheme(
+      (t) => {
+        const palette = { ...t[mode] };
+        if (hex) palette[colour] = hex;
+        else delete palette[colour];
+        return { ...t, [mode]: palette };
+      },
+      `${mode}:${colour}`,
+    );
   return (
     <div className="theme-colour">
       <label htmlFor={id}>{COLOUR_LABELS[colour]}</label>
@@ -346,7 +369,7 @@ function KnobSelect({ knob }: { knob: "uiFont" | "monoFont" }) {
       <select
         className="select"
         value={value}
-        onChange={(e) => editCustom((t) => ({ ...t, [knob]: e.target.value }))}
+        onChange={(e) => editCustomTheme((t) => ({ ...t, [knob]: e.target.value }))}
       >
         {CUSTOM_KNOBS[knob].map((o) => (
           <option key={o} value={o}>
@@ -368,7 +391,7 @@ function KnobToggle({ knob }: { knob: "textSize" | "corners" }) {
           <button
             key={o}
             className={value === o ? "active" : ""}
-            onClick={() => editCustom((t) => ({ ...t, [knob]: o }))}
+            onClick={() => editCustomTheme((t) => ({ ...t, [knob]: o }))}
           >
             {OPTION_LABELS[o]}
           </button>
