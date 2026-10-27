@@ -3058,6 +3058,9 @@ tr.search-current {
   gap: 6px;
   width: 100%;
   height: 24px;
+  /* The list is a scrolling flex column: without this the rows shrink once the
+     tree overflows (filter "All"), making it denser than a filtered one. */
+  flex-shrink: 0;
   padding: 0 8px;
   border: none;
   border-radius: var(--radius-s);
