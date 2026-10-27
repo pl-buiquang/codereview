@@ -1,11 +1,12 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { useRefetchOnActivate } from "../lib/useRefetchOnActivate";
 import { toast } from "../lib/toast";
 import { confirmDialog } from "../lib/confirm";
 import { timeAgo } from "../lib/timeAgo";
-import { isWaiting } from "../lib/sessionCounts";
+import { isWaiting, useWaitingSessions } from "../lib/sessionCounts";
+import { STATUS_LABEL, useUnseenRoutineProblems } from "../lib/routines";
 import { useAiDisabledReason, useSettingsStore } from "../lib/settings";
 import { useUIStore, type SessionsTab } from "../store";
 import type { CardSession, ClaudeSession, SessionFocusState } from "../lib/types";
@@ -415,6 +416,24 @@ const SESSION_TABS: { key: SessionsTab; label: string }[] = [
 export function SessionsView() {
   const tab = useUIStore((s) => s.sessionsTab);
   const setTab = useUIStore((s) => s.setSessionsTab);
+  const waiting = useWaitingSessions();
+  const { unseen, markSeen } = useUnseenRoutineProblems();
+  // Looking at the runs is what clears the badge.
+  useEffect(() => {
+    if (tab === "routines" && unseen.length > 0) markSeen();
+  }, [tab, unseen.length, markSeen]);
+  const badges: Partial<Record<SessionsTab, { count: number; tone: "attention" | "error"; title: string }>> = {
+    terminal: {
+      count: waiting.length,
+      tone: "attention",
+      title: `Waiting for input:\n${waiting.map((s) => s.name ?? s.session_id.slice(0, 8)).join("\n")}`,
+    },
+    routines: {
+      count: unseen.length,
+      tone: unseen.some((r) => r.status !== "needs_attention") ? "error" : "attention",
+      title: `Since you last looked:\n${unseen.map((r) => `${r.routine_name} · ${r.context_label}: ${STATUS_LABEL[r.status]}`).join("\n")}`,
+    },
+  };
   return (
     <div className="cr-main sessions-shell">
       <div className="cr-tabs" role="tablist">
@@ -428,6 +447,11 @@ export function SessionsView() {
             onClick={() => setTab(t.key)}
           >
             {t.label}
+            {(badges[t.key]?.count ?? 0) > 0 && (
+              <span className={`n n-${badges[t.key]!.tone}`} title={badges[t.key]!.title}>
+                {badges[t.key]!.count > 99 ? "99+" : badges[t.key]!.count}
+              </span>
+            )}
           </button>
         ))}
       </div>

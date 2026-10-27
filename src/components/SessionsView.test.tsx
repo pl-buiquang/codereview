@@ -8,12 +8,14 @@ const listClaudeSessions = vi.fn();
 const focusClaudeSession = vi.fn();
 const resumeClaudeSession = vi.fn();
 const generateLiveSessionSummary = vi.fn();
+const routineRunList = vi.fn();
 vi.mock("../lib/api", () => ({
   api: {
     listClaudeSessions: (d: number, dir: string) => listClaudeSessions(d, dir),
     focusClaudeSession: (id: string) => focusClaudeSession(id),
     resumeClaudeSession: (...args: unknown[]) => resumeClaudeSession(...args),
     generateLiveSessionSummary: (id: string, fork: boolean) => generateLiveSessionSummary(id, fork),
+    routineRunList: (filter: unknown) => routineRunList(filter),
   },
 }));
 
@@ -64,6 +66,8 @@ describe("SessionsView", () => {
     vi.clearAllMocks();
     focusClaudeSession.mockResolvedValue(undefined);
     resumeClaudeSession.mockResolvedValue(undefined);
+    routineRunList.mockResolvedValue([]);
+    localStorage.clear();
     listClaudeSessions.mockResolvedValue(snapshot([
       session(),
       session({ session_id: "s2", name: "detached one", focus: "detached" }),
@@ -210,6 +214,46 @@ describe("SessionsView", () => {
     await userEvent.type(box, "{Escape}");
     expect(screen.getByText("Fix login")).toBeInTheDocument();
     expect(screen.getByText("Refactor sync")).toBeInTheDocument();
+  });
+});
+
+describe("SessionsView tab badges", () => {
+  const run = (id: number, status: string, endedAt: string) => ({
+    id,
+    routine_name: "Babysit",
+    context_label: `org/app#${id}`,
+    status,
+    ended_at: endedAt,
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+    useUIStore.setState({ sessionsTab: "terminal" });
+    listClaudeSessions.mockResolvedValue(snapshot([session({ session_id: "w1", name: "waiting one", waiting_for: "input needed" })]));
+  });
+
+  it("counts sessions waiting for input on the Terminal tab", async () => {
+    routineRunList.mockResolvedValue([]);
+    renderView();
+    const tab = screen.getByRole("tab", { name: /Terminal sessions/ });
+    await waitFor(() => expect(tab).toHaveTextContent("1"));
+    expect(screen.getByRole("tab", { name: /^Routines$/ })).toBeInTheDocument();
+  });
+
+  it("counts runs that failed or need attention since the Routines tab was last open, until it is opened", async () => {
+    localStorage.setItem("routines_problems_seen_at", "1000");
+    routineRunList.mockResolvedValue([
+      run(1, "needs_attention", new Date().toISOString()),
+      run(2, "error", new Date().toISOString()),
+      run(3, "error", new Date(500).toISOString()),
+    ]);
+    renderView();
+    const tab = screen.getByRole("tab", { name: /Routines/ });
+    await waitFor(() => expect(tab).toHaveTextContent("2"));
+    expect(tab.querySelector(".n-error")).not.toBeNull();
+    await userEvent.click(tab);
+    await waitFor(() => expect(tab.querySelector(".n")).toBeNull());
   });
 });
 

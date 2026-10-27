@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { listen } from "@tauri-apps/api/event";
 import { api } from "./api";
@@ -8,6 +8,9 @@ export const ROUTINE_RUN_UPDATED_EVENT = "routine-run-updated";
 export const ROUTINE_RUN_EVENT = "routine-run-event";
 
 export const ACTIVE_STATUSES: RoutineRunStatus[] = ["queued", "running"];
+
+/** Finished runs that want a human: the run said so, failed, or ran out of time. */
+export const PROBLEM_STATUSES: RoutineRunStatus[] = ["needs_attention", "error", "timeout"];
 
 export const isActiveRun = (status: RoutineRunStatus) => status === "queued" || status === "running";
 
@@ -69,6 +72,37 @@ export function useActiveRoutineRuns(): Map<string, RoutineRun[]> {
     for (const run of query.data ?? []) m.set(run.context_key, [...(m.get(run.context_key) ?? []), run]);
     return m;
   }, [query.data]);
+}
+
+const SEEN_KEY = "routines_problems_seen_at";
+
+/** When the Routines tab was last looked at; first use starts from now, so old failures don't flood the badge. */
+function readSeenAt(): number {
+  const stored = Number(localStorage.getItem(SEEN_KEY));
+  if (stored > 0) return stored;
+  const now = Date.now();
+  localStorage.setItem(SEEN_KEY, String(now));
+  return now;
+}
+
+/** Runs that ended needing attention, failed or timed out since the Routines tab was last open (badge source). */
+export function useUnseenRoutineProblems(): { unseen: RoutineRun[]; markSeen: () => void } {
+  const [seenAt, setSeenAt] = useState(readSeenAt);
+  const query = useQuery({
+    queryKey: ["routine-runs", "problems"],
+    queryFn: () => api.routineRunList({ statuses: PROBLEM_STATUSES, limit: 50 }),
+    refetchInterval: 15_000,
+  });
+  const unseen = useMemo(
+    () => (query.data ?? []).filter((r) => r.ended_at != null && Date.parse(r.ended_at) > seenAt),
+    [query.data, seenAt],
+  );
+  const markSeen = useCallback(() => {
+    const now = Date.now();
+    localStorage.setItem(SEEN_KEY, String(now));
+    setSeenAt(now);
+  }, []);
+  return { unseen, markSeen };
 }
 
 export function formatDuration(startIso: string | null, endIso: string | null): string {

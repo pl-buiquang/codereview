@@ -3632,6 +3632,19 @@ tr.search-current {
   color: var(--accent);
   border-color: transparent;
 }
+/* Count of things waiting on you, as on the sidebar badges. */
+.cr-tab .n.n-attention,
+.cr-tab.active .n.n-attention {
+  background: var(--warning);
+  color: var(--on-accent);
+  border-color: transparent;
+}
+.cr-tab .n.n-error,
+.cr-tab.active .n.n-error {
+  background: var(--danger);
+  color: var(--on-accent);
+  border-color: transparent;
+}
 .cr-c .cr-tab {
   text-transform: uppercase;
   font-size: 11px;

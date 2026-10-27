@@ -36,8 +36,13 @@ Problem, Analysis, Approach, Steps, Test seams, Risks / side effects, Open quest
 Issue kebab menu → **Agent session**. Claude starts in the repo's main clone (it must be linked under
 Repositories) with `--append-system-prompt-file` set to the *Issue agent session* prompt (Settings →
 Prompts), rendered on every open from the card's metadata. The card's latest session is resumed when
-its transcript exists. Live issue sessions are not listed for focusing yet; opening again starts a
-new session.
+its transcript exists. A live session is listed in the same menu ("Focus agent: …") so you can jump
+to it instead of opening another; it is tied to the card by the session id the app records, so a
+session you started by hand in the clone needs `cr board meta add <url> --kind claude_session --value <id>`.
+
+The Sessions tabs carry a count: **Terminal sessions** shows sessions waiting for input, **Routines**
+shows runs that ended needing attention, failed or timed out since you last opened that tab (red when
+one failed or timed out, amber when they only need attention).
 
 ### Settings (Sessions → Config)
 
