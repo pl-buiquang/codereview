@@ -332,7 +332,7 @@ pub fn restore_item_impl(conn: &Connection, id: &str) -> AppResult<()> {
     set_inbox_state(conn, id, "new", None)
 }
 
-/// Stop counting a New item in the badge; it stays on the New tab.
+/// Mark a New item read: it stops counting in the badges and stays on the New tab.
 pub fn mark_item_viewed_impl(conn: &Connection, id: &str) -> AppResult<()> {
     conn.execute(
         "UPDATE inbox_entry SET viewed_at = COALESCE(viewed_at, ?1) WHERE id = ?2",
@@ -341,9 +341,20 @@ pub fn mark_item_viewed_impl(conn: &Connection, id: &str) -> AppResult<()> {
     Ok(())
 }
 
+/// Count a New item in the badge again.
+pub fn mark_item_unread_impl(conn: &Connection, id: &str) -> AppResult<()> {
+    conn.execute("UPDATE inbox_entry SET viewed_at = NULL WHERE id = ?1", params![id])?;
+    Ok(())
+}
+
 #[tauri::command]
 pub fn mark_item_viewed(id: String, db: State<Db>) -> AppResult<()> {
     mark_item_viewed_impl(&db.0.lock().unwrap(), &id)
+}
+
+#[tauri::command]
+pub fn mark_item_unread(id: String, db: State<Db>) -> AppResult<()> {
+    mark_item_unread_impl(&db.0.lock().unwrap(), &id)
 }
 
 #[tauri::command]
@@ -494,6 +505,16 @@ mod tests {
         assert!(viewed_at(&conn, "PR_1").is_some(), "same reason again keeps it viewed");
         record_reasons(&conn, "PR_1", &[reason("mention"), reason("direct_review")], Some("t2"), "t3").unwrap();
         assert!(viewed_at(&conn, "PR_1").is_none(), "a new reason makes it unviewed");
+    }
+
+    #[test]
+    fn marking_unread_counts_the_item_again() {
+        let conn = open_memory();
+        entry(&conn, "PR_1", "pr");
+        mark_item_viewed_impl(&conn, "PR_1").unwrap();
+        assert!(viewed_at(&conn, "PR_1").is_some());
+        mark_item_unread_impl(&conn, "PR_1").unwrap();
+        assert!(viewed_at(&conn, "PR_1").is_none());
     }
 
     #[test]

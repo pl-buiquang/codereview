@@ -5914,6 +5914,9 @@ button.board-overview-ref {
 .conv-row.unread {
   border-left: 3px solid var(--accent, #3b82f6);
 }
+.pr-card.unread {
+  border-left: 3px solid var(--accent, #3b82f6);
+}
 .conv-row.pinned .btn-icon.on,
 .conv-actions .btn-icon.on {
   color: var(--accent, #3b82f6);

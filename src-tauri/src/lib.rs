@@ -333,6 +333,7 @@ pub fn run() {
             commands::inbox::open_pr_review,
             commands::inbox::inbox_meta,
             commands::inbox::mark_item_viewed,
+            commands::inbox::mark_item_unread,
             commands::board::board_last_refresh_at,
             commands::board::board_list,
             commands::board::board_tracked_ids,

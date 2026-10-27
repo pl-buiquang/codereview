@@ -371,7 +371,7 @@ export interface InboxItem {
   author_is_bot: boolean;
   /** A New item no search in the last complete discovery still found. */
   stale: boolean;
-  /** When it was marked viewed or triaged; a New item without it counts in the badge. */
+  /** When it was marked read or triaged; a New item without it is unread and counts in the badge. */
   viewed_at: string | null;
   first_seen_at: string;
   last_refreshed: string;

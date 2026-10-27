@@ -22,6 +22,7 @@ export function InboxItemRow({
   onArchive,
   onRestore,
   onMarkViewed,
+  onMarkUnread,
   onOpenReview,
   onOpenExisting,
   boardTracked,
@@ -35,8 +36,10 @@ export function InboxItemRow({
   existingReviewId?: number;
   onArchive: () => void;
   onRestore: () => void;
-  /** Stops it counting in the sidebar badge; shown on unviewed New items. */
+  /** Mark read: stops it counting in the badges. New items only. */
   onMarkViewed?: () => void;
+  /** Mark unread: counts in the badges again. New items only. */
+  onMarkUnread?: () => void;
   /** Opens the PR as a review; this also tracks it on the board. */
   onOpenReview: () => void;
   onOpenExisting?: () => void;
@@ -49,7 +52,7 @@ export function InboxItemRow({
   const unviewed = variant === "new" && !item.viewed_at;
 
   return (
-    <div className="card pr-card">
+    <div className={`card pr-card${unviewed ? " unread" : ""}`}>
       <span className="avatar">
         {item.author_avatar ? (
           <img src={item.author_avatar} alt={item.author_login ?? ""} />
@@ -79,8 +82,8 @@ export function InboxItemRow({
             <ReasonBadge key={i} reason={r.reason} detail={r.detail} />
           ))}
           {unviewed && (
-            <span className="chip accent" title="Counts in the Inbox badge until viewed, tracked, reviewed or archived">
-              new
+            <span className="chip accent" title="Counts in the Inbox badge until marked read, tracked, reviewed or archived">
+              unread
             </span>
           )}
           {isBot && <BotBadge />}
@@ -158,14 +161,18 @@ export function InboxItemRow({
               Track
             </button>
           )}
-          {unviewed && onMarkViewed && (
+          {variant === "new" && onMarkViewed && onMarkUnread && (
             <button
-              className="btn btn-sm btn-ghost"
+              className="btn-icon"
               disabled={busy}
-              onClick={onMarkViewed}
-              title="Mark viewed — stays in New but stops counting in the Inbox badge"
+              onClick={unviewed ? onMarkViewed : onMarkUnread}
+              title={
+                unviewed
+                  ? "Mark read — stays in New but stops counting in the badges"
+                  : "Mark unread — counts in the badges again"
+              }
             >
-              Mark viewed
+              <Icon name={unviewed ? "check" : "dot"} size={13} />
             </button>
           )}
           {variant === "new" ? (

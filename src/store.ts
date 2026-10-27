@@ -77,6 +77,8 @@ export interface InboxFilters {
   flag: string | null;
   /** Archive tab only: dismissed | closed | discarded | tracked. */
   cause: string | null;
+  /** New tab only: just the unread items. */
+  unread: boolean;
 }
 
 export const EMPTY_INBOX_FILTERS: InboxFilters = {
@@ -89,6 +91,7 @@ export const EMPTY_INBOX_FILTERS: InboxFilters = {
   reason: null,
   flag: null,
   cause: null,
+  unread: false,
 };
 
 export interface ConversationFiltersState {

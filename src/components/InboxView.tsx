@@ -88,6 +88,7 @@ export function InboxView() {
     reason: reasonFilter,
     flag: flagFilter,
     cause: causeFilter,
+    unread: unreadFilter,
   } = filters;
   const active: TabKey =
     filters.bucket === "archive" ? "archive" : filters.bucket === "conversations" ? "conversations" : "new";
@@ -100,6 +101,7 @@ export function InboxView() {
   const setReasonFilter = (reason: string | null) => setInboxFilters({ reason });
   const setFlagFilter = (flag: string | null) => setInboxFilters({ flag });
   const setCauseFilter = (cause: string | null) => setInboxFilters({ cause });
+  const setUnreadFilter = (on: string | null) => setInboxFilters({ unread: on != null });
 
   const [search, setSearch] = useState("");
   const [archiveLimit, setArchiveLimit] = useState(ARCHIVE_PAGE);
@@ -112,7 +114,7 @@ export function InboxView() {
     enabled: active === "archive",
   });
   const metaQuery = useQuery({ queryKey: ["inbox-meta"], queryFn: api.inboxMeta });
-  const { unreadConversations } = useInboxCounts();
+  const { newItems: unreadNew, unreadConversations } = useInboxCounts();
 
   const reviewsQuery = useQuery({ queryKey: ["reviews", null], queryFn: () => api.listReviews(null) });
   const trackedQuery = useQuery({ queryKey: ["board-tracked"], queryFn: api.boardTrackedIds });
@@ -144,6 +146,7 @@ export function InboxView() {
   const archive = useMutation({ mutationFn: api.archiveItem, onSuccess: invalidate, onError: onErr });
   const restore = useMutation({ mutationFn: api.restoreItem, onSuccess: invalidate, onError: onErr });
   const markViewed = useMutation({ mutationFn: api.markItemViewed, onSuccess: invalidate, onError: onErr });
+  const markUnread = useMutation({ mutationFn: api.markItemUnread, onSuccess: invalidate, onError: onErr });
   const track = useMutation({
     mutationFn: (item: InboxItem) => api.boardTrack(item.url),
     onSuccess: () => {
@@ -179,8 +182,16 @@ export function InboxView() {
   const tabItems = active === "archive" ? archiveItems : newItems;
 
   // Build sidebar filter counts from the active tab's items.
-  const { repoEntries, authorEntries, typeEntries, reviewEntries, statusEntries, reasonEntries, flagEntries } =
-    useMemo(() => {
+  const {
+    repoEntries,
+    authorEntries,
+    typeEntries,
+    reviewEntries,
+    statusEntries,
+    reasonEntries,
+    flagEntries,
+    unreadEntries,
+  } = useMemo(() => {
       const repo = new Map<string, number>();
       const author = new Map<string, number>();
       const type = new Map<string, number>();
@@ -188,6 +199,7 @@ export function InboxView() {
       const status = new Map<string, number>();
       const reason = new Map<string, number>();
       const flag = new Map<string, number>();
+      let unread = 0;
       const bump = (m: Map<string, number>, k: string) => m.set(k, (m.get(k) ?? 0) + 1);
       for (const it of tabItems) {
         bump(repo, it.repo);
@@ -198,6 +210,7 @@ export function InboxView() {
         bump(reason, reasonGroup(it));
         bump(flag, isBot(it) ? "bot" : "human");
         if (it.stale) bump(flag, "stale");
+        if (active === "new" && !it.viewed_at) unread++;
       }
       const byCount = (a: [string, number], b: [string, number]) => b[1] - a[1] || a[0].localeCompare(b[0]);
       const byReviewOrder = (a: [string, number], b: [string, number]) =>
@@ -210,9 +223,10 @@ export function InboxView() {
         statusEntries: [...status.entries()].sort(byCount),
         reasonEntries: [...reason.entries()].sort(byCount),
         flagEntries: [...flag.entries()].sort(byCount),
+        unreadEntries: (unread > 0 ? [["unread", unread]] : []) as [string, number][],
       };
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [tabItems, botSet]);
+    }, [tabItems, botSet, active]);
 
   const effRepos = repoFilter.filter((r) => tabItems.some((i) => i.repo === r));
   const effAuthors = authorFilter.filter((a) => tabItems.some((i) => i.author_login === a));
@@ -226,7 +240,10 @@ export function InboxView() {
       ? flagFilter
       : null;
 
+  const effUnread = unreadFilter && active === "new" && tabItems.some((i) => !i.viewed_at);
+
   const items = tabItems.filter((i) => {
+    if (effUnread && i.viewed_at) return false;
     if (effRepos.length > 0 && !effRepos.includes(i.repo)) return false;
     if (effAuthors.length > 0 && !effAuthors.includes(i.author_login ?? "")) return false;
     if (effType && i.type !== effType) return false;
@@ -242,7 +259,7 @@ export function InboxView() {
   const visibleIds = items.map((i) => i.id);
   useSyncScope("inbox", onHome, visibleIds);
 
-  const busy = archive.isPending || restore.isPending || markViewed.isPending || openPr.isPending || track.isPending;
+  const busy = archive.isPending || restore.isPending || markViewed.isPending || markUnread.isPending || openPr.isPending || track.isPending;
   const lastRefresh = metaQuery.data?.lastRefreshAt;
   const loading = active === "archive" ? archiveQuery.isLoading : inboxQuery.isLoading;
   const tab = TABS.find((t) => t.key === active)!;
@@ -279,7 +296,7 @@ export function InboxView() {
           >
             <Icon name={t.icon} size={13} />
             <span>{t.label}</span>
-            {t.key === "new" && <span className="n">{newItems.length}</span>}
+            {t.key === "new" && unreadNew > 0 && <span className="n">{unreadNew}</span>}
             {t.key === "conversations" && unreadConversations > 0 && <span className="n">{unreadConversations}</span>}
           </button>
         ))}
@@ -290,6 +307,12 @@ export function InboxView() {
       ) : (
       <div className="inbox-layout">
         <aside className="cr-rail">
+          <FilterList
+            title="Show"
+            entries={unreadEntries}
+            selected={effUnread ? "unread" : null}
+            onSelect={setUnreadFilter}
+          />
           <FilterList
             title="Reason"
             entries={reasonEntries}
@@ -375,6 +398,7 @@ export function InboxView() {
                 onArchive={() => archive.mutate(item.id)}
                 onRestore={() => restore.mutate(item.id)}
                 onMarkViewed={() => markViewed.mutate(item.id)}
+                onMarkUnread={() => markUnread.mutate(item.id)}
                 onOpenReview={() => openPr.mutate(item)}
                 onOpenExisting={() => {
                   if (existingReviewId == null) return;
