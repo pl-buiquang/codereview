@@ -3128,7 +3128,13 @@ tr.search-current {
 .comment-filter-group {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 3px;
+  /* Hanging indent: wrapped chips start 12px in, the first line stays flush. */
+  padding-left: 12px;
+}
+.comment-filter-group > :first-child {
+  margin-left: -12px;
 }
 .comment-filter-btn {
   padding: 1px 7px;
