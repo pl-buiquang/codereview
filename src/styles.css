@@ -2280,6 +2280,9 @@ tr.kb-focus {
   color: var(--text-2);
   white-space: pre-wrap;
   line-height: 1.5;
+  /* Long messages (e.g. a batch's PR list) scroll; the actions stay visible. */
+  min-height: 0;
+  overflow-y: auto;
 }
 
 /* --- Settings screen ------------------------------------------------------ */
