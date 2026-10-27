@@ -6065,18 +6065,19 @@ button.board-overview-ref {
 }
 .routine-status-running,
 .routine-status-queued {
-  color: var(--accent);
-  background: var(--accent-soft);
+  color: var(--warning);
+  background: var(--warning-soft);
 }
 .routine-status-ok {
   color: var(--success);
 }
-.routine-status-needs_attention,
+.routine-status-needs_attention {
+  color: var(--info);
+  background: var(--info-soft);
+}
+.routine-status-error,
 .routine-status-timeout,
 .routine-status-interrupted {
-  color: var(--warning);
-}
-.routine-status-error {
   color: var(--danger);
 }
 .routine-badge {
