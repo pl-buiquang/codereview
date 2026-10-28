@@ -1,4 +1,4 @@
-import { memo, useEffect } from "react";
+import { memo, useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { listen } from "@tauri-apps/api/event";
 import { queryClient } from "./lib/queryClient";
@@ -288,9 +288,13 @@ function TabPanes() {
 // toggles this wrapper's `display` — TabContent, memoized on the stable `tab`
 // object, never re-renders, so the diff subtree is left untouched.
 const TabPane = memo(function TabPane({ tab, active }: { tab: Tab; active: boolean }) {
+  // Restored tabs mount (and fetch) on first activation, not at startup; once
+  // opened they stay mounted so later switches are instant.
+  const [everActive, setEverActive] = useState(active);
+  if (active && !everActive) setEverActive(true);
   return (
     <div className="tab-pane" style={active ? undefined : { display: "none" }}>
-      <TabContent tab={tab} />
+      {everActive && <TabContent tab={tab} />}
     </div>
   );
 });
