@@ -140,6 +140,31 @@ function cssVar(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 }
 
+let colorCtx: CanvasRenderingContext2D | null | undefined;
+
+/** A theme token as plain `rgb()/rgba()`: mermaid's color parser rejects `color-mix()` and friends. */
+function cssColor(name: string): string | undefined {
+  const raw = cssVar(name);
+  if (!raw) return undefined;
+  if (colorCtx === undefined) {
+    const canvas = document.createElement("canvas");
+    canvas.width = canvas.height = 1;
+    colorCtx = canvas.getContext("2d", { willReadFrequently: true });
+  }
+  const probe = document.createElement("span");
+  probe.style.color = `var(${name})`;
+  document.body.appendChild(probe);
+  const resolved = getComputedStyle(probe).color;
+  probe.remove();
+  if (!colorCtx) return resolved || undefined;
+  colorCtx.clearRect(0, 0, 1, 1);
+  colorCtx.fillStyle = "#000";
+  colorCtx.fillStyle = resolved;
+  colorCtx.fillRect(0, 0, 1, 1);
+  const [r, g, b, a] = colorCtx.getImageData(0, 0, 1, 1).data;
+  return a === 255 ? `rgb(${r}, ${g}, ${b})` : `rgba(${r}, ${g}, ${b}, ${+(a / 255).toFixed(3)})`;
+}
+
 function MermaidBlock({ code }: { code: string }) {
   const id = `mmd-${useId().replace(/[^a-zA-Z0-9]/g, "")}`;
   const [svg, setSvg] = useState<string | null>(() => svgCache.get(code) ?? null);
@@ -160,13 +185,13 @@ function MermaidBlock({ code }: { code: string }) {
           theme: "base",
           themeVariables: {
             fontFamily: cssVar("--font-sans") || undefined,
-            primaryColor: cssVar("--surface-2") || undefined,
-            primaryTextColor: cssVar("--text") || undefined,
-            primaryBorderColor: cssVar("--border") || undefined,
-            lineColor: cssVar("--text-2") || undefined,
-            secondaryColor: cssVar("--surface-3") || undefined,
-            tertiaryColor: cssVar("--bg-sunken") || undefined,
-            background: cssVar("--bg-sunken") || undefined,
+            primaryColor: cssColor("--surface-2"),
+            primaryTextColor: cssColor("--text"),
+            primaryBorderColor: cssColor("--border"),
+            lineColor: cssColor("--text-2"),
+            secondaryColor: cssColor("--surface-3"),
+            tertiaryColor: cssColor("--bg-sunken"),
+            background: cssColor("--bg-sunken"),
           },
         });
         const { svg } = await mermaid.render(id, code);
