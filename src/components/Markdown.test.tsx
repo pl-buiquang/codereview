@@ -1,8 +1,16 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Markdown } from "./Markdown";
 import { api } from "../lib/api";
+
+// Real mermaid needs browser layout; the wiring is what's under test.
+vi.mock("mermaid", () => ({
+  default: {
+    initialize: vi.fn(),
+    render: vi.fn().mockResolvedValue({ svg: '<svg data-testid="diagram"></svg>' }),
+  },
+}));
 
 describe("Markdown", () => {
   it("renders bold, lists and links", () => {
@@ -45,7 +53,7 @@ describe("Markdown", () => {
     expect(screen.getByText("gone").tagName).toBe("DEL");
   });
 
-  it("escapes raw HTML instead of executing it", () => {
+  it("strips scripts and event handlers from raw HTML", () => {
     const { container } = render(
       <Markdown
         source={'<script>alert(1)</script> <img src=x onerror="alert(2)">'}
@@ -54,7 +62,42 @@ describe("Markdown", () => {
 
     expect(container.querySelector("script")).toBeNull();
     expect(container.querySelector("img[onerror]")).toBeNull();
-    expect(container.textContent).toContain("<script>alert(1)</script>");
+  });
+
+  it("renders <details> blocks and hides HTML comments", () => {
+    const { container } = render(
+      <Markdown
+        source={"<!-- hidden -->\n\nvisible\n\n<details>\n<summary>Exact commands</summary>\n\nbody **bold**\n\n</details>"}
+      />,
+    );
+
+    expect(container.textContent).not.toContain("hidden");
+    expect(container.querySelector("details > summary")?.textContent).toBe("Exact commands");
+    expect(container.querySelector("details strong")?.textContent).toBe("bold");
+  });
+
+  it("colours diff fences per line", () => {
+    const { container } = render(
+      <Markdown source={"```diff\n@@ -1 +1 @@\n-old\n+new\n ctx\n```"} />,
+    );
+
+    expect(container.querySelectorAll(".md-diff-add")).toHaveLength(1);
+    expect(container.querySelectorAll(".md-diff-del")).toHaveLength(1);
+    expect(container.querySelectorAll(".md-diff-hunk")).toHaveLength(1);
+  });
+
+  it("highlights code fences once the grammar loads", async () => {
+    const { container } = render(<Markdown source={"```sh\necho \"hi\"\n```"} />);
+
+    await waitFor(() => expect(container.querySelector("code .token")).not.toBeNull());
+    expect(container.querySelector("code")?.textContent).toBe('echo "hi"\n');
+  });
+
+  it("renders mermaid fences as a diagram", async () => {
+    const { container } = render(<Markdown source={"```mermaid\ngraph TD; A-->B\n```"} />);
+
+    expect(container.querySelector(".md-mermaid")).not.toBeNull();
+    await waitFor(() => expect(container.querySelector(".md-mermaid svg")).not.toBeNull());
   });
 
   it("renders suggestion fences as a panel", () => {

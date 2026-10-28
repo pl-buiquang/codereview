@@ -1062,28 +1062,28 @@ button:disabled,
   font-size: 0.85em;
 }
 /* Syntax tokens (lib/highlight.ts) — colors come from the active theme's `--tok-*` vars. */
-:is(.diff, .theme-sample) .token.tok-comment {
+:is(.diff, .theme-sample, .markdown-body) .token.tok-comment {
   color: var(--tok-comment);
 }
-:is(.diff, .theme-sample) .token.tok-punctuation {
+:is(.diff, .theme-sample, .markdown-body) .token.tok-punctuation {
   color: var(--tok-punctuation);
 }
-:is(.diff, .theme-sample) .token.tok-literal {
+:is(.diff, .theme-sample, .markdown-body) .token.tok-literal {
   color: var(--tok-literal);
 }
-:is(.diff, .theme-sample) .token.tok-string {
+:is(.diff, .theme-sample, .markdown-body) .token.tok-string {
   color: var(--tok-string);
 }
-:is(.diff, .theme-sample) .token.tok-operator {
+:is(.diff, .theme-sample, .markdown-body) .token.tok-operator {
   color: var(--tok-operator);
 }
-:is(.diff, .theme-sample) .token.tok-keyword {
+:is(.diff, .theme-sample, .markdown-body) .token.tok-keyword {
   color: var(--tok-keyword);
 }
-:is(.diff, .theme-sample) .token.tok-function {
+:is(.diff, .theme-sample, .markdown-body) .token.tok-function {
   color: var(--tok-function);
 }
-:is(.diff, .theme-sample) .token.tok-variable {
+:is(.diff, .theme-sample, .markdown-body) .token.tok-variable {
   color: var(--tok-variable);
 }
 
@@ -1939,6 +1939,68 @@ td.diff-code {
 }
 .markdown-body img {
   max-width: 100%;
+}
+.markdown-body details {
+  margin: 0 0 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-m);
+}
+.markdown-body details[open] > summary {
+  margin-bottom: 6px;
+}
+.markdown-body summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.markdown-body pre.md-diff code {
+  display: block;
+}
+.markdown-body .md-diff-line {
+  display: block;
+  margin: 0 -10px;
+  padding: 0 10px;
+}
+.markdown-body .md-diff-add {
+  background: var(--diff-add-bg);
+}
+.markdown-body .md-diff-del {
+  background: var(--diff-del-bg);
+}
+.markdown-body .md-diff-hunk {
+  color: var(--text-2);
+}
+.markdown-body .md-mermaid {
+  position: relative;
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  overflow: auto;
+  text-align: center;
+  border-radius: var(--radius-m);
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+}
+.markdown-body .md-mermaid svg {
+  max-width: 100%;
+  height: auto;
+}
+.markdown-body .md-mermaid-toggle {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  font-size: 11px;
+}
+.markdown-body .md-mermaid pre {
+  margin: 0;
+  text-align: left;
+  border: none;
+}
+.markdown-body .md-mermaid-error {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--danger, #cb3a30);
+  font-size: 12px;
+  text-align: left;
 }
 .markdown-body .image-loading {
   display: inline-block;

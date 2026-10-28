@@ -43,6 +43,19 @@ export function languageForPath(path: string): string | undefined {
   return lang && isSupportedLanguage(lang) ? lang : undefined;
 }
 
+const FENCE_ALIAS: Record<string, string> = {
+  shell: "bash", console: "bash", shellsession: "bash", sh: "bash",
+  dockerfile: "docker", yml: "yaml", rb: "ruby", py: "python", ts: "typescript", js: "javascript",
+};
+
+/** Shiki language for a Markdown fence info string (`sh`, `ruby`, `ts`, …), if supported. */
+export function languageForFence(info: string): string | undefined {
+  const name = info.trim().toLowerCase();
+  if (!name) return undefined;
+  const lang = FENCE_ALIAS[name] ?? EXT_LANG[name] ?? name;
+  return isSupportedLanguage(lang) ? lang : undefined;
+}
+
 /** Files with more changed lines than this skip word-level edit marking (perf). */
 export const MARK_EDITS_MAX_CHANGES = 2000;
 
