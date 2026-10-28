@@ -117,7 +117,7 @@ pub fn remove_repository(id: i64, db: State<Db>) -> AppResult<()> {
     remove_repository_impl(&conn, id)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_branches(repo_id: i64, db: State<Db>) -> AppResult<Vec<git::Branch>> {
     let conn = db.0.lock().unwrap();
     let local_path: Option<String> = conn
@@ -133,7 +133,7 @@ pub fn list_branches(repo_id: i64, db: State<Db>) -> AppResult<Vec<git::Branch>>
 }
 
 /// Unified diff between two refs for a "virtual PR" comparison.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn diff_refs(
     repo_id: i64,
     base: String,
@@ -195,7 +195,7 @@ pub fn link_local_path(repo_id: i64, path: String, db: State<Db>) -> AppResult<R
 
 /// Scan all remote-only repos and try to find local clones under the configured
 /// base paths. Returns the count of repos that were newly linked.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn auto_link_repos(base_paths: Vec<String>, db: State<Db>) -> AppResult<i64> {
     let remote_only: Vec<(i64, String, String)> = {
         let conn = db.0.lock().unwrap();

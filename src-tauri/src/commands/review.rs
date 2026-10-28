@@ -656,7 +656,7 @@ fn reanchor_review_comments(conn: &Connection, detail: &ReviewDetail) -> AppResu
 
 /// Re-anchor a draft review's diff comments onto its pin, reporting how many
 /// moved, were lost, or were already current.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn reanchor_comments(review_id: i64, db: State<Db>) -> AppResult<ReanchorResult> {
     let conn = db.0.lock().unwrap();
     ensure_draft(&conn, review_id)?;
@@ -921,7 +921,7 @@ pub fn review_diff_impl(conn: &Connection, review_id: i64) -> AppResult<Arc<Stri
     diff_source(conn, review_id)?.load()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn review_diff(review_id: i64, db: State<Db>) -> AppResult<String> {
     let source = diff_source(&db.0.lock().unwrap(), review_id)?;
     Ok(source.load()?.as_ref().clone())
@@ -933,7 +933,7 @@ pub fn review_diff(review_id: i64, db: State<Db>) -> AppResult<String> {
 /// backfilled here for rows created before it was populated). Reads the local
 /// blob via `git show`; for GitHub PR targets whose commit isn't checked out
 /// locally, falls back to the GitHub contents API.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn file_source(
     review_id: i64,
     file_path: String,
@@ -1781,7 +1781,7 @@ fn mark_discarded(conn: &Connection, review_id: i64) -> AppResult<()> {
 
 /// Push the draft to GitHub as a PENDING review (event omitted), then lock it
 /// locally as 'published_pending'. github_review_id stores the pending review.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn publish_review_pending(review_id: i64, db: State<Db>) -> AppResult<Review> {
     let (detail, owner, name, number) = prepare_publish(review_id, &db)?;
     let conn = db.0.lock().unwrap();
@@ -1800,7 +1800,7 @@ pub fn publish_review_pending(review_id: i64, db: State<Db>) -> AppResult<Review
 }
 
 /// Submit the PENDING review on GitHub with the stored verdict; lock as 'published'.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn submit_pending_review(review_id: i64, db: State<Db>) -> AppResult<Review> {
     let conn = db.0.lock().unwrap();
     let detail = load_detail(&conn, review_id)?;
@@ -1819,7 +1819,7 @@ pub fn submit_pending_review(review_id: i64, db: State<Db>) -> AppResult<Review>
 }
 
 /// Delete the PENDING review on GitHub; unlock the local draft.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn discard_pending_review(review_id: i64, db: State<Db>) -> AppResult<Review> {
     let conn = db.0.lock().unwrap();
     let detail = load_detail(&conn, review_id)?;

@@ -7,12 +7,12 @@ use crate::provider::provider_for;
 use crate::sync::{MirrorUpdated, Scope, MIRROR_UPDATED_EVENT};
 use crate::{gh, mirror, tools};
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn gh_auth_status() -> bool {
     provider_for().auth_status()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_prs(repo_id: i64, db: State<Db>) -> AppResult<Vec<gh::PrSummary>> {
     let conn = db.0.lock().unwrap();
     let ctx = crate::commands::review::gh_ctx_for_repo(&conn, repo_id)?;
@@ -203,7 +203,7 @@ pub async fn fetch_github_image(url: String) -> AppResult<String> {
     Ok(gh::image_data_url(&bytes))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn check_environment() -> ToolEnv {
     ToolEnv {
         git: tools::git_path(),

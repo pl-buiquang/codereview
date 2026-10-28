@@ -36,7 +36,7 @@ pub fn repo_sync_state(repo_id: i64, db: State<Db>) -> AppResult<RepoSyncState> 
 
 /// Holds a watcher on the repo's git dir. Returns false when the repo can't be
 /// watched (no local clone, or the watcher failed); then don't release.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn watch_acquire(app: AppHandle, repo_id: i64, db: State<Db>, watchers: State<Watchers>) -> AppResult<bool> {
     let local_path: Option<String> = db.0.lock().unwrap().query_row(
         "SELECT local_path FROM repository WHERE id = ?1",
