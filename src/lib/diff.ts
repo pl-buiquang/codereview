@@ -8,34 +8,39 @@ import {
   type HunkData,
   type TokenizeOptions,
 } from "react-diff-view";
-import { refractor } from "refractor";
+import { highlightToHast, isLanguageReady, isSupportedLanguage } from "./highlight";
 import type { Side } from "./types";
 
-// react-diff-view@3 treats refractor.highlight()'s return value as an array of
-// hast children, but refractor@5 wraps them in a root node ({type:'root',
-// children:[...]}). Left as-is, tokenize() throws on the non-array and all
-// highlighting silently falls back to plain text. Unwrap .children to restore
-// the v4 shape tokenize() expects.
-const refractorCompat = {
-  ...refractor,
-  highlight: (value: string, language: string) =>
-    refractor.highlight(value, language).children,
-} as unknown as typeof refractor;
+// react-diff-view only calls `refractor.highlight(text, language)` and expects hast children;
+// highlight.ts provides that shape from Shiki.
+const highlighter = { highlight: highlightToHast } as never;
 
 const EXT_LANG: Record<string, string> = {
-  js: "javascript", mjs: "javascript", cjs: "javascript", jsx: "javascript",
-  ts: "typescript", tsx: "typescript", json: "json", md: "markdown", markdown: "markdown",
-  css: "css", scss: "css", less: "css", html: "markup", xml: "markup", svg: "markup",
-  sh: "bash", bash: "bash", zsh: "bash", py: "python", rs: "rust", go: "go", rb: "ruby",
-  java: "java", c: "c", h: "c", cpp: "cpp", cc: "cpp", hpp: "cpp", cs: "csharp",
-  yml: "yaml", yaml: "yaml", toml: "toml", sql: "sql", php: "php", dockerfile: "docker",
+  js: "javascript", mjs: "javascript", cjs: "javascript", jsx: "jsx",
+  ts: "typescript", mts: "typescript", cts: "typescript", tsx: "tsx",
+  json: "json", jsonc: "jsonc", md: "markdown", markdown: "markdown",
+  css: "css", scss: "scss", less: "less", html: "html", htm: "html", xml: "xml", svg: "xml",
+  csproj: "xml", vue: "vue", svelte: "svelte", erb: "erb",
+  sh: "bash", bash: "bash", zsh: "bash", py: "python", rs: "rust", go: "go",
+  rb: "ruby", rake: "ruby", gemspec: "ruby", ru: "ruby",
+  java: "java", kt: "kotlin", kts: "kotlin", scala: "scala", swift: "swift", dart: "dart",
+  c: "c", h: "c", cpp: "cpp", cc: "cpp", hpp: "cpp", cs: "csharp",
+  yml: "yaml", yaml: "yaml", toml: "toml", ini: "ini", sql: "sql", php: "php", lua: "lua",
+  graphql: "graphql", gql: "graphql", proto: "proto", diff: "diff", patch: "diff",
+  ex: "elixir", exs: "elixir", tf: "hcl", hcl: "hcl", mk: "makefile",
+};
+
+/** Extension-less files (or ones whose name is the language). */
+const NAME_LANG: Record<string, string> = {
+  dockerfile: "docker", makefile: "makefile", gemfile: "ruby", rakefile: "ruby",
+  guardfile: "ruby", podfile: "ruby", brewfile: "ruby", vagrantfile: "ruby",
 };
 
 export function languageForPath(path: string): string | undefined {
   const name = path.split("/").pop()?.toLowerCase() ?? "";
   const ext = name.includes(".") ? name.split(".").pop()! : name;
-  const lang = EXT_LANG[ext];
-  return lang && refractor.registered(lang) ? lang : undefined;
+  const lang = NAME_LANG[name] ?? EXT_LANG[ext];
+  return lang && isSupportedLanguage(lang) ? lang : undefined;
 }
 
 /** Files with more changed lines than this skip word-level edit marking (perf). */
@@ -83,14 +88,16 @@ export function tokenizeFile(
   file: FileData,
   opts: { markEditsMaxChanges?: number } = {},
 ) {
-  const language = languageForPath(fileDisplayPath(file));
+  const lang = languageForPath(fileDisplayPath(file));
+  // Grammars load lazily (useSyntaxReady re-runs callers once ready): plain until then.
+  const language = lang && isLanguageReady(lang) ? lang : undefined;
   const { markEditsMaxChanges = MARK_EDITS_MAX_CHANGES } = opts;
   const { add, del } = countChanges(file);
   const wantEdits = add + del <= markEditsMaxChanges;
   if (!language && !wantEdits) return undefined;
 
   const base: TokenizeOptions = language
-    ? { highlight: true, refractor: refractorCompat, language }
+    ? { highlight: true, refractor: highlighter, language }
     : { highlight: false };
   if (wantEdits) {
     try {

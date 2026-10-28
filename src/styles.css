@@ -1033,50 +1033,29 @@ button:disabled,
 .expand-error-note {
   font-size: 0.85em;
 }
-/* Prism syntax tokens — colors come from the active theme's `--tok-*` vars. */
-:is(.diff, .theme-sample) .token.comment,
-:is(.diff, .theme-sample) .token.prolog,
-:is(.diff, .theme-sample) .token.doctype,
-:is(.diff, .theme-sample) .token.cdata {
+/* Syntax tokens (lib/highlight.ts) — colors come from the active theme's `--tok-*` vars. */
+:is(.diff, .theme-sample) .token.tok-comment {
   color: var(--tok-comment);
 }
-:is(.diff, .theme-sample) .token.punctuation {
+:is(.diff, .theme-sample) .token.tok-punctuation {
   color: var(--tok-punctuation);
 }
-:is(.diff, .theme-sample) .token.property,
-:is(.diff, .theme-sample) .token.tag,
-:is(.diff, .theme-sample) .token.boolean,
-:is(.diff, .theme-sample) .token.number,
-:is(.diff, .theme-sample) .token.constant,
-:is(.diff, .theme-sample) .token.symbol,
-:is(.diff, .theme-sample) .token.deleted {
+:is(.diff, .theme-sample) .token.tok-literal {
   color: var(--tok-literal);
 }
-:is(.diff, .theme-sample) .token.selector,
-:is(.diff, .theme-sample) .token.attr-name,
-:is(.diff, .theme-sample) .token.string,
-:is(.diff, .theme-sample) .token.char,
-:is(.diff, .theme-sample) .token.builtin,
-:is(.diff, .theme-sample) .token.inserted {
+:is(.diff, .theme-sample) .token.tok-string {
   color: var(--tok-string);
 }
-:is(.diff, .theme-sample) .token.operator,
-:is(.diff, .theme-sample) .token.entity,
-:is(.diff, .theme-sample) .token.url {
+:is(.diff, .theme-sample) .token.tok-operator {
   color: var(--tok-operator);
 }
-:is(.diff, .theme-sample) .token.atrule,
-:is(.diff, .theme-sample) .token.attr-value,
-:is(.diff, .theme-sample) .token.keyword {
+:is(.diff, .theme-sample) .token.tok-keyword {
   color: var(--tok-keyword);
 }
-:is(.diff, .theme-sample) .token.function,
-:is(.diff, .theme-sample) .token.class-name {
+:is(.diff, .theme-sample) .token.tok-function {
   color: var(--tok-function);
 }
-:is(.diff, .theme-sample) .token.regex,
-:is(.diff, .theme-sample) .token.important,
-:is(.diff, .theme-sample) .token.variable {
+:is(.diff, .theme-sample) .token.tok-variable {
   color: var(--tok-variable);
 }
 

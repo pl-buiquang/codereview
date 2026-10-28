@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { beforeAll, describe, it, expect } from "vitest";
 import {
   expandFromRawCode,
   getCollapsedLinesCountBetween,
@@ -25,15 +25,17 @@ import {
   trailingExpandRange,
   trailingGap,
 } from "./diff";
+import { ensureLanguage } from "./highlight";
 
 describe("languageForPath", () => {
-  it("maps known extensions to refractor languages", () => {
+  it("maps known extensions to syntax languages", () => {
     expect(languageForPath("src/main.ts")).toBe("typescript");
-    expect(languageForPath("a/b/Component.tsx")).toBe("typescript");
+    expect(languageForPath("a/b/Component.tsx")).toBe("tsx");
+    expect(languageForPath("app/models/episode.rb")).toBe("ruby");
     expect(languageForPath("lib.rs")).toBe("rust");
     expect(languageForPath("script.py")).toBe("python");
     expect(languageForPath("data.json")).toBe("json");
-    expect(languageForPath("style.scss")).toBe("css");
+    expect(languageForPath("style.scss")).toBe("scss");
   });
 
   it("lowercases the extension before lookup", () => {
@@ -42,7 +44,12 @@ describe("languageForPath", () => {
 
   it("returns undefined for unknown or missing extensions", () => {
     expect(languageForPath("notes.unknownext")).toBeUndefined();
-    expect(languageForPath("Makefile")).toBeUndefined();
+  });
+
+  it("maps well-known extension-less file names", () => {
+    expect(languageForPath("Makefile")).toBe("makefile");
+    expect(languageForPath("back/Gemfile")).toBe("ruby");
+    expect(languageForPath("Dockerfile")).toBe("docker");
   });
 
   it("uses only the basename, ignoring directory dots", () => {
@@ -357,6 +364,8 @@ index 0000000..1111111 100644
 `;
 
 describe("tokenizeFile", () => {
+  beforeAll(() => Promise.all([ensureLanguage("typescript"), ensureLanguage("ruby")]));
+
   it("marks intra-line edits on a modified line pair", () => {
     const [file] = parseDiff(MODIFIED_TS_DIFF);
     const tokens = tokenizeFile(file);
@@ -370,8 +379,31 @@ describe("tokenizeFile", () => {
     const tokens = tokenizeFile(file);
     expect(tokens).toBeDefined();
     const types = tokenTypes(tokens!.new);
-    const refractorTypes = [...types].filter((t) => t !== "text" && t !== "edit");
-    expect(refractorTypes.length).toBeGreaterThan(0);
+    const syntaxTypes = [...types].filter((t) => t !== "text" && t !== "edit");
+    expect(syntaxTypes.length).toBeGreaterThan(0);
+  });
+
+  it("maps Ruby tokens onto theme roles", () => {
+    const [file] = parseDiff(`diff --git a/a.rb b/a.rb
+index 0000000..1111111 100644
+--- a/a.rb
++++ b/a.rb
+@@ -0,0 +1,2 @@
++# hi
++def up; Foo::Bar.run('x', :y); end
+`);
+    const classes = new Set<string>();
+    const walk = (n: TokenNode) => {
+      const cn = (n as { properties?: { className?: string[] } }).properties?.className;
+      for (const c of cn ?? []) classes.add(c);
+      for (const child of n.children ?? []) walk(child);
+    };
+    for (const line of tokenizeFile(file)!.new) for (const n of line) walk(n);
+    expect(classes).toContain("tok-comment");
+    expect(classes).toContain("tok-keyword");
+    expect(classes).toContain("tok-string");
+    expect(classes).toContain("tok-function"); // `up`
+    expect(classes).toContain("tok-literal"); // Foo / Bar constants, :y
   });
 
   it("skips markEdits above the changed-line threshold", () => {

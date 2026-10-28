@@ -30,6 +30,7 @@ import {
   changeKeyOf,
   countChanges,
   fileDisplayPath,
+  languageForPath,
   hunkContextSnippet,
   indexFile,
   isLargeDiff,
@@ -41,6 +42,7 @@ import {
   trailingExpandRange,
   trailingGap,
 } from "../lib/diff";
+import { useSyntaxReady } from "../lib/highlight";
 import { filterDiffMatches, wrapIndex, type DiffMatch } from "../lib/diffSearch";
 import { categorize, compileCategoryRules, type FileCategory } from "../lib/fileCategory";
 import { FileJumpList } from "./FileJumpList";
@@ -197,7 +199,6 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
       setLeftWidth(detailQuery.data.review.left_panel_width);
       setRightWidth(detailQuery.data.review.right_panel_width);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     detailQuery.data?.review.sidebar_collapsed,
     detailQuery.data?.review.chat_collapsed,
@@ -506,7 +507,6 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
     };
     raf = requestAnimationFrame(find);
     return () => cancelAnimationFrame(raf);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     threadJump,
     isActiveTab,
@@ -536,7 +536,6 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
         ?.scrollIntoView({ block: "center" });
     });
     return () => cancelAnimationFrame(raf);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchOpen, searchIdx, matches, viewedSig, files, revealed]);
 
   // A match inside a focus-hidden hunk reveals it, like un-viewing a file.
@@ -2058,12 +2057,13 @@ function FileReview({
   const tooLarge = useMemo(() => isLargeDiff(file, largeDiffMaxLines), [file, largeDiffMaxLines]);
   const [selection, setSelection] = useState<Selection | null>(null);
   const viewed = detail.viewed_files.includes(path);
+  const syntaxReady = useSyntaxReady(languageForPath(path));
   const tokens = useMemo(
     () =>
       tooLarge || viewed
         ? undefined
         : tokenizeFile({ ...file, hunks }, { markEditsMaxChanges: markEditsEnabled ? undefined : 0 }),
-    [file, hunks, markEditsEnabled, tooLarge, viewed],
+    [file, hunks, markEditsEnabled, tooLarge, viewed, syntaxReady],
   );
   const [fileComposerOpen, setFileComposerOpen] = useState(false);
 

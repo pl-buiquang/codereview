@@ -566,28 +566,28 @@ function ThemeSample() {
       </div>
       <pre className="diff theme-sample-code">
         <span className="theme-sample-line">
-          <span className="token comment">{"// load the settings"}</span>
+          <span className="token tok-comment">{"// load the settings"}</span>
         </span>
         <span className="theme-sample-line del">
-          <span className="token keyword">const</span> <span className="token variable">cfg</span>{" "}
-          <span className="token operator">=</span> <span className="token function">read</span>
-          <span className="token punctuation">(</span>
-          <span className="token string">"a.json"</span>
-          <span className="token punctuation">);</span>
+          <span className="token tok-keyword">const</span> <span className="token tok-variable">cfg</span>{" "}
+          <span className="token tok-operator">=</span> <span className="token tok-function">read</span>
+          <span className="token tok-punctuation">(</span>
+          <span className="token tok-string">"a.json"</span>
+          <span className="token tok-punctuation">);</span>
         </span>
         <span className="theme-sample-line add">
-          <span className="token keyword">const</span> <span className="token variable">cfg</span>{" "}
-          <span className="token operator">=</span> <span className="token function">load</span>
-          <span className="token punctuation">(</span>
-          <span className="token number">42</span>
-          <span className="token punctuation">,</span> <span className="token boolean">true</span>
-          <span className="token punctuation">);</span>
+          <span className="token tok-keyword">const</span> <span className="token tok-variable">cfg</span>{" "}
+          <span className="token tok-operator">=</span> <span className="token tok-function">load</span>
+          <span className="token tok-punctuation">(</span>
+          <span className="token tok-literal">42</span>
+          <span className="token tok-punctuation">,</span> <span className="token tok-literal">true</span>
+          <span className="token tok-punctuation">);</span>
         </span>
         <span className="theme-sample-line">
-          <span className="token tag">{"<Tag"}</span> <span className="token attr-name">name</span>
-          <span className="token punctuation">=</span>
-          <span className="token string">"x"</span>
-          <span className="token tag">{" />"}</span>
+          <span className="token tok-literal">{"<Tag"}</span> <span className="token tok-string">name</span>
+          <span className="token tok-punctuation">=</span>
+          <span className="token tok-string">"x"</span>
+          <span className="token tok-literal">{" />"}</span>
         </span>
       </pre>
     </div>

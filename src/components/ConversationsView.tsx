@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Diff, Hunk } from "react-diff-view";
 import { api } from "../lib/api";
-import { hunkSnippetFile, tokenizeFile } from "../lib/diff";
+import { hunkSnippetFile, languageForPath, tokenizeFile } from "../lib/diff";
+import { useSyntaxReady } from "../lib/highlight";
 import { parseBotLogins, parseRepoBasePaths, useSettingsStore } from "../lib/settings";
 import { timeAgo } from "../lib/timeAgo";
 import { toast } from "../lib/toast";
@@ -277,7 +278,11 @@ function ConversationRow({
 
 function HunkSnippet({ path, diffHunk }: { path: string; diffHunk: string }) {
   const file = useMemo(() => hunkSnippetFile(path, diffHunk), [path, diffHunk]);
-  const tokens = useMemo(() => (file ? tokenizeFile(file) : undefined), [file]);
+  const syntaxReady = useSyntaxReady(languageForPath(path));
+  const tokens = useMemo(
+    () => (file ? tokenizeFile(file) : undefined),
+    [file, syntaxReady],
+  );
   if (!file) return null;
   return (
     <div className="conv-snippet">

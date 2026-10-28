@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { Diff, Hunk, parseDiff, type FileData, type ViewType } from "react-diff-view";
-import { countChanges, tokenizeFile } from "../lib/diff";
+import { countChanges, fileDisplayPath, languageForPath, tokenizeFile } from "../lib/diff";
+import { useSyntaxReady } from "../lib/highlight";
 import { useSettingsStore } from "../lib/settings";
 
 function filePath(file: FileData): string {
@@ -39,7 +40,11 @@ function DiffFile({ file, viewType }: { file: FileData; viewType: ViewType }) {
   const { add, del } = countChanges(file);
   const maxLines = useSettingsStore((s) => s.largeDiffMaxLines);
   const tooLarge = add + del > maxLines;
-  const tokens = useMemo(() => (tooLarge ? undefined : tokenizeFile(file)), [file, tooLarge]);
+  const syntaxReady = useSyntaxReady(languageForPath(fileDisplayPath(file)));
+  const tokens = useMemo(
+    () => (tooLarge ? undefined : tokenizeFile(file)),
+    [file, tooLarge, syntaxReady],
+  );
   return (
     <div className="diff-file">
       <div className="diff-file-header">

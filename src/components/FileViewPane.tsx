@@ -15,8 +15,10 @@ import {
   changedRightLines,
   fileDisplayPath,
   indexFile,
+  languageForPath,
   tokenizeFile,
 } from "../lib/diff";
+import { useSyntaxReady } from "../lib/highlight";
 import { LineWidget, ThreadItem } from "./ReviewView";
 import { groupThreads, isDraftReply, type CommentThread } from "../lib/threads";
 import type { ReviewDetail } from "../lib/types";
@@ -80,7 +82,11 @@ export function FileViewPane({
     () => (sourceQuery.data != null ? buildFullFileFile(filePath, sourceQuery.data) : null),
     [sourceQuery.data, filePath],
   );
-  const tokens = useMemo(() => (synthetic ? tokenizeFile(synthetic) : undefined), [synthetic]);
+  const syntaxReady = useSyntaxReady(languageForPath(filePath));
+  const tokens = useMemo(
+    () => (synthetic ? tokenizeFile(synthetic) : undefined),
+    [synthetic, syntaxReady],
+  );
   const { metaByKey, keyByAnchor } = useMemo(
     () => (synthetic ? indexFile(synthetic) : { metaByKey: new Map(), keyByAnchor: new Map() }),
     [synthetic],
