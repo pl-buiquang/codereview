@@ -890,6 +890,15 @@ button:disabled,
 .diff-area > .diff-files {
   margin: 8px 12px 12px;
 }
+.diff-area > .review-summary-row {
+  margin: 0 12px 12px;
+}
+.diff-area > .hint,
+.diff-area > p.muted,
+.diff-area > p.error {
+  margin-left: 12px;
+  margin-right: 12px;
+}
 .diff-file {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -3134,7 +3143,6 @@ tr.search-current {
   color: var(--accent);
 }
 .tree-row.viewed .tree-file + .tree-name {
-  font-weight: 400;
   color: inherit;
 }
 .tree-name {
