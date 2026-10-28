@@ -251,6 +251,8 @@ export interface PrMeta {
   title: string;
   url: string;
   body: string; // Markdown source
+  /** Asset uuid → signed image URL (SSO orgs); live fetch only. */
+  bodyImages: Record<string, string>;
   state: string; // OPEN | CLOSED | MERGED
   isDraft: boolean;
   headRefOid: string | null;

@@ -306,6 +306,7 @@ pub fn read_pr_meta(conn: &Connection, owner: &str, name: &str, number: i64) -> 
                 title: r.get(1)?,
                 url: r.get(2)?,
                 body: r.get::<_, Option<String>>(3)?.unwrap_or_default(),
+                body_images: Default::default(),
                 state: r.get::<_, Option<String>>(4)?.unwrap_or_default().to_uppercase(),
                 is_draft: r.get::<_, i64>(5)? != 0,
                 head_ref_oid: r.get(6)?,

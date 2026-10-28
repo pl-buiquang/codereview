@@ -394,6 +394,14 @@ pub async fn fetch_authenticated_url(raw_url: &str) -> AppResult<Vec<u8>> {
         }
         response.error_for_status_ref().map_err(image_http_error)?;
         if response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|t| t.starts_with("text/html"))
+        {
+            return Err(AppError::Gh("image URL returned HTML (sign-in page?)".into()));
+        }
+        if response
             .content_length()
             .is_some_and(|len| len > MAX_IMAGE_BYTES as u64)
         {
@@ -589,6 +597,7 @@ query PrMeta($owner: String!, $name: String!, $number: Int!) {
       __typename
       ...PrCore
       body
+      bodyHTML
       labels(first: 50) { nodes { name color } }
       latestReviews(first: 20) { nodes { author { login avatarUrl } state } }
       reviewRequests(first: 30) {
@@ -629,6 +638,9 @@ pub struct PrMeta {
     pub title: String,
     pub url: String,
     pub body: String,
+    /// Asset UUID → signed `private-user-images` URL, from `bodyHTML`. SSO orgs
+    /// reject token-authenticated `user-attachments` fetches. Live fetch only.
+    pub body_images: HashMap<String, String>,
     pub state: String,
     pub is_draft: bool,
     /// The PR's live head, compared with a review's pin for "head moved".
@@ -719,6 +731,8 @@ struct PrMetaPr {
     url: String,
     #[serde(default)]
     body: Option<String>,
+    #[serde(default, rename = "bodyHTML")]
+    body_html: Option<String>,
     state: String,
     #[serde(default)]
     is_draft: bool,
@@ -948,6 +962,7 @@ fn map_pr_meta(pr: PrMetaPr) -> PrMeta {
         title: pr.title,
         url: pr.url,
         body: pr.body.unwrap_or_default(),
+        body_images: pr.body_html.as_deref().map(signed_image_urls).unwrap_or_default(),
         state: pr.state,
         is_draft: pr.is_draft,
         head_ref_oid: pr.head_ref_oid,
@@ -966,6 +981,36 @@ fn map_pr_meta(pr: PrMetaPr) -> PrMeta {
         ci_state,
         checks,
     }
+}
+
+/// Signed image URLs in GitHub-rendered HTML, keyed by asset UUID (the id in
+/// the original `user-attachments/assets/<uuid>` markdown URL).
+pub fn signed_image_urls(html: &str) -> HashMap<String, String> {
+    const PREFIX: &str = "src=\"https://private-user-images.githubusercontent.com/";
+    let mut out = HashMap::new();
+    let mut rest = html;
+    while let Some(i) = rest.find(PREFIX) {
+        rest = &rest[i + 5..];
+        let Some(end) = rest.find('"') else { break };
+        let url = rest[..end].replace("&amp;", "&");
+        rest = &rest[end..];
+        let path = url.split('?').next().unwrap_or("");
+        let file = path.rsplit('/').next().unwrap_or("");
+        let stem = file.split('.').next().unwrap_or("");
+        // `<id>-<uuid>`: the UUID is the last 36 chars.
+        if let Some(uuid) = stem.get(stem.len().saturating_sub(36)..).filter(|u| is_uuid(u)) {
+            out.insert(uuid.to_string(), url.clone());
+        }
+    }
+    out
+}
+
+fn is_uuid(s: &str) -> bool {
+    s.len() == 36
+        && s.char_indices().all(|(i, c)| match i {
+            8 | 13 | 18 | 23 => c == '-',
+            _ => c.is_ascii_hexdigit(),
+        })
 }
 
 /// A PR's header metadata plus the mirror node of the same response.
@@ -2358,6 +2403,7 @@ mod tests {
         let meta = map_pr_meta(pr);
 
         assert_eq!(meta.number, 42);
+        assert!(meta.body_images.is_empty());
         assert_eq!(meta.state, "OPEN");
         assert!(!meta.is_draft);
         assert_eq!(meta.mergeable.as_deref(), Some("MERGEABLE"));
@@ -2386,6 +2432,20 @@ mod tests {
         assert_eq!(meta.checks[2].name, "legacy/lint");
         assert_eq!(meta.checks[2].state.as_deref(), Some("FAILURE"));
         assert_eq!(meta.checks[2].url.as_deref(), Some("https://ci/lint"));
+    }
+
+    #[test]
+    fn signed_image_urls_keys_by_asset_uuid() {
+        let html = r#"<p><img src="https://private-user-images.githubusercontent.com/1/687-40c62b64-7e5b-48e4-b488-c3417a123a9c.png?jwt=a&amp;b=c" alt="x"></p>
+<img src="https://example.com/other.png">
+<img src="https://private-user-images.githubusercontent.com/1/688-ab485b28-f3b2-41c2-91c9-47acc2f02a8e.png?jwt=d">"#;
+        let m = signed_image_urls(html);
+        assert_eq!(m.len(), 2);
+        assert_eq!(
+            m["40c62b64-7e5b-48e4-b488-c3417a123a9c"],
+            "https://private-user-images.githubusercontent.com/1/687-40c62b64-7e5b-48e4-b488-c3417a123a9c.png?jwt=a&b=c"
+        );
+        assert!(m.contains_key("ab485b28-f3b2-41c2-91c9-47acc2f02a8e"));
     }
 
     #[test]

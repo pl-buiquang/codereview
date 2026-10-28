@@ -89,7 +89,7 @@ export function PrMetaPanel({
 
       {meta.checks.length > 0 && <ChecksList checks={meta.checks} />}
 
-      {meta.body.trim() && <Description body={meta.body} />}
+      {meta.body.trim() && <Description body={meta.body} imageUrls={meta.bodyImages} />}
     </div>
   );
 }
@@ -492,11 +492,11 @@ function ChecksList({ checks }: { checks: PrCheck[] }) {
   );
 }
 
-function Description({ body }: { body: string }) {
+function Description({ body, imageUrls }: { body: string; imageUrls?: Record<string, string> }) {
   return (
     <div className="pr-meta-description">
       <div className="pr-meta-desc-body scroll">
-        <Markdown source={body} />
+        <Markdown source={body} imageUrls={imageUrls} />
       </div>
     </div>
   );

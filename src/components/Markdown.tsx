@@ -27,13 +27,13 @@ const imageCache = new Map<string, string>();
 const imageInflight = new Map<string, Promise<string>>();
 
 /** Proxied GitHub images by URL, shared across mounts; failures aren't cached. */
-function loadGithubImage(src: string): Promise<string> {
+function loadGithubImage(src: string, fetchUrl: string = src): Promise<string> {
   const cached = imageCache.get(src);
   if (cached) return Promise.resolve(cached);
   let pending = imageInflight.get(src);
   if (!pending) {
     pending = api
-      .fetchGithubImage(src)
+      .fetchGithubImage(fetchUrl)
       .then((url) => {
         imageCache.set(src, url);
         if (imageCache.size > MAX_CACHED_IMAGES) {
@@ -47,7 +47,7 @@ function loadGithubImage(src: string): Promise<string> {
   return pending;
 }
 
-function ProxiedImage({ src, alt }: { src: string; alt?: string }) {
+function ProxiedImage({ src, alt, fetchUrl }: { src: string; alt?: string; fetchUrl?: string }) {
   const [loaded, setLoaded] = useState<{ src: string; url: string } | null>(() => {
     const url = imageCache.get(src);
     return url ? { src, url } : null;
@@ -61,7 +61,8 @@ function ProxiedImage({ src, alt }: { src: string; alt?: string }) {
       return;
     }
     let cancelled = false;
-    loadGithubImage(src)
+    setFailedSrc(null);
+    loadGithubImage(src, fetchUrl)
       .then((url) => {
         if (!cancelled) setLoaded({ src, url });
       })
@@ -71,7 +72,7 @@ function ProxiedImage({ src, alt }: { src: string; alt?: string }) {
     return () => {
       cancelled = true;
     };
-  }, [src]);
+  }, [src, fetchUrl]);
 
   if (failedSrc === src) return <img src={src} alt={alt} />;
   if (loaded?.src !== src) return <span className="image-loading" title={alt ?? src} />;
@@ -231,7 +232,19 @@ function MermaidBlock({ code }: { code: string }) {
   );
 }
 
-export function Markdown({ source }: { source: string }) {
+const ASSET_UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+
+/**
+ * `imageUrls` maps an attachment's asset uuid to a signed URL that loads without
+ * SSO (from GitHub's rendered HTML); the original URL stays the cache key.
+ */
+export function Markdown({
+  source,
+  imageUrls,
+}: {
+  source: string;
+  imageUrls?: Record<string, string>;
+}) {
   return (
     <div className="markdown-body">
       <ReactMarkdown
@@ -251,7 +264,8 @@ export function Markdown({ source }: { source: string }) {
           ),
           img: ({ src, alt }) => {
             if (src && GITHUB_IMAGE_RE.test(src)) {
-              return <ProxiedImage src={src} alt={alt} />;
+              const uuid = ASSET_UUID_RE.exec(src)?.[0].toLowerCase();
+              return <ProxiedImage src={src} alt={alt} fetchUrl={uuid ? imageUrls?.[uuid] : undefined} />;
             }
             return <img src={src} alt={alt} />;
           },

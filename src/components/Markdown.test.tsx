@@ -154,4 +154,20 @@ describe("Markdown", () => {
     expect(fetchImage).toHaveBeenCalledTimes(1);
     fetchImage.mockRestore();
   });
+
+  it("fetches the signed URL for an SSO attachment but caches under the original src", async () => {
+    const uuid = "40c62b64-7e5b-48e4-b488-c3417a123a9c";
+    const src = `https://github.com/user-attachments/assets/${uuid}`;
+    const signed = `https://private-user-images.githubusercontent.com/1/2-${uuid}.png?jwt=x`;
+    const fetchImage = vi
+      .spyOn(api, "fetchGithubImage")
+      .mockResolvedValue("data:image/png;base64,BBBB");
+    render(<Markdown source={`![shot](${src})`} imageUrls={{ [uuid]: signed }} />);
+    expect(await screen.findByRole("img", { name: "shot" })).toHaveAttribute(
+      "src",
+      "data:image/png;base64,BBBB",
+    );
+    expect(fetchImage).toHaveBeenCalledWith(signed);
+    fetchImage.mockRestore();
+  });
 });

@@ -25,6 +25,7 @@ const meta = (over: Partial<PrMeta> = {}): PrMeta => ({
   title: "Add widgets",
   url: "https://github.com/acme/widget/pull/42",
   body: "",
+  bodyImages: {},
   state: "OPEN",
   isDraft: false,
   headRefOid: null,
