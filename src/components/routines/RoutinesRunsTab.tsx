@@ -56,7 +56,6 @@ export function RoutinesRunsTab() {
 
   const list = runs.data ?? [];
   const selected = list.find((r) => r.id === selectedId) ?? null;
-  const running = list.filter((r) => isActiveRun(r.status)).length;
 
   const openContext = (run: RoutineRun) => {
     if (run.context.kind === "review") openReview(Number(run.context.id));
@@ -88,7 +87,6 @@ export function RoutinesRunsTab() {
               </option>
             ))}
           </select>
-          <span className="muted">{running} active</span>
         </div>
         {runs.isLoading && <p className="muted">Loading…</p>}
         {runs.isError && <p className="form-warning">{String(runs.error)}</p>}

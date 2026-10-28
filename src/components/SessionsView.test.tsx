@@ -243,17 +243,30 @@ describe("SessionsView tab badges", () => {
 
   it("counts runs that failed or need attention since the Routines tab was last open, until it is opened", async () => {
     localStorage.setItem("routines_problems_seen_at", "1000");
-    routineRunList.mockResolvedValue([
+    const runs = [
       run(1, "needs_attention", new Date().toISOString()),
       run(2, "error", new Date().toISOString()),
       run(3, "error", new Date(500).toISOString()),
-    ]);
+    ];
+    routineRunList.mockImplementation(async (f: { statuses?: string[] }) =>
+      runs.filter((r) => !f?.statuses || f.statuses.includes(r.status)),
+    );
     renderView();
     const tab = screen.getByRole("tab", { name: /Routines/ });
     await waitFor(() => expect(tab).toHaveTextContent("2"));
     expect(tab.querySelector(".n-error")).not.toBeNull();
     await userEvent.click(tab);
     await waitFor(() => expect(tab.querySelector(".n")).toBeNull());
+  });
+
+  it("shows the number of active routine runs on the Routines tab", async () => {
+    routineRunList.mockImplementation(async (f: { statuses?: string[] }) =>
+      [run(1, "running", new Date().toISOString()), run(2, "queued", new Date().toISOString())].filter((r) => !f?.statuses || f.statuses.includes(r.status)),
+    );
+    renderView();
+    const tab = screen.getByRole("tab", { name: /Routines/ });
+    await waitFor(() => expect(tab).toHaveTextContent("2"));
+    expect(tab.querySelector(".n-info")).not.toBeNull();
   });
 });
 
