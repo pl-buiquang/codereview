@@ -45,6 +45,7 @@ import {
 } from "../lib/diff";
 import { useSyntaxReady } from "../lib/highlight";
 import { useDefinitionLinks, type DefinitionLookup } from "../lib/useDefinitionLinks";
+import { recordJump, registerReviewNav } from "../lib/navHistory";
 import { DefinitionPopover } from "./DefinitionPopover";
 import { filterDiffMatches, wrapIndex, type DiffMatch } from "../lib/diffSearch";
 import { categorize, compileCategoryRules, type FileCategory } from "../lib/fileCategory";
@@ -142,9 +143,9 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [filePanePath, setFilePanePath] = useState<string | null>(null);
   const [filePaneFocus, setFilePaneFocus] = useState<{ line: number } | null>(null);
-  const openFilePane = useCallback((path: string, line?: number) => {
+  const openFilePane = useCallback((path: string | null, line?: number) => {
     setFilePanePath(path);
-    setFilePaneFocus(line != null ? { line } : null);
+    setFilePaneFocus(path != null && line != null ? { line } : null);
   }, []);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const [chatCollapsed, setChatCollapsed] = useState(true);
@@ -662,6 +663,53 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
     return () => cancelAnimationFrame(raf);
   }, [lineJump, isActiveTab, files, anchorsOf, viewedSig, typeFilter, categoryRules, focusModel, reveal, jumpToFile]);
 
+  // Back/Forward (Cmd+←/→) also undo/redo definition jumps: lend the history this view's
+  // scroll position and file pane, and record the origin right before each jump.
+  const navState = useRef({ filePanePath, filePaneFocus });
+  navState.current = { filePanePath, filePaneFocus };
+  useEffect(
+    () =>
+      registerReviewNav(reviewId, {
+        capture: () => {
+          const { filePanePath: path, filePaneFocus: focus } = navState.current;
+          return {
+            scrollTop: diffAreaRef.current?.scrollTop ?? 0,
+            filePane: path ? { path, line: focus?.line } : null,
+          };
+        },
+        restore: (pos) => {
+          openFilePane(pos.filePane?.path ?? null, pos.filePane?.line);
+          // the diff may still be laying out (reopened tab): wait until it is tall enough
+          let frames = 0;
+          const apply = () => {
+            const area = diffAreaRef.current;
+            if (!area) return;
+            if (area.scrollHeight - area.clientHeight >= pos.scrollTop - 1 || ++frames > 60) {
+              area.scrollTop = pos.scrollTop;
+            } else {
+              requestAnimationFrame(apply);
+            }
+          };
+          requestAnimationFrame(apply);
+        },
+      }),
+    [reviewId, openFilePane],
+  );
+  const jumpFromDefinition = useCallback(
+    (path: string, side: Side, line: number) => {
+      recordJump();
+      jumpToLine(path, side, line);
+    },
+    [jumpToLine],
+  );
+  const openFileFromDefinition = useCallback(
+    (path: string, line: number) => {
+      recordJump();
+      openFilePane(path, line);
+    },
+    [openFilePane],
+  );
+
   useEffect(() => {
     if (!isActiveTab) return;
     const onKey = (e: KeyboardEvent) => {
@@ -909,8 +957,8 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
           lookup={definition}
           diffPaths={diffPaths}
           inDiff={lineInDiff}
-          onJump={jumpToLine}
-          onOpenFile={openFilePane}
+          onJump={jumpFromDefinition}
+          onOpenFile={openFileFromDefinition}
           onClose={closeDefinition}
         />
       )}

@@ -20,6 +20,8 @@ Holding `⌘/Ctrl` over a word in the diff underlines it **only if a declaration
 - one declaration, and its line is in the diff: the view scrolls to that line and flashes it, no popover;
 - otherwise the popover lists up to 10 declarations with a snippet, "Go to line" (line is in the diff) and "Open file" (the file pane, scrolled to the declaration). The clicked file comes first, then the other files in the diff.
 
+A jump is a step in the app's Back/Forward history (`⌘←` / `⌘→`, mouse side buttons): Back returns to the scroll position (and closed file pane) you jumped from, Forward to where the jump landed (`src/lib/navHistory.ts`, `recordJump`).
+
 It needs a local clone that has the commit; PRs without one find nothing.
 
 **How it works** (`src-tauri/src/definitions/`). No language server and no index, so cost does not grow with the repo or the number of open reviews, and nothing is kept between lookups:
