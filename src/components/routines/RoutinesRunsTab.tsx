@@ -4,9 +4,11 @@ import { api } from "../../lib/api";
 import { toast } from "../../lib/toast";
 import { timeAgo } from "../../lib/timeAgo";
 import { formatDuration, isActiveRun, STATUS_LABEL } from "../../lib/routines";
-import { useAiDisabledReason } from "../../lib/settings";
+import { useAiDisabledReason, useSettingsStore } from "../../lib/settings";
 import { useUIStore } from "../../store";
 import type { RoutineRun, RoutineRunStatus } from "../../lib/types";
+import { Icon } from "../icons";
+import { resumeCommand } from "../SessionsView";
 import { RunStatusBadge } from "./RunStatusBadge";
 import { RunTranscript } from "./RunTranscript";
 
@@ -45,6 +47,20 @@ export function RoutinesRunsTab() {
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["routine-runs"] });
   const stop = useMutation({ mutationFn: api.routineRunStop, onSuccess: invalidate, onError: (e) => toast.error(String(e)) });
   const aiOff = useAiDisabledReason();
+  const defaultTerminal = useSettingsStore((s) => s.defaultTerminal);
+  const tmuxTarget = useSettingsStore((s) => s.tmuxTarget);
+  const tmuxSessionName = useSettingsStore((s) => s.tmuxSessionName);
+  const resume = useMutation({
+    mutationFn: (r: { session_id: string; cwd: string }) =>
+      api.resumeClaudeSession(r.session_id, r.cwd, null, defaultTerminal, tmuxTarget, tmuxSessionName),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["claude-sessions"] }),
+    onError: (e) => toast.error(`Could not resume session:\n${String(e)}`),
+  });
+  const copyCommand = (command: string) =>
+    navigator.clipboard.writeText(command).then(
+      () => toast.success("Resume command copied to clipboard"),
+      (e) => toast.error(`Could not copy: ${String(e)}`),
+    );
   const relaunch = useMutation({
     mutationFn: api.routineRunRelaunch,
     onSuccess: (run) => {
@@ -149,6 +165,28 @@ export function RoutinesRunsTab() {
                   >
                     Run again
                   </button>
+                )}
+                {!isActiveRun(selected.status) && selected.session_id && selected.cwd && (
+                  <div className="btn-split">
+                    <button
+                      type="button"
+                      className="btn btn-sm"
+                      disabled={resume.isPending}
+                      title={`Open a new terminal running: ${resumeCommand({ cwd: selected.cwd, session_id: selected.session_id })}`}
+                      onClick={() => resume.mutate({ session_id: selected.session_id!, cwd: selected.cwd! })}
+                    >
+                      <Icon name="terminal" size={13} /> Resume
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-sm"
+                      title={`Copy: ${resumeCommand({ cwd: selected.cwd, session_id: selected.session_id })}`}
+                      aria-label="Copy resume command"
+                      onClick={() => copyCommand(resumeCommand({ cwd: selected.cwd!, session_id: selected.session_id! }))}
+                    >
+                      <Icon name="copy" size={12} />
+                    </button>
+                  </div>
                 )}
               </div>
             </div>
