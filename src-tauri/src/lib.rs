@@ -326,6 +326,7 @@ pub fn run() {
             commands::gh::repo_labels,
             commands::gh::repo_assignable_users,
             commands::gh::pr_checks,
+            commands::gh::approve_pr,
             commands::gh::body_images,
             commands::gh::rerun_ci_runs,
             commands::gh::rerun_ci_job,

@@ -1089,6 +1089,20 @@ pub fn set_pr_auto_merge(owner: &str, name: &str, number: i64, enable: bool) -> 
     Ok(())
 }
 
+/// Approve a PR with a bare approving review. Clone-less, like `set_pr_draft`.
+pub fn approve_pr(owner: &str, name: &str, number: i64) -> AppResult<()> {
+    let ctx = GhRepo::Remote {
+        owner: owner.to_string(),
+        name: name.to_string(),
+    };
+    let num = number.to_string();
+    let mut args = vec!["pr", "review", num.as_str(), "--approve"];
+    let suffix = ctx.pr_args_suffix();
+    args.extend(suffix.iter().map(String::as_str));
+    run_gh(&ctx, &args)?;
+    Ok(())
+}
+
 /// Bring a PR's head branch up to date with its base (merge, or rebase when `rebase`).
 pub fn update_pr_branch(owner: &str, name: &str, number: i64, rebase: bool) -> AppResult<()> {
     let ctx = GhRepo::Remote {

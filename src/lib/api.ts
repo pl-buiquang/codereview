@@ -227,6 +227,8 @@ export const api = {
     invoke<void>("update_pr_branch", { owner, name, number, rebase }),
   setPrAutoMerge: (owner: string, name: string, number: number, enable: boolean) =>
     invoke<void>("set_pr_auto_merge", { owner, name, number, enable }),
+  approvePr: (owner: string, name: string, number: number) =>
+    invoke<void>("approve_pr", { owner, name, number }),
   setPrLabel: (owner: string, name: string, number: number, label: string, on: boolean) =>
     invoke<void>("set_pr_label", { owner, name, number, label, on }),
   setPrReviewer: (owner: string, name: string, number: number, reviewer: string, team: boolean, on: boolean) =>

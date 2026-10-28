@@ -94,6 +94,11 @@ pub async fn set_pr_auto_merge(owner: String, name: String, number: i64, enable:
 }
 
 #[tauri::command]
+pub async fn approve_pr(owner: String, name: String, number: i64) -> AppResult<()> {
+    provider_for().approve_pr(&owner, &name, number)
+}
+
+#[tauri::command]
 pub async fn set_pr_label(owner: String, name: String, number: i64, label: String, on: bool) -> AppResult<()> {
     provider_for().set_pr_label(&owner, &name, number, &label, on)
 }

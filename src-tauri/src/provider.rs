@@ -38,6 +38,8 @@ pub trait ReviewProvider: Send + Sync {
     fn update_pr_branch(&self, owner: &str, name: &str, number: i64, rebase: bool) -> AppResult<()>;
     /// Enable (squash) or disable GitHub auto-merge on a PR.
     fn set_pr_auto_merge(&self, owner: &str, name: &str, number: i64, enable: bool) -> AppResult<()>;
+    /// Approve a PR (a bare approving review, no comments).
+    fn approve_pr(&self, owner: &str, name: &str, number: i64) -> AppResult<()>;
     /// Add (`on`) or remove a label on a PR.
     fn set_pr_label(&self, owner: &str, name: &str, number: i64, label: &str, on: bool) -> AppResult<()>;
     /// Request (`on`) or withdraw a user's or team's review.
@@ -161,6 +163,10 @@ impl ReviewProvider for GithubProvider {
 
     fn set_pr_auto_merge(&self, owner: &str, name: &str, number: i64, enable: bool) -> AppResult<()> {
         gh::set_pr_auto_merge(owner, name, number, enable)
+    }
+
+    fn approve_pr(&self, owner: &str, name: &str, number: i64) -> AppResult<()> {
+        gh::approve_pr(owner, name, number)
     }
 
     fn set_pr_label(&self, owner: &str, name: &str, number: i64, label: &str, on: bool) -> AppResult<()> {

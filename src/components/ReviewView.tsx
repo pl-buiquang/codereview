@@ -1396,6 +1396,28 @@ function ReviewHeader({
     onError: (e) => toast.error(`Auto-merge failed:\n${String(e)}`),
   });
 
+  // Approve first, then enable auto-merge: if the approval fails, nothing is merged.
+  const approveAndMerge = useMutation({
+    mutationFn: async () => {
+      if (owner == null || name == null || prNumber == null) {
+        throw new Error("missing PR identity");
+      }
+      await api.approvePr(owner, name, prNumber);
+      if (prMetaQuery.data?.autoMerge == null) {
+        await api.setPrAutoMerge(owner, name, prNumber, true);
+      }
+    },
+    onSuccess: () => {
+      toast.success("Approved, auto-merge enabled");
+      queryClient.invalidateQueries({ queryKey: ["pr-meta", owner, name, prNumber] });
+      queryClient.invalidateQueries({ queryKey: ["board"] });
+    },
+    onError: (e) => {
+      toast.error(`Approve & merge failed:\n${String(e)}`);
+      queryClient.invalidateQueries({ queryKey: ["pr-meta", owner, name, prNumber] });
+    },
+  });
+
   // Same key as the Context tab, so tracking from either updates both.
   const boardCardQuery = useQuery({
     queryKey: ["board-card-for-pr", owner, name, prNumber],
@@ -1782,6 +1804,17 @@ function ReviewHeader({
               )
                 setAutoMerge.mutate(true);
             };
+            const doApproveAndMerge = async () => {
+              close();
+              if (
+                await confirmDialog({
+                  title: "Approve & merge",
+                  message: `Approve #${prNumber} "${target.title}", then squash-merge it and delete its branch once all requirements pass?`,
+                  confirmLabel: "Approve & merge",
+                })
+              )
+                approveAndMerge.mutate();
+            };
             return (
               <>
                 {prUrl && (
@@ -1820,6 +1853,14 @@ function ReviewHeader({
                       onClick={toggleAutoMerge}
                     >
                       {autoMergeOn ? "Disable auto-merge" : "Enable auto-merge (squash)"}
+                    </button>
+                    <button
+                      role="menuitem"
+                      disabled={autoMergeDisabledReason != null || approveAndMerge.isPending}
+                      title={autoMergeDisabledReason ?? "Approve the PR and enable auto-merge (squash)"}
+                      onClick={doApproveAndMerge}
+                    >
+                      {approveAndMerge.isPending ? "Approving…" : "Approve & merge"}
                     </button>
                     <button
                       role="menuitem"
