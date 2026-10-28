@@ -93,6 +93,8 @@ function DirectionPicker() {
 export function ThemeSection() {
   const mode = useSettingsStore((s) => s.mode);
   const diffFontSize = useSettingsStore((s) => s.diffFontSize);
+  const diffMarkers = useSettingsStore((s) => s.diffMarkers);
+  const setDiffMarkers = useSettingsStore((s) => s.setDiffMarkers);
   const setMode = useSettingsStore((s) => s.setMode);
   const setDiffFontSize = useSettingsStore((s) => s.setDiffFontSize);
   const direction = useSettingsStore((s) => s.direction);
@@ -132,6 +134,14 @@ export function ThemeSection() {
             />
             <span className="settings-value">{diffFontSize}px</span>
           </span>
+        </label>
+        <label className="settings-row">
+          <span>Show +/- markers in diffs</span>
+          <input
+            type="checkbox"
+            checked={diffMarkers}
+            onChange={(e) => setDiffMarkers(e.target.checked)}
+          />
         </label>
       </section>
 

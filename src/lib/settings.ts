@@ -35,7 +35,7 @@ export const TMUX_TARGET_OPTIONS: { label: string; value: TmuxTarget }[] = [
   { label: "Session per repository", value: "per_repo" },
 ];
 
-export const DEFAULT_DIFF_FONT_SIZE = 12.5;
+export const DEFAULT_DIFF_FONT_SIZE = 12;
 
 /** Auto Sync modes (the backend sync engine's schedule). */
 export const AUTO_SYNC_OPTIONS: { label: string; value: AutoSync }[] = [
@@ -139,6 +139,7 @@ type PersistedSettings = Pick<
   | "boardSnoozes"
   | "boardNeedsActionSnoozed"
   | "markEdits"
+  | "diffMarkers"
   | "largeDiffMaxLines"
   | "fileTestPatterns"
   | "fileConfigPatterns"
@@ -181,6 +182,7 @@ const DEFAULTS: PersistedSettings = {
   boardSnoozes: {},
   boardNeedsActionSnoozed: false,
   markEdits: false,
+  diffMarkers: true,
   largeDiffMaxLines: 3000,
   fileTestPatterns: DEFAULT_TEST_PATTERNS,
   fileConfigPatterns: DEFAULT_CONFIG_PATTERNS,
@@ -227,6 +229,8 @@ interface SettingsState {
   boardStatusBorderSide: BoardBorderSide;
   /** Highlight intra-line character-level changes (markEdits). */
   markEdits: boolean;
+  /** Show the +/- marker column in diffs. */
+  diffMarkers: boolean;
   /** Files with more changed lines (add + del) are not rendered in the diff. */
   largeDiffMaxLines: number;
   /** Master switch for every app-spawned `claude -p` feature (chat, focus, AI review, overview, routines). */
@@ -287,6 +291,7 @@ interface SettingsState {
   setAiEnabled: (on: boolean) => void;
   setChatModel: (s: string) => void;
   setMarkEdits: (b: boolean) => void;
+  setDiffMarkers: (b: boolean) => void;
   setLargeDiffMaxLines: (n: number) => void;
   setFileTestPatterns: (s: string) => void;
   setFileConfigPatterns: (s: string) => void;
@@ -388,6 +393,7 @@ export const useSettingsStore = create<SettingsState>()(
       setAiEnabled: (aiEnabled) => set({ aiEnabled }),
       setChatModel: (chatModel) => set({ chatModel }),
       setMarkEdits: (markEdits) => set({ markEdits }),
+      setDiffMarkers: (diffMarkers) => set({ diffMarkers }),
       setLargeDiffMaxLines: (largeDiffMaxLines) => set({ largeDiffMaxLines }),
       setFileTestPatterns: (fileTestPatterns) => set({ fileTestPatterns }),
       setFileConfigPatterns: (fileConfigPatterns) => set({ fileConfigPatterns }),
@@ -414,7 +420,7 @@ export const useSettingsStore = create<SettingsState>()(
     }),
     {
       name: "codereview-settings",
-      version: 10,
+      version: 11,
       storage: createJSONStorage(() => mirroredStorage),
       partialize: (s) => pickPersisted(s),
       // Adding a key needs no version bump: the merge fills it from DEFAULTS.
@@ -434,6 +440,7 @@ export const useSettingsStore = create<SettingsState>()(
           out.direction = "a";
           out.mode = oldMode === "dark" || oldMode === "light" ? oldMode : "system";
         }
+        if (version < 11 && p.diffFontSize === 12.5) out.diffFontSize = 12;
         return out;
       },
     },

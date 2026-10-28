@@ -69,6 +69,7 @@ export function useApplySettings() {
   const customTheme = useSettingsStore((s) => s.customTheme);
   const mode = useSettingsStore((s) => s.mode);
   const diffFontSize = useSettingsStore((s) => s.diffFontSize);
+  const diffMarkers = useSettingsStore((s) => s.diffMarkers);
   const logLevel = useSettingsStore((s) => s.logLevel);
   const aiEnabled = useSettingsStore((s) => s.aiEnabled);
 
@@ -85,6 +86,10 @@ export function useApplySettings() {
   useEffect(() => {
     document.documentElement.style.setProperty("--diff-font-size", `${diffFontSize}px`);
   }, [diffFontSize]);
+
+  useEffect(() => {
+    document.documentElement.classList.toggle("diff-markers", diffMarkers);
+  }, [diffMarkers]);
 
   // The backend owns the log file; push the chosen level to it (and to the
   // frontend logger) at startup and whenever it changes.

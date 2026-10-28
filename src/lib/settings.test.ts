@@ -30,11 +30,11 @@ beforeEach(() => {
 const migrate = useSettingsStore.persist.getOptions().migrate!;
 
 describe("useSettingsStore", () => {
-  it("has sensible defaults (direction a, system mode, 12.5px, split, three-dot)", () => {
+  it("has sensible defaults (direction a, system mode, 12px, split, three-dot)", () => {
     const s = useSettingsStore.getState();
     expect(s.direction).toBe("a");
     expect(s.mode).toBe("system");
-    expect(s.diffFontSize).toBe(12.5);
+    expect(s.diffFontSize).toBe(12);
     expect(s.defaultViewType).toBe("split");
     expect(s.defaultThreeDot).toBe(true);
     expect(s.autoSync).toBe("periodic");
@@ -100,6 +100,7 @@ describe("useSettingsStore", () => {
         "leftPaneTab",
         "logLevel",
         "markEdits",
+        "diffMarkers",
         "mode",
         "overviewModel",
         "repoBasePaths",
@@ -128,7 +129,7 @@ describe("exportSettings / importSettings", () => {
     s.setFileTestPatterns("");
     const applied = importSettings(json);
     const n = useSettingsStore.getState();
-    expect(applied).toBe(39);
+    expect(applied).toBe(40);
     expect(n.mode).toBe("light");
     expect(n.diffFontSize).toBe(15);
     expect(n.fileTestPatterns).toBe("*.spec.rb");

@@ -7,7 +7,7 @@
  * (13px, 12.5px for direction C); `--font-ui` overrides the fallback stack here.
  */
 :root {
-  --diff-font-size: 12.5px;
+  --diff-font-size: 12px;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica,
     Arial, sans-serif;
 }
@@ -939,15 +939,40 @@ button:disabled,
 
 /* react-diff-view overrides — restyle only via documented class hooks */
 .diff {
+  /* react-diff-view's own .diff-line rule reads this var (default Consolas, Courier). */
+  --diff-font-family: var(--font-mono);
   background: var(--surface);
   color: var(--text);
   font-family: var(--font-mono);
-  font-size: var(--diff-font-size, 12.5px);
+  font-size: var(--diff-font-size, 12px);
+  font-weight: 400;
+}
+.diff-line,
+.diff-decoration {
+  line-height: calc(var(--diff-font-size, 12px) * 5 / 3);
 }
 .diff-gutter {
   color: var(--text-3);
-  font-size: 10.5px;
+  padding: 0 10px;
   text-align: right;
+}
+/* +/- marker column; toggled by the `diffMarkers` setting (root class). */
+.diff-markers td.diff-code {
+  position: relative;
+  padding-left: 22px;
+}
+.diff-markers td.diff-code-insert::before,
+.diff-markers td.diff-code-delete::before {
+  position: absolute;
+  left: 8px;
+  color: var(--text-2);
+  user-select: none;
+}
+.diff-markers td.diff-code-insert::before {
+  content: "+";
+}
+.diff-markers td.diff-code-delete::before {
+  content: "-";
 }
 .diff-gutter-col {
   background: var(--surface);
@@ -980,9 +1005,8 @@ button:disabled,
   color: var(--text-2);
 }
 .diff-expander .diff-decoration-content {
-  background: var(--bg-sunken);
-  border-top: 1px dashed var(--border);
-  border-bottom: 1px dashed var(--border);
+  background: var(--diff-hunk-bg, color-mix(in srgb, var(--accent) 10%, var(--surface)));
+  color: var(--text-2);
 }
 .expand-control {
   display: flex;
@@ -2127,7 +2151,7 @@ td.diff-code {
   border-radius: var(--radius-m);
   padding: 12px;
   font-family: var(--font-mono);
-  font-size: var(--diff-font-size, 12.5px);
+  font-size: var(--diff-font-size, 12px);
   white-space: pre-wrap;
   word-break: break-word;
 }
