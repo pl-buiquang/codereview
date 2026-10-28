@@ -6527,3 +6527,48 @@ button.board-overview-ref {
   resize: vertical;
   line-height: 1.45;
 }
+
+/* Go-to-definition popover (Cmd/Ctrl-click an identifier in a diff) */
+.definition-popover {
+  position: fixed;
+  z-index: 60;
+  overflow: auto;
+  padding: 8px 10px;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-m);
+  box-shadow: var(--shadow-pop);
+  font-size: 12px;
+}
+.definition-popover-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.definition-hit + .definition-hit {
+  margin-top: 8px;
+}
+.definition-hit-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-2);
+}
+.definition-hit-head .file-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.definition-snippet {
+  margin: 4px 0 0;
+  padding: 6px 8px;
+  max-height: 240px;
+  overflow: auto;
+  background: var(--bg-sunken);
+  border-radius: var(--radius-s);
+  font-family: var(--font-mono);
+  font-size: var(--diff-font-size);
+}

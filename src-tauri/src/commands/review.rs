@@ -1002,6 +1002,30 @@ pub fn file_source(
     }
 }
 
+/// Declarations of `symbol` in the pinned commit of one side (LEFT→base, RIGHT→head), for the
+/// diff view's go-to-definition. `file_path` is the file the symbol was clicked in (it picks the
+/// language and ranks same-file hits first). Needs a local clone with the commit; otherwise
+/// there is nothing to search and the result is empty.
+#[tauri::command]
+pub fn find_definition(
+    review_id: i64,
+    symbol: String,
+    file_path: String,
+    side: String,
+    db: State<Db>,
+) -> AppResult<Vec<crate::definitions::DefinitionHit>> {
+    let detail = load_detail(&db.0.lock().unwrap(), review_id)?;
+    let sha = match side.as_str() {
+        "LEFT" => detail.review.base_sha.clone(),
+        "RIGHT" => detail.review.head_sha.clone(),
+        other => return Err(AppError::Other(format!("invalid side: {other}"))),
+    };
+    let (Some(repo), Some(sha)) = (detail.local_path.as_deref(), sha) else {
+        return Ok(vec![]);
+    };
+    crate::definitions::find(Path::new(repo), &sha, &symbol, &file_path)
+}
+
 /// Enriches raw `review` rows with their target, repo label and comment count.
 fn summarize_reviews(conn: &Connection, reviews: Vec<Review>) -> AppResult<Vec<ReviewSummary>> {
     let mut out = Vec::with_capacity(reviews.len());

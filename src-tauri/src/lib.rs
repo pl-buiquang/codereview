@@ -10,6 +10,7 @@ mod cr_install;
 pub mod db;
 pub mod db_path;
 pub mod deep_link;
+mod definitions;
 mod diff_cache;
 pub mod error;
 pub mod export;
@@ -297,6 +298,7 @@ pub fn run() {
             commands::review::create_review_for_pr,
             commands::review::review_diff,
             commands::review::file_source,
+            commands::review::find_definition,
             commands::review::publish_review,
             commands::review::publish_review_pending,
             commands::review::submit_pending_review,

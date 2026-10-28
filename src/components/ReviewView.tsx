@@ -44,6 +44,8 @@ import {
   trailingGap,
 } from "../lib/diff";
 import { useSyntaxReady } from "../lib/highlight";
+import { identifierUnderPointer } from "../lib/definition";
+import { DefinitionPopover, type DefinitionLookup } from "./DefinitionPopover";
 import { filterDiffMatches, wrapIndex, type DiffMatch } from "../lib/diffSearch";
 import { categorize, compileCategoryRules, type FileCategory } from "../lib/fileCategory";
 import { FileJumpList } from "./FileJumpList";
@@ -2410,7 +2412,7 @@ const FileReview = memo(function FileReview({
   }, [detail.comments, path]);
 
   return (
-    <div className="diff-file" id={`file-${index}`} ref={rootRef}>
+    <div className="diff-file" id={`file-${index}`} data-file-path={path} ref={rootRef}>
       <div className="diff-file-header">
         <span className="file-path-group">
           <span className="file-path" title={path} data-cr-title-when="clipped">{path}</span>
@@ -2550,6 +2552,7 @@ const FileReview = memo(function FileReview({
           threadCtx={threadCtx}
           reviewId={reviewId}
           draftRepliesByRoot={draftRepliesByRoot}
+          onOpenFilePane={onOpenFilePane}
           headSha={detail.review.head_sha}
           baseSha={detail.review.base_sha}
           readOnly={readOnly}
@@ -2587,6 +2590,7 @@ function FileBody({
   threadCtx,
   reviewId,
   draftRepliesByRoot,
+  onOpenFilePane,
   headSha,
   baseSha,
   readOnly,
@@ -2618,6 +2622,7 @@ function FileBody({
   threadCtx: PrThreadCtx | null;
   reviewId: number;
   draftRepliesByRoot: Map<number, Comment[]>;
+  onOpenFilePane: (path: string) => void;
   headSha: string | null;
   baseSha: string | null;
   readOnly: boolean;
@@ -2641,8 +2646,49 @@ function FileBody({
   onSaved: () => void;
   onCommentsChanged: () => void;
 }) {
+  // Cmd/Ctrl-click an identifier: look its declaration up in the pinned commit (search-based
+  // go-to-definition, no language server).
+  const [lookup, setLookup] = useState<DefinitionLookup | null>(null);
+  const closeLookup = useCallback(() => setLookup(null), []);
+  const onCodeClick = useCallback(
+    ({ change }: { change: ChangeData | null }, event: React.MouseEvent) => {
+      if (!change || !(event.metaKey || event.ctrlKey)) return;
+      const symbol = identifierUnderPointer(event);
+      if (!symbol) return;
+      event.preventDefault();
+      window.getSelection()?.removeAllRanges();
+      setLookup({
+        symbol,
+        side: change.type === "delete" ? "LEFT" : "RIGHT",
+        x: event.clientX,
+        y: event.clientY,
+      });
+    },
+    [],
+  );
+  const filePath = fileDisplayPath(file);
+  const jumpInDiff = useCallback((path: string) => {
+    const el = document.querySelector<HTMLElement>(`.diff-file[data-file-path="${CSS.escape(path)}"]`);
+    if (el) scrollToAndFlash(el);
+  }, []);
+  const inDiff = useCallback(
+    (path: string) => !!document.querySelector(`.diff-file[data-file-path="${CSS.escape(path)}"]`),
+    [],
+  );
+
   return (
     <>
+      {lookup && (
+        <DefinitionPopover
+          reviewId={reviewId}
+          filePath={filePath}
+          lookup={lookup}
+          inDiff={inDiff}
+          onJumpInDiff={jumpInDiff}
+          onOpenFile={onOpenFilePane}
+          onClose={closeLookup}
+        />
+      )}
       {expandError && (
         <p className="muted expand-error-note">
           Context expansion unavailable: {expandError}
@@ -2696,6 +2742,7 @@ function FileBody({
           selectedChanges={selectedChanges}
           generateLineClassName={generateLineClassName}
           gutterEvents={{ onClick: onLineClick }}
+          codeEvents={{ onClick: onCodeClick }}
         >
           {(renderedHunks) => {
             // Each rendered hunk maps back to the parsed hunks it covers (context

@@ -20,6 +20,14 @@ export interface Branch {
 
 export type ReviewEvent = "comment" | "approve" | "request_changes";
 export type Side = "LEFT" | "RIGHT";
+/** A declaration found by the diff view's go-to-definition (`find_definition`). */
+export interface DefinitionHit {
+  path: string;
+  /** 1-based line of the declaration. */
+  line: number;
+  /** ~20 source lines starting at `line`. */
+  snippet: string;
+}
 export type AiReviewLayer = "explain" | "critique" | "codex";
 export interface AiReviewUpdated {
   review_id: number;

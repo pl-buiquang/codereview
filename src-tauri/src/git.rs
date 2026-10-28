@@ -218,6 +218,30 @@ pub fn show_file(path: &Path, sha: &str, file_path: &str) -> AppResult<String> {
     )
 }
 
+/// `git grep -nE <pattern>` over the tree at `sha`, limited to the `globs` pathspecs. Returns
+/// `(path, 1-based line, line text)`; no match is an empty list, not an error.
+pub fn grep_at(path: &Path, sha: &str, pattern: &str, globs: &[&str]) -> AppResult<Vec<(String, u32, String)>> {
+    let sha = rev_parse(path, sha)?;
+    let mut args = vec!["grep", "-n", "-I", "-E", "--no-color", "-e", pattern, &sha, "--"];
+    args.extend(globs);
+    let out = match run_git(path, &args) {
+        Ok(out) => out,
+        // exit 1 with no stderr is how `git grep` says "no matches"
+        Err(AppError::Git(msg)) if msg.is_empty() => return Ok(vec![]),
+        Err(e) => return Err(e),
+    };
+    let prefix = format!("{sha}:");
+    Ok(out
+        .lines()
+        .filter_map(|l| {
+            let mut it = l.strip_prefix(&prefix)?.splitn(3, ':');
+            let file = it.next()?.to_string();
+            let line = it.next()?.parse().ok()?;
+            Some((file, line, it.next().unwrap_or("").to_string()))
+        })
+        .collect())
+}
+
 /// Unified diff between two refs. `three_dot` uses the merge-base (GitHub PR
 /// semantics); otherwise a plain two-dot diff.
 pub fn diff(path: &Path, base: &str, head: &str, three_dot: bool) -> AppResult<String> {
