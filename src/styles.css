@@ -2878,7 +2878,8 @@ tr.search-current {
   border-bottom: 2px solid transparent;
   border-radius: 0;
   background: transparent;
-  font-size: 11px;
+  font-family: var(--font-ident);
+  font-size: 13px;
   font-weight: 700;
   color: var(--text-3);
   cursor: pointer;
