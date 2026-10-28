@@ -70,6 +70,7 @@ import type {
   SyncScope,
   SyncStatus,
   AutoSync,
+  SessionUsageSummary,
   ToolEnv,
   UpdateReviewResult,
   WipKind,
@@ -155,6 +156,8 @@ export const api = {
     invoke<AiRun[]>("ai_usage_runs", { range, feature, limit }),
 
   // Chat
+  sessionUsageSummary: (range: UsageRange, summaryDir: string) =>
+    invoke<SessionUsageSummary>("session_usage_summary", { range, summaryDir }),
   crInstallNote: () => invoke<string | null>("cr_install_note"),
   appVersion: () => invoke<string>("app_version"),
 

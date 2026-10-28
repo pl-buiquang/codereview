@@ -48,7 +48,7 @@ fn load_generated_summaries(conn: &Connection) -> AppResult<HashMap<String, Sess
         .query_map([], |r| {
             Ok((
                 r.get::<_, String>(0)?,
-                SessionSummary { title: r.get(1)?, body: r.get(2)?, date: Some(r.get(3)?), generated: true },
+                SessionSummary { title: r.get(1)?, body: r.get(2)?, date: Some(r.get(3)?), generated: true, cost: None },
             ))
         })?
         .collect::<Result<_, _>>()?;
@@ -148,7 +148,7 @@ pub async fn generate_live_session_summary(
            input_tokens = excluded.input_tokens, output_tokens = excluded.output_tokens, cost_usd = excluded.cost_usd",
         params![session_id, title, body, generated_at, model, mode, turn.input_tokens, turn.output_tokens, turn.cost_usd],
     )?;
-    Ok(SessionSummary { date: Some(generated_at), title, body, generated: true })
+    Ok(SessionSummary { date: Some(generated_at), title, body, generated: true, cost: None })
 }
 
 #[tauri::command]

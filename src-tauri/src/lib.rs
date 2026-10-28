@@ -233,6 +233,7 @@ pub fn run() {
         .invoke_handler(traced(tauri::generate_handler![
             ai_usage::ai_usage_summary,
             ai_usage::ai_usage_runs,
+            ai_usage::session_usage_summary,
             log_path,
             read_app_log,
             get_log_level,

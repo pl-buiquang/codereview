@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { useUIStore } from "../store";
+import { useSettingsStore } from "../lib/settings";
 import type { AiRun, UsageRange, UsageTotals } from "../lib/types";
 import { featureLabel, formatCost, formatDuration, formatTokens, runSubject, shortModel } from "../lib/usage";
 
@@ -33,15 +34,16 @@ function TotalsCells({ t }: { t: UsageTotals }) {
   );
 }
 
-const TOTALS_HEAD = (
+const totalsHead = (runs: string) => (
   <>
-    <th className="num">Runs</th>
+    <th className="num">{runs}</th>
     <th className="num">In</th>
     <th className="num">Out</th>
     <th className="num">Cache</th>
     <th className="num">Cost</th>
   </>
 );
+const TOTALS_HEAD = totalsHead("Runs");
 
 function formatStarted(iso: string): string {
   return new Date(iso).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
@@ -84,6 +86,14 @@ export function UsageSection() {
   const summary = useQuery({ queryKey: ["ai-usage", "summary", range], queryFn: () => api.aiUsageSummary(range) });
   const runs = useQuery({ queryKey: ["ai-usage", "runs", range, feature], queryFn: () => api.aiUsageRuns(range, feature) });
 
+  const summaryDir = useSettingsStore((s) => s.sessionSummaryDir);
+  const sessions = useQuery({
+    queryKey: ["ai-usage", "sessions", range, summaryDir],
+    queryFn: () => api.sessionUsageSummary(range, summaryDir),
+    enabled: summaryDir.trim() !== "",
+  });
+  const st = sessions.data;
+
   const features = [...new Set([...(summary.data?.by_feature.map((f) => f.feature) ?? []), ...(feature ? [feature] : [])])];
   const totals = summary.data?.totals;
 
@@ -118,6 +128,51 @@ export function UsageSection() {
           </div>
         </section>
       )}
+
+      <section className="settings-group">
+        <h3>Terminal sessions</h3>
+        {summaryDir.trim() === "" && (
+          <p className="muted">Set a session summary folder in Settings to see what your terminal sessions cost.</p>
+        )}
+        {sessions.isError && <p className="error">Could not load session costs: {String(sessions.error)}</p>}
+        {st && (
+          <>
+            <div className="usage-tiles">
+              <Tile label="Cost" value={formatCost(st.totals.cost_usd)} hint="Estimated from transcript tokens by the SessionEnd hook" />
+              <Tile label="Sessions" value={String(st.totals.runs)} />
+              <Tile label="Main" value={formatCost(st.main_usd)} />
+              <Tile label="Subagents" value={formatCost(st.subagents_usd)} />
+              <Tile label="Output" value={formatTokens(st.totals.output_tokens)} />
+              <Tile
+                label="Cache"
+                value={formatTokens(st.totals.cache_read_tokens + st.totals.cache_creation_tokens)}
+                hint={`${st.totals.cache_read_tokens.toLocaleString()} read · ${st.totals.cache_creation_tokens.toLocaleString()} written`}
+              />
+            </div>
+            {st.by_model.length > 0 && (
+              <table className="usage-table">
+                <thead>
+                  <tr>
+                    <th>Model</th>
+                    {totalsHead("Sessions")}
+                  </tr>
+                </thead>
+                <tbody>
+                  {st.by_model.map((m) => (
+                    <tr key={m.model}>
+                      <td className="usage-models" title={m.model}>
+                        {shortModel(m.model)}
+                      </td>
+                      <TotalsCells t={m} />
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+            {st.totals.runs === 0 && <p className="muted">No priced sessions in this period.</p>}
+          </>
+        )}
+      </section>
 
       {summary.data && totals && totals.runs === 0 ? (
         <p className="muted">No AI runs in this period.</p>
@@ -218,8 +273,9 @@ export function UsageSection() {
 
       <p className="settings-hint">
         Costs are the API-equivalent prices claude reports; on a subscription they are not billed. Only runs the app
-        starts itself with <code>claude -p</code> are counted. Codex runs (<code>/local-review --codex</code>) and
-        terminal sessions are not included. A routine run is logged when it ends, so one still running
+        starts itself with <code>claude -p</code> are counted above. Terminal sessions are listed separately, as
+        estimated by your SessionEnd hook, dated by their last summary. Codex runs
+        (<code>/local-review --codex</code>) are not included. A routine run is logged when it ends, so one still running
         does not appear yet.
       </p>
     </div>

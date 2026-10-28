@@ -1,13 +1,50 @@
 //! Markdown session summaries written by a user `SessionEnd` hook: YAML-ish frontmatter
 //! (`session_id`, `date`, optional `title`) followed by a markdown body.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::SystemTime;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+
+/// Per-model share of a session's estimated cost (the hook's `cost.by_model` entries).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ModelCost {
+    pub msgs: i64,
+    pub usd: f64,
+    #[serde(rename = "in")]
+    pub input: i64,
+    #[serde(rename = "out")]
+    pub output: i64,
+    pub cache_read: i64,
+    pub cache_write: i64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AgentCost {
+    pub n: i64,
+    pub usd: f64,
+}
+
+/// Estimated cost of a whole session (main transcript + subagents), from the hook's `cost_usd`,
+/// `subagents` and `cost` frontmatter lines.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SessionCost {
+    #[serde(skip_deserializing)]
+    pub total_usd: f64,
+    pub main_usd: f64,
+    pub subagents_usd: f64,
+    #[serde(skip_deserializing)]
+    pub subagents: i64,
+    pub by_agent_type: BTreeMap<String, AgentCost>,
+    pub by_model: BTreeMap<String, ModelCost>,
+    pub unpriced_msgs: i64,
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct SessionSummary {
@@ -16,6 +53,8 @@ pub struct SessionSummary {
     pub body: String,
     /// Written by the app's Generate button rather than the user's SessionEnd hook.
     pub generated: bool,
+    /// Cumulative over the whole transcript, so the newest summary of a session holds its total.
+    pub cost: Option<SessionCost>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -91,6 +130,7 @@ fn parse(content: &str) -> Option<ParsedSummary> {
         fields.insert(k.trim(), v);
     }
     let session_id = fields.remove("session_id").filter(|s| !s.is_empty())?;
+    let cost = parse_cost(&fields);
     Some(ParsedSummary {
         session_id,
         summary: SessionSummary {
@@ -98,8 +138,21 @@ fn parse(content: &str) -> Option<ParsedSummary> {
             title: fields.remove("title").filter(|s| !s.is_empty()),
             body,
             generated: false,
+            cost,
         },
     })
+}
+
+fn parse_cost(fields: &HashMap<&str, String>) -> Option<SessionCost> {
+    let total = fields.get("cost_usd").and_then(|v| v.parse::<f64>().ok());
+    let detail = fields.get("cost").and_then(|v| serde_json::from_str::<SessionCost>(v).ok());
+    if total.is_none() && detail.is_none() {
+        return None;
+    }
+    let mut cost = detail.unwrap_or_default();
+    cost.total_usd = total.unwrap_or(cost.main_usd + cost.subagents_usd);
+    cost.subagents = fields.get("subagents").and_then(|v| v.parse().ok()).unwrap_or(0);
+    Some(cost)
 }
 
 /// Split the `Title: …` first line (as the SessionEnd hook does) from the markdown body.
@@ -168,6 +221,27 @@ mod tests {
         assert_eq!(p.summary.date.as_deref(), Some("2026-10-16 10:25"));
         assert_eq!(p.summary.title, None);
         assert_eq!(p.summary.body, "## Goal\nDo it.");
+    }
+
+    #[test]
+    fn parses_cost_lines() {
+        let p = parse(
+            "---\nsession_id: abc\ncost_usd: 5.93\nsubagents: 8\ncost: {\"main_usd\":4.73,\"subagents_usd\":1.2,\"by_agent_type\":{\"general-purpose\":{\"n\":8,\"usd\":1.2}},\"by_model\":{\"claude-opus-5-5\":{\"msgs\":34,\"usd\":2.67,\"in\":66,\"out\":24868,\"cache_read\":2623190,\"cache_write\":205875}},\"unpriced_msgs\":0}\n---\nbody",
+        )
+        .unwrap();
+        let c = p.summary.cost.unwrap();
+        assert_eq!((c.total_usd, c.main_usd, c.subagents_usd, c.subagents), (5.93, 4.73, 1.2, 8));
+        assert_eq!(c.by_agent_type["general-purpose"].n, 8);
+        let m = &c.by_model["claude-opus-5-5"];
+        assert_eq!((m.msgs, m.input, m.output, m.cache_read, m.cache_write), (34, 66, 24868, 2623190, 205875));
+    }
+
+    #[test]
+    fn cost_usd_alone_and_none() {
+        let c = parse("---\nsession_id: a\ncost_usd: 0.54\n---\nb").unwrap().summary.cost.unwrap();
+        assert_eq!((c.total_usd, c.by_model.len()), (0.54, 0));
+        assert!(parse("---\nsession_id: a\ncost: {oops\n---\nb").unwrap().summary.cost.is_none());
+        assert!(parse("---\nsession_id: a\n---\nb").unwrap().summary.cost.is_none());
     }
 
     #[test]

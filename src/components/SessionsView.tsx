@@ -5,11 +5,12 @@ import { useRefetchOnActivate } from "../lib/useRefetchOnActivate";
 import { toast } from "../lib/toast";
 import { confirmDialog } from "../lib/confirm";
 import { timeAgo } from "../lib/timeAgo";
+import { formatCost, shortModel } from "../lib/usage";
 import { isWaiting, useWaitingSessions } from "../lib/sessionCounts";
 import { STATUS_LABEL, useActiveRoutineRuns, useUnseenRoutineProblems } from "../lib/routines";
 import { useAiDisabledReason, useSettingsStore } from "../lib/settings";
 import { useUIStore, type SessionsTab } from "../store";
-import type { CardSession, ClaudeSession, SessionFocusState } from "../lib/types";
+import type { CardSession, ClaudeSession, SessionCost, SessionFocusState } from "../lib/types";
 import { Icon } from "./icons";
 import { Markdown } from "./Markdown";
 import { RoutinesConfigTab } from "./routines/RoutinesConfigTab";
@@ -285,6 +286,15 @@ function BackgroundOpenButton({
   );
 }
 
+export function costTooltip(c: SessionCost): string {
+  const lines = [`main ${formatCost(c.main_usd)} · subagents ${formatCost(c.subagents_usd)} (${c.subagents})`];
+  for (const [model, m] of Object.entries(c.by_model)) {
+    lines.push(`${shortModel(model)}: ${formatCost(m.usd)} · ${m.msgs} msgs`);
+  }
+  if (c.unpriced_msgs > 0) lines.push(`${c.unpriced_msgs} msgs of unpriced models not counted`);
+  return lines.join("\n");
+}
+
 function statusClass(s: ClaudeSession): string {
   if (!s.live) return "ended";
   if (isWaiting(s)) return "waiting";
@@ -307,6 +317,7 @@ function SessionRow({
   const queryClient = useQueryClient();
   const fork = useSettingsStore((st) => st.sessionSummaryFork);
   const summaries = s.summaries ?? [];
+  const cost = summaries.find((x) => x.cost)?.cost; // newest first, and cumulative
   const canExpand = s.live || summaries.length > 0;
   const aiOff = useAiDisabledReason();
   const generate = useMutation({
@@ -371,6 +382,11 @@ function SessionRow({
             {s.tmux?.label && (
               <span className="chip" title={`tmux pane ${s.tmux.pane}`}>
                 <Icon name="terminal" size={11} /> {s.tmux.label}
+              </span>
+            )}
+            {cost && (
+              <span className="chip" title={costTooltip(cost)}>
+                {formatCost(cost.total_usd)}
               </span>
             )}
             <span className="chip">{timeAgo(s.updated_at)}</span>

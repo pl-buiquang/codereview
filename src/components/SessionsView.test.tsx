@@ -136,8 +136,22 @@ describe("SessionsView", () => {
         tmux: null,
         focus: "not_live",
         summaries: [
-          { date: "2026-10-16 11:00", title: "Add summaries", body: "## Goal\nSecond run", generated: false },
-          { date: "2026-10-16 10:00", title: null, body: "## Goal\nFirst run", generated: false },
+          {
+            date: "2026-10-16 11:00",
+            title: "Add summaries",
+            body: "## Goal\nSecond run",
+            generated: false,
+            cost: {
+              total_usd: 5.93,
+              main_usd: 4.73,
+              subagents_usd: 1.2,
+              subagents: 8,
+              by_agent_type: {},
+              by_model: { "claude-opus-5-5": { msgs: 34, usd: 2.67, in: 66, out: 24868, cache_read: 1, cache_write: 1 } },
+              unpriced_msgs: 0,
+            },
+          },
+          { date: "2026-10-16 10:00", title: null, body: "## Goal\nFirst run", generated: false, cost: null },
         ],
       }),
       session({ session_id: "h2", name: "plain", live: false, pid: null, tmux: null, focus: "not_live" }),
@@ -145,6 +159,7 @@ describe("SessionsView", () => {
     renderView();
     expect((await screen.findByText("Add summaries")).closest("button")).toHaveAttribute("title", "look at the notes");
     expect(screen.getAllByRole("button", { name: /show summary/i })).toHaveLength(1);
+    expect(screen.getByText("$5.93")).toHaveAttribute("title", expect.stringContaining("main $4.73 · subagents $1.20 (8)"));
     expect(screen.queryByText("Second run")).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: /show summary/i }));
     expect(screen.getByText("Second run")).toBeInTheDocument();
@@ -160,7 +175,7 @@ describe("SessionsView", () => {
         ...live,
         name: "Fix the flaky test",
         original_name: "live one",
-        summaries: [{ date: new Date().toISOString(), title: "Fix the flaky test", body: "## Goal\nStabilise CI", generated: true }],
+        summaries: [{ date: new Date().toISOString(), title: "Fix the flaky test", body: "## Goal\nStabilise CI", generated: true, cost: null }],
       },
     ]));
     generateLiveSessionSummary.mockResolvedValue({});
@@ -183,7 +198,7 @@ describe("SessionsView", () => {
         pid: null,
         tmux: null,
         focus: "not_live",
-        summaries: [{ date: new Date().toISOString(), title: "Gen title", body: "## Goal\nKept", generated: true }],
+        summaries: [{ date: new Date().toISOString(), title: "Gen title", body: "## Goal\nKept", generated: true, cost: null }],
       }),
     ]));
     renderView();
@@ -286,7 +301,7 @@ describe("helpers", () => {
       name: "Fix login",
       git_branch: "fix/oauth",
       cwd: "/Users/me/projects/back",
-      summaries: [{ date: null, title: null, body: "Patched the token refresh", generated: false }],
+      summaries: [{ date: null, title: null, body: "Patched the token refresh", generated: false, cost: null }],
     });
     expect(matchesSessionSearch(s, "")).toBe(true);
     expect(matchesSessionSearch(s, "  ")).toBe(true);

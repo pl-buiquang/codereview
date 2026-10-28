@@ -675,6 +675,7 @@ mod tests {
             title: title.map(Into::into),
             body: "generated".into(),
             generated: true,
+            cost: None,
         };
         let mut hooked = SessionSummary { generated: false, ..gen(Some("Hook title")) };
         hooked.body = "hook".into();

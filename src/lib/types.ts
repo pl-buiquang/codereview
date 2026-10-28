@@ -67,6 +67,14 @@ export interface AiUsageSummary {
   by_model: ModelUsageRow[];
 }
 
+/** Terminal sessions priced by the SessionEnd hook; `runs` counts sessions. */
+export interface SessionUsageSummary {
+  totals: UsageTotals;
+  main_usd: number;
+  subagents_usd: number;
+  by_model: ModelUsageRow[];
+}
+
 export interface AiRun {
   id: number;
   started_at: string;
@@ -725,11 +733,23 @@ export interface SessionSummary {
 export interface CardSession {
   card_id: string;
   repo: string;
+/** Estimated cost of a whole session, from the SessionEnd hook's frontmatter (cumulative per transcript). */
+export interface SessionCost {
+  total_usd: number;
+  main_usd: number;
+  subagents_usd: number;
+  subagents: number;
+  by_agent_type: Record<string, { n: number; usd: number }>;
+  by_model: Record<string, { msgs: number; usd: number; in: number; out: number; cache_read: number; cache_write: number }>;
+  unpriced_msgs: number;
+}
+
   number: number;
   session_id: string;
 }
 
 export interface SessionsSnapshot {
+  cost: SessionCost | null; // hook-written summaries only
   sessions: ClaudeSession[];
   card_sessions: CardSession[];
 }

@@ -2,15 +2,17 @@
 //! records one `ai_run` row per run, successful or not; the Settings "Usage" section reads it.
 //! Codex runs launched by `/local-review --codex` are billed separately and are not tracked.
 
+use std::collections::{BTreeMap, HashMap};
 use std::sync::OnceLock;
 
-use chrono::{DateTime, Duration, Local, SecondsFormat, TimeZone, Utc};
+use chrono::{DateTime, Duration, Local, NaiveDateTime, SecondsFormat, TimeZone, Utc};
 use rusqlite::{params, Connection};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
+use crate::session_summaries::{self, SessionSummary};
 
 static APP: OnceLock<AppHandle> = OnceLock::new();
 
@@ -240,9 +242,9 @@ pub struct AiRun {
     pub head_ref: Option<String>,
 }
 
-/// Lower bound (inclusive) of a range, as a `started_at` stamp; `None` means all time.
-pub fn range_start(range: &str, now: DateTime<Local>) -> AppResult<Option<String>> {
-    let since = match range {
+/// Lower bound (inclusive) of a range; `None` means all time.
+fn range_since(range: &str, now: DateTime<Local>) -> AppResult<Option<DateTime<Local>>> {
+    Ok(Some(match range {
         "all" => return Ok(None),
         "today" => {
             let midnight = now.date_naive().and_hms_opt(0, 0, 0).expect("valid midnight");
@@ -252,8 +254,12 @@ pub fn range_start(range: &str, now: DateTime<Local>) -> AppResult<Option<String
         "7d" => now - Duration::days(7),
         "30d" => now - Duration::days(30),
         other => return Err(AppError::Other(format!("unknown usage range `{other}`"))),
-    };
-    Ok(Some(stamp(since.with_timezone(&Utc))))
+    }))
+}
+
+/// Lower bound (inclusive) of a range, as a `started_at` stamp; `None` means all time.
+pub fn range_start(range: &str, now: DateTime<Local>) -> AppResult<Option<String>> {
+    Ok(range_since(range, now)?.map(|since| stamp(since.with_timezone(&Utc))))
 }
 
 fn totals_at(r: &rusqlite::Row, i: usize) -> rusqlite::Result<UsageTotals> {
@@ -353,6 +359,68 @@ pub fn runs(conn: &Connection, since: Option<&str>, feature: Option<&str>, limit
         })
     })?
     .collect()
+}
+
+/// Terminal sessions (not app-spawned runs): the cost the SessionEnd hook wrote into the
+/// summaries' frontmatter. `runs` counts sessions.
+#[derive(Serialize, Default, Debug)]
+pub struct SessionUsageSummary {
+    pub totals: UsageTotals,
+    pub main_usd: f64,
+    pub subagents_usd: f64,
+    pub by_model: Vec<ModelUsageRow>,
+}
+
+/// Costs are cumulative per transcript, so each session counts once, from its newest summary with
+/// a cost; it is in range when that summary's local `date` is at or after `since`.
+pub fn session_summary(
+    sessions: &HashMap<String, Vec<SessionSummary>>,
+    since: Option<NaiveDateTime>,
+) -> SessionUsageSummary {
+    let mut out = SessionUsageSummary::default();
+    let mut models: BTreeMap<&str, UsageTotals> = BTreeMap::new();
+    for list in sessions.values() {
+        let Some((cost, date)) = list.iter().find_map(|s| s.cost.as_ref().map(|c| (c, s.date.as_deref()))) else {
+            continue;
+        };
+        if let Some(since) = since {
+            let at = date.and_then(|d| NaiveDateTime::parse_from_str(d, "%Y-%m-%d %H:%M").ok());
+            if at.is_none_or(|at| at < since) {
+                continue;
+            }
+        }
+        out.totals.runs += 1;
+        out.totals.cost_usd += cost.total_usd;
+        out.main_usd += cost.main_usd;
+        out.subagents_usd += cost.subagents_usd;
+        for (model, m) in &cost.by_model {
+            out.totals.input_tokens += m.input;
+            out.totals.output_tokens += m.output;
+            out.totals.cache_read_tokens += m.cache_read;
+            out.totals.cache_creation_tokens += m.cache_write;
+            let t = models.entry(model).or_default();
+            t.runs += 1;
+            t.input_tokens += m.input;
+            t.output_tokens += m.output;
+            t.cache_read_tokens += m.cache_read;
+            t.cache_creation_tokens += m.cache_write;
+            t.cost_usd += m.usd;
+        }
+    }
+    out.by_model = models.into_iter().map(|(m, totals)| ModelUsageRow { model: m.to_string(), totals }).collect();
+    out.by_model.sort_by(|a, b| b.totals.cost_usd.total_cmp(&a.totals.cost_usd));
+    out
+}
+
+#[tauri::command]
+pub fn session_usage_summary(range: String, summary_dir: String) -> AppResult<SessionUsageSummary> {
+    let since = range_since(&range, Local::now())?.map(|d| d.naive_local());
+    let dir = summary_dir.trim();
+    if dir.is_empty() {
+        return Ok(SessionUsageSummary::default());
+    }
+    let sessions = session_summaries::load(std::path::Path::new(&crate::commands::repo::expand_home(dir)));
+    Ok(session_summary(&sessions, since))
 }
 
 #[tauri::command]
@@ -465,5 +533,32 @@ mod tests {
         let week = range_start("7d", now).unwrap().unwrap();
         assert_eq!(week, stamp((now - Duration::days(7)).with_timezone(&Utc)));
         assert!(range_start("yesterday", now).is_err());
+    }
+
+    #[test]
+    fn session_usage_counts_each_session_once_within_range() {
+        use crate::session_summaries::{ModelCost, SessionCost};
+        let sum = |date: &str, usd: f64, model: &str| SessionSummary {
+            date: Some(date.into()),
+            title: None,
+            body: String::new(),
+            generated: false,
+            cost: Some(SessionCost {
+                total_usd: usd,
+                main_usd: usd,
+                by_model: BTreeMap::from([(model.to_string(), ModelCost { usd, output: 10, ..Default::default() })]),
+                ..Default::default()
+            }),
+        };
+        let sessions = HashMap::from([
+            ("a".to_string(), vec![sum("2026-10-20 10:00", 3.0, "opus"), sum("2026-10-10 10:00", 1.0, "opus")]),
+            ("b".to_string(), vec![sum("2026-10-01 10:00", 2.0, "sonnet")]),
+        ]);
+        let all = session_summary(&sessions, None);
+        assert_eq!((all.totals.runs, all.totals.cost_usd), (2, 5.0));
+        assert_eq!(all.by_model[0].model, "opus");
+        let since = NaiveDateTime::parse_from_str("2026-10-15 00:00", "%Y-%m-%d %H:%M").unwrap();
+        let recent = session_summary(&sessions, Some(since));
+        assert_eq!((recent.totals.runs, recent.totals.cost_usd, recent.by_model.len()), (1, 3.0, 1));
     }
 }
