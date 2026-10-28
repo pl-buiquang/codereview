@@ -348,6 +348,8 @@
   --diff-add-strong: rgba(63, 185, 80, 0.30);
   --diff-del-bg: rgba(248, 81, 73, 0.10);
   --diff-del-strong: rgba(248, 81, 73, 0.30);
+  --diff-add-word: rgba(46, 160, 67, 0.40);
+  --diff-del-word: rgba(248, 81, 73, 0.40);
   --diff-hunk-bg: rgba(56, 139, 253, 0.10);
   --shadow-card: 0 1px 0 rgba(0,0,0,0.30);
   --shadow-pop: 0 8px 24px rgba(0,0,0,0.50);
@@ -392,6 +394,8 @@
   --diff-add-strong: #ACEEBB;
   --diff-del-bg: #FFEBE9;
   --diff-del-strong: #FFCECB;
+  --diff-add-word: #ABF2BC;
+  --diff-del-word: rgba(255, 129, 130, 0.40);
   --diff-hunk-bg: #DDF4FF;
   --shadow-card: 0 1px 3px rgba(31, 35, 40, 0.08);
   --shadow-pop: 0 8px 24px rgba(31, 35, 40, 0.16);

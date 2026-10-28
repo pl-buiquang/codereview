@@ -184,7 +184,7 @@ function renderReview() {
 }
 
 beforeEach(() => {
-  useSettingsStore.setState({ aiEnabled: true });
+  useSettingsStore.setState({ aiEnabled: true, markEdits: false });
   for (const k of Object.keys(handlers)) delete handlers[k];
   handlers.getReview = vi.fn(() => Promise.resolve(detail()));
   handlers.reviewDiff = vi.fn(() => Promise.resolve(DIFF));

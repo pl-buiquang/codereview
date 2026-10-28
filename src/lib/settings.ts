@@ -181,7 +181,7 @@ const DEFAULTS: PersistedSettings = {
   boardSnoozeOptions: DEFAULT_SNOOZE_OPTIONS,
   boardSnoozes: {},
   boardNeedsActionSnoozed: false,
-  markEdits: false,
+  markEdits: true,
   diffMarkers: true,
   largeDiffMaxLines: 3000,
   fileTestPatterns: DEFAULT_TEST_PATTERNS,

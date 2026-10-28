@@ -992,10 +992,10 @@ button:disabled,
   color: var(--text);
 }
 .diff-code-insert .diff-code-edit {
-  background: color-mix(in srgb, var(--success) 40%, transparent);
+  background: var(--diff-add-word, color-mix(in srgb, var(--success) 40%, transparent));
 }
 .diff-code-delete .diff-code-edit {
-  background: color-mix(in srgb, var(--danger) 40%, transparent);
+  background: var(--diff-del-word, color-mix(in srgb, var(--danger) 40%, transparent));
 }
 .diff-gutter:hover {
   background: var(--surface-2);
@@ -1005,17 +1005,23 @@ button:disabled,
   color: var(--text-2);
 }
 .diff-expander .diff-decoration-content {
-  background: var(--diff-hunk-bg, color-mix(in srgb, var(--accent) 10%, var(--surface)));
+  background: var(--diff-hunk-bg, color-mix(in srgb, var(--info) 12%, var(--surface)));
   color: var(--text-2);
 }
 .expand-control {
   display: flex;
   align-items: center;
-  justify-content: center;
   gap: 0.75rem;
   padding: 0.25rem 0.5rem;
   font-size: 0.85em;
   color: var(--text-2);
+}
+.expand-header {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
 }
 .expand-btn {
   background: transparent;

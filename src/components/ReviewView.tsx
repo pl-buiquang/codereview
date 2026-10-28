@@ -2718,6 +2718,7 @@ function FileBody({
                     <ExpandControl
                       count={collapsed}
                       direction="up"
+                      header={hunk.content}
                       busy={expanding}
                       onExpandChunk={() => onExpandLeading(EXPAND_CHUNK)}
                       onExpandAll={() => onExpandLeading(Number.POSITIVE_INFINITY)}
@@ -2730,6 +2731,7 @@ function FileBody({
                   <Decoration key={`exp-${hunk.content}`} className="diff-expander">
                     <ExpandControl
                       count={collapsed}
+                      header={hunk.content}
                       busy={expanding}
                       onExpandChunk={() => onExpandBetween(prev, hunk, EXPAND_CHUNK)}
                       onExpandAll={() => onExpandBetween(prev, hunk, collapsed)}
@@ -2792,6 +2794,7 @@ function ExpandControl({
   count,
   busy,
   direction = "between",
+  header,
   onExpandChunk,
   onExpandAll,
 }: {
@@ -2799,6 +2802,8 @@ function ExpandControl({
   count: number | null;
   busy: boolean;
   direction?: "up" | "down" | "between";
+  /** The hunk header (`@@ -a,b +c,d @@ context`) of the hunk below, shown like GitHub does. */
+  header?: string;
   onExpandChunk: () => void;
   onExpandAll: () => void;
 }) {
@@ -2823,6 +2828,7 @@ function ExpandControl({
           </button>
         </>
       )}
+      {header && <span className="expand-header">{header}</span>}
     </div>
   );
 }
