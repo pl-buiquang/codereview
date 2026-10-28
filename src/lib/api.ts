@@ -210,6 +210,8 @@ export const api = {
   listPrs: (repoId: number) => invoke<PrSummary[]>("list_prs", { repoId }),
   prMeta: (owner: string, name: string, number: number) =>
     invoke<PrMeta>("pr_meta", { owner, name, number }),
+  bodyImages: (nodeId: string) =>
+    invoke<Record<string, string>>("body_images", { nodeId }),
   prChecks: (owner: string, name: string, number: number) =>
     invoke<PrChecks>("pr_checks", { owner, name, number }),
   rerunCiRuns: (owner: string, name: string, runIds: number[], failedOnly: boolean) =>

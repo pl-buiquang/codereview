@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { confirmDialog } from "../lib/confirm";
 import { toast } from "../lib/toast";
@@ -262,6 +262,17 @@ function DraftReplyItem({
   );
 }
 
+/** Signed image URLs for a GitHub-hosted body, fetched only when it embeds attachments. */
+function useBodyImages(nodeId: string | undefined, body: string) {
+  const { data } = useQuery({
+    queryKey: ["body-images", nodeId],
+    queryFn: () => api.bodyImages(nodeId as string),
+    enabled: !!nodeId && body.includes("/user-attachments/"),
+    staleTime: 4 * 60_000,
+  });
+  return data;
+}
+
 export function ThreadComment({
   comment,
   interactive = false,
@@ -276,6 +287,7 @@ export function ThreadComment({
   onReacted?: () => void;
 }) {
   const login = comment.author?.login ?? "unknown";
+  const imageUrls = useBodyImages(comment.id, comment.body);
   return (
     <div className="github-thread-comment">
       <div className="github-thread-comment-head">
@@ -301,7 +313,7 @@ export function ThreadComment({
           View on GitHub
         </a>
       </div>
-      <Markdown source={comment.body} />
+      <Markdown source={comment.body} imageUrls={imageUrls} />
       {comment.id && (
         <Reactions
           subjectId={comment.id}

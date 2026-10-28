@@ -61,6 +61,13 @@ pub async fn set_pr_draft(owner: String, name: String, number: i64, draft: bool)
     provider_for().set_pr_draft(&owner, &name, number, draft)
 }
 
+/// Signed image URLs for a comment/review/PR body, for SSO orgs where the
+/// `user-attachments` URLs don't load. `async` for the same reason as `pr_meta`.
+#[tauri::command]
+pub async fn body_images(node_id: String) -> AppResult<std::collections::HashMap<String, String>> {
+    gh::node_body_images(&node_id)
+}
+
 /// Per-check detail of the PR's head commit, for the CI badge popover. `async`
 /// for the same reason as `pr_meta`.
 #[tauri::command]

@@ -1013,6 +1013,20 @@ fn is_uuid(s: &str) -> bool {
         })
 }
 
+/// Signed image URLs (asset UUID → URL) for any GitHub `Comment` node (PR, issue,
+/// comment, review, review comment), from its rendered `bodyHTML`.
+pub fn node_body_images(node_id: &str) -> AppResult<HashMap<String, String>> {
+    let data: serde_json::Value = graphql(
+        "query BodyImages($id: ID!) { node(id: $id) { ... on Comment { bodyHTML } } }",
+        serde_json::json!({ "id": node_id }),
+    )?;
+    Ok(data
+        .pointer("/node/bodyHTML")
+        .and_then(|v| v.as_str())
+        .map(signed_image_urls)
+        .unwrap_or_default())
+}
+
 /// A PR's header metadata plus the mirror node of the same response.
 pub struct PrDetail {
     pub node: crate::mirror::Node,
