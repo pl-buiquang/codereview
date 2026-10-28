@@ -3083,7 +3083,7 @@ tr.search-current {
   align-items: center;
   gap: 6px;
   width: 100%;
-  height: 24px;
+  height: 26px;
   /* The list is a scrolling flex column: without this the rows shrink once the
      tree overflows (filter "All"), making it denser than a filtered one. */
   flex-shrink: 0;
@@ -3093,7 +3093,7 @@ tr.search-current {
   background: transparent;
   color: var(--text-2);
   font-family: var(--font-ident);
-  font-size: 11.5px;
+  font-size: 13px;
   font-weight: 400;
   text-align: left;
   cursor: pointer;
@@ -3122,6 +3122,20 @@ tr.search-current {
 .tree-file {
   flex-shrink: 0;
   color: var(--text-3);
+}
+.tree-folder {
+  color: var(--accent);
+}
+.tree-file + .tree-name {
+  font-weight: 600;
+  color: var(--text);
+}
+.tree-row.active .tree-file + .tree-name {
+  color: var(--accent);
+}
+.tree-row.viewed .tree-file + .tree-name {
+  font-weight: 400;
+  color: inherit;
 }
 .tree-name {
   flex: 1;
