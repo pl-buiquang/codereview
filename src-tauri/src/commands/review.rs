@@ -820,6 +820,15 @@ enum DiffCommand {
     /// A PR's diff at the review's pin: from the local clone when it has (or
     /// can fetch) both commits, else the compare API.
     PinnedPr { clone: Option<PathBuf>, owner_name: Option<(String, String)>, base: String, head: String },
+    /// What changed in a PR since an earlier pin, rebase-aware (`git::interdiff`);
+    /// without a usable clone, the compare API between the two heads.
+    Interdiff {
+        clone: Option<PathBuf>,
+        owner_name: Option<(String, String)>,
+        since: (String, String),
+        base: String,
+        head: String,
+    },
     Local { path: PathBuf, base: String, head: String, three_dot: bool },
 }
 
@@ -835,7 +844,15 @@ pub fn diff_source(conn: &Connection, review_id: i64) -> AppResult<DiffSource> {
     let detail = load_detail(conn, review_id)?;
     let t = &detail.target;
     let pin = review_pin(&detail.review);
+    let since = review_since(&detail.review);
     let command = match (t.kind.as_str(), &pin.base_sha, &pin.head_sha) {
+        ("github_pr", Some(base), Some(head)) if since.is_some() => DiffCommand::Interdiff {
+            clone: detail.local_path.as_ref().map(PathBuf::from),
+            owner_name: repo_owner_name(conn, t.repo_id)?,
+            since: since.clone().unwrap_or_default(),
+            base: base.clone(),
+            head: head.clone(),
+        },
         ("github_pr", Some(base), Some(head)) => DiffCommand::PinnedPr {
             clone: detail.local_path.as_ref().map(PathBuf::from),
             owner_name: repo_owner_name(conn, t.repo_id)?,
@@ -870,10 +887,44 @@ pub fn diff_source(conn: &Connection, review_id: i64) -> AppResult<DiffSource> {
             base_sha: base.clone(),
             head_sha: head.clone(),
             three_dot: t.three_dot,
+            since: since.filter(|_| t.kind == "github_pr"),
         }),
         _ => None,
     };
     Ok(DiffSource { command, key })
+}
+
+/// The earlier pin a "changes since" review diffs from, when it has one.
+fn review_since(review: &Review) -> Option<(String, String)> {
+    Some((review.since_base_sha.clone()?, review.since_head_sha.clone()?))
+}
+
+/// The since side of a PR interdiff, resolved against `new_base`; `None` when it
+/// can't be (no local clone, or the commits aren't reachable).
+fn interdiff_since_side(
+    clone: Option<&Path>,
+    since: &(String, String),
+    new_base: &str,
+) -> Option<git::InterdiffBase> {
+    git::interdiff_base(clone?, &since.0, &since.1, new_base).ok()
+}
+
+fn pinned_interdiff(
+    clone: Option<&Path>,
+    owner_name: Option<&(String, String)>,
+    since: &(String, String),
+    base: &str,
+    head: &str,
+) -> AppResult<String> {
+    let local = clone.map(|repo| git::interdiff(repo, &since.0, &since.1, base, head));
+    match (local, owner_name) {
+        (Some(Ok(diff)), _) => Ok(diff),
+        // No clone (or it lacks the commits): between the two heads, which also
+        // shows whatever a rebase pulled in.
+        (_, Some((owner, name))) => provider_for().compare_diff(owner, name, &since.1, head),
+        (Some(Err(e)), None) => Err(e),
+        (None, None) => Err(AppError::Other("interdiff needs a local clone or a GitHub remote".into())),
+    }
 }
 
 fn pinned_pr_diff(
@@ -902,6 +953,9 @@ impl DiffSource {
             DiffCommand::LivePr { ctx, number } => provider_for().pr_diff(ctx, *number),
             DiffCommand::PinnedPr { clone, owner_name, base, head } => {
                 pinned_pr_diff(clone.as_deref(), owner_name.as_ref(), base, head)
+            }
+            DiffCommand::Interdiff { clone, owner_name, since, base, head } => {
+                pinned_interdiff(clone.as_deref(), owner_name.as_ref(), since, base, head)
             }
             DiffCommand::Local { path, base, head, three_dot } => {
                 git::diff(path, base, head, *three_dot)
@@ -977,6 +1031,22 @@ pub fn file_source(
             AppError::Other("this side has no source (file added or deleted)".into())
         })?,
     };
+
+    // A "changes since" review's LEFT side is the earlier PR replayed onto the
+    // new merge-base (a tree, not a commit); without a clone, the earlier head.
+    let mut sha = sha;
+    if side == "LEFT" && detail.target.kind == "github_pr" {
+        if let Some(since) = review_since(&detail.review) {
+            if let Some(repo) = detail.local_path.as_deref().map(std::path::Path::new) {
+                if let Some(left) = interdiff_since_side(Some(repo), &since, &sha) {
+                    if let Ok(source) = git::show_blob(repo, left.treeish(), &file_path) {
+                        return Ok(source);
+                    }
+                }
+            }
+            sha = since.1;
+        }
+    }
 
     // Remote-only (clone-less) PR targets have no local blob, so skip the
     // guaranteed-to-fail `git show` and go straight to the GitHub contents API.
@@ -1129,6 +1199,79 @@ pub fn new_review_on_target_live(db: &Db, target_id: i64) -> AppResult<Review> {
 #[tauri::command]
 pub async fn new_review_on_target(target_id: i64, db: State<'_, Db>) -> AppResult<Review> {
     new_review_on_target_live(&db, target_id)
+}
+
+/// A new draft on a PR target that covers only what changed since `review_id`'s
+/// pin (works for a draft, a pending or a published review). The new review is
+/// pinned at the PR's live commits; its diff starts from the source's pin
+/// (rebase-aware, see `git::interdiff`), recorded in `since_*_sha`.
+pub fn new_review_since_impl(db: &Db, review_id: i64) -> AppResult<Review> {
+    let (source, target) = {
+        let conn = db.0.lock().unwrap();
+        let source = get_review_row(&conn, review_id)?;
+        let target = get_target(&conn, source.target_id)?;
+        (source, target)
+    };
+    if target.kind != "github_pr" {
+        return Err(AppError::Other("only PR reviews can be continued from new commits".into()));
+    }
+    let (Some(since_base), Some(since_head)) = (source.base_sha.clone(), source.head_sha.clone()) else {
+        return Err(AppError::Other("this review has no pinned commits to continue from".into()));
+    };
+    let live = resolve_live(db, &target)?;
+    if live.base_sha.is_none() || live.head_sha.is_none() {
+        return Err(AppError::Other("could not resolve the PR's latest commits".into()));
+    }
+    if !has_moved(&review_pin(&source), &live) {
+        return Err(AppError::Other("the PR has no new commits since this review".into()));
+    }
+    let conn = db.0.lock().unwrap();
+    let review = new_review_for_target(&conn, target.id, &live)?;
+    conn.execute(
+        "UPDATE review SET since_base_sha = ?1, since_head_sha = ?2 WHERE id = ?3",
+        params![since_base, since_head, review.id],
+    )?;
+    get_review_row(&conn, review.id)
+}
+
+/// `async`: pins at the PR's live head, which means `gh`.
+#[tauri::command]
+pub async fn new_review_since(review_id: i64, db: State<'_, Db>) -> AppResult<Review> {
+    new_review_since_impl(&db, review_id)
+}
+
+/// How a "changes since" review's diff was derived, for its header chip.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InterdiffMeta {
+    /// The PR's merge-base moved since the earlier pin.
+    pub rebased: bool,
+    /// The rebase could not be replayed cleanly (or there is no clone): the diff
+    /// may include upstream changes or miss some context.
+    pub approximate: bool,
+}
+
+pub fn interdiff_meta_impl(db: &Db, review_id: i64) -> AppResult<Option<InterdiffMeta>> {
+    let detail = load_detail(&db.0.lock().unwrap(), review_id)?;
+    let Some(since) = review_since(&detail.review) else {
+        return Ok(None);
+    };
+    let Some(new_base) = detail.review.base_sha.as_deref() else {
+        return Ok(None);
+    };
+    let rebased = since.0 != new_base;
+    let clone = detail.local_path.as_deref().map(Path::new);
+    let approximate = rebased
+        && !matches!(
+            interdiff_since_side(clone, &since, new_base),
+            Some(git::InterdiffBase::Same(_) | git::InterdiffBase::Replayed(_))
+        );
+    Ok(Some(InterdiffMeta { rebased, approximate }))
+}
+
+#[tauri::command(async)]
+pub fn review_interdiff_meta(review_id: i64, db: State<Db>) -> AppResult<Option<InterdiffMeta>> {
+    interdiff_meta_impl(&db, review_id)
 }
 
 /// Human-friendly repo label: the user-set friendly name if any, else
@@ -1301,6 +1444,11 @@ pub fn update_review(
 /// behaviour. LEFT comments therefore stop folding into the body just because
 /// the head moved (their line numbers live in base coordinates).
 fn is_anchored_to(c: &Comment, review: &Review) -> bool {
+    // A "changes since" review's LEFT side is a replayed tree GitHub has never
+    // seen, so its line numbers can't be posted inline.
+    if c.side == "LEFT" && review_since(review).is_some() {
+        return false;
+    }
     let (pin, current) = if c.side == "LEFT" {
         (c.anchored_base_sha.as_deref(), review.base_sha.as_deref())
     } else {
@@ -1474,7 +1622,11 @@ fn body_with_file_comments(detail: &ReviewDetail) -> String {
         if !body.is_empty() {
             body.push_str("\n\n");
         }
-        body.push_str("## Comments that could not be re-anchored");
+        body.push_str(if review_since(&detail.review).is_some() {
+            "## Comments that could not be posted inline"
+        } else {
+            "## Comments that could not be re-anchored"
+        });
         for c in lost_comments {
             body.push_str(&format!(
                 "\n- **{}** {}: {}",
@@ -3514,6 +3666,8 @@ mod tests {
                 status: "draft".into(),
                 base_sha: None,
                 head_sha: Some("headsha".into()),
+                since_base_sha: None,
+                since_head_sha: None,
                 published_at: None,
                 github_review_id: None,
                 last_exported_at: None,
@@ -3611,6 +3765,22 @@ mod tests {
         assert_eq!(c["line"], 8);
         assert_eq!(c["start_line"], 3);
         assert_eq!(c["start_side"], "LEFT");
+    }
+
+    #[test]
+    fn since_review_posts_right_comments_inline_and_folds_left_ones_into_the_body() {
+        let mut d = detail_with(
+            None,
+            "",
+            vec![payload_comment(5, None, "RIGHT"), payload_comment(7, None, "LEFT")],
+        );
+        d.review.since_base_sha = Some("oldbase".into());
+        d.review.since_head_sha = Some("oldhead".into());
+        let p = build_publish_payload(&d);
+        assert_eq!(p["comments"].as_array().unwrap().len(), 1);
+        assert_eq!(p["comments"][0]["side"], "RIGHT");
+        let body = p["body"].as_str().unwrap();
+        assert!(body.contains("could not be posted inline") && body.contains("L7"), "{body}");
     }
 
     #[test]

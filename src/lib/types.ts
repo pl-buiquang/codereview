@@ -123,6 +123,9 @@ export interface Review {
   /** The pin: the merge-base (or two-dot base tip) and head this review was written against. */
   base_sha: string | null;
   head_sha: string | null;
+  /** Set on a "changes since" review: the earlier pin its diff starts from (null = the whole PR). */
+  since_base_sha: string | null;
+  since_head_sha: string | null;
   published_at: string | null;
   github_review_id: number | null;
   last_exported_at: string | null;
@@ -477,6 +480,14 @@ export interface MirrorUpdatedPayload {
 }
 
 /** A review's pin compared with its target's live head. */
+/** How a "changes since" review's diff was derived. */
+export interface InterdiffMeta {
+  /** The PR's merge-base moved since the earlier pin. */
+  rebased: boolean;
+  /** The rebase could not be replayed cleanly (or no clone): the diff may be inexact. */
+  approximate: boolean;
+}
+
 export interface FreshnessResult {
   moved: boolean;
   pinnedHeadSha: string | null;
@@ -722,17 +733,6 @@ export interface ClaudeSession {
   original_name: string | null; // transcript name when a summary title replaced it
 }
 
-export interface SessionSummary {
-  date: string | null;
-  title: string | null;
-  body: string;
-  generated: boolean; // made by the app's Generate button, not the SessionEnd hook
-}
-
-/** A live session matched to a PR card (via claude_session meta or head-branch checkout). */
-export interface CardSession {
-  card_id: string;
-  repo: string;
 /** Estimated cost of a whole session, from the SessionEnd hook's frontmatter (cumulative per transcript). */
 export interface SessionCost {
   total_usd: number;
@@ -744,12 +744,23 @@ export interface SessionCost {
   unpriced_msgs: number;
 }
 
+export interface SessionSummary {
+  date: string | null;
+  title: string | null;
+  body: string;
+  generated: boolean; // made by the app's Generate button, not the SessionEnd hook
+  cost: SessionCost | null; // hook-written summaries only
+}
+
+/** A live session matched to a PR card (via claude_session meta or head-branch checkout). */
+export interface CardSession {
+  card_id: string;
+  repo: string;
   number: number;
   session_id: string;
 }
 
 export interface SessionsSnapshot {
-  cost: SessionCost | null; // hook-written summaries only
   sessions: ClaudeSession[];
   card_sessions: CardSession[];
 }

@@ -95,7 +95,7 @@ pub struct Defaults {
     pub handler: Option<&'static str>,
 }
 
-const BABYSIT_PROMPT: &str = "/goal PR {{repo}}#{{number}} has every required check passing on its latest head and its branch is not behind {{base_ref}}, or you have stopped and reported NEEDS_ATTENTION";
+const BABYSIT_PROMPT: &str = "/goal PR {{repo}}#{{number}} has every required check passing on its latest head, its branch is not behind {{base_ref}} and it has no merge conflicts, or you have stopped and reported NEEDS_ATTENTION";
 
 const BABYSIT_SYSTEM: &str = "\
 You are babysitting pull request {{url}} ({{title}}). Your working directory is its checked-out worktree \
@@ -108,13 +108,23 @@ Loop:
 foreground, or start a background `gh run watch` and wait for it.
 3. If the branch is BEHIND `{{base_ref}}`, update it: `gh pr update-branch {{number}}`. If the PR is part of a stack \
 (use the gh-stack skill), rebase it on its parent instead; `git push --force-with-lease` is allowed only after such a rebase.
+3b. If the PR has merge conflicts (`mergeable` is CONFLICTING or `mergeStateStatus` is DIRTY), merge or rebase \
+`origin/{{base_ref}}` into the worktree branch (rebase, then `--force-with-lease`, only if the branch is already rebased-style \
+or part of a stack; otherwise a merge commit and a plain `git push`) and resolve the conflicts only if they are simple: \
+adjacent or whitespace edits, import or list ordering, lockfile or generated-file regeneration, or one side clearly \
+superseding the other with no intent to reconcile. Run the relevant tests afterwards. If any conflict needs a judgement \
+about behaviour or intent, or touches logic both sides changed, run `git merge --abort` (or `git rebase --abort`) and stop \
+with NEEDS_ATTENTION.
 4. If a check failed, read its log (`gh run view <id> --log-failed`). A flaky or infrastructure failure (network, runner, \
 timeout, unrelated test): rerun just the failed jobs (`gh run rerun <id> --failed`), at most 3 times per run. A real failure \
-caused by the branch: fix it in the worktree, run the relevant tests locally, commit with a one-line Conventional Commit \
+caused by the branch and simple to fix (a typo, lint or format error, an obvious test or snapshot update, a missing import): \
+fix it in the worktree, run the relevant tests locally, commit with a one-line Conventional Commit \
 message (no body), and `git push` (never a plain `--force`). Then go back to step 1.
 5. Never merge the PR, never post comments or reviews on GitHub, never touch other branches.
 
-Stop when the goal holds, or when you cannot make progress without a human (a failure you cannot fix, a decision only the \
+Every fix and every conflict resolution must be simple. If it is not obvious and low-risk, do not attempt it.
+
+Stop when the goal holds, or when you cannot make progress without a human (a failure or conflict that is not simple, a decision only the \
 author can take, repeated reruns of the same failure). In that last case finish with `NEEDS_ATTENTION: <one-sentence diagnosis>`.";
 
 const ISSUE_PLAN_SYSTEM: &str = concat!(include_str!("builtin/preamble.md"), "\n", include_str!("builtin/issue_plan.md"));
@@ -198,7 +208,7 @@ pub const DEFAULTS: &[Defaults] = &[
     Defaults {
         key: BABYSIT_KEY,
         name: "Babysit",
-        description: "Keep a PR's CI green: wait for checks, rerun flaky jobs, update the branch, fix real failures and push.",
+        description: "Keep a PR's CI green: wait for checks, rerun flaky jobs, update the branch, resolve simple merge conflicts, fix simple real failures and push; otherwise flag it as needing attention.",
         context_type: "pr",
         prompt_template: BABYSIT_PROMPT,
         system_prompt: BABYSIT_SYSTEM,

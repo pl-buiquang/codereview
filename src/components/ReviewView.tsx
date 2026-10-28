@@ -74,6 +74,7 @@ import { ShortcutHelp } from "./ShortcutHelp";
 import { Markdown } from "./Markdown";
 import { ChatPanel } from "./ChatPanel";
 import { PublishButton } from "./PublishButton";
+import { UpdateReviewButton } from "./UpdateReviewButton";
 import { PrMetaPanel, usePrMeta } from "./PrMetaPanel";
 import { ReviewSummaryRow } from "./ReviewSummaryRow";
 import { ReviewSwitcher } from "./ReviewSwitcher";
@@ -1321,6 +1322,20 @@ function ReviewHeader({
     },
     onError: (e) => toast.error(`Could not start a new review:\n${String(e)}`),
   });
+  const newReviewSince = useMutation({
+    mutationFn: () => api.newReviewSince(review.id),
+    onSuccess: (r) => {
+      queryClient.invalidateQueries({ queryKey: ["target-reviews", target.id] });
+      queryClient.invalidateQueries({ queryKey: ["reviews"] });
+      openReview(r.id);
+    },
+    onError: (e) => toast.error(`Could not start a review of the new commits:\n${String(e)}`),
+  });
+  const interdiffMetaQuery = useQuery({
+    queryKey: ["interdiff-meta", review.id, review.base_sha, review.since_head_sha],
+    queryFn: () => api.reviewInterdiffMeta(review.id),
+    enabled: review.since_head_sha != null,
+  });
   const updatePin = useMutation({
     mutationFn: () => api.updateReviewPin(review.id),
     onSuccess: (r) => {
@@ -1660,16 +1675,31 @@ function ReviewHeader({
             >
               {movedLabel}
             </span>
-            {isDraft && (
-              <button
-                className="btn btn-sm"
-                disabled={updatePin.isPending}
-                title="Move this review to the latest commits and re-anchor its comments"
-                onClick={() => updatePin.mutate()}
-              >
-                {updatePin.isPending ? "Updating…" : "Update review"}
-              </button>
-            )}
+            <UpdateReviewButton
+              busy={updatePin.isPending || newReviewSince.isPending}
+              canUpdate={isDraft}
+              canReviewNew={isPr}
+              onUpdate={() => updatePin.mutate()}
+              onReviewNew={() => newReviewSince.mutate()}
+            />
+          </span>
+        )}
+        {review.since_head_sha != null && (
+          <span className="head-moved">
+            <span
+              className="head-moved-badge"
+              title={
+                interdiffMetaQuery.data?.approximate
+                  ? "The branch was rebased and the earlier changes could not be replayed cleanly, so this diff may include upstream changes or miss some context."
+                  : interdiffMetaQuery.data?.rebased
+                    ? "The branch was rebased: upstream changes are filtered out, only the author's changes since the earlier review are shown."
+                    : "Only the commits added since the earlier review are shown."
+              }
+            >
+              Changes since {review.since_head_sha.slice(0, 7)}
+              {interdiffMetaQuery.data?.rebased ? " (rebased)" : ""}
+              {interdiffMetaQuery.data?.approximate ? " ⚠ approximate" : ""}
+            </span>
           </span>
         )}
         {anchorsStale && (

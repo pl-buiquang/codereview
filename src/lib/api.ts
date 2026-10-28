@@ -73,6 +73,7 @@ import type {
   SessionUsageSummary,
   ToolEnv,
   UpdateReviewResult,
+  InterdiffMeta,
   WipKind,
   WipStatus,
   StashEntry,
@@ -102,6 +103,10 @@ export const api = {
     invoke<ReviewSummary[]>("list_target_reviews", { targetId }),
   newReviewOnTarget: (targetId: number) =>
     invoke<Review>("new_review_on_target", { targetId }),
+  newReviewSince: (reviewId: number) =>
+    invoke<Review>("new_review_since", { reviewId }),
+  reviewInterdiffMeta: (reviewId: number) =>
+    invoke<InterdiffMeta | null>("review_interdiff_meta", { reviewId }),
   getReview: (reviewId: number) =>
     invoke<ReviewDetail>("get_review", { reviewId }),
   setFileViewed: (reviewId: number, filePath: string, viewed: boolean) =>
@@ -151,13 +156,13 @@ export const api = {
   routineSetSettings: (settings: RoutineSettings) => invoke<void>("routine_set_settings", { settings }),
 
   // AI usage log
+  sessionUsageSummary: (range: UsageRange, summaryDir: string) =>
+    invoke<SessionUsageSummary>("session_usage_summary", { range, summaryDir }),
   aiUsageSummary: (range: UsageRange) => invoke<AiUsageSummary>("ai_usage_summary", { range }),
   aiUsageRuns: (range: UsageRange, feature: string | null, limit = 50) =>
     invoke<AiRun[]>("ai_usage_runs", { range, feature, limit }),
 
   // Chat
-  sessionUsageSummary: (range: UsageRange, summaryDir: string) =>
-    invoke<SessionUsageSummary>("session_usage_summary", { range, summaryDir }),
   crInstallNote: () => invoke<string | null>("cr_install_note"),
   appVersion: () => invoke<string>("app_version"),
 

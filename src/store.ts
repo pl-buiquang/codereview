@@ -39,6 +39,7 @@ let graphFocusNonce = 0;
 
 export interface BoardFilters {
   repos: string[];
+  authors: string[];
   status: string | null;
   ci: string | null;
   merge: string | null;
@@ -53,6 +54,7 @@ export interface BoardFilters {
 
 export const EMPTY_BOARD_FILTERS: BoardFilters = {
   repos: [],
+  authors: [],
   status: null,
   ci: null,
   merge: null,

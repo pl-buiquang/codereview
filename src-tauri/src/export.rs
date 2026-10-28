@@ -283,6 +283,8 @@ mod tests {
             status: "draft".into(),
             base_sha: Some("abcdef1234567890".into()),
             head_sha: Some("1234567890abcdef".into()),
+            since_base_sha: None,
+            since_head_sha: None,
             published_at: None,
             github_review_id: None,
             last_exported_at: None,

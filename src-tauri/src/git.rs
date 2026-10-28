@@ -387,6 +387,118 @@ pub fn diff_shas_path(
     )
 }
 
+/// What the "since" side of a rebase-aware interdiff is. A PR that was
+/// rebased since the earlier pin can't just be diffed `old_head..new_head`:
+/// that also shows every upstream commit the rebase picked up.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InterdiffBase {
+    /// Same merge-base as before: the earlier head is the since side.
+    Same(String),
+    /// The earlier PR changes replayed onto the new merge-base: a tree OID.
+    Replayed(String),
+    /// The replay conflicted or could not run: the earlier head, with the diff
+    /// limited to files either PR version touches. Approximate.
+    Approximate(String),
+}
+
+impl InterdiffBase {
+    /// The tree-ish the diff starts from, also the LEFT side's file source.
+    pub fn treeish(&self) -> &str {
+        match self {
+            Self::Same(s) | Self::Replayed(s) | Self::Approximate(s) => s,
+        }
+    }
+}
+
+/// `git merge-tree --write-tree`: the tree of `new_base` plus what the earlier
+/// PR (`old_base..old_head`) changed. None on conflicts, or when git can't do it
+/// (needs a clone and git >= 2.40). Writes loose objects, never a ref.
+fn replay_tree(repo: &Path, old_base: &str, old_head: &str, new_base: &str) -> Option<String> {
+    let output = Command::new(crate::tools::git_bin())
+        .env("GIT_OPTIONAL_LOCKS", "0")
+        .arg("-C")
+        .arg(repo)
+        .args(["merge-tree", "--write-tree", "--no-messages"])
+        .arg(format!("--merge-base={old_base}"))
+        .arg(new_base)
+        .arg(old_head)
+        .output()
+        .ok()?;
+    // Exit 1 = conflicts: the tree is then not a faithful replay.
+    if !output.status.success() {
+        return None;
+    }
+    let out = String::from_utf8_lossy(&output.stdout);
+    let tree = out.lines().next()?.trim();
+    (!tree.is_empty()).then(|| tree.to_string())
+}
+
+/// Resolve the since side of an interdiff between an earlier pin
+/// (`old_base`, `old_head`) and the new merge-base.
+pub fn interdiff_base(repo: &Path, old_base: &str, old_head: &str, new_base: &str) -> AppResult<InterdiffBase> {
+    for sha in [old_base, old_head, new_base] {
+        ensure_commit(repo, sha)?;
+    }
+    let old_base = rev_parse(repo, old_base)?;
+    let old_head = rev_parse(repo, old_head)?;
+    let new_base = rev_parse(repo, new_base)?;
+    if old_base == new_base {
+        return Ok(InterdiffBase::Same(old_head));
+    }
+    Ok(match replay_tree(repo, &old_base, &old_head, &new_base) {
+        Some(tree) => InterdiffBase::Replayed(tree),
+        None => InterdiffBase::Approximate(old_head),
+    })
+}
+
+fn changed_paths(repo: &Path, a: &str, b: &str) -> AppResult<Vec<String>> {
+    let out = run_git(repo, &["diff", "--name-only", "-z", "--no-color", a, b, "--"])?;
+    Ok(out.split('\0').filter(|p| !p.is_empty()).map(str::to_string).collect())
+}
+
+/// What changed between an earlier PR pin and `new_head`, rebase-aware: the
+/// diff of the since side ([`interdiff_base`]) against `new_head`.
+pub fn interdiff(
+    repo: &Path,
+    old_base: &str,
+    old_head: &str,
+    new_base: &str,
+    new_head: &str,
+) -> AppResult<String> {
+    ensure_commit(repo, new_head)?;
+    let new_head = rev_parse(repo, new_head)?;
+    let base = interdiff_base(repo, old_base, old_head, new_base)?;
+    let mut args: Vec<String> = ["diff", "--no-color", "--no-ext-diff", "--no-textconv"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    args.push(base.treeish().to_string());
+    args.push(new_head.clone());
+    args.push("--".into());
+    if matches!(base, InterdiffBase::Approximate(_)) {
+        let mut paths = changed_paths(repo, old_base, old_head)?;
+        paths.extend(changed_paths(repo, new_base, &new_head)?);
+        paths.sort();
+        paths.dedup();
+        if paths.is_empty() {
+            return Ok(String::new());
+        }
+        args.extend(paths);
+    }
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    run_git(repo, &args)
+}
+
+/// Contents of `file_path` in any tree-ish (a replayed tree has no commit, so
+/// [`show_file`]'s commit check would reject it).
+pub fn show_blob(repo: &Path, treeish: &str, file_path: &str) -> AppResult<String> {
+    validate_commit_ref(treeish)?;
+    run_git(
+        repo,
+        &["show", "--no-ext-diff", "--no-textconv", &format!("{treeish}:{file_path}"), "--"],
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -705,5 +817,127 @@ mod tests {
         let mb = merge_base(p, "main", "feat").unwrap();
         assert_eq!(mb, fork);
         assert_eq!(mb, rev_parse(p, "main~1").unwrap());
+    }
+
+    // ---- interdiff ----------------------------------------------------------
+
+    /// `main` with a 10-line `a.txt` and a `b.txt`; returns the repo.
+    fn interdiff_repo() -> TempDir {
+        let dir = TempDir::new().unwrap();
+        let p = dir.path();
+        git(p, &["init", "-q", "-b", "main"]);
+        git(p, &["config", "user.email", "test@example.com"]);
+        git(p, &["config", "user.name", "Test"]);
+        let a: String = (1..=10).map(|i| format!("line{i}\n")).collect();
+        fs::write(p.join("a.txt"), a).unwrap();
+        fs::write(p.join("b.txt"), "b\n").unwrap();
+        git(p, &["add", "."]);
+        git(p, &["commit", "-q", "-m", "base"]);
+        dir
+    }
+
+    fn sed_line(p: &Path, file: &str, n: usize, text: &str) {
+        let src = fs::read_to_string(p.join(file)).unwrap();
+        let out: String = src
+            .lines()
+            .enumerate()
+            .map(|(i, l)| format!("{}\n", if i + 1 == n { text } else { l }))
+            .collect();
+        fs::write(p.join(file), out).unwrap();
+    }
+
+    fn rev(p: &Path, r: &str) -> String {
+        rev_parse(p, r).unwrap()
+    }
+
+    #[test]
+    fn interdiff_without_a_rebase_is_the_plain_head_diff() {
+        let dir = interdiff_repo();
+        let p = dir.path();
+        let base = rev(p, "main");
+        git(p, &["checkout", "-q", "-b", "pr"]);
+        sed_line(p, "a.txt", 2, "pr1");
+        git(p, &["commit", "-q", "-am", "pr first"]);
+        let old_head = rev(p, "HEAD");
+        sed_line(p, "a.txt", 9, "fix");
+        git(p, &["commit", "-q", "-am", "pr second"]);
+        let new_head = rev(p, "HEAD");
+
+        let out = interdiff(p, &base, &old_head, &base, &new_head).unwrap();
+        assert_eq!(out, diff(p, &old_head, &new_head, false).unwrap());
+        assert!(out.contains("+fix") && !out.contains("pr1"));
+    }
+
+    #[test]
+    fn interdiff_hides_upstream_changes_picked_up_by_a_rebase() {
+        let dir = interdiff_repo();
+        let p = dir.path();
+        let old_base = rev(p, "main");
+        git(p, &["checkout", "-q", "-b", "pr"]);
+        sed_line(p, "a.txt", 2, "pr1");
+        git(p, &["commit", "-q", "-am", "pr first"]);
+        let old_head = rev(p, "HEAD");
+
+        // Upstream moves on (touching another file and another part of a.txt).
+        git(p, &["checkout", "-q", "main"]);
+        fs::write(p.join("b.txt"), "b upstream\n").unwrap();
+        sed_line(p, "a.txt", 5, "upstream5");
+        git(p, &["commit", "-q", "-am", "upstream"]);
+        let new_base = rev(p, "main");
+
+        // The author rebases onto it and adds one more fix.
+        git(p, &["checkout", "-q", "-b", "pr2"]);
+        sed_line(p, "a.txt", 2, "pr1");
+        git(p, &["commit", "-q", "-am", "pr first, rebased"]);
+        sed_line(p, "a.txt", 9, "fix");
+        git(p, &["commit", "-q", "-am", "pr second"]);
+        let new_head = rev(p, "HEAD");
+
+        let out = interdiff(p, &old_base, &old_head, &new_base, &new_head).unwrap();
+        assert!(out.contains("+fix"), "{out}");
+        let changed: Vec<&str> = out
+            .lines()
+            .filter(|l| (l.starts_with('+') || l.starts_with('-')) && !l.starts_with("+++") && !l.starts_with("---"))
+            .collect();
+        assert_eq!(changed, ["-line9", "+fix"], "{out}");
+        assert!(!out.contains("b.txt"), "{out}");
+        assert!(matches!(
+            interdiff_base(p, &old_base, &old_head, &new_base).unwrap(),
+            InterdiffBase::Replayed(_)
+        ));
+        // The replayed tree is the LEFT side: it already has the rebased pr1 line.
+        let tree = interdiff_base(p, &old_base, &old_head, &new_base).unwrap();
+        let left = show_blob(p, tree.treeish(), "a.txt").unwrap();
+        assert!(left.contains("pr1") && left.contains("upstream5") && !left.contains("fix"));
+    }
+
+    #[test]
+    fn interdiff_falls_back_when_the_replay_conflicts() {
+        let dir = interdiff_repo();
+        let p = dir.path();
+        let old_base = rev(p, "main");
+        git(p, &["checkout", "-q", "-b", "pr"]);
+        sed_line(p, "a.txt", 2, "pr1");
+        git(p, &["commit", "-q", "-am", "pr first"]);
+        let old_head = rev(p, "HEAD");
+
+        git(p, &["checkout", "-q", "main"]);
+        sed_line(p, "a.txt", 2, "upstream2");
+        fs::write(p.join("b.txt"), "b upstream\n").unwrap();
+        git(p, &["commit", "-q", "-am", "upstream"]);
+        let new_base = rev(p, "main");
+
+        git(p, &["checkout", "-q", "-b", "pr2"]);
+        sed_line(p, "a.txt", 2, "resolved");
+        git(p, &["commit", "-q", "-am", "pr rebased, conflict resolved"]);
+        let new_head = rev(p, "HEAD");
+
+        assert!(matches!(
+            interdiff_base(p, &old_base, &old_head, &new_base).unwrap(),
+            InterdiffBase::Approximate(_)
+        ));
+        let out = interdiff(p, &old_base, &old_head, &new_base, &new_head).unwrap();
+        assert!(out.contains("-pr1") && out.contains("+resolved"), "{out}");
+        assert!(!out.contains("b.txt"), "limited to files the PR touches: {out}");
     }
 }

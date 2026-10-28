@@ -275,6 +275,8 @@ pub fn run() {
             commands::review::list_reviews,
             commands::review::list_target_reviews,
             commands::review::new_review_on_target,
+            commands::review::new_review_since,
+            commands::review::review_interdiff_meta,
             commands::review::get_review,
             commands::review::set_file_viewed,
             commands::review::set_panel_widths,

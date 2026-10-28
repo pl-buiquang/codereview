@@ -15,6 +15,8 @@ pub struct DiffKey {
     pub base_sha: String,
     pub head_sha: String,
     pub three_dot: bool,
+    /// The earlier pin of an interdiff, so it never collides with the full PR diff.
+    pub since: Option<(String, String)>,
 }
 
 struct Lru {
@@ -90,6 +92,7 @@ mod tests {
             base_sha: "base".into(),
             head_sha: head.into(),
             three_dot: true,
+            since: None,
         }
     }
 

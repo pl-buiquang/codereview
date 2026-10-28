@@ -77,6 +77,10 @@ pub struct Review {
     /// written against. None when unresolved at creation.
     pub base_sha: Option<String>,
     pub head_sha: Option<String>,
+    /// The earlier pin this review's diff starts from (an interdiff of what
+    /// changed since that review). None = the whole PR.
+    pub since_base_sha: Option<String>,
+    pub since_head_sha: Option<String>,
     pub published_at: Option<String>,
     pub github_review_id: Option<i64>,
     pub last_exported_at: Option<String>,
@@ -99,6 +103,8 @@ impl Review {
             status: row.get("status")?,
             base_sha: row.get("base_sha")?,
             head_sha: row.get("head_sha")?,
+            since_base_sha: row.get("since_base_sha")?,
+            since_head_sha: row.get("since_head_sha")?,
             published_at: row.get("published_at")?,
             github_review_id: row.get("github_review_id")?,
             last_exported_at: row.get("last_exported_at")?,

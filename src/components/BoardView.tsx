@@ -77,8 +77,9 @@ export function BoardView() {
   const tmuxSessionName = useSettingsStore((s) => s.tmuxSessionName);
   const filters = useUIStore((s) => s.boardFilters);
   const setBoardFilters = useUIStore((s) => s.setBoardFilters);
-  const { repos: repoFilter, status: statusFilter, ci: ciFilter, merge: mergeFilter, needsAction, stack: stackFilter, tags: tagFilter, untagged: untaggedFilter, excludeTags: tagExclude } = filters;
+  const { repos: repoFilter, authors: authorFilter, status: statusFilter, ci: ciFilter, merge: mergeFilter, needsAction, stack: stackFilter, tags: tagFilter, untagged: untaggedFilter, excludeTags: tagExclude } = filters;
   const setRepoFilter = (repos: string[]) => setBoardFilters({ repos });
+  const setAuthorFilter = (authors: string[]) => setBoardFilters({ authors });
   const setStatusFilter = (status: string | null) => setBoardFilters({ status });
   const setCiFilter = (ci: string | null) => setBoardFilters({ ci });
   const setMergeFilter = (merge: string | null) => setBoardFilters({ merge });
@@ -301,8 +302,9 @@ export function BoardView() {
 
   const allCards = useMemo(() => (boardQuery.data ?? []).filter((c) => c.lane != null), [boardQuery.data]);
 
-  const { repoEntries, statusEntries, ciEntries, mergeEntries, stackEntries, tagEntries } = useMemo(() => {
+  const { repoEntries, authorEntries, statusEntries, ciEntries, mergeEntries, stackEntries, tagEntries } = useMemo(() => {
     const repo = new Map<string, number>();
+    const author = new Map<string, number>();
     const status = new Map<string, number>();
     const ci = new Map<string, number>();
     const tag = new Map<string, number>();
@@ -317,6 +319,7 @@ export function BoardView() {
       }
       for (const f of mergeFacets(c)) merge.set(f, (merge.get(f) ?? 0) + 1);
       repo.set(c.repo, (repo.get(c.repo) ?? 0) + 1);
+      if (c.author_login) author.set(c.author_login, (author.get(c.author_login) ?? 0) + 1);
       const s = prStatus(c);
       if (s) status.set(s, (status.get(s) ?? 0) + 1);
       const ciS = ciStatus(c);
@@ -330,6 +333,7 @@ export function BoardView() {
       (CI_ORDER[a[0]] ?? 99) - (CI_ORDER[b[0]] ?? 99);
     return {
       repoEntries: [...repo.entries()].sort(byCount),
+      authorEntries: [...author.entries()].sort(byCount),
       statusEntries: [...status.entries()].sort(byStatusOrder),
       ciEntries: [...ci.entries()].sort(byCiOrder),
       mergeEntries: Object.keys(MERGE_FACET_LABEL)
@@ -341,6 +345,7 @@ export function BoardView() {
   }, [allCards]);
 
   const effRepos = repoFilter.filter((r) => allCards.some((c) => c.repo === r));
+  const effAuthors = authorFilter.filter((a) => allCards.some((c) => c.author_login === a));
   const effStatus = statusFilter && allCards.some((c) => prStatus(c) === statusFilter) ? statusFilter : null;
   const effCi = ciFilter && allCards.some((c) => ciStatus(c) === ciFilter) ? ciFilter : null;
   const effMerge = mergeFilter && allCards.some((c) => mergeFacets(c).includes(mergeFilter)) ? mergeFilter : null;
@@ -356,8 +361,9 @@ export function BoardView() {
     badgeCards.has(c.id) && (includeSnoozed || !((snoozes[c.id] ?? 0) > Date.now()));
   const needsActionCount = allCards.filter((c) => c.lane !== "done" && needsActionCard(c)).length;
 
-  const matches = (c: BoardCardT, skip?: "repo" | "status" | "ci" | "merge" | "stack" | "tags") => {
+  const matches = (c: BoardCardT, skip?: "repo" | "author" | "status" | "ci" | "merge" | "stack" | "tags") => {
     if (skip !== "repo" && effRepos.length > 0 && !effRepos.includes(c.repo)) return false;
+    if (skip !== "author" && effAuthors.length > 0 && !effAuthors.includes(c.author_login ?? "")) return false;
     if (skip !== "status" && effStatus && c.type === "pr" && prStatus(c) !== effStatus) return false;
     if (skip !== "ci" && effCi && ciStatus(c) !== effCi) return false;
     if (skip !== "merge" && effMerge && !mergeFacets(c).includes(effMerge)) return false;
@@ -379,7 +385,7 @@ export function BoardView() {
   useSyncScope("board", onHome, visibleIdList);
 
   // Each facet counts cards matching every other active filter, so its own options stay comparable.
-  const facetCounts = (skip: "repo" | "status" | "ci" | "merge" | "stack" | "tags", keysOf: (c: BoardCardT) => (string | null | undefined)[]) => {
+  const facetCounts = (skip: "repo" | "author" | "status" | "ci" | "merge" | "stack" | "tags", keysOf: (c: BoardCardT) => (string | null | undefined)[]) => {
     const m = new Map<string, number>();
     for (const c of allCards) {
       if (!countDone && c.lane === "done") continue;
@@ -391,6 +397,7 @@ export function BoardView() {
   const withCounts = (entries: [string, number][], counts: Map<string, number>): [string, number][] =>
     entries.map(([k]) => [k, counts.get(k) ?? 0]);
   const repoShown = withCounts(repoEntries, facetCounts("repo", (c) => [c.repo]));
+  const authorShown = withCounts(authorEntries, facetCounts("author", (c) => [c.author_login]));
   const statusShown = withCounts(statusEntries, facetCounts("status", (c) => [prStatus(c)]));
   const ciShown = withCounts(ciEntries, facetCounts("ci", (c) => [ciStatus(c)]));
   const mergeShown = withCounts(mergeEntries, facetCounts("merge", mergeFacets));
@@ -602,6 +609,7 @@ export function BoardView() {
             onChange={setRepoFilter}
             renderLabel={(k) => <RepoName className="lbl ident" name={k} />}
           />
+          <MultiFilterList title="Users" entries={authorShown} selected={effAuthors} onChange={setAuthorFilter} />
           <TagFilter
             tags={tagsShown}
             selected={effTags}
