@@ -14,6 +14,8 @@ export interface DefinitionLookup {
   side: Side;
   /** Path of the file the word was clicked in. */
   path: string;
+  /** Where it was clicked: the review's diff or the head-file pane. */
+  from: "diff" | "file";
   x: number;
   y: number;
 }
@@ -33,10 +35,10 @@ interface Probe {
   hit: IdentifierUnderPointer;
 }
 
-/** The diff word under a viewport point, or null off the code cells. */
+/** The code word under a viewport point, or null off the code cells (diff or file pane). */
 function probeAt(x: number, y: number): Probe | null {
   const cell = document.elementFromPoint(x, y)?.closest<HTMLElement>("td.diff-code");
-  const path = cell?.closest<HTMLElement>(".diff-file[data-file-path]")?.dataset.filePath;
+  const path = cell?.closest<HTMLElement>("[data-file-path]")?.dataset.filePath;
   if (!cell || !path) return null;
   const hit = identifierUnderPointer({ clientX: x, clientY: y });
   if (!hit || !cell.contains(hit.node)) return null;
@@ -55,6 +57,7 @@ function probeAt(x: number, y: number): Probe | null {
  */
 export function useDefinitionLinks({
   rootRef,
+  from,
   enabled,
   reviewId,
   pin,
@@ -62,6 +65,7 @@ export function useDefinitionLinks({
   onLookup,
 }: {
   rootRef: RefObject<HTMLElement | null>;
+  from: "diff" | "file";
   /** False while the review's tab is hidden: its subtree stays mounted. */
   enabled: boolean;
   reviewId: number;
@@ -153,6 +157,7 @@ export function useDefinitionLinks({
         symbol: probe.symbol,
         side: probe.side,
         path: probe.path,
+        from,
         x: e.clientX,
         y: e.clientY,
       });
@@ -176,5 +181,5 @@ export function useDefinitionLinks({
       cancelAnimationFrame(raf);
       clear();
     };
-  }, [rootRef, enabled, reviewId, pin, queryClient]);
+  }, [rootRef, from, enabled, reviewId, pin, queryClient]);
 }

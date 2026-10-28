@@ -11,14 +11,16 @@ The review screen shows the diff of a GitHub PR or a local "virtual PR" (two bra
 - **File tree.** The left pane has `Files`, `Comments` and (PR reviews only) `Context` tabs. Files are grouped into a directory tree in diff order; single-child directory chains collapse into one node (`src/components`). The Comments tab lists threads with open/resolved filters. The Context tab shows the linked board card's metadata (plan files, links, notes, Claude sessions). Hide or show the pane with `b`.
 - **Viewed.** Each file header has a checkbox that collapses the file. It is stored per review and still works on published reviews.
 - **Go to definition.** Hold `⌘/Ctrl` and hover an identifier: it is underlined when a declaration exists. Click it to jump (see [Go to definition](#go-to-definition)).
-- **Find.** `⌘/Ctrl + F` opens "Find in diff". `Enter` / `Shift+Enter` go to the next / previous match, `Esc` closes.
+- **Find.** `⌘/Ctrl + F` opens "Find in diff", or "Find in file" while the file pane is open (it searches that file only). `Enter` / `Shift+Enter` go to the next / previous match, `Esc` closes.
 
 ## Go to definition
 
 Holding `⌘/Ctrl` over a word in the diff underlines it **only if a declaration of it exists** in the pinned commit (LEFT = base, RIGHT = head); the first `⌘/Ctrl` press is enough to start looking. `⌘/Ctrl + click` opens a popover at the pointer right away (with a spinner while the lookup runs):
 
 - one declaration, and its line is in the diff: the view scrolls to that line and flashes it, no popover;
-- otherwise the popover lists up to 10 declarations with a snippet, "Go to line" (line is in the diff) and "Open file" (the file pane, scrolled to the declaration). The clicked file comes first, then the other files in the diff.
+- otherwise the popover lists up to 10 declarations with a snippet, "Go to line" (line is in the diff), "View file" (the file pane, scrolled to the declaration) and "Open" (VSCode, in the chat worktree, at that line). The clicked file comes first, then the other files in the diff.
+
+The same works inside the file pane (head side): one declaration opens straight in the pane.
 
 A jump is a step in the app's Back/Forward history (`⌘←` / `⌘→`, mouse side buttons): Back returns to the scroll position (and closed file pane) you jumped from, Forward to where the jump landed (`src/lib/navHistory.ts`, `recordJump`).
 

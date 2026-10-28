@@ -3,7 +3,7 @@ import { useUIStore, type HomeSection } from "../store";
 /** A position inside a review tab: how far its diff is scrolled and which file pane is open. */
 export interface ViewPos {
   scrollTop: number;
-  filePane: { path: string; line?: number } | null;
+  filePane: { path: string; line?: number; scrollTop?: number } | null;
 }
 
 /** What a mounted review view lends to the history so jumps inside it can be undone. */

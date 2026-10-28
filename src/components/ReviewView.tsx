@@ -155,6 +155,7 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
   const [typeFilter, setTypeFilter] = useState<"all" | FileCategory>("all");
   const [commentFilter, setCommentFilter] = useState<CommentFilter>(DEFAULT_COMMENT_FILTER);
   const diffAreaRef = useRef<HTMLDivElement>(null);
+  const filePaneBodyRef = useRef<HTMLDivElement>(null);
   const summaryBodyRef = useRef<string | null>(null);
 
   // Keyboard navigation. The single window listener lives here (see the effect
@@ -584,6 +585,7 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
   const diffPaths = useMemo(() => files.map(fileDisplayPath), [files]);
   useDefinitionLinks({
     rootRef: diffAreaRef,
+    from: "diff",
     enabled: isActiveTab && detailQuery.data != null,
     reviewId,
     pin,
@@ -674,11 +676,27 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
           const { filePanePath: path, filePaneFocus: focus } = navState.current;
           return {
             scrollTop: diffAreaRef.current?.scrollTop ?? 0,
-            filePane: path ? { path, line: focus?.line } : null,
+            filePane: path
+              ? { path, line: focus?.line, scrollTop: filePaneBodyRef.current?.scrollTop }
+              : null,
           };
         },
         restore: (pos) => {
           openFilePane(pos.filePane?.path ?? null, pos.filePane?.line);
+          const paneTop = pos.filePane?.scrollTop;
+          if (paneTop != null) {
+            // the pane loads its file asynchronously: wait until it is tall enough
+            let paneFrames = 0;
+            const applyPane = () => {
+              const body = filePaneBodyRef.current;
+              if (body && body.scrollHeight - body.clientHeight >= paneTop - 1) {
+                body.scrollTop = paneTop;
+              } else if (++paneFrames <= 60) {
+                requestAnimationFrame(applyPane);
+              }
+            };
+            requestAnimationFrame(applyPane);
+          }
           // the diff may still be laying out (reopened tab): wait until it is tall enough
           let frames = 0;
           const apply = () => {
@@ -714,6 +732,7 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
     if (!isActiveTab) return;
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && !e.altKey && (e.key === "f" || e.key === "F")) {
+        if (filePanePath) return; // the file pane searches its own file
         e.preventDefault();
         setSearchOpen(true);
         searchInputRef.current?.select();
@@ -969,6 +988,12 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
           detail={detail}
           filePath={filePanePath}
           focus={filePaneFocus}
+          bodyRef={filePaneBodyRef}
+          active={isActiveTab}
+          pin={pin}
+          diffPaths={diffPaths}
+          definitionOpen={definition != null}
+          onLookup={setDefinition}
           readOnly={readOnly}
           onClose={() => setFilePanePath(null)}
           onSaving={() => setSaveState("saving")}
@@ -987,8 +1012,9 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
   );
 }
 
-function DiffSearchBar({
+export function DiffSearchBar({
   inputRef,
+  placeholder = "Find in diff…",
   query,
   count,
   index,
@@ -998,6 +1024,7 @@ function DiffSearchBar({
   onClose,
 }: {
   inputRef: React.RefObject<HTMLInputElement | null>;
+  placeholder?: string;
   query: string;
   count: number;
   index: number;
@@ -1012,7 +1039,7 @@ function DiffSearchBar({
         ref={inputRef}
         autoFocus
         className="input diff-search-input"
-        placeholder="Find in diff…"
+        placeholder={placeholder}
         value={query}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={(e) => {

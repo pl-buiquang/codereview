@@ -1,6 +1,8 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
+import { toast } from "../lib/toast";
+import { Icon } from "./icons";
 import { api } from "../lib/api";
 import {
   DEFINITION_STALE_MS,
@@ -12,10 +14,11 @@ import type { Side } from "../lib/types";
 const WIDTH = 460;
 
 /**
- * Popover for a Cmd/Ctrl-clicked identifier in the diff. It opens at once with a spinner; the
+ * Popover for a Cmd/Ctrl-clicked identifier in the diff or the file pane. It opens at once with a spinner; the
  * result usually is already cached by the hover check. A single declaration that is part of the
  * diff is jumped to directly (the popover closes itself). Otherwise each declaration is listed
- * with a few lines of source and a way to reach it.
+ * with a few lines of source and a way to reach it. From the file pane a single declaration
+ * opens straight in the pane.
  *
  * Rendered into `document.body`: the diff files use `content-visibility`/`overflow: clip`, which
  * would make them the containing block of a `position: fixed` popover and clip it.
@@ -42,7 +45,20 @@ export function DefinitionPopover({
   onClose: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
-  const { symbol, side, path, x, y } = lookup;
+  const { symbol, side, path, from, x, y } = lookup;
+  const [openingHit, setOpeningHit] = useState<string | null>(null);
+  const openInVscode = async (hitPath: string, line: number) => {
+    if (openingHit) return;
+    setOpeningHit(`${hitPath}:${line}`);
+    try {
+      const worktreePath = await api.ensureChatWorktree(reviewId);
+      await api.openInVscode(worktreePath, hitPath, line);
+      onClose();
+    } catch (err) {
+      toast.error(`Could not open VSCode:\n${String(err)}`);
+      setOpeningHit(null);
+    }
+  };
   const query = useQuery({
     queryKey: definitionQueryKey(reviewId, pin, side, path, symbol),
     queryFn: () => api.findDefinition(reviewId, symbol, path, side, diffPaths, false),
@@ -66,12 +82,13 @@ export function DefinitionPopover({
 
   const hits = query.data;
   const only = hits?.length === 1 ? hits[0] : null;
-  const jumpOnly = only != null && inDiff(only.path, side, only.line);
+  const jumpOnly = only != null && (from === "file" || inDiff(only.path, side, only.line));
   useEffect(() => {
     if (!only || !jumpOnly) return;
-    onJump(only.path, side, only.line);
+    if (from === "file") onOpenFile(only.path, only.line);
+    else onJump(only.path, side, only.line);
     onClose();
-  }, [only, jumpOnly, side, onJump, onClose]);
+  }, [only, jumpOnly, from, side, onJump, onOpenFile, onClose]);
 
   const left = Math.max(8, Math.min(x, window.innerWidth - WIDTH - 8));
   const top = Math.min(y + 14, window.innerHeight - 120);
@@ -108,7 +125,7 @@ export function DefinitionPopover({
               <span className="muted">{hit.kind}</span>
               {inDiff(hit.path, side, hit.line) && (
                 <button
-                  className="link-button"
+                  className="btn btn-sm btn-ghost"
                   onClick={() => {
                     onJump(hit.path, side, hit.line);
                     onClose();
@@ -117,17 +134,27 @@ export function DefinitionPopover({
                   Go to line
                 </button>
               )}
-              {/* the file pane shows the head side only */}
+              {/* the file pane and the worktree show the head side only */}
               {side === "RIGHT" && (
-                <button
-                  className="link-button"
-                  onClick={() => {
-                    onOpenFile(hit.path, hit.line);
-                    onClose();
-                  }}
-                >
-                  Open file
-                </button>
+                <>
+                  <button
+                    className="btn btn-sm btn-ghost"
+                    onClick={() => {
+                      onOpenFile(hit.path, hit.line);
+                      onClose();
+                    }}
+                  >
+                    <Icon name="eye" size={12} /> View file
+                  </button>
+                  <button
+                    className="btn btn-sm btn-ghost open-file-btn"
+                    title="Open in VSCode (chat worktree)"
+                    disabled={openingHit != null}
+                    onClick={() => openInVscode(hit.path, hit.line)}
+                  >
+                    <Icon name="ext" size={12} /> Open
+                  </button>
+                </>
               )}
             </div>
             <pre className="definition-snippet">{hit.snippet}</pre>

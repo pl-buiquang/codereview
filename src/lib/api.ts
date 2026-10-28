@@ -430,8 +430,8 @@ export const api = {
     invoke<void>("remove_worktree", { repoId, worktreePath }),
   pruneWorktrees: (repoId: number) =>
     invoke<string>("prune_worktrees", { repoId }),
-  openInVscode: (path: string, file?: string) =>
-    invoke<void>("open_in_vscode", { path, file: file ?? null }),
+  openInVscode: (path: string, file?: string, line?: number) =>
+    invoke<void>("open_in_vscode", { path, file: file ?? null, line: line ?? null }),
 
   // Git graph
   graphLog: (args: {

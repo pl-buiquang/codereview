@@ -525,11 +525,19 @@ fn terminal_target(
 }
 
 #[tauri::command]
-pub fn open_in_vscode(path: String, file: Option<String>) -> AppResult<()> {
+pub fn open_in_vscode(path: String, file: Option<String>, line: Option<u32>) -> AppResult<()> {
     let mut cmd = Command::new("code");
     cmd.arg(&path);
     if let Some(file) = file {
-        cmd.arg(Path::new(&path).join(file));
+        let target = Path::new(&path).join(file);
+        match line {
+            Some(line) => {
+                cmd.arg("--goto").arg(format!("{}:{line}", target.display()));
+            }
+            None => {
+                cmd.arg(target);
+            }
+        }
     }
     cmd.spawn()
         .map_err(|e| AppError::Other(format!("failed to open VSCode: {e}")))?;

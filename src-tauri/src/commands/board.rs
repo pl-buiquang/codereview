@@ -649,7 +649,7 @@ pub async fn board_open_vscode(card_id: String, base_paths: Vec<String>, db: Sta
     let (owner, name, number) = pr_card_coords(&db, &card_id)?;
     let review = crate::commands::review::create_review_for_pr_impl(&db, &owner, &name, number, &base_paths)?;
     let worktree_path = crate::commands::chat::ensure_chat_worktree(review.id, db).await?;
-    crate::commands::worktree::open_in_vscode(worktree_path, None)
+    crate::commands::worktree::open_in_vscode(worktree_path, None, None)
 }
 
 /// Ensure the PR card's chat worktree exists, then open a plain shell there.

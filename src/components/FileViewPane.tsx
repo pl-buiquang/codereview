@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   Diff,
@@ -19,7 +19,9 @@ import {
   tokenizeFile,
 } from "../lib/diff";
 import { useSyntaxReady } from "../lib/highlight";
-import { LineWidget, ThreadItem, flashRow } from "./ReviewView";
+import { DiffSearchBar, LineWidget, ThreadItem, flashRow } from "./ReviewView";
+import { filterDiffMatches, wrapIndex } from "../lib/diffSearch";
+import { useDefinitionLinks, type DefinitionLookup } from "../lib/useDefinitionLinks";
 import { groupThreads, isDraftReply, type CommentThread } from "../lib/threads";
 import type { ReviewDetail } from "../lib/types";
 
@@ -34,7 +36,8 @@ interface Selection {
  * diff hunks are commentable here; those comments are stored as `origin =
  * 'file_view'` and fold into the review body on publish/export rather than
  * posting inline. Existing RIGHT-side diff comments are surfaced (and editable)
- * on their lines, and diff-changed lines get a discreet gutter bar.
+ * on their lines, and diff-changed lines get a discreet gutter bar. Cmd/Ctrl-hover/click
+ * go-to-definition and Cmd+F search both work on this file (not the diff).
  */
 export function FileViewPane({
   reviewId,
@@ -42,6 +45,12 @@ export function FileViewPane({
   filePath,
   readOnly,
   focus,
+  bodyRef,
+  active,
+  pin,
+  diffPaths,
+  definitionOpen,
+  onLookup,
   onClose,
   onSaving,
   onSaved,
@@ -53,18 +62,53 @@ export function FileViewPane({
   readOnly: boolean;
   /** Line to scroll to and flash once the file is shown (a new object re-triggers it). */
   focus?: { line: number } | null;
+  /** The scrollable body; owned by the parent so Back/Forward can save and restore its scroll. */
+  bodyRef: RefObject<HTMLDivElement | null>;
+  /** False while the review's tab is hidden: its subtree stays mounted. */
+  active: boolean;
+  /** `base:head` commit ids, the definition cache key's pin. */
+  pin: string;
+  diffPaths: string[];
+  /** The definition popover is open (it owns the next Escape). */
+  definitionOpen: boolean;
+  onLookup: (lookup: DefinitionLookup) => void;
   onClose: () => void;
   onSaving: () => void;
   onSaved: () => void;
   onCommentsChanged: () => void;
 }) {
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchIdx, setSearchIdx] = useState(0);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
   useEffect(() => {
+    if (!active) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && (e.key === "f" || e.key === "F")) {
+        e.preventDefault();
+        setSearchOpen(true);
+        searchInputRef.current?.select();
+        return;
+      }
+      // the search input and the definition popover handle their own Escape
+      if (e.key !== "Escape" || e.defaultPrevented || definitionOpen) return;
+      if (searchOpen) setSearchOpen(false);
+      else onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [active, definitionOpen, searchOpen, onClose]);
+
+  useDefinitionLinks({
+    rootRef: bodyRef,
+    from: "file",
+    enabled: active,
+    reviewId,
+    pin,
+    diffPaths,
+    onLookup,
+  });
 
   const sourceQuery = useQuery(headFileSourceQuery(reviewId, filePath, detail.review.head_sha));
 
@@ -95,7 +139,6 @@ export function FileViewPane({
     [synthetic],
   );
 
-  const bodyRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!focus || !synthetic) return;
     const key = keyByAnchor.get(`RIGHT:${focus.line}`);
@@ -108,6 +151,20 @@ export function FileViewPane({
     });
     return () => cancelAnimationFrame(raf);
   }, [focus, synthetic, keyByAnchor]);
+
+  const matches = useMemo(
+    () => (searchOpen ? filterDiffMatches([metaByKey], searchQuery) : []),
+    [searchOpen, metaByKey, searchQuery],
+  );
+  const matchKeys = useMemo(() => new Set(matches.map((m) => m.changeKey)), [matches]);
+  const curMatch = matches.length ? matches[wrapIndex(searchIdx, matches.length)] : null;
+  useEffect(() => {
+    if (!curMatch) return;
+    const raf = requestAnimationFrame(() => {
+      bodyRef.current?.querySelector(".search-current")?.scrollIntoView({ block: "center" });
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [curMatch, bodyRef]);
 
   // This file's RIGHT-side line comments (both diff- and file-view-origin),
   // grouped by the change key they anchor to. LEFT/deletion comments don't map
@@ -217,11 +274,14 @@ export function FileViewPane({
     defaultGenerate: () => string;
   }): string | undefined => {
     const base = defaultGenerate();
-    const changed = changes.some(
-      (c) => c != null && c.type === "normal" && changedLines.has(c.newLineNumber),
-    );
-    if (!changed) return base;
-    return base ? `${base} changed-line` : "changed-line";
+    const extra: string[] = [];
+    if (changes.some((c) => c != null && c.type === "normal" && changedLines.has(c.newLineNumber)))
+      extra.push("changed-line");
+    if (matchKeys.size && changes.some((c) => c != null && matchKeys.has(changeKeyOf(c))))
+      extra.push("search-match");
+    if (curMatch && changes.some((c) => c != null && changeKeyOf(c) === curMatch.changeKey))
+      extra.push("search-current");
+    return [base, ...extra].filter(Boolean).join(" ") || undefined;
   };
 
   return (
@@ -237,7 +297,23 @@ export function FileViewPane({
           ✕
         </button>
       </div>
-      <div className="file-view-pane-body" ref={bodyRef}>
+      {searchOpen && (
+        <DiffSearchBar
+          inputRef={searchInputRef}
+          placeholder="Find in file…"
+          query={searchQuery}
+          count={matches.length}
+          index={matches.length ? wrapIndex(searchIdx, matches.length) : 0}
+          onChange={(v) => {
+            setSearchQuery(v);
+            setSearchIdx(0);
+          }}
+          onNext={() => setSearchIdx((i) => i + 1)}
+          onPrev={() => setSearchIdx((i) => i - 1)}
+          onClose={() => setSearchOpen(false)}
+        />
+      )}
+      <div className="file-view-pane-body" ref={bodyRef} data-file-path={filePath}>
         {sourceQuery.isLoading && <p className="muted">Loading file…</p>}
         {sourceQuery.isError && (
           <p className="error">Could not load file: {String(sourceQuery.error)}</p>
