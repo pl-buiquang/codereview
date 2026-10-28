@@ -242,6 +242,81 @@ pub fn grep_at(path: &Path, sha: &str, pattern: &str, globs: &[&str]) -> AppResu
         .collect())
 }
 
+/// `git grep -lE` over the tree at `sha` (already a full commit id): the paths (within `globs`)
+/// with at least one match for any of `patterns`. No match is an empty list, not an error.
+pub fn grep_files_at(path: &Path, sha: &str, patterns: &[String], globs: &[&str]) -> AppResult<Vec<String>> {
+    let mut args = vec!["grep", "-l", "-I", "-E", "--no-color"];
+    for p in patterns {
+        args.extend(["-e", p.as_str()]);
+    }
+    args.extend([sha, "--"]);
+    args.extend(globs);
+    let out = match run_git(path, &args) {
+        Ok(out) => out,
+        Err(AppError::Git(msg)) if msg.is_empty() => return Ok(vec![]),
+        Err(e) => return Err(e),
+    };
+    let prefix = format!("{sha}:");
+    Ok(out.lines().filter_map(|l| l.strip_prefix(&prefix).map(str::to_string)).collect())
+}
+
+
+/// Contents of `paths` at `sha` (a full commit id), read through one `git cat-file --batch`
+/// process. Files that do not exist or are larger than `max_bytes` come back as `None` (still in
+/// input order).
+pub fn cat_files(path: &Path, sha: &str, paths: &[String], max_bytes: usize) -> AppResult<Vec<Option<String>>> {
+    use std::io::{BufRead, BufReader, Read, Write};
+    use std::process::Stdio;
+
+    let mut child = Command::new(crate::tools::git_bin())
+        .env("GIT_OPTIONAL_LOCKS", "0")
+        .arg("-C")
+        .arg(path)
+        .args(["cat-file", "--batch"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| AppError::Git(format!("failed to spawn git: {e}")))?;
+    let mut stdin = child.stdin.take().expect("piped stdin");
+    let requests: Vec<String> = paths.iter().map(|p| format!("{sha}:{p}\n")).collect();
+    // Written from a thread: a large batch would otherwise fill the pipe while we are not reading.
+    let writer = std::thread::spawn(move || {
+        for r in requests {
+            if stdin.write_all(r.as_bytes()).is_err() {
+                break;
+            }
+        }
+    });
+    let mut out = BufReader::new(child.stdout.take().expect("piped stdout"));
+    let mut files = Vec::with_capacity(paths.len());
+    let mut header = String::new();
+    for _ in paths {
+        header.clear();
+        if out.read_line(&mut header).map_err(|e| AppError::Git(e.to_string()))? == 0 {
+            files.push(None);
+            continue;
+        }
+        // `<oid> <type> <size>` or `<spec> missing`
+        let size = match header.trim_end().rsplit(' ').next().zip(header.split(' ').nth(1)) {
+            Some((size, "blob")) => size.parse::<usize>().ok(),
+            _ => None,
+        };
+        let Some(size) = size else {
+            files.push(None);
+            continue;
+        };
+        let mut buf = vec![0u8; size + 1]; // content + trailing newline
+        out.read_exact(&mut buf).map_err(|e| AppError::Git(e.to_string()))?;
+        buf.truncate(size);
+        files.push(if size > max_bytes { None } else { Some(String::from_utf8_lossy(&buf).into_owned()) });
+    }
+    drop(out);
+    let _ = writer.join();
+    let _ = child.wait();
+    Ok(files)
+}
+
 /// Unified diff between two refs. `three_dot` uses the merge-base (GitHub PR
 /// semantics); otherwise a plain two-dot diff.
 pub fn diff(path: &Path, base: &str, head: &str, three_dot: bool) -> AppResult<String> {

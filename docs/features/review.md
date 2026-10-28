@@ -10,8 +10,53 @@ The review screen shows the diff of a GitHub PR or a local "virtual PR" (two bra
 - **Large diffs.** A file with more changed lines (added + deleted) than Settings > "Max diff lines per file" (`largeDiffMaxLines`, default 3000, minimum 100) is not rendered. It shows a notice with an "Open in VSCode" button; "View file" is disabled and find-in-diff skips it.
 - **File tree.** The left pane has `Files`, `Comments` and (PR reviews only) `Context` tabs. Files are grouped into a directory tree in diff order; single-child directory chains collapse into one node (`src/components`). The Comments tab lists threads with open/resolved filters. The Context tab shows the linked board card's metadata (plan files, links, notes, Claude sessions). Hide or show the pane with `b`.
 - **Viewed.** Each file header has a checkbox that collapses the file. It is stored per review and still works on published reviews.
-- **Go to definition.** `⌘/Ctrl + click` an identifier in the diff to see where it is declared. The backend runs `git grep` on the pinned commit (LEFT = base, RIGHT = head) with per-language declaration patterns (`src-tauri/src/definitions.rs`), and the popover shows up to 10 matches with a snippet, "Go to in diff" (when the file is in the diff) and "Open file". It needs a local clone with the commit; PRs without one find nothing. A faster, more precise tree-sitter index is planned: [spec 10](../../specs/10-definition-index.md).
+- **Go to definition.** Hold `⌘/Ctrl` and hover an identifier: it is underlined when a declaration exists. Click it to jump (see [Go to definition](#go-to-definition)).
 - **Find.** `⌘/Ctrl + F` opens "Find in diff". `Enter` / `Shift+Enter` go to the next / previous match, `Esc` closes.
+
+## Go to definition
+
+Holding `⌘/Ctrl` over a word in the diff underlines it **only if a declaration of it exists** in the pinned commit (LEFT = base, RIGHT = head); the first `⌘/Ctrl` press is enough to start looking. `⌘/Ctrl + click` opens a popover at the pointer right away (with a spinner while the lookup runs):
+
+- one declaration, and its line is in the diff: the view scrolls to that line and flashes it, no popover;
+- otherwise the popover lists up to 10 declarations with a snippet, "Go to line" (line is in the diff) and "Open file" (the file pane, scrolled to the declaration). The clicked file comes first, then the other files in the diff.
+
+It needs a local clone that has the commit; PRs without one find nothing.
+
+**How it works** (`src-tauri/src/definitions/`). No language server and no index, so cost does not grow with the repo or the number of open reviews, and nothing is kept between lookups:
+
+1. one loose `git grep -l` lists the files containing something shaped like a declaration of the word;
+2. the first 30 of them (clicked file, then files in the diff, then the rest) are read in one `git cat-file --batch` and parsed with tree-sitter, keeping only declarations *named* the word. Hits in comments and strings fall away;
+3. languages without a grammar use a strict one-line `git grep -n` instead.
+
+At most 2 lookups run at once; a hover lookup is dropped as soon as a newer one starts. Files over 512 KB are skipped. On a 1,500-file Ruby repo a lookup takes 60–120 ms.
+
+### Supported languages
+
+| Language | Extensions | Mode |
+|---|---|---|
+| Ruby | `rb`, `rake` (`erb` as a starting point) | tree-sitter |
+| Python | `py`, `pyi` | tree-sitter |
+| Rust | `rs` | tree-sitter |
+| TypeScript / JavaScript | `ts`, `tsx`, `mts`, `cts`, `js`, `jsx`, `mjs`, `cjs` | tree-sitter |
+| TypeScript / JavaScript (single-file components) | `vue`, `svelte` | grep only |
+| C# | `cs` | tree-sitter |
+| Go | `go` | grep only |
+| Java / Kotlin / Scala / Swift / PHP / Dart | `java`, `kt`, `kts`, `scala`, `swift`, `php`, `dart` | grep only |
+| C / C++ | `c`, `h`, `cpp`, `cc`, `hpp`, `cxx` | grep only |
+
+Any other file type finds nothing. A unit test checks that this table lists every extension of the registry.
+
+### Adding a language
+
+Everything is declared in `src-tauri/src/definitions/languages.rs` (`LANGUAGES`).
+
+- **Grep only (quick).** Add a `Language` entry: `extensions`, `grep_globs` (pathspecs to search) and an `exact` function returning ERE patterns that match a one-line declaration of `sym`. Add a case to the `grep_only_languages_and_unknown_files` test.
+- **Tree-sitter (precise).**
+  1. `cargo add tree-sitter-<lang>` in `src-tauri`.
+  2. Write `src-tauri/src/definitions/queries/<lang>.scm`: a pattern per kind of declaration, capturing the declared identifier as `@name` and the whole declaration as `@definition.<kind>`. Look at the existing queries; `tree-sitter parse` or a unit test in `tags.rs` shows the node names.
+  3. Add a `Parser` (`grammar`, `query`, `extensions`) to the language's `parsers`, plus `parsed_globs` and a `shortlist` function: loose ERE patterns that every declaration of `sym` matches (false positives are fine, misses are not).
+  4. Add a case to `src-tauri/src/definitions/tags.rs` tests. `every_registered_query_compiles` catches queries that do not fit the grammar.
+- Update the table above.
 
 ## Comments
 

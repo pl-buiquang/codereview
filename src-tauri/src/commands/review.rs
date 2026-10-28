@@ -1004,14 +1004,18 @@ pub fn file_source(
 
 /// Declarations of `symbol` in the pinned commit of one side (LEFT→base, RIGHT→head), for the
 /// diff view's go-to-definition. `file_path` is the file the symbol was clicked in (it picks the
-/// language and ranks same-file hits first). Needs a local clone with the commit; otherwise
-/// there is nothing to search and the result is empty.
+/// language and ranks same-file hits first, then `diff_files`). `hover` marks a speculative
+/// lookup (Cmd held over a word) that is abandoned, with a "cancelled" error, as soon as a newer
+/// lookup starts. Needs a local clone with the commit; otherwise there is nothing to search and
+/// the result is empty.
 #[tauri::command]
 pub async fn find_definition(
     review_id: i64,
     symbol: String,
     file_path: String,
     side: String,
+    diff_files: Vec<String>,
+    hover: bool,
     db: State<'_, Db>,
 ) -> AppResult<Vec<crate::definitions::DefinitionHit>> {
     let detail = load_detail(&db.0.lock().unwrap(), review_id)?;
@@ -1026,7 +1030,7 @@ pub async fn find_definition(
     // `git grep` over a big tree can take a while; keep it off the command thread.
     let repo = PathBuf::from(repo);
     tauri::async_runtime::spawn_blocking(move || {
-        crate::definitions::find(&repo, &sha, &symbol, &file_path)
+        crate::definitions::lookup(&repo, &sha, &symbol, &file_path, &diff_files, hover)
     })
     .await
     .map_err(|e| AppError::Other(format!("definition lookup task failed: {e}")))?
