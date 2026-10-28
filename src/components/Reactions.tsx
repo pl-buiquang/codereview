@@ -99,7 +99,8 @@ export function Reactions({
             aria-expanded={picking}
             onClick={() => setPicking((v) => !v)}
           >
-            ☺+
+            <span aria-hidden>☺</span>
+            <span aria-hidden>+</span>
           </button>
           {picking && (
             <span className="reaction-picker">

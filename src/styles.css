@@ -1834,6 +1834,7 @@ td.diff-code {
   gap: 3px;
   padding: 1px 7px;
   font-size: 12px;
+  line-height: 1.4;
   color: var(--text-2);
   background: var(--surface-2);
   border: 1px solid var(--border);
@@ -1850,6 +1851,10 @@ td.diff-code {
 }
 .reaction-add {
   position: relative;
+  display: inline-flex;
+}
+.reaction-add-btn {
+  gap: 6px;
 }
 .reaction-picker {
   position: absolute;
@@ -1995,13 +2000,22 @@ td.diff-code {
   max-width: 100%;
 }
 .markdown-body details {
+  min-width: 0;
+  max-width: 100%;
   margin: 0 0 8px;
-  padding: 6px 10px;
+  padding: 8px 12px;
+  overflow: hidden;
   border: 1px solid var(--border);
   border-radius: var(--radius-m);
 }
 .markdown-body details[open] > summary {
   margin-bottom: 6px;
+}
+.markdown-body details > :last-child {
+  margin-bottom: 0;
+}
+.markdown-body details pre {
+  max-width: 100%;
 }
 .markdown-body summary {
   cursor: pointer;
