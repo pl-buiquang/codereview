@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   Diff,
@@ -19,7 +19,7 @@ import {
   tokenizeFile,
 } from "../lib/diff";
 import { useSyntaxReady } from "../lib/highlight";
-import { LineWidget, ThreadItem } from "./ReviewView";
+import { LineWidget, ThreadItem, flashRow } from "./ReviewView";
 import { groupThreads, isDraftReply, type CommentThread } from "../lib/threads";
 import type { ReviewDetail } from "../lib/types";
 
@@ -41,6 +41,7 @@ export function FileViewPane({
   detail,
   filePath,
   readOnly,
+  focus,
   onClose,
   onSaving,
   onSaved,
@@ -50,6 +51,8 @@ export function FileViewPane({
   detail: ReviewDetail;
   filePath: string;
   readOnly: boolean;
+  /** Line to scroll to and flash once the file is shown (a new object re-triggers it). */
+  focus?: { line: number } | null;
   onClose: () => void;
   onSaving: () => void;
   onSaved: () => void;
@@ -91,6 +94,20 @@ export function FileViewPane({
     () => (synthetic ? indexFile(synthetic) : { metaByKey: new Map(), keyByAnchor: new Map() }),
     [synthetic],
   );
+
+  const bodyRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!focus || !synthetic) return;
+    const key = keyByAnchor.get(`RIGHT:${focus.line}`);
+    if (!key) return;
+    // after the Diff has rendered the rows
+    const raf = requestAnimationFrame(() => {
+      const cell = bodyRef.current?.querySelector<HTMLElement>(`[data-change-key="${CSS.escape(key)}"]`);
+      const row = cell?.closest<HTMLElement>("tr") ?? cell;
+      if (row) flashRow(row);
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [focus, synthetic, keyByAnchor]);
 
   // This file's RIGHT-side line comments (both diff- and file-view-origin),
   // grouped by the change key they anchor to. LEFT/deletion comments don't map
@@ -220,7 +237,7 @@ export function FileViewPane({
           ✕
         </button>
       </div>
-      <div className="file-view-pane-body">
+      <div className="file-view-pane-body" ref={bodyRef}>
         {sourceQuery.isLoading && <p className="muted">Loading file…</p>}
         {sourceQuery.isError && (
           <p className="error">Could not load file: {String(sourceQuery.error)}</p>

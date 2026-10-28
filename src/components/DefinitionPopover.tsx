@@ -1,46 +1,54 @@
 import { useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
+import {
+  DEFINITION_STALE_MS,
+  definitionQueryKey,
+  type DefinitionLookup,
+} from "../lib/useDefinitionLinks";
 import type { Side } from "../lib/types";
-
-export interface DefinitionLookup {
-  symbol: string;
-  side: Side;
-  /** Viewport position of the click. */
-  x: number;
-  y: number;
-}
 
 const WIDTH = 460;
 
 /**
- * Popover for a Cmd/Ctrl-clicked identifier in the diff: the declarations `find_definition`
- * found, each with a few lines of source and a way to reach the file (scroll to it when it is
- * part of the diff, otherwise open it in the file pane).
+ * Popover for a Cmd/Ctrl-clicked identifier in the diff. It opens at once with a spinner; the
+ * result usually is already cached by the hover check. A single declaration that is part of the
+ * diff is jumped to directly (the popover closes itself). Otherwise each declaration is listed
+ * with a few lines of source and a way to reach it.
+ *
+ * Rendered into `document.body`: the diff files use `content-visibility`/`overflow: clip`, which
+ * would make them the containing block of a `position: fixed` popover and clip it.
  */
 export function DefinitionPopover({
   reviewId,
-  filePath,
+  pin,
   lookup,
+  diffPaths,
   inDiff,
-  onJumpInDiff,
+  onJump,
   onOpenFile,
   onClose,
 }: {
   reviewId: number;
-  filePath: string;
+  pin: string;
   lookup: DefinitionLookup;
-  inDiff: (path: string) => boolean;
-  onJumpInDiff: (path: string) => void;
-  onOpenFile: (path: string) => void;
+  diffPaths: string[];
+  /** True when `side:line` of `path` is a line the diff view shows. */
+  inDiff: (path: string, side: Side, line: number) => boolean;
+  onJump: (path: string, side: Side, line: number) => void;
+  /** Open the head-side file pane at `line`. */
+  onOpenFile: (path: string, line: number) => void;
   onClose: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
-  const { symbol, side, x, y } = lookup;
+  const { symbol, side, path, x, y } = lookup;
   const query = useQuery({
-    queryKey: ["definition", reviewId, side, filePath, symbol],
-    queryFn: () => api.findDefinition(reviewId, symbol, filePath, side),
-    staleTime: 60_000,
+    queryKey: definitionQueryKey(reviewId, pin, side, path, symbol),
+    queryFn: () => api.findDefinition(reviewId, symbol, path, side, diffPaths, false),
+    staleTime: DEFINITION_STALE_MS,
+    // a hover lookup we shared a request with may have been superseded; ask again
+    retry: (count, error) => count < 3 && String(error).includes("cancelled"),
   });
 
   useEffect(() => {
@@ -56,10 +64,19 @@ export function DefinitionPopover({
     };
   }, [onClose]);
 
+  const hits = query.data;
+  const only = hits?.length === 1 ? hits[0] : null;
+  const jumpOnly = only != null && inDiff(only.path, side, only.line);
+  useEffect(() => {
+    if (!only || !jumpOnly) return;
+    onJump(only.path, side, only.line);
+    onClose();
+  }, [only, jumpOnly, side, onJump, onClose]);
+
   const left = Math.max(8, Math.min(x, window.innerWidth - WIDTH - 8));
   const top = Math.min(y + 14, window.innerHeight - 120);
 
-  return (
+  return createPortal(
     <div
       ref={ref}
       className="definition-popover"
@@ -69,6 +86,7 @@ export function DefinitionPopover({
     >
       <div className="definition-popover-head">
         <code>{symbol}</code>
+        {query.isPending && <span className="spinner" />}
         <span className="muted">
           {query.isPending
             ? "searching…"
@@ -80,36 +98,42 @@ export function DefinitionPopover({
         </span>
       </div>
       {query.isError && <p className="muted">{String(query.error)}</p>}
-      {query.data?.map((hit) => (
-        <div key={`${hit.path}:${hit.line}`} className="definition-hit">
-          <div className="definition-hit-head">
-            <span className="file-path" title={hit.path}>
-              {hit.path}:{hit.line}
-            </span>
-            {inDiff(hit.path) && (
-              <button
-                className="link-button"
-                onClick={() => {
-                  onJumpInDiff(hit.path);
-                  onClose();
-                }}
-              >
-                Go to in diff
-              </button>
-            )}
-            <button
-              className="link-button"
-              onClick={() => {
-                onOpenFile(hit.path);
-                onClose();
-              }}
-            >
-              Open file
-            </button>
+      {!jumpOnly &&
+        hits?.map((hit) => (
+          <div key={`${hit.path}:${hit.line}`} className="definition-hit">
+            <div className="definition-hit-head">
+              <span className="file-path" title={hit.path}>
+                {hit.path}:{hit.line}
+              </span>
+              <span className="muted">{hit.kind}</span>
+              {inDiff(hit.path, side, hit.line) && (
+                <button
+                  className="link-button"
+                  onClick={() => {
+                    onJump(hit.path, side, hit.line);
+                    onClose();
+                  }}
+                >
+                  Go to line
+                </button>
+              )}
+              {/* the file pane shows the head side only */}
+              {side === "RIGHT" && (
+                <button
+                  className="link-button"
+                  onClick={() => {
+                    onOpenFile(hit.path, hit.line);
+                    onClose();
+                  }}
+                >
+                  Open file
+                </button>
+              )}
+            </div>
+            <pre className="definition-snippet">{hit.snippet}</pre>
           </div>
-          <pre className="definition-snippet">{hit.snippet}</pre>
-        </div>
-      ))}
-    </div>
+        ))}
+    </div>,
+    document.body,
   );
 }

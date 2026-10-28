@@ -6562,6 +6562,28 @@ button.board-overview-ref {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Cmd/Ctrl-hover on an identifier that has a declaration (see useDefinitionLinks) */
+::highlight(definition-link) {
+  color: var(--accent);
+  text-decoration: underline;
+}
+.def-link-hover td.diff-code {
+  cursor: pointer;
+}
+@keyframes def-flash {
+  from {
+    background-color: color-mix(in srgb, var(--accent) 38%, transparent);
+  }
+  to {
+    background-color: transparent;
+  }
+}
+tr.def-flash > td {
+  animation: def-flash 1.5s ease-out;
+}
+.definition-popover-head .spinner {
+  align-self: center;
+}
 .definition-snippet {
   margin: 4px 0 0;
   padding: 6px 8px;

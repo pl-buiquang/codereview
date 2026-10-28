@@ -177,8 +177,16 @@ export const api = {
   reviewDiff: (reviewId: number) => invoke<string>("review_diff", { reviewId }),
   fileSource: (reviewId: number, filePath: string, side: Side) =>
     invoke<string>("file_source", { reviewId, filePath, side }),
-  findDefinition: (reviewId: number, symbol: string, filePath: string, side: Side) =>
-    invoke<DefinitionHit[]>("find_definition", { reviewId, symbol, filePath, side }),
+  /** `hover` lookups are speculative: the backend rejects them with "cancelled" when superseded. */
+  findDefinition: (
+    reviewId: number,
+    symbol: string,
+    filePath: string,
+    side: Side,
+    diffFiles: string[],
+    hover: boolean,
+  ) =>
+    invoke<DefinitionHit[]>("find_definition", { reviewId, symbol, filePath, side, diffFiles, hover }),
   openInDefaultApp: (path: string) =>
     invoke<void>("open_in_default_app", { path }),
   openUrl: (url: string) => invoke<void>("open_url", { url }),

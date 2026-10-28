@@ -44,8 +44,8 @@ import {
   trailingGap,
 } from "../lib/diff";
 import { useSyntaxReady } from "../lib/highlight";
-import { identifierUnderPointer } from "../lib/definition";
-import { DefinitionPopover, type DefinitionLookup } from "./DefinitionPopover";
+import { useDefinitionLinks, type DefinitionLookup } from "../lib/useDefinitionLinks";
+import { DefinitionPopover } from "./DefinitionPopover";
 import { filterDiffMatches, wrapIndex, type DiffMatch } from "../lib/diffSearch";
 import { categorize, compileCategoryRules, type FileCategory } from "../lib/fileCategory";
 import { FileJumpList } from "./FileJumpList";
@@ -128,12 +128,24 @@ function scrollToAndFlash(el: HTMLElement) {
   setTimeout(() => el.classList.remove("kb-flash"), 900);
 }
 
+/** Scroll a diff row to the middle of its scroller and flash its cells (go-to-definition). */
+export function flashRow(row: HTMLElement) {
+  row.scrollIntoView({ behavior: "smooth", block: "center" });
+  row.classList.add("def-flash");
+  setTimeout(() => row.classList.remove("def-flash"), 1500);
+}
+
 export function ReviewView({ reviewId }: { reviewId: number }) {
   const queryClient = useQueryClient();
   const defaultViewType = useSettingsStore((s) => s.defaultViewType);
   const [viewType, setViewType] = useState<ViewType>(defaultViewType);
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [filePanePath, setFilePanePath] = useState<string | null>(null);
+  const [filePaneFocus, setFilePaneFocus] = useState<{ line: number } | null>(null);
+  const openFilePane = useCallback((path: string, line?: number) => {
+    setFilePanePath(path);
+    setFilePaneFocus(line != null ? { line } : null);
+  }, []);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const [chatCollapsed, setChatCollapsed] = useState(true);
   const [leftWidth, setLeftWidth] = useState(248);
@@ -563,6 +575,93 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
     if (hf?.hidden && hf.entry) reveal([hf.entry.hunk_id]);
   }, [searchOpen, curMatch, focusModel, perFileMeta, files, reveal]);
 
+  // Go to definition: Cmd/Ctrl-hover underlines identifiers that have a declaration, Cmd/Ctrl-click
+  // opens the popover (see useDefinitionLinks / DefinitionPopover).
+  const [definition, setDefinition] = useState<DefinitionLookup | null>(null);
+  const closeDefinition = useCallback(() => setDefinition(null), []);
+  const pin = `${detailQuery.data?.review.base_sha ?? ""}:${detailQuery.data?.review.head_sha ?? ""}`;
+  const diffPaths = useMemo(() => files.map(fileDisplayPath), [files]);
+  useDefinitionLinks({
+    rootRef: diffAreaRef,
+    enabled: isActiveTab && detailQuery.data != null,
+    reviewId,
+    pin,
+    diffPaths,
+    onLookup: setDefinition,
+  });
+
+  // "SIDE:line" -> change key per file, built on first use.
+  const anchorsRef = useRef(new WeakMap<FileData, Map<string, string>>());
+  const anchorsOf = useCallback((file: FileData) => {
+    let anchors = anchorsRef.current.get(file);
+    if (!anchors) {
+      anchors = indexFile(file).keyByAnchor;
+      anchorsRef.current.set(file, anchors);
+    }
+    return anchors;
+  }, []);
+  const lineInDiff = useCallback(
+    (path: string, side: Side, line: number) => {
+      const file = files.find((f) => fileDisplayPath(f) === path);
+      return !!file && anchorsOf(file).has(`${side}:${line}`);
+    },
+    [files, anchorsOf],
+  );
+
+  // Scroll to a diff line and flash it. Each thing that hides the row (a viewed file, the type
+  // filter, a focus-hidden hunk) is undone first, which re-runs this effect.
+  const [lineJump, setLineJump] = useState<{ path: string; side: Side; line: number } | null>(null);
+  const jumpToLine = useCallback(
+    (path: string, side: Side, line: number) => setLineJump({ path, side, line }),
+    [],
+  );
+  useEffect(() => {
+    if (!lineJump || !isActiveTab) return;
+    const { path, side, line } = lineJump;
+    const fi = files.findIndex((f) => fileDisplayPath(f) === path);
+    const key = fi >= 0 ? anchorsOf(files[fi]).get(`${side}:${line}`) : undefined;
+    if (fi < 0 || !key) {
+      setLineJump(null);
+      return;
+    }
+    if ((detailQuery.data?.viewed_files ?? []).includes(path)) {
+      expandForSearch.mutate(path);
+      return;
+    }
+    if (typeFilter !== "all" && categorize(path, categoryRules) !== typeFilter) {
+      setTypeFilter("all");
+      return;
+    }
+    const hunkIdx = files[fi].hunks.findIndex((h) => h.changes.some((c) => changeKeyOf(c) === key));
+    const hf = focusModel?.[fi]?.hunks[hunkIdx];
+    if (hf?.hidden && hf.entry) {
+      reveal([hf.entry.hunk_id]);
+      return;
+    }
+    let frames = 0;
+    let raf = 0;
+    const find = () => {
+      const cell = diffAreaRef.current?.querySelector<HTMLElement>(
+        `#file-${fi} [data-change-key="${CSS.escape(key)}"]`,
+      );
+      const row = cell?.closest<HTMLElement>("tr") ?? cell;
+      if (row) {
+        flashRow(row);
+        setLineJump(null);
+        return;
+      }
+      if (++frames > 60) {
+        jumpToFile(fi);
+        toast.error("That line isn't shown in the diff");
+        setLineJump(null);
+        return;
+      }
+      raf = requestAnimationFrame(find);
+    };
+    raf = requestAnimationFrame(find);
+    return () => cancelAnimationFrame(raf);
+  }, [lineJump, isActiveTab, files, anchorsOf, viewedSig, typeFilter, categoryRules, focusModel, reveal, jumpToFile]);
+
   useEffect(() => {
     if (!isActiveTab) return;
     const onKey = (e: KeyboardEvent) => {
@@ -785,7 +884,7 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
               focusActions={focusActions}
               onReveal={reveal}
               onUnreveal={unreveal}
-              onOpenFilePane={setFilePanePath}
+              onOpenFilePane={openFilePane}
               onSaving={onDiffSaving}
               onSaved={onDiffSaved}
               onCommentsChanged={onDiffCommentsChanged}
@@ -803,11 +902,25 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
         />
       </div>
 
+      {definition && (
+        <DefinitionPopover
+          reviewId={reviewId}
+          pin={pin}
+          lookup={definition}
+          diffPaths={diffPaths}
+          inDiff={lineInDiff}
+          onJump={jumpToLine}
+          onOpenFile={openFilePane}
+          onClose={closeDefinition}
+        />
+      )}
+
       {filePanePath && (
         <FileViewPane
           reviewId={reviewId}
           detail={detail}
           filePath={filePanePath}
+          focus={filePaneFocus}
           readOnly={readOnly}
           onClose={() => setFilePanePath(null)}
           onSaving={() => setSaveState("saving")}
@@ -2552,7 +2665,6 @@ const FileReview = memo(function FileReview({
           threadCtx={threadCtx}
           reviewId={reviewId}
           draftRepliesByRoot={draftRepliesByRoot}
-          onOpenFilePane={onOpenFilePane}
           headSha={detail.review.head_sha}
           baseSha={detail.review.base_sha}
           readOnly={readOnly}
@@ -2590,7 +2702,6 @@ function FileBody({
   threadCtx,
   reviewId,
   draftRepliesByRoot,
-  onOpenFilePane,
   headSha,
   baseSha,
   readOnly,
@@ -2622,7 +2733,6 @@ function FileBody({
   threadCtx: PrThreadCtx | null;
   reviewId: number;
   draftRepliesByRoot: Map<number, Comment[]>;
-  onOpenFilePane: (path: string) => void;
   headSha: string | null;
   baseSha: string | null;
   readOnly: boolean;
@@ -2646,49 +2756,8 @@ function FileBody({
   onSaved: () => void;
   onCommentsChanged: () => void;
 }) {
-  // Cmd/Ctrl-click an identifier: look its declaration up in the pinned commit (search-based
-  // go-to-definition, no language server).
-  const [lookup, setLookup] = useState<DefinitionLookup | null>(null);
-  const closeLookup = useCallback(() => setLookup(null), []);
-  const onCodeClick = useCallback(
-    ({ change }: { change: ChangeData | null }, event: React.MouseEvent) => {
-      if (!change || !(event.metaKey || event.ctrlKey)) return;
-      const symbol = identifierUnderPointer(event);
-      if (!symbol) return;
-      event.preventDefault();
-      window.getSelection()?.removeAllRanges();
-      setLookup({
-        symbol,
-        side: change.type === "delete" ? "LEFT" : "RIGHT",
-        x: event.clientX,
-        y: event.clientY,
-      });
-    },
-    [],
-  );
-  const filePath = fileDisplayPath(file);
-  const jumpInDiff = useCallback((path: string) => {
-    const el = document.querySelector<HTMLElement>(`.diff-file[data-file-path="${CSS.escape(path)}"]`);
-    if (el) scrollToAndFlash(el);
-  }, []);
-  const inDiff = useCallback(
-    (path: string) => !!document.querySelector(`.diff-file[data-file-path="${CSS.escape(path)}"]`),
-    [],
-  );
-
   return (
     <>
-      {lookup && (
-        <DefinitionPopover
-          reviewId={reviewId}
-          filePath={filePath}
-          lookup={lookup}
-          inDiff={inDiff}
-          onJumpInDiff={jumpInDiff}
-          onOpenFile={onOpenFilePane}
-          onClose={closeLookup}
-        />
-      )}
       {expandError && (
         <p className="muted expand-error-note">
           Context expansion unavailable: {expandError}
@@ -2742,7 +2811,6 @@ function FileBody({
           selectedChanges={selectedChanges}
           generateLineClassName={generateLineClassName}
           gutterEvents={{ onClick: onLineClick }}
-          codeEvents={{ onClick: onCodeClick }}
         >
           {(renderedHunks) => {
             // Each rendered hunk maps back to the parsed hunks it covers (context

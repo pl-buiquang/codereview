@@ -25,6 +25,8 @@ export interface DefinitionHit {
   path: string;
   /** 1-based line of the declaration. */
   line: number;
+  /** `class`, `method`, ... (`declaration` when only a regex matched). */
+  kind: string;
   /** ~20 source lines starting at `line`. */
   snippet: string;
 }
