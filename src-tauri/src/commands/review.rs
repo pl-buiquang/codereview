@@ -1007,12 +1007,12 @@ pub fn file_source(
 /// language and ranks same-file hits first). Needs a local clone with the commit; otherwise
 /// there is nothing to search and the result is empty.
 #[tauri::command]
-pub fn find_definition(
+pub async fn find_definition(
     review_id: i64,
     symbol: String,
     file_path: String,
     side: String,
-    db: State<Db>,
+    db: State<'_, Db>,
 ) -> AppResult<Vec<crate::definitions::DefinitionHit>> {
     let detail = load_detail(&db.0.lock().unwrap(), review_id)?;
     let sha = match side.as_str() {
@@ -1023,7 +1023,13 @@ pub fn find_definition(
     let (Some(repo), Some(sha)) = (detail.local_path.as_deref(), sha) else {
         return Ok(vec![]);
     };
-    crate::definitions::find(Path::new(repo), &sha, &symbol, &file_path)
+    // `git grep` over a big tree can take a while; keep it off the command thread.
+    let repo = PathBuf::from(repo);
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::definitions::find(&repo, &sha, &symbol, &file_path)
+    })
+    .await
+    .map_err(|e| AppError::Other(format!("definition lookup task failed: {e}")))?
 }
 
 /// Enriches raw `review` rows with their target, repo label and comment count.
