@@ -58,6 +58,22 @@ export function ReviewSwitcher({ targetId, currentReviewId }: { targetId: number
 
   const index = reviews.findIndex((r) => r.review.id === currentReviewId);
 
+  // A lone review has nothing to switch to: just offer to start another.
+  if (reviews.length === 1) {
+    return (
+      <div className="review-switcher">
+        <button
+          className="btn btn-sm"
+          disabled={newReview.isPending}
+          title="Start another draft review on this PR"
+          onClick={() => newReview.mutate()}
+        >
+          {newReview.isPending ? "Starting…" : "+ New review"}
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div ref={ref} className="review-switcher">
       <button
