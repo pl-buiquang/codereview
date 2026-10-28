@@ -1076,25 +1076,25 @@ pub fn list_target_reviews(target_id: i64, db: State<Db>) -> AppResult<Vec<Revie
     list_target_reviews_impl(&conn, target_id)
 }
 
-/// Start a brand-new review on a target whose reviews are all published —
-/// e.g. a second round. Errors while one is still open (draft or pending on
-/// GitHub), since the app keeps at most one open review per target
-/// (`review_for_target`, and the board's `existing_review_id`).
+/// Start an additional draft on a target, pinned at `pin`, even while it
+/// already has an open review — e.g. a second pass with a different kind of
+/// comment. Reopening the target (`review_for_target`, the board's
+/// `existing_review_id`) lands on the most recently updated open review.
 pub fn new_review_on_target_impl(conn: &Connection, target_id: i64, pin: &LiveShas) -> AppResult<Review> {
-    if latest_open_review(conn, target_id)?.is_some() {
-        return Err(AppError::Other(
-            "this target already has an unpublished review — publish or delete it first".into(),
-        ));
-    }
     new_review_for_target(conn, target_id, pin)
+}
+
+/// `new_review_on_target_impl` at the target's live head; for a PR that means `gh`.
+pub fn new_review_on_target_live(db: &Db, target_id: i64) -> AppResult<Review> {
+    let target = get_target(&db.0.lock().unwrap(), target_id)?;
+    let live = resolve_live(db, &target)?;
+    new_review_on_target_impl(&db.0.lock().unwrap(), target_id, &live)
 }
 
 /// `async`: the new review pins at the live head, which for a PR means `gh`.
 #[tauri::command]
 pub async fn new_review_on_target(target_id: i64, db: State<'_, Db>) -> AppResult<Review> {
-    let target = get_target(&db.0.lock().unwrap(), target_id)?;
-    let live = resolve_live(&db, &target)?;
-    new_review_on_target_impl(&db.0.lock().unwrap(), target_id, &live)
+    new_review_on_target_live(&db, target_id)
 }
 
 /// Human-friendly repo label: the user-set friendly name if any, else
@@ -2709,24 +2709,17 @@ mod tests {
     }
 
     #[test]
-    fn new_review_on_target_requires_no_existing_draft() {
+    fn new_review_on_target_allows_a_second_open_draft() {
         let conn = open_memory();
         let repo = seed_repo(&conn, None, None);
         let target =
             get_or_create_local_target(&conn, repo, "/nope", "main", "feature", true).unwrap().0;
 
         let first = new_review_for_target(&conn, target.id, &LiveShas::default()).unwrap();
-        let err = new_review_on_target_impl(&conn, target.id, &LiveShas::default()).unwrap_err();
-        assert!(matches!(err, AppError::Other(_)));
-        conn.execute("UPDATE review SET status = 'published_pending' WHERE id = ?1", params![first.id])
-            .unwrap();
-        assert!(new_review_on_target_impl(&conn, target.id, &LiveShas::default()).is_err(), "pending");
-
-        conn.execute("UPDATE review SET status = 'published' WHERE id = ?1", params![first.id])
-            .unwrap();
         let second = new_review_on_target_impl(&conn, target.id, &LiveShas::default()).unwrap();
         assert_ne!(second.id, first.id);
         assert_eq!(second.status, "draft");
+        assert_eq!(list_target_reviews_impl(&conn, target.id).unwrap().len(), 2);
     }
 
     #[test]

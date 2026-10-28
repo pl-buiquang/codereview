@@ -62,6 +62,7 @@ cr diff <review-id>                # Print the unified diff
 cr worktree <review-id>            # Path of a checkout of the head branch (reuses one, else creates a worktree)
 cr create local <repo-id> <base> <head> [--three-dot]  # Review a local diff
 cr create pr <owner> <name> <number>                    # Review a GitHub PR
+cr new <review-id>                 # Another draft on the same PR/diff, even if one is already open
 cr update <review-id> [--body <text>] [--verdict approve|comment|request_changes]
 cr delete <review-id>              # Delete a draft review
 cr publish <review-id>             # Publish the review to GitHub

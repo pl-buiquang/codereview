@@ -22,8 +22,8 @@ function verdictLabel(summary: ReviewSummary): string {
 }
 
 /** Switches between the several reviews a target can accumulate — e.g. one
- *  published round and a new draft for a second pass. Hidden unless the
- *  target has more than one review. */
+ *  published round and a new draft for a second pass — and starts a new draft
+ *  alongside any existing one. */
 export function ReviewSwitcher({ targetId, currentReviewId }: { targetId: number; currentReviewId: number }) {
   const queryClient = useQueryClient();
   const openReview = useUIStore((s) => s.openReview);
@@ -54,10 +54,9 @@ export function ReviewSwitcher({ targetId, currentReviewId }: { targetId: number
   });
 
   const reviews = reviewsQuery.data ?? [];
-  if (reviews.length < 2) return null;
+  if (reviews.length === 0) return null;
 
   const index = reviews.findIndex((r) => r.review.id === currentReviewId);
-  const hasOpen = reviews.some((r) => r.review.status !== "published");
 
   return (
     <div ref={ref} className="review-switcher">
@@ -93,12 +92,8 @@ export function ReviewSwitcher({ targetId, currentReviewId }: { targetId: number
           <button
             role="menuitem"
             className="review-switcher-item"
-            disabled={hasOpen || newReview.isPending}
-            title={
-              hasOpen
-                ? "Publish or delete the unpublished review before starting a new one"
-                : "Start a new review round on this PR"
-            }
+            disabled={newReview.isPending}
+            title="Start another draft review on this PR"
             onClick={() => newReview.mutate()}
           >
             {newReview.isPending ? "Starting…" : "+ New review"}

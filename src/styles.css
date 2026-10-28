@@ -886,6 +886,10 @@ button:disabled,
   flex-direction: column;
   gap: 16px;
 }
+/* In the review view, line up with the Focus digest card's inset. */
+.diff-area > .diff-files {
+  margin: 8px 12px 12px;
+}
 .diff-file {
   background: var(--surface);
   border: 1px solid var(--border);

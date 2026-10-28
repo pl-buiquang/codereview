@@ -57,6 +57,12 @@ enum Cmd {
         #[command(subcommand)]
         target: CreateTarget,
     },
+    /// Start another draft review on the same PR / local diff as <review-id>,
+    /// even if it already has an unpublished one (e.g. a second pass with a
+    /// different kind of comment)
+    New {
+        review_id: i64,
+    },
     /// Update a review's body or verdict
     Update {
         review_id: i64,
@@ -808,6 +814,19 @@ fn run(cmd: Cmd, json: bool, db: &Db) -> AppResult<()> {
             review::update_review_impl(&conn, review_id, body, verdict)?;
             if !json {
                 println!("Updated review #{review_id}");
+            }
+        }
+
+        Cmd::New { review_id } => {
+            let target_id = {
+                let conn = db.0.lock().unwrap();
+                review::load_detail(&conn, review_id)?.review.target_id
+            };
+            let r = review::new_review_on_target_live(db, target_id)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&r)?);
+            } else {
+                println!("Review #{}", r.id);
             }
         }
 
