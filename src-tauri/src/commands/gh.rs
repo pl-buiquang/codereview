@@ -167,6 +167,25 @@ pub async fn set_pr_thread_resolved(thread_id: String, resolved: bool) -> AppRes
     provider_for().set_thread_resolved(&thread_id, resolved)
 }
 
+/// Add/remove my emoji reaction on a comment by GraphQL node id; returns the
+/// comment's new reaction groups. For top-level discussion comments pass the
+/// subject (PR/issue) node id so its mirrored discussion facet is refreshed.
+#[tauri::command]
+pub async fn set_comment_reaction(
+    subject_id: String,
+    content: String,
+    on: bool,
+    discussion_subject_id: Option<String>,
+    app: AppHandle,
+    db: State<'_, Db>,
+) -> AppResult<Vec<gh::ReactionGroup>> {
+    let groups = provider_for().set_reaction(&subject_id, &content, on)?;
+    if let Some(id) = discussion_subject_id {
+        crate::commands::conversations::refresh_discussion(&app, &db, &id)?;
+    }
+    Ok(groups)
+}
+
 /// Detected external-tool environment, for the Settings diagnostics panel.
 /// `git`/`gh` are the resolved absolute paths (or `null` if not found).
 #[derive(Debug, Serialize)]

@@ -3,6 +3,8 @@ import { open, save } from "@tauri-apps/plugin-dialog";
 import type { LogLevel } from "./log";
 import type { CommentTag } from "./commentTag";
 import type {
+  ReactionContent,
+  ReactionGroup,
   StackRebasePreview,
   StackRebaseResult,
   ChatWorktree,
@@ -228,6 +230,13 @@ export const api = {
     invoke<number>("reply_to_thread", { owner, name, number, commentId, body }),
   setPrThreadResolved: (threadId: string, resolved: boolean) =>
     invoke<boolean>("set_pr_thread_resolved", { threadId, resolved }),
+  setCommentReaction: (subjectId: string, content: ReactionContent, on: boolean, discussionSubjectId?: string) =>
+    invoke<ReactionGroup[]>("set_comment_reaction", {
+      subjectId,
+      content,
+      on,
+      discussionSubjectId: discussionSubjectId ?? null,
+    }),
   addDraftReply: (args: {
     reviewId: number;
     githubThreadRootId: number;

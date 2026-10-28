@@ -332,6 +332,7 @@ pub fn run() {
             commands::gh::mirror_pr_threads,
             commands::gh::reply_to_thread,
             commands::gh::set_pr_thread_resolved,
+            commands::gh::set_comment_reaction,
             commands::gh::check_environment,
             commands::gh::fetch_github_image,
             commands::inbox::list_inbox,

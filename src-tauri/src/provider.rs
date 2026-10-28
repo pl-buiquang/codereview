@@ -119,6 +119,8 @@ pub trait ReviewProvider: Send + Sync {
     /// `thread_id` = the opaque thread id from `pr_review_threads` (GitHub:
     /// GraphQL node id). Covers both resolve and unresolve.
     fn set_thread_resolved(&self, thread_id: &str, resolved: bool) -> AppResult<bool>; // spec 18
+    /// Add/remove my emoji reaction (`content` = GitHub `ReactionContent`) on a comment.
+    fn set_reaction(&self, subject_id: &str, content: &str, on: bool) -> AppResult<Vec<gh::ReactionGroup>>;
 }
 
 /// GitHub, via the `gh` CLI. Stateless: auth and host config live in `gh` itself.
@@ -280,6 +282,9 @@ impl ReviewProvider for GithubProvider {
 
     fn set_thread_resolved(&self, thread_id: &str, resolved: bool) -> AppResult<bool> {
         gh::set_thread_resolved(thread_id, resolved)
+    }
+    fn set_reaction(&self, subject_id: &str, content: &str, on: bool) -> AppResult<Vec<gh::ReactionGroup>> {
+        gh::set_reaction(subject_id, content, on)
     }
 }
 

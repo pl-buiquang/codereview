@@ -289,6 +289,23 @@ export interface PrChecks {
 
 // --- GitHub PR review threads (read-only, ephemeral; not persisted) ---
 
+/** GitHub's fixed set of reactions (GraphQL `ReactionContent`). */
+export type ReactionContent =
+  | "THUMBS_UP"
+  | "THUMBS_DOWN"
+  | "LAUGH"
+  | "HOORAY"
+  | "CONFUSED"
+  | "HEART"
+  | "ROCKET"
+  | "EYES";
+
+export interface ReactionGroup {
+  content: ReactionContent;
+  count: number;
+  viewerHasReacted: boolean;
+}
+
 export interface PrThreadComment {
   id: string;
   databaseId: number | null;
@@ -298,6 +315,7 @@ export interface PrThreadComment {
   url: string;
   diffHunk: string | null;
   outdated: boolean;
+  reactions?: ReactionGroup[];
 }
 
 /** Which PR a GitHub thread belongs to — needed by thread mutations and for
@@ -814,6 +832,7 @@ export interface DiscussionComment {
   body: string;
   createdAt: string;
   url: string;
+  reactions?: ReactionGroup[];
 }
 
 export interface ConversationSubject {

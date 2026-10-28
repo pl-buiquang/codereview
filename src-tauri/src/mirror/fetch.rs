@@ -600,12 +600,12 @@ query MirrorDiscussion($ids: [ID!]!) {
   nodes(ids: $ids) {
     ... on PullRequest {
       id updatedAt
-      comments(last: 50) { nodes { id databaseId author { __typename login avatarUrl } body createdAt url } }
-      reviews(last: 50) { nodes { id databaseId author { __typename login avatarUrl } body state submittedAt url } }
+      comments(last: 50) { nodes { id databaseId author { __typename login avatarUrl } body createdAt url reactionGroups { content viewerHasReacted reactors { totalCount } } } }
+      reviews(last: 50) { nodes { id databaseId author { __typename login avatarUrl } body state submittedAt url reactionGroups { content viewerHasReacted reactors { totalCount } } } }
     }
     ... on Issue {
       id updatedAt
-      comments(last: 50) { nodes { id databaseId author { __typename login avatarUrl } body createdAt url } }
+      comments(last: 50) { nodes { id databaseId author { __typename login avatarUrl } body createdAt url reactionGroups { content viewerHasReacted reactors { totalCount } } } }
     }
   }
 }
@@ -626,6 +626,8 @@ pub struct DiscussionComment {
     pub body: String,
     pub created_at: String,
     pub url: String,
+    #[serde(default)]
+    pub reactions: Vec<gh::ReactionGroup>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -646,6 +648,8 @@ struct RawDiscussionComment {
     state: Option<String>,
     #[serde(default)]
     url: String,
+    #[serde(default)]
+    reaction_groups: Vec<gh::RawReactionGroup>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -689,6 +693,7 @@ impl Discussion {
                 body: c.body,
                 created_at: c.created_at.or(c.submitted_at).unwrap_or_default(),
                 url: c.url,
+                reactions: gh::map_reactions(c.reaction_groups),
             })
             .collect();
         out.sort_by(|a, b| a.created_at.cmp(&b.created_at));
@@ -746,6 +751,24 @@ mod tests {
         assert_eq!(got.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(), vec!["R1", "C2"]);
         assert_eq!(got[0].review_state.as_deref(), Some("APPROVED"));
         assert_eq!(got[1].author.as_ref().unwrap().typename.as_deref(), Some("Bot"));
+    }
+
+    #[test]
+    fn discussion_keeps_only_used_reaction_groups() {
+        let d: Discussion = serde_json::from_value(serde_json::json!({
+            "id": "PR1",
+            "comments": { "nodes": [
+                { "id": "C1", "body": "x", "createdAt": "2026-01-01T00:00:00Z", "url": "u",
+                  "reactionGroups": [
+                    { "content": "THUMBS_UP", "viewerHasReacted": true, "reactors": { "totalCount": 2 } },
+                    { "content": "HEART", "viewerHasReacted": false, "reactors": { "totalCount": 0 } }] }] }
+        }))
+        .unwrap();
+        let got = d.into_comments();
+        assert_eq!(
+            got[0].reactions,
+            vec![gh::ReactionGroup { content: "THUMBS_UP".into(), count: 2, viewer_has_reacted: true }]
+        );
     }
 
     #[test]

@@ -306,6 +306,7 @@ mod tests {
                     url: "u".into(),
                     diff_hunk: None,
                     outdated: false,
+                    reactions: vec![],
                 })
                 .collect(),
         }

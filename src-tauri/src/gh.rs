@@ -1621,6 +1621,7 @@ query PrThreads($owner: String!, $name: String!, $number: Int!, $cursor: String)
               url
               diffHunk
               outdated
+              reactionGroups { content viewerHasReacted reactors { totalCount } }
             }
           }
         }
@@ -1659,6 +1660,47 @@ pub struct PrThreadComment {
     pub url: String,
     pub diff_hunk: Option<String>,
     pub outdated: bool,
+    #[serde(default)]
+    pub reactions: Vec<ReactionGroup>,
+}
+
+/// One emoji reaction on a comment: how many people reacted and whether I did.
+/// `content` is GitHub's `ReactionContent` enum (`THUMBS_UP`, `HEART`, …).
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ReactionGroup {
+    pub content: String,
+    pub count: i64,
+    pub viewer_has_reacted: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RawReactionGroup {
+    content: String,
+    #[serde(default)]
+    viewer_has_reacted: bool,
+    #[serde(default)]
+    reactors: RawReactors,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RawReactors {
+    #[serde(default)]
+    total_count: i64,
+}
+
+/// GitHub returns all eight groups, empty ones included; keep the used ones.
+pub fn map_reactions(raw: Vec<RawReactionGroup>) -> Vec<ReactionGroup> {
+    raw.into_iter()
+        .filter(|g| g.reactors.total_count > 0)
+        .map(|g| ReactionGroup {
+            content: g.content,
+            count: g.reactors.total_count,
+            viewer_has_reacted: g.viewer_has_reacted,
+        })
+        .collect()
 }
 
 #[derive(Debug, Deserialize)]
@@ -1740,6 +1782,8 @@ struct ThreadCommentNode {
     diff_hunk: Option<String>,
     #[serde(default)]
     outdated: bool,
+    #[serde(default)]
+    reaction_groups: Vec<RawReactionGroup>,
 }
 
 fn map_thread(t: ThreadNode) -> PrThread {
@@ -1758,6 +1802,7 @@ fn map_thread(t: ThreadNode) -> PrThread {
             url: c.url,
             diff_hunk: c.diff_hunk,
             outdated: c.outdated,
+            reactions: map_reactions(c.reaction_groups),
         })
         .collect();
     PrThread {
@@ -1890,6 +1935,58 @@ pub fn set_thread_resolved(thread_id: &str, resolved: bool) -> AppResult<bool> {
         .and_then(|r| r.thread)
         .map(|t| t.is_resolved)
         .ok_or_else(|| AppError::Gh("thread mutation returned no thread".into()))
+}
+
+const REACTION_CONTENTS: [&str; 8] =
+    ["THUMBS_UP", "THUMBS_DOWN", "LAUGH", "HOORAY", "CONFUSED", "HEART", "ROCKET", "EYES"];
+
+// Both mutations alias their payload to `result` so one deserializer serves add and remove.
+const ADD_REACTION_MUTATION: &str = r#"
+mutation AddReaction($id: ID!, $content: ReactionContent!) {
+  result: addReaction(input: { subjectId: $id, content: $content }) {
+    subject { reactionGroups { content viewerHasReacted reactors { totalCount } } }
+  }
+}
+"#;
+
+const REMOVE_REACTION_MUTATION: &str = r#"
+mutation RemoveReaction($id: ID!, $content: ReactionContent!) {
+  result: removeReaction(input: { subjectId: $id, content: $content }) {
+    subject { reactionGroups { content viewerHasReacted reactors { totalCount } } }
+  }
+}
+"#;
+
+#[derive(Debug, Deserialize)]
+struct ReactionMutationData {
+    result: Option<ReactionMutationResult>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ReactionMutationResult {
+    subject: Option<ReactionSubject>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ReactionSubject {
+    #[serde(default)]
+    reaction_groups: Vec<RawReactionGroup>,
+}
+
+/// Add or remove my `content` reaction on a comment/review by GraphQL node id.
+/// Returns the comment's new reaction groups.
+pub fn set_reaction(subject_id: &str, content: &str, on: bool) -> AppResult<Vec<ReactionGroup>> {
+    if !REACTION_CONTENTS.contains(&content) {
+        return Err(AppError::Other(format!("unsupported reaction: {content}")));
+    }
+    let query = if on { ADD_REACTION_MUTATION } else { REMOVE_REACTION_MUTATION };
+    let data: ReactionMutationData =
+        graphql(query, serde_json::json!({ "id": subject_id, "content": content }))?;
+    data.result
+        .and_then(|r| r.subject)
+        .map(|s| map_reactions(s.reaction_groups))
+        .ok_or_else(|| AppError::Gh("reaction mutation returned no subject".into()))
 }
 
 /// Outcome of a conditional `GET /notifications`.
@@ -2041,6 +2138,18 @@ pub fn fetch_notifications(since: &str) -> AppResult<Vec<Notification>> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn mirrored_comments_without_reactions_still_deserialize() {
+        let json = r#"{"id":"C","databaseId":1,"author":null,"body":"b","createdAt":"t","url":"u","diffHunk":null,"outdated":false}"#;
+        let c: super::PrThreadComment = serde_json::from_str(json).unwrap();
+        assert!(c.reactions.is_empty());
+    }
+
+    #[test]
+    fn set_reaction_rejects_unknown_content() {
+        assert!(super::set_reaction("id", "SMILE", true).is_err());
+    }
+
     use super::*;
     #[test]
     fn parses_notification_subject_urls() {

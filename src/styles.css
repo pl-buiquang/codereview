@@ -1821,6 +1821,60 @@ td.diff-code {
   font-size: 11px;
   cursor: pointer;
 }
+.reactions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+}
+.reaction-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 7px;
+  font-size: 12px;
+  color: var(--text-2);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+}
+.reaction-pill:disabled {
+  cursor: default;
+}
+.reaction-pill.on {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.reaction-add {
+  position: relative;
+}
+.reaction-picker {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 20;
+  display: flex;
+  gap: 2px;
+  padding: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+}
+.reaction-pick {
+  padding: 2px 5px;
+  font-size: 15px;
+  background: none;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.reaction-pick:hover {
+  background: var(--surface-3);
+}
 .github-orphan-threads {
   padding: 8px 12px;
   background: color-mix(in srgb, var(--accent) 5%, transparent);

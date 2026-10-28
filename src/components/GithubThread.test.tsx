@@ -7,6 +7,7 @@ import type { ReactNode } from "react";
 const setPrThreadResolved = vi.fn();
 const replyToThread = vi.fn();
 const openUrl = vi.fn();
+const setCommentReaction = vi.fn();
 vi.mock("../lib/api", () => ({
   api: {
     setPrThreadResolved: (threadId: string, resolved: boolean) =>
@@ -19,6 +20,7 @@ vi.mock("../lib/api", () => ({
       body: string,
     ) => replyToThread(owner, name, number, commentId, body),
     openUrl: (url: string) => openUrl(url),
+    setCommentReaction: (...a: unknown[]) => setCommentReaction(...a),
   },
 }));
 
@@ -107,5 +109,37 @@ describe("GithubThread", () => {
     renderThread({ thread: thread({ comments: [comment({ databaseId: null })] }), ctx });
     expect(screen.getByRole("button", { name: "Resolve" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Reply…" })).not.toBeInTheDocument();
+  });
+
+  it("shows reactions, removes mine on click and adds one from the picker", async () => {
+    setCommentReaction.mockResolvedValueOnce([]);
+    setCommentReaction.mockResolvedValueOnce([{ content: "ROCKET", count: 1, viewerHasReacted: true }]);
+    renderThread({
+      thread: thread({
+        comments: [comment({ reactions: [{ content: "THUMBS_UP", count: 3, viewerHasReacted: true }] })],
+      }),
+      ctx,
+    });
+
+    const pill = screen.getByRole("button", { name: "👍 3" });
+    expect(pill).toHaveAttribute("aria-pressed", "true");
+    await userEvent.click(pill);
+    expect(setCommentReaction).toHaveBeenCalledWith("C1", "THUMBS_UP", false, undefined);
+    await waitFor(() => expect(screen.queryByRole("button", { name: "👍 3" })).not.toBeInTheDocument());
+
+    await userEvent.click(screen.getByRole("button", { name: "Add reaction" }));
+    await userEvent.click(screen.getByTitle("rocket"));
+    expect(setCommentReaction).toHaveBeenCalledWith("C1", "ROCKET", true, undefined);
+    expect(await screen.findByRole("button", { name: "🚀 1" })).toBeInTheDocument();
+  });
+
+  it("shows reactions read-only without ctx", () => {
+    renderThread({
+      thread: thread({
+        comments: [comment({ reactions: [{ content: "HEART", count: 2, viewerHasReacted: false }] })],
+      }),
+    });
+    expect(screen.getByRole("button", { name: "❤️ 2" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Add reaction" })).not.toBeInTheDocument();
   });
 });

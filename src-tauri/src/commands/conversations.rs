@@ -566,13 +566,18 @@ pub async fn reply_to_discussion(
     db: State<'_, Db>,
 ) -> AppResult<()> {
     gh::comment_on_issue(&owner, &name, number, &body)?;
-    let ids = [subject_id.clone()];
-    if let Some(Some(d)) = mirror::fetch::discussions(&ids).remove(&subject_id) {
+    refresh_discussion(&app, &db, &subject_id)
+}
+
+/// Re-read a subject's discussion facet from GitHub into the mirror and tell the UI.
+pub(crate) fn refresh_discussion(app: &AppHandle, db: &Db, subject_id: &str) -> AppResult<()> {
+    let ids = [subject_id.to_string()];
+    if let Some(Some(d)) = mirror::fetch::discussions(&ids).remove(subject_id) {
         let updated_at = d.updated_at.clone();
         let conn = db.0.lock().unwrap();
-        mirror::store::upsert_discussion(&conn, &subject_id, updated_at.as_deref(), &d.into_comments(), &Utc::now().to_rfc3339())?;
+        mirror::store::upsert_discussion(&conn, subject_id, updated_at.as_deref(), &d.into_comments(), &Utc::now().to_rfc3339())?;
     }
-    crate::commands::gh::notify_mirror(&app, &subject_id);
+    crate::commands::gh::notify_mirror(app, subject_id);
     Ok(())
 }
 

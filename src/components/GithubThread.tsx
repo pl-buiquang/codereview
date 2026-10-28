@@ -7,6 +7,7 @@ import { timeAgo } from "../lib/timeAgo";
 import { useDebouncedCallback } from "../lib/useDebouncedCallback";
 import { Icon } from "./icons";
 import { Markdown } from "./Markdown";
+import { Reactions } from "./Reactions";
 import { Composer } from "./ReviewView";
 import type { Comment, PrThread, PrThreadComment, PrThreadCtx, Side } from "../lib/types";
 
@@ -122,7 +123,9 @@ export function GithubThread({
         )}
       </div>
       {expanded &&
-        thread.comments.map((c) => <ThreadComment key={c.id} comment={c} />)}
+        thread.comments.map((c) => (
+          <ThreadComment key={c.id} comment={c} interactive={!!ctx} onReacted={invalidate} />
+        ))}
       {expanded && draftReplies && draftReplies.length > 0 && (
         <div className="github-thread-drafts">
           {draftReplies.map((d) => (
@@ -261,8 +264,16 @@ function DraftReplyItem({
 
 export function ThreadComment({
   comment,
+  interactive = false,
+  discussionSubjectId,
+  onReacted,
 }: {
-  comment: Pick<PrThreadComment, "author" | "body" | "createdAt" | "url">;
+  comment: Pick<PrThreadComment, "author" | "body" | "createdAt" | "url"> &
+    Partial<Pick<PrThreadComment, "id" | "reactions">>;
+  /** Allow adding/removing reactions (needs a GitHub-backed context). */
+  interactive?: boolean;
+  discussionSubjectId?: string;
+  onReacted?: () => void;
 }) {
   const login = comment.author?.login ?? "unknown";
   return (
@@ -291,6 +302,15 @@ export function ThreadComment({
         </a>
       </div>
       <Markdown source={comment.body} />
+      {comment.id && (
+        <Reactions
+          subjectId={comment.id}
+          reactions={comment.reactions}
+          interactive={interactive}
+          discussionSubjectId={discussionSubjectId}
+          onChanged={onReacted}
+        />
+      )}
     </div>
   );
 }

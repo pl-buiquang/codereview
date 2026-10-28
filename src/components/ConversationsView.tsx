@@ -299,7 +299,7 @@ function Discussion({ c, onChanged }: { c: Conversation; onChanged: () => void }
   return (
     <div className="github-thread">
       {c.comments.map((d) => (
-        <DiscussionItem key={d.id} comment={d} />
+        <DiscussionItem key={d.id} comment={d} subjectId={subject.id} onChanged={onChanged} />
       ))}
       <div className="github-thread-reply">
         {!replying ? (
@@ -326,12 +326,21 @@ function Discussion({ c, onChanged }: { c: Conversation; onChanged: () => void }
   );
 }
 
-function DiscussionItem({ comment }: { comment: DiscussionComment }) {
-  if (comment.kind === "comment") return <ThreadComment comment={comment} />;
+function DiscussionItem({
+  comment,
+  subjectId,
+  onChanged,
+}: {
+  comment: DiscussionComment;
+  subjectId: string;
+  onChanged: () => void;
+}) {
+  const body = <ThreadComment comment={comment} interactive discussionSubjectId={subjectId} onReacted={onChanged} />;
+  if (comment.kind === "comment") return body;
   return (
     <div>
       <span className="chip">review · {(comment.reviewState ?? "commented").toLowerCase().replace(/_/g, " ")}</span>
-      <ThreadComment comment={comment} />
+      {body}
     </div>
   );
 }
