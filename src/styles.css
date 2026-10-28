@@ -905,6 +905,9 @@ button:disabled,
   border-radius: var(--radius-l);
   box-shadow: var(--shadow-card);
   overflow: clip;
+  /* Skip layout/paint of offscreen files: un-hiding a tab pane only lays out what's visible. */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 600px;
 }
 .diff-file-header {
   display: flex;
