@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
-import { toast } from "../lib/toast";
 import { statusLabel, statusBadgeClass } from "../lib/status";
 import { timeAgo } from "../lib/timeAgo";
 import { useUIStore } from "../store";
@@ -22,10 +21,9 @@ function verdictLabel(summary: ReviewSummary): string {
 }
 
 /** Switches between the several reviews a target can accumulate — e.g. one
- *  published round and a new draft for a second pass — and starts a new draft
- *  alongside any existing one. */
+ *  published round and a new draft for a second pass. Hidden unless
+ *  the target has more than one review. */
 export function ReviewSwitcher({ targetId, currentReviewId }: { targetId: number; currentReviewId: number }) {
-  const queryClient = useQueryClient();
   const openReview = useUIStore((s) => s.openReview);
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -42,37 +40,10 @@ export function ReviewSwitcher({ targetId, currentReviewId }: { targetId: number
     return () => document.removeEventListener("mousedown", onDown);
   }, [open]);
 
-  const newReview = useMutation({
-    mutationFn: () => api.newReviewOnTarget(targetId),
-    onSuccess: (review) => {
-      queryClient.invalidateQueries({ queryKey });
-      queryClient.invalidateQueries({ queryKey: ["reviews"] });
-      setOpen(false);
-      openReview(review.id);
-    },
-    onError: (e) => toast.error(`Could not start a new review:\n${String(e)}`),
-  });
-
   const reviews = reviewsQuery.data ?? [];
-  if (reviews.length === 0) return null;
+  if (reviews.length < 2) return null;
 
   const index = reviews.findIndex((r) => r.review.id === currentReviewId);
-
-  // A lone review has nothing to switch to: just offer to start another.
-  if (reviews.length === 1) {
-    return (
-      <div className="review-switcher">
-        <button
-          className="btn btn-sm"
-          disabled={newReview.isPending}
-          title="Start another draft review on this PR"
-          onClick={() => newReview.mutate()}
-        >
-          {newReview.isPending ? "Starting…" : "+ New review"}
-        </button>
-      </div>
-    );
-  }
 
   return (
     <div ref={ref} className="review-switcher">
@@ -105,15 +76,6 @@ export function ReviewSwitcher({ targetId, currentReviewId }: { targetId: number
               </span>
             </button>
           ))}
-          <button
-            role="menuitem"
-            className="review-switcher-item"
-            disabled={newReview.isPending}
-            title="Start another draft review on this PR"
-            onClick={() => newReview.mutate()}
-          >
-            {newReview.isPending ? "Starting…" : "+ New review"}
-          </button>
         </div>
       )}
     </div>

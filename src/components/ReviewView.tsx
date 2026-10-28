@@ -1114,6 +1114,16 @@ function ReviewHeader({
     },
     onError: (e) => toast.error(`Sync failed:\n${String(e)}`),
   });
+  const openReview = useUIStore((s) => s.openReview);
+  const newReview = useMutation({
+    mutationFn: () => api.newReviewOnTarget(target.id),
+    onSuccess: (r) => {
+      queryClient.invalidateQueries({ queryKey: ["target-reviews", target.id] });
+      queryClient.invalidateQueries({ queryKey: ["reviews"] });
+      openReview(r.id);
+    },
+    onError: (e) => toast.error(`Could not start a new review:\n${String(e)}`),
+  });
   const updatePin = useMutation({
     mutationFn: () => api.updateReviewPin(review.id),
     onSuccess: (r) => {
@@ -1705,6 +1715,14 @@ function ReviewHeader({
                   onClick={run(() => reanchorComments.mutate())}
                 >
                   Re-anchor comments
+                </button>
+                <button
+                  role="menuitem"
+                  disabled={newReview.isPending}
+                  title="Start another draft review on this PR, alongside the existing ones"
+                  onClick={run(() => newReview.mutate())}
+                >
+                  New review
                 </button>
                 <hr className="btn-split-menu-separator" />
                 <button
