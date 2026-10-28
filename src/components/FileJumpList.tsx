@@ -34,7 +34,15 @@ import {
   type SourceFilter,
 } from "../lib/commentFilter";
 import { ContextPane } from "./ContextPane";
-import { Icon } from "./icons";
+import { Icon, type IconName } from "./icons";
+
+const FILE_ICON: Record<string, IconName> = {
+  add: "file-add",
+  delete: "file-del",
+  rename: "file-move",
+  copy: "file-move",
+  modify: "file-edit",
+};
 
 interface Row {
   index: number;
@@ -44,6 +52,8 @@ interface Row {
   count: number;
   viewed: boolean;
   category: FileCategory;
+  /** react-diff-view's change type: add / delete / rename / copy / modify. */
+  status: string;
 }
 
 type TreeNode =
@@ -218,6 +228,7 @@ export function FileJumpList({
           count: countByPath.get(path) ?? 0,
           viewed: viewedSet.has(path),
           category: categorize(path, categoryRules),
+          status: file.type,
         };
       }),
     [files, countByPath, viewedSet, categoryRules],
@@ -375,7 +386,7 @@ export function FileJumpList({
           onClick={() => jumpTo(row.index)}
           title={row.path}
         >
-          <Icon name="file" size={13} className="tree-file" />
+          <Icon name={FILE_ICON[row.status] ?? "file-edit"} size={13} className={`tree-file tree-file-${row.status}`} />
           <span className="tree-name">{node.name}</span>
           <span className="jump-meta">
             {row.count > 0 && <span className="jump-badge">{row.count}</span>}

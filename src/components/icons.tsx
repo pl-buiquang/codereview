@@ -26,6 +26,10 @@ export type IconName =
   | "eye"
   | "branch"
   | "file"
+  | "file-add"
+  | "file-del"
+  | "file-move"
+  | "file-edit"
   | "folder"
   | "bot"
   | "person"
@@ -144,6 +148,34 @@ const STROKE: Record<Exclude<IconName, "dot" | "kebab">, ReactNode> = {
     <>
       <path d="M4 1.8h5.5L12 4.3v9.9H4z" />
       <path d="M9.2 2v2.6H12" />
+    </>
+  ),
+  "file-add": (
+    <>
+      <path d="M4 1.8h5.5L12 4.3v9.9H4z" />
+      <path d="M9.2 2v2.6H12" />
+      <path d="M8 7.2v4.4M5.8 9.4h4.4" />
+    </>
+  ),
+  "file-del": (
+    <>
+      <path d="M4 1.8h5.5L12 4.3v9.9H4z" />
+      <path d="M9.2 2v2.6H12" />
+      <path d="M5.8 9.4h4.4" />
+    </>
+  ),
+  "file-move": (
+    <>
+      <path d="M4 1.8h5.5L12 4.3v9.9H4z" />
+      <path d="M9.2 2v2.6H12" />
+      <path d="M5.6 9.4h4.2M8.4 7.6l1.6 1.8-1.6 1.8" />
+    </>
+  ),
+  "file-edit": (
+    <>
+      <path d="M4 1.8h5.5L12 4.3v9.9H4z" />
+      <path d="M9.2 2v2.6H12" />
+      <path d="M9.6 7.4 11 8.8 7.6 12.2H6.2v-1.4z" />
     </>
   ),
   folder: <path d="M1.8 3.5h4.4l1.2 1.6h6.8v7.4H1.8z" />,

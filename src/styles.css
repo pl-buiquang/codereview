@@ -3135,6 +3135,16 @@ tr.search-current {
 .tree-folder {
   color: var(--accent);
 }
+.tree-file-add {
+  color: var(--success);
+}
+.tree-file-delete {
+  color: var(--danger);
+}
+.tree-file-rename,
+.tree-file-copy {
+  color: var(--warning);
+}
 .tree-file + .tree-name {
   font-weight: 600;
   color: var(--text);
