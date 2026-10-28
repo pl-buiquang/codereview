@@ -10,6 +10,7 @@ The review screen shows the diff of a GitHub PR or a local "virtual PR" (two bra
 - **Large diffs.** A file with more changed lines (added + deleted) than Settings > "Max diff lines per file" (`largeDiffMaxLines`, default 3000, minimum 100) is not rendered. It shows a notice with an "Open in VSCode" button; "View file" is disabled and find-in-diff skips it.
 - **File tree.** The left pane has `Files`, `Comments` and (PR reviews only) `Context` tabs. Files are grouped into a directory tree in diff order; single-child directory chains collapse into one node (`src/components`). The Comments tab lists threads with open/resolved filters. The Context tab shows the linked board card's metadata (plan files, links, notes, Claude sessions). Hide or show the pane with `b`.
 - **Viewed.** Each file header has a checkbox that collapses the file. It is stored per review and still works on published reviews.
+- **Go to definition.** `⌘/Ctrl + click` an identifier in the diff to see where it is declared. The backend runs `git grep` on the pinned commit (LEFT = base, RIGHT = head) with per-language declaration patterns (`src-tauri/src/definitions.rs`), and the popover shows up to 10 matches with a snippet, "Go to in diff" (when the file is in the diff) and "Open file". It needs a local clone with the commit; PRs without one find nothing. A faster, more precise tree-sitter index is planned: [spec 10](../../specs/10-definition-index.md).
 - **Find.** `⌘/Ctrl + F` opens "Find in diff". `Enter` / `Shift+Enter` go to the next / previous match, `Esc` closes.
 
 ## Comments
