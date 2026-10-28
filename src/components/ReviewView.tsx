@@ -1,4 +1,5 @@
 import {
+  memo,
   useCallback,
   useEffect,
   useMemo,
@@ -180,6 +181,17 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
     null,
   );
   const focusActions = useFocusActions(reviewId);
+  // Stable handlers: ReviewDiff/FileReview are memoized so a tab switch (which
+  // re-renders this view via isActiveTab) leaves the heavy diff subtree alone.
+  const onDiffSaving = useCallback(() => setSaveState("saving"), []);
+  const onDiffSaved = useCallback(() => {
+    setSaveState("saved");
+    queryClient.invalidateQueries({ queryKey: ["review", reviewId] });
+  }, [queryClient, reviewId]);
+  const onDiffCommentsChanged = useCallback(
+    () => queryClient.invalidateQueries({ queryKey: ["review", reviewId] }),
+    [queryClient, reviewId],
+  );
   const generateFocus = useGenerateFocus(reviewId);
   const chatModel = useSettingsStore((s) => s.chatModel);
 
@@ -772,14 +784,9 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
               onReveal={reveal}
               onUnreveal={unreveal}
               onOpenFilePane={setFilePanePath}
-              onSaving={() => setSaveState("saving")}
-              onSaved={() => {
-                setSaveState("saved");
-                queryClient.invalidateQueries({ queryKey: ["review", reviewId] });
-              }}
-              onCommentsChanged={() =>
-                queryClient.invalidateQueries({ queryKey: ["review", reviewId] })
-              }
+              onSaving={onDiffSaving}
+              onSaved={onDiffSaved}
+              onCommentsChanged={onDiffCommentsChanged}
               onSendToChat={sendToChat}
             />
           )}
@@ -1813,7 +1820,7 @@ function ReviewHeader({
   );
 }
 
-function ReviewDiff({
+const ReviewDiff = memo(function ReviewDiff({
   files,
   visibleFileIdx,
   viewType,
@@ -1888,7 +1895,7 @@ function ReviewDiff({
       })}
     </div>
   );
-}
+});
 
 interface Selection {
   side: Side;
@@ -1897,7 +1904,7 @@ interface Selection {
   focusKey: string;
 }
 
-function FileReview({
+const FileReview = memo(function FileReview({
   index,
   file,
   viewType,
@@ -2566,7 +2573,7 @@ function FileReview({
       )}
     </div>
   );
-}
+});
 
 function FileBody({
   file,

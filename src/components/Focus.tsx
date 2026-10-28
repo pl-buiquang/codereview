@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQueryClient, type UseMutationResult } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { toast } from "../lib/toast";
@@ -110,60 +110,63 @@ export interface FocusActions {
 /** Focus mutations, applied optimistically: refetching the focus re-fetches the diff. */
 export function useFocusActions(reviewId: number): FocusActions {
   const queryClient = useQueryClient();
-  const key = ["focus", reviewId];
-  const patch = (fn: (v: FocusView) => FocusView) =>
-    queryClient.setQueriesData<FocusView | null>({ queryKey: key }, (old) =>
-      old ? fn(old) : old,
-    );
-  const run = (p: Promise<unknown>) =>
-    p.catch((e) => {
-      toast.error(String(e));
-      queryClient.invalidateQueries({ queryKey: key });
-    });
-
-  return {
-    setLevel: (level) => {
-      patch((v) => ({ ...v, focus: { ...v.focus, level } }));
-      run(api.setFocusLevel(reviewId, level));
-    },
-    setHunkOverride: (hunkIds, value) => {
-      const ids = new Set(hunkIds);
-      patch((v) => ({
-        ...v,
-        hunks: v.hunks.map((h) => (ids.has(h.hunk_id) ? { ...h, override: value } : h)),
-      }));
-      run(Promise.all(hunkIds.map((id) => api.setHunkOverride(reviewId, id, value))));
-    },
-    setFileOverride: (path, value) => {
-      patch((v) => ({
-        ...v,
-        file_overrides: [
-          ...v.file_overrides.filter((o) => o.file_path !== path),
-          ...(value ? [{ file_path: path, override: value }] : []),
-        ],
-      }));
-      run(api.setFileOverride(reviewId, path, value));
-    },
-    clear: async () => {
-      if (
-        !(await confirmDialog({
-          title: "Clear focus",
-          message:
-            "Remove the focus (tiers, summary and overrides)? AI comments it added that you haven't edited are removed too; comments you wrote or edited are kept.",
-          confirmLabel: "Clear focus",
-          danger: true,
-        }))
-      )
-        return;
-      queryClient.setQueriesData<FocusView | null>({ queryKey: key }, null);
-      run(
-        api.clearFocus(reviewId).then(() => {
-          queryClient.invalidateQueries({ queryKey: ["review", reviewId] });
-          queryClient.invalidateQueries({ queryKey: ["reviews"] });
-        }),
+  // Stable across renders: ReviewDiff/FileReview are memoized on this object.
+  return useMemo(() => {
+    const key = ["focus", reviewId];
+    const patch = (fn: (v: FocusView) => FocusView) =>
+      queryClient.setQueriesData<FocusView | null>({ queryKey: key }, (old) =>
+        old ? fn(old) : old,
       );
-    },
-  };
+    const run = (p: Promise<unknown>) =>
+      p.catch((e) => {
+        toast.error(String(e));
+        queryClient.invalidateQueries({ queryKey: key });
+      });
+
+    return {
+      setLevel: (level) => {
+        patch((v) => ({ ...v, focus: { ...v.focus, level } }));
+        run(api.setFocusLevel(reviewId, level));
+      },
+      setHunkOverride: (hunkIds, value) => {
+        const ids = new Set(hunkIds);
+        patch((v) => ({
+          ...v,
+          hunks: v.hunks.map((h) => (ids.has(h.hunk_id) ? { ...h, override: value } : h)),
+        }));
+        run(Promise.all(hunkIds.map((id) => api.setHunkOverride(reviewId, id, value))));
+      },
+      setFileOverride: (path, value) => {
+        patch((v) => ({
+          ...v,
+          file_overrides: [
+            ...v.file_overrides.filter((o) => o.file_path !== path),
+            ...(value ? [{ file_path: path, override: value }] : []),
+          ],
+        }));
+        run(api.setFileOverride(reviewId, path, value));
+      },
+      clear: async () => {
+        if (
+          !(await confirmDialog({
+            title: "Clear focus",
+            message:
+              "Remove the focus (tiers, summary and overrides)? AI comments it added that you haven't edited are removed too; comments you wrote or edited are kept.",
+            confirmLabel: "Clear focus",
+            danger: true,
+          }))
+        )
+          return;
+        queryClient.setQueriesData<FocusView | null>({ queryKey: key }, null);
+        run(
+          api.clearFocus(reviewId).then(() => {
+            queryClient.invalidateQueries({ queryKey: ["review", reviewId] });
+            queryClient.invalidateQueries({ queryKey: ["reviews"] });
+          }),
+        );
+      },
+    };
+  }, [queryClient, reviewId]);
 }
 
 export function FocusLevelSelect({
