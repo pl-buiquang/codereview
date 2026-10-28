@@ -2685,6 +2685,7 @@ mod tests {
         assert_eq!(review.status, "draft");
         assert_eq!(review.body, "");
         assert!(review.event.is_none());
+        assert!(!review.sidebar_collapsed, "the side pane starts open");
     }
 
     #[test]
