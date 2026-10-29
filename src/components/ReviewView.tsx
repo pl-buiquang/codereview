@@ -150,6 +150,7 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
   }, []);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const [chatCollapsed, setChatCollapsed] = useState(true);
+  const [prDetailsCollapsed, setPrDetailsCollapsed] = useState(true);
   const [leftWidth, setLeftWidth] = useState(248);
   const [rightWidth, setRightWidth] = useState(360);
   const [pendingChatMessage, setPendingChatMessage] = useState<string | null>(null);
@@ -225,12 +226,14 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
     if (detailQuery.data) {
       setSidebarCollapsed(detailQuery.data.review.sidebar_collapsed);
       setChatCollapsed(detailQuery.data.review.chat_collapsed);
+      setPrDetailsCollapsed(detailQuery.data.review.pr_details_collapsed);
       setLeftWidth(detailQuery.data.review.left_panel_width);
       setRightWidth(detailQuery.data.review.right_panel_width);
     }
   }, [
     detailQuery.data?.review.sidebar_collapsed,
     detailQuery.data?.review.chat_collapsed,
+    detailQuery.data?.review.pr_details_collapsed,
     detailQuery.data?.review.left_panel_width,
     detailQuery.data?.review.right_panel_width,
   ]);
@@ -239,6 +242,22 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
     setSidebarCollapsed((prev) => {
       const next = !prev;
       api.setSidebarCollapsed(reviewId, next);
+      return next;
+    });
+  }, [reviewId]);
+
+  const hasPrMeta =
+    detailQuery.data?.target.kind === "github_pr" &&
+    !!detailQuery.data.remote_owner &&
+    !!detailQuery.data.remote_name &&
+    detailQuery.data.target.github_pr_number != null;
+
+  const togglePrDetails = useCallback(() => {
+    setPrDetailsCollapsed((prev) => {
+      const next = !prev;
+      api
+        .setPrDetailsCollapsed(reviewId, next)
+        .catch((e) => toast.error(`Could not save PR details state: ${String(e)}`));
       return next;
     });
   }, [reviewId]);
@@ -805,6 +824,17 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
         case "b":
           toggleSidebar();
           break;
+        case " ": {
+          // Keep native Space activation on focused controls.
+          if (e.shiftKey || !hasPrMeta) return;
+          if (
+            e.target instanceof Element &&
+            e.target.closest("button, a, summary, [role=button], [role=checkbox], [role=tab]")
+          )
+            return;
+          togglePrDetails();
+          break;
+        }
         case "'":
           toggleChat();
           break;
@@ -826,6 +856,8 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
     searchOpen,
     toggleSidebar,
     toggleChat,
+    togglePrDetails,
+    hasPrMeta,
     visibleFileIdx,
   ]);
 
@@ -852,6 +884,8 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
         focusActions={focusActions}
         generateFocus={generateFocus}
         bodyRef={summaryBodyRef}
+        collapsed={prDetailsCollapsed}
+        togglePrDetails={togglePrDetails}
       />
 
       <div
@@ -1150,7 +1184,11 @@ function ReviewHeader({
   focusActions,
   generateFocus,
   bodyRef,
+  collapsed,
+  togglePrDetails,
 }: {
+  collapsed: boolean;
+  togglePrDetails: () => void;
   detail: ReviewDetail;
   saveState: SaveState;
   readOnly: boolean;
@@ -1176,12 +1214,6 @@ function ReviewHeader({
       ? prContextKey(`${detail.remote_owner}/${detail.remote_name}`, target.github_pr_number)
       : `review:${review.id}`;
   const activeRoutineRuns = useActiveRoutineRuns().get(routineContextKey);
-  const [collapsed, setCollapsed] = useState(review.pr_details_collapsed);
-  const togglePrDetails = () => {
-    const next = !collapsed;
-    setCollapsed(next);
-    api.setPrDetailsCollapsed(review.id, next).catch((e) => toast.error(`Could not save PR details state: ${String(e)}`));
-  };
   const [openingWorktree, setOpeningWorktree] = useState(false);
   const openChatWorktreeInVscode = async () => {
     if (openingWorktree) return;
