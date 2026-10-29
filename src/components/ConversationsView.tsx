@@ -7,7 +7,7 @@ import { useSyntaxReady } from "../lib/highlight";
 import { parseBotLogins, parseRepoBasePaths, useSettingsStore } from "../lib/settings";
 import { timeAgo } from "../lib/timeAgo";
 import { toast } from "../lib/toast";
-import { useUIStore } from "../store";
+import { EMPTY_CONVERSATION_FILTERS, useUIStore } from "../store";
 import type { Conversation, DiscussionComment } from "../lib/types";
 import { GithubThread, ThreadComment } from "./GithubThread";
 import { Icon } from "./icons";
@@ -94,6 +94,7 @@ export function ConversationsView() {
   const activeFlags = [filters.pinned, filters.unread, filters.unresolved, filters.showBots, filters.showIgnored].filter(
     Boolean,
   ).length;
+  const anyFilter = activeFlags > 0 || filters.subjectIds.length > 0 || filters.repos.length > 0;
   const flag = (label: string, count: number | undefined, on: boolean, toggleFlag: () => void) => (
     <button className={`cr-rail-item${on ? " on" : ""}`} aria-pressed={on} onClick={toggleFlag}>
       <span className="lbl">{label}</span>
@@ -104,6 +105,13 @@ export function ConversationsView() {
   return (
     <div className="inbox-layout">
       <FilterRail id="conversations">
+        <button
+          className="cr-rail-clear-all"
+          disabled={!anyFilter}
+          onClick={() => setFilters(EMPTY_CONVERSATION_FILTERS)}
+        >
+          Clear all
+        </button>
         <RailSection title="Show" summary={activeFlags || undefined}>
           {flag("Pinned", facets?.pinned, filters.pinned, () => setFilters({ pinned: !filters.pinned }))}
           {flag("Unread", facets?.unread, filters.unread, () => setFilters({ unread: !filters.unread }))}

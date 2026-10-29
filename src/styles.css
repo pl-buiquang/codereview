@@ -3976,6 +3976,22 @@ tr.search-current {
   background: transparent;
   color: var(--accent);
 }
+.cr-rail-clear-all {
+  align-self: flex-start;
+  margin-bottom: 10px;
+  padding: 0 8px;
+  height: 22px;
+  font-size: 12px;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.cr-rail-clear-all:hover:not(:disabled) {
+  color: var(--accent);
+}
+.cr-rail-clear-all:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
 .cr-rail-item {
   display: flex;
   align-items: center;
