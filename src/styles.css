@@ -1161,6 +1161,9 @@ td.diff-code {
   min-width: 0;
   flex: 1;
 }
+.review-header-top > .review-title-wrap:first-child {
+  margin-left: 12px;
+}
 .review-title {
   font-family: var(--font-ui);
   font-weight: 600;
