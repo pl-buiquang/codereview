@@ -6,7 +6,7 @@ import { autoSyncRefetch } from "../lib/sync";
 import { Markdown } from "./Markdown";
 import { toast } from "../lib/toast";
 import { useDebouncedCallback } from "../lib/useDebouncedCallback";
-import type { PrActor, PrCheck, PrLabel, PrMeta, PrReviewRequest } from "../lib/types";
+import type { PrActor, PrBase, PrCheck, PrLabel, PrMeta, PrReviewRequest } from "../lib/types";
 
 /** Shared with the review header's status chips, which need the same PR
  *  metadata even while this panel is collapsed — same query key, so there's
@@ -73,6 +73,12 @@ export function PrMetaPanel({
         <ReviewersField pr={pr} meta={meta} />
         <span className="pr-meta-key">Labels</span>
         <LabelsField pr={pr} meta={meta} />
+        {meta.base && (
+          <>
+            <span className="pr-meta-key">Base</span>
+            <BaseField pr={pr} base={meta.base} />
+          </>
+        )}
       </div>
 
       <hr className="pr-meta-divider" />
@@ -487,6 +493,45 @@ function ChecksList({ checks }: { checks: PrCheck[] }) {
             </li>
           ))}
         </ul>
+      )}
+    </div>
+  );
+}
+
+function ExtLink({ href, children }: { href: string; children: ReactNode }) {
+  return (
+    <a
+      href={href}
+      onClick={(e) => {
+        e.preventDefault();
+        api.openUrl(href);
+      }}
+    >
+      {children}
+    </a>
+  );
+}
+
+function BaseField({ pr, base }: { pr: PrRef; base: PrBase }) {
+  const tree = `https://github.com/${pr.owner}/${pr.name}/tree`;
+  const parent = base.pr;
+  return (
+    <div className="pr-meta-val">
+      <ExtLink href={`${tree}/${base.refName}`}>
+        <code>{base.refName}</code>
+      </ExtLink>
+      {base.oid && (
+        <ExtLink href={`${tree}/${base.oid}`}>
+          <code>{base.oid.slice(0, 7)}</code>
+        </ExtLink>
+      )}
+      {parent && (
+        <>
+          <ExtLink href={parent.url}>
+            #{parent.number} {parent.title}
+          </ExtLink>
+          {parent.state !== "OPEN" && <span className="faint">{humanState(parent.state)}</span>}
+        </>
       )}
     </div>
   );

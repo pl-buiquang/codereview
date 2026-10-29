@@ -327,6 +327,7 @@ pub fn read_pr_meta(conn: &Connection, owner: &str, name: &str, number: i64) -> 
                 review_requests: Vec::new(),
                 ci_state: r.get(20)?,
                 checks: parse_json(r.get(21)?),
+                base: None,
             })
         },
     )

@@ -593,11 +593,18 @@ impl PrInfo {
 const PR_META_QUERY: &str = r#"
 query PrMeta($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
+    defaultBranchRef { name }
     pullRequest(number: $number) {
       __typename
       ...PrCore
       body
       bodyHTML
+      baseRefOid
+      baseRef {
+        associatedPullRequests(first: 1, orderBy: {field: CREATED_AT, direction: DESC}) {
+          nodes { number title url state }
+        }
+      }
       labels(first: 50) { nodes { name color } }
       latestReviews(first: 20) { nodes { author { login avatarUrl } state } }
       reviewRequests(first: 30) {
@@ -660,6 +667,25 @@ pub struct PrMeta {
     pub review_requests: Vec<PrReviewRequest>,
     pub ci_state: Option<String>,
     pub checks: Vec<PrCheck>,
+    /// The base branch, when it isn't the repo's default (a stacked PR). Live fetch only.
+    pub base: Option<PrBase>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrBase {
+    pub ref_name: String,
+    pub oid: Option<String>,
+    /// The PR whose head is the base branch, if any.
+    pub pr: Option<PrBasePr>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PrBasePr {
+    pub number: i64,
+    pub title: String,
+    pub url: String,
+    pub state: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -761,6 +787,25 @@ struct PrMetaPr {
     review_requests: ReviewRequestConn,
     #[serde(default)]
     commits: CommitMetaConn,
+    #[serde(default)]
+    base_ref_name: Option<String>,
+    #[serde(default)]
+    base_ref_oid: Option<String>,
+    #[serde(default)]
+    base_ref: Option<BaseRefNode>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BaseRefNode {
+    #[serde(default)]
+    associated_pull_requests: BasePrConn,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct BasePrConn {
+    #[serde(default)]
+    nodes: Vec<PrBasePr>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -895,7 +940,15 @@ struct WorkflowNode {
     name: String,
 }
 
-fn map_pr_meta(pr: PrMetaPr) -> PrMeta {
+fn map_pr_meta(pr: PrMetaPr, default_branch: Option<&str>) -> PrMeta {
+    let base = pr
+        .base_ref_name
+        .filter(|b| Some(b.as_str()) != default_branch)
+        .map(|ref_name| PrBase {
+            ref_name,
+            oid: pr.base_ref_oid,
+            pr: pr.base_ref.and_then(|b| b.associated_pull_requests.nodes.into_iter().next()),
+        });
     let labels = pr
         .labels
         .nodes
@@ -980,6 +1033,7 @@ fn map_pr_meta(pr: PrMetaPr) -> PrMeta {
         review_requests,
         ci_state,
         checks,
+        base,
     }
 }
 
@@ -1045,7 +1099,8 @@ pub fn pr_detail(owner: &str, name: &str, number: i64) -> AppResult<PrDetail> {
     let parse_err = |e: serde_json::Error| AppError::Gh(format!("failed to parse PR {owner}/{name}#{number}: {e}"));
     let node: crate::mirror::Node = serde_json::from_value(pr.clone()).map_err(parse_err)?;
     let raw: PrMetaPr = serde_json::from_value(pr.clone()).map_err(parse_err)?;
-    Ok(PrDetail { node, meta: map_pr_meta(raw) })
+    let default_branch = data.pointer("/repository/defaultBranchRef/name").and_then(|v| v.as_str());
+    Ok(PrDetail { node, meta: map_pr_meta(raw, default_branch) })
 }
 
 /// Flip a PR's draft status. Clone-less (owner/name/number), like `pr_meta`.
@@ -2379,6 +2434,11 @@ mod tests {
       "repository": {
         "pullRequest": {
           "number": 42,
+          "baseRefName": "feat/parent",
+          "baseRefOid": "abcdef1234567890",
+          "baseRef": { "associatedPullRequests": { "nodes": [
+            { "number": 41, "title": "Parent", "url": "https://github.com/acme/widget/pull/41", "state": "OPEN" }
+          ] } },
           "title": "Add widgets",
           "url": "https://github.com/acme/widget/pull/42",
           "body": "Summary line.\nDoes a thing.",
@@ -2428,7 +2488,7 @@ mod tests {
     fn pr_meta_maps_fixture() {
         let data: PrMetaData = serde_json::from_str(FIXTURE).expect("fixture parses");
         let pr = data.repository.unwrap().pull_request.unwrap();
-        let meta = map_pr_meta(pr);
+        let meta = map_pr_meta(pr, Some("main"));
 
         assert_eq!(meta.number, 42);
         assert!(meta.body_images.is_empty());
@@ -2460,6 +2520,19 @@ mod tests {
         assert_eq!(meta.checks[2].name, "legacy/lint");
         assert_eq!(meta.checks[2].state.as_deref(), Some("FAILURE"));
         assert_eq!(meta.checks[2].url.as_deref(), Some("https://ci/lint"));
+
+        let base = meta.base.expect("non-default base is reported");
+        assert_eq!(base.ref_name, "feat/parent");
+        assert_eq!(base.oid.as_deref(), Some("abcdef1234567890"));
+        assert_eq!(base.pr.map(|p| p.number), Some(41));
+    }
+
+    #[test]
+    fn pr_meta_omits_base_on_default_branch() {
+        let json = FIXTURE.replace("\"baseRefName\": \"feat/parent\"", "\"baseRefName\": \"main\"");
+        let data: PrMetaData = serde_json::from_str(&json).expect("parses");
+        let meta = map_pr_meta(data.repository.unwrap().pull_request.unwrap(), Some("main"));
+        assert!(meta.base.is_none());
     }
 
     #[test]
@@ -2500,7 +2573,7 @@ mod tests {
           }
         }"#;
         let data: PrMetaData = serde_json::from_str(json).expect("parses");
-        let meta = map_pr_meta(data.repository.unwrap().pull_request.unwrap());
+        let meta = map_pr_meta(data.repository.unwrap().pull_request.unwrap(), None);
         assert_eq!(meta.body, "");
         assert!(meta.is_draft);
         assert_eq!(meta.mergeable.as_deref(), Some("UNKNOWN"));

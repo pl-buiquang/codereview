@@ -43,6 +43,7 @@ const meta = (over: Partial<PrMeta> = {}): PrMeta => ({
   reviewRequests: [],
   ciState: null,
   checks: [],
+  base: null,
   ...over,
 });
 
@@ -75,6 +76,34 @@ describe("PrMetaPanel", () => {
     expect(screen.getByText("−7")).toBeInTheDocument();
     expect(screen.getByText("bug")).toBeInTheDocument();
     expect(screen.getByText("Summary").tagName).toBe("STRONG");
+  });
+
+  it("shows the base with its branch, commit and parent PR links only when set", async () => {
+    const user = userEvent.setup();
+    prMeta.mockResolvedValue(
+      meta({
+        base: {
+          refName: "feat/parent",
+          oid: "abcdef1234567890",
+          pr: { number: 41, title: "Parent", url: "https://github.com/acme/widget/pull/41", state: "OPEN" },
+        },
+      }),
+    );
+    renderPanel();
+
+    expect(await screen.findByText("Base")).toBeInTheDocument();
+    await user.click(screen.getByText("abcdef1"));
+    expect(openUrl).toHaveBeenCalledWith("https://github.com/acme/widget/tree/abcdef1234567890");
+    await user.click(screen.getByText("#41 Parent"));
+    expect(openUrl).toHaveBeenCalledWith("https://github.com/acme/widget/pull/41");
+  });
+
+  it("hides the base row when the base is the default branch", async () => {
+    prMeta.mockResolvedValue(meta());
+    renderPanel();
+
+    await screen.findByText(/5 files/);
+    expect(screen.queryByText("Base")).not.toBeInTheDocument();
   });
 
   it("shows a neutral Checking… state for unknown mergeability", async () => {

@@ -282,6 +282,15 @@ export interface PrMeta {
   reviewRequests: PrReviewRequest[];
   ciState: string | null;
   checks: PrCheck[];
+  /** Set only when the base isn't the repo's default branch (stacked PR); live fetch only. */
+  base: PrBase | null;
+}
+
+export interface PrBase {
+  refName: string;
+  oid: string | null;
+  /** The PR whose head is the base branch, if any. */
+  pr: { number: number; title: string; url: string; state: string } | null;
 }
 
 export interface CiAnnotation {
