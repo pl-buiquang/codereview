@@ -136,6 +136,79 @@ pub fn remap_line(line: i64, hunks: &FileHunks) -> Remap {
     Remap::Shifted(line + delta)
 }
 
+/// Line `line` would land on if every hunk fully above it applied: a cheap guess used to
+/// break ties between equally good content matches.
+pub fn predict_line(line: i64, hunks: &FileHunks) -> i64 {
+    let mut delta = 0;
+    for hunk in &hunks.hunks {
+        if hunk.old_start + hunk.old_len.max(0) > line {
+            break;
+        }
+        delta += hunk.new_len - hunk.old_len;
+    }
+    line + delta
+}
+
+/// Context lines compared on each side of the commented block.
+const CONTEXT: usize = 3;
+
+fn trivial(line: &str) -> bool {
+    line.len() < 3 || !line.chars().any(char::is_alphanumeric)
+}
+
+/// Fallback for a line `remap_line` lost: find the commented block `old[start..=end]` (1-based,
+/// inclusive) in `new` by content. Lines compare trimmed, so re-indentation and CRLF don't matter.
+/// Returns the block's new first line, or `Lost` unless there is exactly one best match: the most
+/// matching context lines wins, then the one nearest `predicted`. A block of only trivial lines
+/// (blank, `}`) with no matching context is never relocated.
+pub fn relocate(old: &[&str], new: &[&str], start: i64, end: i64, predicted: Option<i64>) -> Remap {
+    if start < 1 || end < start || end as usize > old.len() {
+        return Remap::Lost;
+    }
+    let (s, e) = (start as usize - 1, end as usize);
+    let block: Vec<&str> = old[s..e].iter().map(|l| l.trim()).collect();
+    if block.len() > new.len() {
+        return Remap::Lost;
+    }
+    let matches = |a: Option<&&str>, b: Option<&&str>| matches!((a, b), (Some(a), Some(b)) if a.trim() == b.trim());
+
+    let mut best: Vec<(usize, usize)> = Vec::new(); // (score, 0-based index in new)
+    let mut best_score = 0;
+    for i in 0..=(new.len() - block.len()) {
+        if !block.iter().enumerate().all(|(k, l)| new[i + k].trim() == *l) {
+            continue;
+        }
+        let mut score = 0;
+        for k in 1..=CONTEXT {
+            if s >= k && i >= k && matches(old.get(s - k), new.get(i - k)) {
+                score += 1;
+            }
+            if matches(old.get(e + k - 1), new.get(i + block.len() + k - 1)) {
+                score += 1;
+            }
+        }
+        if best.is_empty() || score > best_score {
+            best_score = score;
+            best.clear();
+        }
+        if score == best_score {
+            best.push((score, i));
+        }
+    }
+    if best.is_empty() || (best_score == 0 && block.iter().all(|l| trivial(l))) {
+        return Remap::Lost;
+    }
+    if best.len() > 1 {
+        let Some(p) = predicted else { return Remap::Lost };
+        let dist = |&(_, i): &(usize, usize)| (i as i64 + 1 - p).abs();
+        best.sort_by_key(dist);
+        if dist(&best[0]) == dist(&best[1]) {
+            return Remap::Lost;
+        }
+    }
+    Remap::Shifted(best[0].1 as i64 + 1)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -239,5 +312,76 @@ index abc123..def456 100644\n\
         let patch = "@@ -50 +60 @@\n ctx\n";
         let hunks = parse_file_patch(patch);
         assert_eq!(remap_line(50, &hunks), Remap::Shifted(60));
+    }
+
+    fn lines(s: &str) -> Vec<&str> {
+        s.lines().collect()
+    }
+
+    #[test]
+    fn relocate_finds_line_in_rewritten_hunk() {
+        let old = lines("a\nb\nneedle()\nc\nd");
+        let new = lines("a\nb2\nb3\nneedle()\nc\nd");
+        assert_eq!(relocate(&old, &new, 3, 3, None), Remap::Shifted(4));
+    }
+
+    #[test]
+    fn relocate_survives_reindent_and_crlf() {
+        let old = lines("x\n  do_thing(1)\ny");
+        let new = lines("x\n\t\tdo_thing(1)\r\ny");
+        assert_eq!(relocate(&old, &new, 2, 2, None), Remap::Shifted(2));
+    }
+
+    #[test]
+    fn relocate_moved_block_range() {
+        let old = lines("h\nfoo(1)\nfoo(2)\nt\nz");
+        let new = lines("z\nq\nq\nq\nh\nfoo(1)\nfoo(2)\nt");
+        assert_eq!(relocate(&old, &new, 2, 3, None), Remap::Shifted(6));
+    }
+
+    #[test]
+    fn relocate_missing_is_lost() {
+        let old = lines("a\nneedle()\nb");
+        let new = lines("a\nother()\nb");
+        assert_eq!(relocate(&old, &new, 2, 2, None), Remap::Lost);
+    }
+
+    #[test]
+    fn relocate_duplicate_uses_context_then_prediction() {
+        // Same line twice; context picks the second.
+        let old = lines("p\nq\nval = 1\nr\ns");
+        let new = lines("x\nval = 1\ny\np\nq\nval = 1\nr\ns");
+        assert_eq!(relocate(&old, &new, 3, 3, None), Remap::Shifted(6));
+        // No context anywhere: ambiguous without a prediction, resolved by a nearer one.
+        let old = lines("val = 1");
+        let new = lines("val = 1\nm\nval = 1");
+        assert_eq!(relocate(&old, &new, 1, 1, None), Remap::Lost);
+        assert_eq!(relocate(&old, &new, 1, 1, Some(3)), Remap::Shifted(3));
+        assert_eq!(relocate(&old, &new, 1, 1, Some(2)), Remap::Lost);
+    }
+
+    #[test]
+    fn relocate_refuses_trivial_line_without_context() {
+        let old = lines("a\n}\nb");
+        let new = lines("q\n}\nw");
+        assert_eq!(relocate(&old, &new, 2, 2, None), Remap::Lost);
+        // With matching context it is fine.
+        let new = lines("q\na\n}\nb");
+        assert_eq!(relocate(&old, &new, 2, 2, None), Remap::Shifted(3));
+    }
+
+    #[test]
+    fn relocate_out_of_bounds_is_lost() {
+        let old = lines("a");
+        assert_eq!(relocate(&old, &old, 2, 2, None), Remap::Lost);
+        assert_eq!(relocate(&old, &old, 0, 1, None), Remap::Lost);
+    }
+
+    #[test]
+    fn predict_line_counts_hunks_above_only() {
+        let hunks = parse_file_patch("@@ -10,1 +10,3 @@\n ctx\n+a\n+b\n@@ -100,2 +102,0 @@\n-x\n-y\n");
+        assert_eq!(predict_line(50, &hunks), 52);
+        assert_eq!(predict_line(100, &hunks), 102);
+        assert_eq!(predict_line(200, &hunks), 200);
     }
 }

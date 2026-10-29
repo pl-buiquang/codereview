@@ -337,7 +337,7 @@ describe("ReviewView pin", () => {
       Promise.resolve({ moved: true, pinnedHeadSha: "head", liveHeadSha: "head2", liveBaseSha: "base", newCommits: 2 }),
     );
     handlers.updateReviewPin = vi.fn(() =>
-      Promise.resolve({ moved: true, reanchor: { reanchored: 1, lost: 0, skippedNoChange: 0 } }),
+      Promise.resolve({ moved: true, reanchor: { reanchored: 1, lost: 0, skippedNoChange: 0, relocated: 0 } }),
     );
     renderReview();
 

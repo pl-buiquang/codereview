@@ -1385,9 +1385,9 @@ function ReviewHeader({
         toast.info("Review is already on the latest commits.");
         return;
       }
-      const { reanchored, lost } = r.reanchor;
+      const { reanchored, lost, relocated } = r.reanchor;
       toast.success(
-        `Review updated to the latest commits.${reanchored ? ` ${reanchored} comment${reanchored === 1 ? "" : "s"} moved.` : ""}${lost ? ` ${lost} could not follow and are marked outdated.` : ""}`,
+        `Review updated to the latest commits.${reanchored ? ` ${reanchored} comment${reanchored === 1 ? "" : "s"} moved${relocated ? ` (${relocated} found by content)` : ""}.` : ""}${lost ? ` ${lost} could not follow and are marked outdated.` : ""}`,
       );
     },
     onError: (e) => toast.error(`Update review failed:\n${String(e)}`),
@@ -1528,7 +1528,9 @@ function ReviewHeader({
     mutationFn: () => api.reanchorComments(review.id),
     onSuccess: (r) => {
       queryClient.invalidateQueries({ queryKey: ["review", review.id] });
-      toast.success(`Re-anchored ${r.reanchored}, ${r.lost} could not be moved`);
+      toast.success(
+        `Re-anchored ${r.reanchored}${r.relocated ? ` (${r.relocated} found by content)` : ""}, ${r.lost} could not be moved`,
+      );
     },
     onError: (e) => toast.error(`Re-anchor failed:\n${String(e)}`),
   });

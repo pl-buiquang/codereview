@@ -98,7 +98,7 @@ For a RIGHT-side selection or comment, the composer shows "± Insert suggestion"
 
 Each review pins its own `base_sha` / `head_sha` ([ADR 0001](../adr/0001-pin-lives-on-review.md)). Reopening or refreshing the PR never moves an existing review.
 
-- When the branch moves past the pin, the header shows a "new commits" badge. On a draft, **Update review** moves the pin to the latest commits and re-anchors the comments. A toast reports how many moved and how many could not follow (marked outdated). Published reviews never move.
+- When the branch moves past the pin, the header shows a "new commits" badge. On a draft, **Update review** moves the pin to the latest commits and re-anchors the comments. A comment on a line the diff rewrote or moved is looked up by its text in the new revision (trimmed lines, plus up to 3 lines of context; a unique best match only, never a lone `}` or blank line). A toast reports how many moved (and how many of those were found by content) and how many could not follow (marked outdated). Published reviews never move.
 - A comment anchored to a SHA its side has since moved past gets an `outdated · <sha>` badge, and the header shows "outdated comments".
 - Review actions menu > **Re-anchor comments** moves comments onto the review's commits and clears the badges (drafts only).
 

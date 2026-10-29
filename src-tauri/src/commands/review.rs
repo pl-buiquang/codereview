@@ -13,6 +13,7 @@ use crate::db::Db;
 use crate::diff_cache;
 use crate::error::{AppError, AppResult};
 use crate::export;
+use crate::gh;
 use crate::gh::ComparedFile;
 use crate::gh::GhRepo;
 use crate::gh::PrInfo;
@@ -436,6 +437,8 @@ pub struct ReanchorResult {
     pub reanchored: usize,
     pub lost: usize,
     pub skipped_no_change: usize,
+    /// Of `reanchored`, those the diff could not map and that were found again by content.
+    pub relocated: usize,
 }
 
 /// Which anchor a re-anchor pass operates on: the comment side it selects, the
@@ -485,6 +488,32 @@ impl AnchorPass {
         match self {
             AnchorPass::Head => "UPDATE comment SET line = ?1, start_line = ?2, anchored_head_sha = ?3, updated_at = ?4 WHERE parent_id = ?5",
             AnchorPass::Base => "UPDATE comment SET line = ?1, start_line = ?2, anchored_base_sha = ?3, updated_at = ?4 WHERE parent_id = ?5",
+        }
+    }
+}
+
+/// File contents at `pinned_sha` and `current`, for the content fallback. Best effort: any
+/// failure (missing file, unreachable commit, no network) yields `None` and the comment stays lost.
+fn read_versions(
+    detail: &ReviewDetail,
+    pinned_sha: &str,
+    current: &str,
+    file_path: &str,
+) -> Option<(String, String)> {
+    match detail.local_path.as_deref() {
+        Some(local) => {
+            let local = Path::new(local);
+            Some((
+                git::show_file(local, pinned_sha, file_path).ok()?,
+                git::show_file(local, current, file_path).ok()?,
+            ))
+        }
+        None => {
+            let (owner, name) = (detail.remote_owner.as_deref()?, detail.remote_name.as_deref()?);
+            Some((
+                gh::file_at_ref(owner, name, file_path, pinned_sha).ok()?,
+                gh::file_at_ref(owner, name, file_path, current).ok()?,
+            ))
         }
     }
 }
@@ -594,31 +623,57 @@ fn reanchor_pass(
             None => Some(anchor::FileHunks::default()),
         };
 
-        for c in comments {
-            let Some(hunks) = &hunks else {
-                result.lost += 1;
-                continue;
-            };
+        // File contents at both revisions, read only if a comment needs the content fallback.
+        let mut versions: Option<Option<(String, String)>> = None;
 
+        for c in comments {
             // A true multi-line range remaps both endpoints; otherwise only `line`.
             let range_start = c.start_line.filter(|&s| s != c.line);
 
-            let new_line = match anchor::remap_line(c.line, hunks) {
-                Remap::Shifted(l) => l,
-                Remap::Lost => {
-                    result.lost += 1;
-                    continue;
+            let direct = hunks.as_ref().and_then(|h| {
+                let line = match anchor::remap_line(c.line, h) {
+                    Remap::Shifted(l) => l,
+                    Remap::Lost => return None,
+                };
+                match range_start {
+                    Some(s) => match anchor::remap_line(s, h) {
+                        Remap::Shifted(l) => Some((line, Some(l))),
+                        Remap::Lost => None,
+                    },
+                    None => Some((line, c.start_line)),
                 }
-            };
-            let new_start = match range_start {
-                Some(s) => match anchor::remap_line(s, hunks) {
-                    Remap::Shifted(l) => Some(l),
-                    Remap::Lost => {
+            });
+
+            let (new_line, new_start) = match direct {
+                Some(pair) => pair,
+                None => {
+                    // The diff could not follow the line (rewritten, or file not in the
+                    // compare): look for the commented text in the new revision.
+                    let block_start = range_start.unwrap_or(c.line);
+                    let versions = versions.get_or_insert_with(|| {
+                        read_versions(detail, pinned_sha, current, file_path)
+                    });
+                    let found = versions.as_ref().and_then(|(old, new)| {
+                        let old: Vec<&str> = old.lines().collect();
+                        let new: Vec<&str> = new.lines().collect();
+                        let predicted = hunks
+                            .as_ref()
+                            .map_or(block_start, |h| anchor::predict_line(block_start, h));
+                        match anchor::relocate(&old, &new, block_start, c.line, Some(predicted)) {
+                            Remap::Shifted(l) => Some(l),
+                            Remap::Lost => None,
+                        }
+                    });
+                    let Some(first) = found else {
                         result.lost += 1;
                         continue;
-                    }
-                },
-                None => c.start_line,
+                    };
+                    result.relocated += 1;
+                    (
+                        first + (c.line - block_start),
+                        range_start.map(|_| first).or(c.start_line),
+                    )
+                }
             };
 
             conn.execute(
@@ -648,6 +703,7 @@ fn reanchor_review_comments(conn: &Connection, detail: &ReviewDetail) -> AppResu
         reanchored: 0,
         lost: 0,
         skipped_no_change: 0,
+        relocated: 0,
     };
     reanchor_pass(conn, detail, AnchorPass::Head, &mut result)?;
     reanchor_pass(conn, detail, AnchorPass::Base, &mut result)?;
@@ -4692,6 +4748,42 @@ mod tests {
 
         let c = comment_row(&conn, id);
         assert_eq!(c.line, 3);
+        assert_eq!(c.anchored_head_sha.as_deref(), Some(h2.as_str()));
+    }
+
+    #[test]
+    fn reanchor_relocates_moved_line_by_content() {
+        let dir = TempDir::new().unwrap();
+        let p = dir.path();
+        git(p, &["init", "-q", "-b", "main"]);
+        git(p, &["config", "user.email", "test@example.com"]);
+        git(p, &["config", "user.name", "Test"]);
+        fs::write(p.join("file.txt"), "one\ntwo\nneedle_call(42)\nthree\nfour\nfive\n").unwrap();
+        git(p, &["add", "."]);
+        git(p, &["commit", "-q", "-m", "h1"]);
+        let h1 = git::rev_parse(p, "HEAD").unwrap();
+        // The commented line moves to the end: the diff deletes it, content finds it.
+        fs::write(p.join("file.txt"), "one\ntwo\nthree\nfour\nfive\nneedle_call(42)\n").unwrap();
+        git(p, &["commit", "-q", "-am", "h2"]);
+        let h2 = git::rev_parse(p, "HEAD").unwrap();
+        let repo_path = p.to_str().unwrap().to_string();
+
+        let conn = open_memory();
+        let repo = seed_repo_at(&conn, &repo_path);
+        let target =
+            get_or_create_local_target(&conn, repo, &repo_path, "main~1", "main", false).unwrap().0;
+        let review = new_review_for_target(&conn, target.id, &LiveShas::default()).unwrap();
+        conn.execute("UPDATE review SET head_sha = ?1 WHERE id = ?2", params![h2, review.id])
+            .unwrap();
+        let id = seed_comment_anchored(
+            &conn, review.id, "file.txt", "RIGHT", 3, None, "on call", Some(&h1),
+        );
+
+        let detail = load_detail(&conn, review.id).unwrap();
+        let result = reanchor_review_comments(&conn, &detail).unwrap();
+        assert_eq!((result.reanchored, result.relocated, result.lost), (1, 1, 0));
+        let c = comment_row(&conn, id);
+        assert_eq!(c.line, 6);
         assert_eq!(c.anchored_head_sha.as_deref(), Some(h2.as_str()));
     }
 

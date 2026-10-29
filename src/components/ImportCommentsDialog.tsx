@@ -67,7 +67,9 @@ export function ImportCommentsDialog({
       const parts = [`Imported ${r.imported} comment${r.imported === 1 ? "" : "s"}`];
       if (r.skipped) parts.push(`${r.skipped} skipped (duplicates)`);
       if (r.reanchor) {
-        if (r.reanchor.reanchored) parts.push(`${r.reanchor.reanchored} moved`);
+        if (r.reanchor.reanchored) parts.push(
+            `${r.reanchor.reanchored} moved${r.reanchor.relocated ? ` (${r.reanchor.relocated} by content)` : ""}`,
+          );
         if (r.reanchor.lost) parts.push(`${r.reanchor.lost} outdated`);
       }
       toast.success(parts.join(", "));

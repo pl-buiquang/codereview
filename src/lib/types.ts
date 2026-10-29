@@ -506,6 +506,7 @@ export interface ReanchorResult {
   reanchored: number;
   lost: number;
   skippedNoChange: number;
+  relocated: number;
 }
 
 export interface ImportCommentsResult {
