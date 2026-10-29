@@ -408,7 +408,7 @@ export function FileJumpList({
   const setResolutionFilter = (resolution: ResolutionFilter) =>
     onCommentFilterChange({ ...commentFilter, resolution });
   const setSourceFilter = (source: SourceFilter) => onCommentFilterChange({ ...commentFilter, source });
-  const [sortMode, setSortMode] = useState<SortMode>("file");
+  const [sortMode, setSortMode] = useState<SortMode>("time");
 
   const allComments = detail?.comments ?? [];
 
