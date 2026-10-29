@@ -40,7 +40,8 @@ export function ReviewSwitcher({ targetId, currentReviewId }: { targetId: number
     return () => document.removeEventListener("mousedown", onDown);
   }, [open]);
 
-  const reviews = reviewsQuery.data ?? [];
+  // The API returns newest first; show oldest first so "Review 1" is the earliest.
+  const reviews = [...(reviewsQuery.data ?? [])].reverse();
   if (reviews.length < 2) return null;
 
   const index = reviews.findIndex((r) => r.review.id === currentReviewId);
