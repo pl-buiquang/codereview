@@ -75,6 +75,7 @@ import { ShortcutHelp } from "./ShortcutHelp";
 import { Markdown } from "./Markdown";
 import { ChatPanel } from "./ChatPanel";
 import { PublishButton } from "./PublishButton";
+import { NewCommitsQuickView } from "./NewCommitsQuickView";
 import { UpdateReviewButton } from "./UpdateReviewButton";
 import { PrMetaPanel, usePrMeta } from "./PrMetaPanel";
 import { ReviewSummaryRow } from "./ReviewSummaryRow";
@@ -1361,9 +1362,11 @@ function ReviewHeader({
     },
     onError: (e) => toast.error(`Could not start a new review:\n${String(e)}`),
   });
+  const [newCommitsOpen, setNewCommitsOpen] = useState(false);
   const newReviewSince = useMutation({
-    mutationFn: () => api.newReviewSince(review.id),
+    mutationFn: (pin: { baseSha: string; headSha: string }) => api.newReviewSince(review.id, pin),
     onSuccess: (r) => {
+      setNewCommitsOpen(false);
       queryClient.invalidateQueries({ queryKey: ["target-reviews", target.id] });
       queryClient.invalidateQueries({ queryKey: ["reviews"] });
       openReview(r.id);
@@ -1716,10 +1719,19 @@ function ReviewHeader({
             <UpdateReviewButton
               busy={updatePin.isPending || newReviewSince.isPending}
               canUpdate={isDraft}
-              canReviewNew={isPr}
+              canQuickView={isPr}
               onUpdate={() => updatePin.mutate()}
-              onReviewNew={() => newReviewSince.mutate()}
+              onQuickView={() => setNewCommitsOpen(true)}
             />
+            {newCommitsOpen && (
+              <NewCommitsQuickView
+                reviewId={review.id}
+                headSha={review.head_sha}
+                busy={newReviewSince.isPending}
+                onClose={() => setNewCommitsOpen(false)}
+                onCreate={(pin) => newReviewSince.mutate(pin)}
+              />
+            )}
           </span>
         )}
         {review.since_head_sha != null && (

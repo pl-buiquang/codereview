@@ -1414,7 +1414,21 @@ pub async fn new_review_on_target(target_id: i64, db: State<'_, Db>) -> AppResul
 /// pin (works for a draft, a pending or a published review). The new review is
 /// pinned at the PR's live commits; its diff starts from the source's pin
 /// (rebase-aware, see `git::interdiff`), recorded in `since_*_sha`.
-pub fn new_review_since_impl(db: &Db, review_id: i64) -> AppResult<Review> {
+pub fn new_review_since_impl(db: &Db, review_id: i64, pin: Option<LiveShas>) -> AppResult<Review> {
+    let (target, since, live) = since_plan(db, review_id, pin)?;
+    let conn = db.0.lock().unwrap();
+    let review = new_review_for_target(&conn, target.id, &live)?;
+    conn.execute(
+        "UPDATE review SET since_base_sha = ?1, since_head_sha = ?2 WHERE id = ?3",
+        params![since.0, since.1, review.id],
+    )?;
+    get_review_row(&conn, review.id)
+}
+
+/// What a "changes since" review needs: the PR target, the source's pin and the
+/// commits to review up to. `pin` (from a quick view) skips resolving the live
+/// head, so the review covers exactly the diff that was previewed.
+fn since_plan(db: &Db, review_id: i64, pin: Option<LiveShas>) -> AppResult<(Target, (String, String), LiveShas)> {
     let (source, target) = {
         let conn = db.0.lock().unwrap();
         let source = get_review_row(&conn, review_id)?;
@@ -1427,26 +1441,83 @@ pub fn new_review_since_impl(db: &Db, review_id: i64) -> AppResult<Review> {
     let (Some(since_base), Some(since_head)) = (source.base_sha.clone(), source.head_sha.clone()) else {
         return Err(AppError::Other("this review has no pinned commits to continue from".into()));
     };
-    let live = resolve_live(db, &target)?;
+    let live = match pin {
+        Some(pin) => pin,
+        None => resolve_live(db, &target)?,
+    };
     if live.base_sha.is_none() || live.head_sha.is_none() {
         return Err(AppError::Other("could not resolve the PR's latest commits".into()));
     }
     if !has_moved(&review_pin(&source), &live) {
         return Err(AppError::Other("the PR has no new commits since this review".into()));
     }
-    let conn = db.0.lock().unwrap();
-    let review = new_review_for_target(&conn, target.id, &live)?;
-    conn.execute(
-        "UPDATE review SET since_base_sha = ?1, since_head_sha = ?2 WHERE id = ?3",
-        params![since_base, since_head, review.id],
-    )?;
-    get_review_row(&conn, review.id)
+    Ok((target, (since_base, since_head), live))
 }
 
-/// `async`: pins at the PR's live head, which means `gh`.
+/// `async`: pins at the PR's live head (unless `base_sha`/`head_sha` are given), which means `gh`.
 #[tauri::command]
-pub async fn new_review_since(review_id: i64, db: State<'_, Db>) -> AppResult<Review> {
-    new_review_since_impl(&db, review_id)
+pub async fn new_review_since(
+    review_id: i64,
+    base_sha: Option<String>,
+    head_sha: Option<String>,
+    db: State<'_, Db>,
+) -> AppResult<Review> {
+    let pin = match (base_sha, head_sha) {
+        (Some(base_sha), Some(head_sha)) => Some(LiveShas { base_sha: Some(base_sha), head_sha: Some(head_sha) }),
+        _ => None,
+    };
+    new_review_since_impl(&db, review_id, pin)
+}
+
+/// The preview behind "Quick view new commits": the diff a since-review would
+/// start with, and the commits it would pin, with nothing stored.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuickInterdiff {
+    pub diff: String,
+    pub base_sha: String,
+    pub head_sha: String,
+    pub rebased: bool,
+    pub approximate: bool,
+}
+
+#[tauri::command]
+pub async fn quick_interdiff(review_id: i64, db: State<'_, Db>) -> AppResult<QuickInterdiff> {
+    let (target, since, live) = since_plan(&db, review_id, None)?;
+    let (Some(base), Some(head)) = (live.base_sha, live.head_sha) else {
+        return Err(AppError::Other("could not resolve the PR's latest commits".into()));
+    };
+    let (clone, owner_name, repo_id) = {
+        let conn = db.0.lock().unwrap();
+        let local_path: Option<String> =
+            conn.query_row("SELECT local_path FROM repository WHERE id = ?1", params![target.repo_id], |r| r.get(0))?;
+        (local_path.map(PathBuf::from), repo_owner_name(&conn, target.repo_id)?, target.repo_id)
+    };
+    let source = DiffSource {
+        key: Some(diff_cache::DiffKey {
+            repo_id,
+            pr_number: target.github_pr_number,
+            base_sha: base.clone(),
+            head_sha: head.clone(),
+            three_dot: target.three_dot,
+            since: Some(since.clone()),
+        }),
+        command: DiffCommand::Interdiff {
+            clone: clone.clone(),
+            owner_name,
+            since: since.clone(),
+            base: base.clone(),
+            head: head.clone(),
+        },
+    };
+    let diff = source.load()?.as_ref().clone();
+    let rebased = since.0 != base;
+    let approximate = rebased
+        && !matches!(
+            interdiff_since_side(clone.as_deref(), &since, &base),
+            Some(git::InterdiffBase::Same(_) | git::InterdiffBase::Replayed(_))
+        );
+    Ok(QuickInterdiff { diff, base_sha: base, head_sha: head, rebased, approximate })
 }
 
 /// How a "changes since" review's diff was derived, for its header chip.

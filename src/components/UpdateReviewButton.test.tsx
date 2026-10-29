@@ -7,9 +7,9 @@ function setup(over: Partial<React.ComponentProps<typeof UpdateReviewButton>> = 
   const props = {
     busy: false,
     canUpdate: true,
-    canReviewNew: true,
+    canQuickView: true,
     onUpdate: vi.fn(),
-    onReviewNew: vi.fn(),
+    onQuickView: vi.fn(),
     ...over,
   };
   render(<UpdateReviewButton {...props} />);
@@ -22,15 +22,15 @@ describe("UpdateReviewButton", () => {
     const props = setup();
     await user.click(screen.getByRole("button", { name: "Update review" }));
     expect(props.onUpdate).toHaveBeenCalledTimes(1);
-    expect(props.onReviewNew).not.toHaveBeenCalled();
+    expect(props.onQuickView).not.toHaveBeenCalled();
   });
 
-  it("offers a new review of the new commits in the menu", async () => {
+  it("offers a quick view of the new commits in the menu", async () => {
     const user = userEvent.setup();
     const props = setup();
     await user.click(screen.getByRole("button", { name: "More update options" }));
-    await user.click(screen.getByRole("menuitem", { name: "Review new commits as a new review" }));
-    expect(props.onReviewNew).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByRole("menuitem", { name: "Quick view new commits" }));
+    expect(props.onQuickView).toHaveBeenCalledTimes(1);
     expect(props.onUpdate).not.toHaveBeenCalled();
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
@@ -41,17 +41,17 @@ describe("UpdateReviewButton", () => {
     expect(screen.getByRole("button", { name: "Update review" })).toBeDisabled();
     await user.click(screen.getByRole("button", { name: "More update options" }));
     await user.click(screen.getByRole("menuitem"));
-    expect(props.onReviewNew).toHaveBeenCalledTimes(1);
+    expect(props.onQuickView).toHaveBeenCalledTimes(1);
   });
 
   it("local drafts get no menu, local published reviews get nothing", () => {
     const { unmount } = render(
-      <UpdateReviewButton busy={false} canUpdate canReviewNew={false} onUpdate={vi.fn()} onReviewNew={vi.fn()} />,
+      <UpdateReviewButton busy={false} canUpdate canQuickView={false} onUpdate={vi.fn()} onQuickView={vi.fn()} />,
     );
     expect(screen.queryByRole("button", { name: "More update options" })).not.toBeInTheDocument();
     unmount();
     const { container } = render(
-      <UpdateReviewButton busy={false} canUpdate={false} canReviewNew={false} onUpdate={vi.fn()} onReviewNew={vi.fn()} />,
+      <UpdateReviewButton busy={false} canUpdate={false} canQuickView={false} onUpdate={vi.fn()} onQuickView={vi.fn()} />,
     );
     expect(container).toBeEmptyDOMElement();
   });

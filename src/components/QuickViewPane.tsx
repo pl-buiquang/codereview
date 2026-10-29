@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { parseDiff } from "react-diff-view";
 import { api } from "../lib/api";
@@ -29,17 +29,6 @@ export function QuickViewPane({
   onApproveAndMerge: (autoMergeOn: boolean) => void;
 }) {
   const [owner, name] = item.repo.split("/");
-  const viewType = useSettingsStore((s) => s.defaultViewType);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape" || e.defaultPrevented) return;
-      e.preventDefault();
-      onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
 
   const diffQuery = useQuery({
     queryKey: ["quick-pr-diff", owner, name, item.number],
@@ -53,14 +42,6 @@ export function QuickViewPane({
     queryFn: () => api.mirrorPrMeta(owner, name, item.number),
   });
 
-  const files = useMemo(
-    () =>
-      diffQuery.data
-        ? parseDiff(diffQuery.data).map((f) => ({ path: fileDisplayPath(f), ...countChanges(f) }))
-        : [],
-    [diffQuery.data],
-  );
-
   const meta = metaQuery.data;
   const own = viewerLogin != null && item.author_login === viewerLogin;
   const autoMergeOn = meta?.autoMerge != null;
@@ -72,26 +53,24 @@ export function QuickViewPane({
         ? "Draft PRs can't be merged"
         : null;
 
-  const jumpTo = (path: string) => {
-    for (const el of document.querySelectorAll<HTMLElement>(".quick-view-body [data-file-path]")) {
-      if (el.dataset.filePath === path) {
-        el.scrollIntoView({ block: "start" });
-        return;
-      }
-    }
-  };
-
   return (
-    <>
-      <div className="quick-view-backdrop" onClick={onClose} />
-      <aside className="file-view-pane" aria-label="Quick view">
-        <div className="file-view-pane-header">
-          <span className="file-path" title={item.title}>
-            <span className="mono">
-              {item.repo}#{item.number}
-            </span>{" "}
-            {item.title}
-          </span>
+    <QuickDiffPane
+      title={
+        <>
+          <span className="mono">
+            {item.repo}#{item.number}
+          </span>{" "}
+          {item.title}
+        </>
+      }
+      titleText={item.title}
+      diffText={diffQuery.data}
+      isLoading={diffQuery.isLoading}
+      error={diffQuery.isError ? diffQuery.error : null}
+      errorHint="Use Open review for large PRs."
+      onClose={onClose}
+      actions={
+        <>
           <button className="btn btn-sm btn-primary" onClick={onOpenReview} title="Open (or resume) the review">
             Open review
           </button>
@@ -110,21 +89,86 @@ export function QuickViewPane({
               </button>
             </>
           )}
+        </>
+      }
+    />
+  );
+}
+
+/** The slide-out shell shared by the Inbox quick view and the new-commits quick view:
+ *  backdrop + Esc close, a header with caller-supplied actions, a jump-to-file bar and the diff. */
+export function QuickDiffPane({
+  title,
+  titleText,
+  actions,
+  diffText,
+  isLoading,
+  error,
+  errorHint,
+  onClose,
+}: {
+  title: ReactNode;
+  titleText?: string;
+  actions: ReactNode;
+  diffText: string | undefined;
+  isLoading: boolean;
+  error: unknown;
+  errorHint?: string;
+  onClose: () => void;
+}) {
+  const viewType = useSettingsStore((s) => s.defaultViewType);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      e.preventDefault();
+      onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const files = useMemo(
+    () =>
+      diffText != null
+        ? parseDiff(diffText).map((f) => ({ path: fileDisplayPath(f), ...countChanges(f) }))
+        : [],
+    [diffText],
+  );
+
+  const jumpTo = (path: string) => {
+    for (const el of document.querySelectorAll<HTMLElement>(".quick-view-body [data-file-path]")) {
+      if (el.dataset.filePath === path) {
+        el.scrollIntoView({ block: "start" });
+        return;
+      }
+    }
+  };
+
+  return (
+    <>
+      <div className="quick-view-backdrop" onClick={onClose} />
+      <aside className="file-view-pane" aria-label="Quick view">
+        <div className="file-view-pane-header">
+          <span className="file-path" title={titleText}>
+            {title}
+          </span>
+          {actions}
           <button className="btn-icon" title="Close (Esc)" onClick={onClose}>
             ✕
           </button>
         </div>
         <div className="file-view-pane-body quick-view-body">
-          {diffQuery.isLoading && <p className="muted quick-view-note">Loading diff…</p>}
-          {diffQuery.isError && (
+          {isLoading && <p className="muted quick-view-note">Loading diff…</p>}
+          {error != null && (
             <p className="muted quick-view-note">
-              Could not load the diff ({String(diffQuery.error)}). Use Open review for large PRs.
+              Could not load the diff ({String(error)}).{errorHint ? ` ${errorHint}` : ""}
             </p>
           )}
-          {diffQuery.data != null && (
+          {diffText != null && (
             <>
               {files.length > 1 && <FileSelect files={files} onPick={jumpTo} />}
-              <DiffViewer diffText={diffQuery.data} viewType={viewType} />
+              <DiffViewer diffText={diffText} viewType={viewType} />
             </>
           )}
         </div>

@@ -480,6 +480,13 @@ export interface MirrorUpdatedPayload {
 }
 
 /** A review's pin compared with its target's live head. */
+/** Preview of a "changes since" review: its diff and the commits it would pin. */
+export interface QuickInterdiff extends InterdiffMeta {
+  diff: string;
+  baseSha: string;
+  headSha: string;
+}
+
 /** How a "changes since" review's diff was derived. */
 export interface InterdiffMeta {
   /** The PR's merge-base moved since the earlier pin. */

@@ -75,6 +75,7 @@ import type {
   ToolEnv,
   UpdateReviewResult,
   InterdiffMeta,
+  QuickInterdiff,
   WipKind,
   WipStatus,
   StashEntry,
@@ -104,8 +105,10 @@ export const api = {
     invoke<ReviewSummary[]>("list_target_reviews", { targetId }),
   newReviewOnTarget: (targetId: number) =>
     invoke<Review>("new_review_on_target", { targetId }),
-  newReviewSince: (reviewId: number) =>
-    invoke<Review>("new_review_since", { reviewId }),
+  newReviewSince: (reviewId: number, pin?: { baseSha: string; headSha: string }) =>
+    invoke<Review>("new_review_since", { reviewId, ...pin }),
+  /** What a review of the PR's new commits would contain, with nothing stored. */
+  quickInterdiff: (reviewId: number) => invoke<QuickInterdiff>("quick_interdiff", { reviewId }),
   reviewInterdiffMeta: (reviewId: number) =>
     invoke<InterdiffMeta | null>("review_interdiff_meta", { reviewId }),
   getReview: (reviewId: number) =>

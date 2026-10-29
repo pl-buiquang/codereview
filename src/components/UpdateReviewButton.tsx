@@ -2,22 +2,23 @@ import { useEffect, useRef, useState } from "react";
 import { Icon } from "./icons";
 
 /** Split button shown when a review's branch has new commits. The primary action moves this
- *  review to the latest commits (drafts only); the menu starts a separate review of just what
- *  changed since this one (rebase-aware), which also works on a published review. */
+ *  review to the latest commits (drafts only); the menu opens a quick view of just what changed
+ *  since this one (rebase-aware), from which a separate review can be created; it also works on a
+ *  published review. */
 export function UpdateReviewButton({
   busy,
   canUpdate,
-  canReviewNew,
+  canQuickView,
   onUpdate,
-  onReviewNew,
+  onQuickView,
 }: {
   busy: boolean;
   /** Only a draft can be moved to the latest commits. */
   canUpdate: boolean;
-  /** Only PR reviews can start a review of the new commits. */
-  canReviewNew: boolean;
+  /** Only PR reviews can preview the new commits. */
+  canQuickView: boolean;
   onUpdate: () => void;
-  onReviewNew: () => void;
+  onQuickView: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -31,7 +32,7 @@ export function UpdateReviewButton({
     return () => document.removeEventListener("mousedown", onDown);
   }, [menuOpen]);
 
-  if (!canUpdate && !canReviewNew) return null;
+  if (!canUpdate && !canQuickView) return null;
   return (
     <div ref={ref} className="btn-split">
       <button
@@ -40,13 +41,13 @@ export function UpdateReviewButton({
         title={
           canUpdate
             ? "Move this review to the latest commits and re-anchor its comments"
-            : "A published review can't move. Use the menu to review the new commits"
+            : "A published review can't move. Use the menu to view the new commits"
         }
         onClick={onUpdate}
       >
         {busy ? "Updating…" : "Update review"}
       </button>
-      {canReviewNew && (
+      {canQuickView && (
         <button
           className="btn btn-sm"
           disabled={busy}
@@ -59,17 +60,17 @@ export function UpdateReviewButton({
           <Icon name="chev" size={11} />
         </button>
       )}
-      {menuOpen && canReviewNew && (
+      {menuOpen && canQuickView && (
         <div className="btn-split-menu card" role="menu">
           <button
             role="menuitem"
-            title="Start a new review of only what changed since this one (rebase-aware)"
+            title="Preview only what changed since this review (rebase-aware), then create a review from it"
             onClick={() => {
               setMenuOpen(false);
-              onReviewNew();
+              onQuickView();
             }}
           >
-            Review new commits as a new review
+            Quick view new commits
           </button>
         </div>
       )}

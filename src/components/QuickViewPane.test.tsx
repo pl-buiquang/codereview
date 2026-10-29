@@ -88,4 +88,16 @@ describe("QuickViewPane", () => {
     setup();
     expect(await screen.findByText(/Could not load the diff/)).toBeInTheDocument();
   });
+
+  it("collapses and expands a file card from its header chevron", async () => {
+    setup();
+    const header = await screen.findByRole("button", { name: /a\.txt/ });
+    expect(header).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("new")).toBeInTheDocument();
+    await userEvent.click(header);
+    expect(header).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("new")).not.toBeInTheDocument();
+    await userEvent.click(header);
+    expect(screen.getByText("new")).toBeInTheDocument();
+  });
 });
