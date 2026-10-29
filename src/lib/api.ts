@@ -235,6 +235,9 @@ export const api = {
     invoke<void>("update_pr_branch", { owner, name, number, rebase }),
   setPrAutoMerge: (owner: string, name: string, number: number, enable: boolean) =>
     invoke<void>("set_pr_auto_merge", { owner, name, number, enable }),
+  /** A PR's unified diff straight from GitHub, with nothing stored (Inbox quick view). */
+  quickPrDiff: (owner: string, name: string, number: number) =>
+    invoke<string>("quick_pr_diff", { owner, name, number }),
   approvePr: (owner: string, name: string, number: number) =>
     invoke<void>("approve_pr", { owner, name, number }),
   setPrLabel: (owner: string, name: string, number: number, label: string, on: boolean) =>

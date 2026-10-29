@@ -29,6 +29,7 @@ export function InboxItemRow({
   onOpenExisting,
   boardTracked,
   onBoardTrack,
+  onQuickView,
 }: {
   item: InboxItem;
   variant: RowVariant;
@@ -51,6 +52,8 @@ export function InboxItemRow({
   boardTracked?: boolean;
   /** Shown as a "Track" button when the item isn't on the board yet. */
   onBoardTrack?: () => void;
+  /** Previews a PR's diff in a side panel without creating a review. */
+  onQuickView?: () => void;
 }) {
   const tracked = boardTracked || item.inbox_state === "tracked";
   const unviewed = variant === "new" && !item.viewed_at;
@@ -140,6 +143,16 @@ export function InboxItemRow({
           {timeAgo(item.updated_at)}
         </span>
         <div className="pr-actions">
+          {item.type === "pr" && onQuickView && (
+            <button
+              className="btn btn-sm"
+              disabled={busy}
+              onClick={onQuickView}
+              title="Preview the diff and approve without creating a review"
+            >
+              Quick view
+            </button>
+          )}
           {item.type === "pr" &&
             (existingReviewId != null ? (
               <button

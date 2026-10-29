@@ -68,6 +68,7 @@ import {
   type FileFocus,
   type HunkFocus,
 } from "../lib/focus";
+import { approveAndAutoMerge } from "../lib/prActions";
 import { FileViewPane } from "./FileViewPane";
 import { GithubThread } from "./GithubThread";
 import { ShortcutHelp } from "./ShortcutHelp";
@@ -1449,10 +1450,7 @@ function ReviewHeader({
       if (owner == null || name == null || prNumber == null) {
         throw new Error("missing PR identity");
       }
-      await api.approvePr(owner, name, prNumber);
-      if (prMetaQuery.data?.autoMerge == null) {
-        await api.setPrAutoMerge(owner, name, prNumber, true);
-      }
+      await approveAndAutoMerge(owner, name, prNumber, prMetaQuery.data?.autoMerge != null);
     },
     onSuccess: () => {
       toast.success("Approved, auto-merge enabled");

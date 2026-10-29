@@ -46,7 +46,7 @@ function DiffFile({ file, viewType }: { file: FileData; viewType: ViewType }) {
     [file, tooLarge, syntaxReady],
   );
   return (
-    <div className="diff-file">
+    <div className="diff-file" data-file-path={fileDisplayPath(file)}>
       <div className="diff-file-header">
         <span className="file-path">{filePath(file)}</span>
         <span className="diff-stats">

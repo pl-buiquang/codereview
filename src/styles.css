@@ -6608,3 +6608,35 @@ tr.def-flash > td {
   font-family: var(--font-mono);
   font-size: var(--diff-font-size);
 }
+
+/* Inbox quick view: a transparent click-catcher under the file-view-pane (z-index 50). */
+.quick-view-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 49;
+}
+.quick-view-note {
+  padding: 12px;
+}
+.quick-view-files {
+  list-style: none;
+  margin: 0;
+  padding: 8px 12px;
+  font-size: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.quick-view-files .add {
+  color: var(--success);
+}
+.quick-view-files .del {
+  color: var(--danger);
+}
+.quick-view-files button {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}

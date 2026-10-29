@@ -8,9 +8,11 @@ import { useSyncNow, useSyncScope } from "../lib/sync";
 import { timeAgo } from "../lib/timeAgo";
 import { useUIStore } from "../store";
 import type { InboxItem } from "../lib/types";
+import { approveAndAutoMerge } from "../lib/prActions";
 import { InboxItemRow, type RowVariant } from "./InboxItemRow";
 import { ConversationsView } from "./ConversationsView";
 import { FilterList, FilterRail, MultiFilterList } from "./RailFilters";
+import { QuickViewPane } from "./QuickViewPane";
 import { RepoName } from "./RepoName";
 import { Icon, type IconName } from "./icons";
 import { SyncButton } from "./SyncButton";
@@ -174,6 +176,53 @@ export function InboxView() {
     },
     onError: (e) => toast.error(`Could not open review:\n${String(e)}`),
   });
+
+  const [quickItem, setQuickItem] = useState<InboxItem | null>(null);
+  const closeQuick = () => setQuickItem(null);
+
+  // Quick view: Open review resumes the latest review when there is one, and either way
+  // the PR ends up tracked, which takes it out of the inbox.
+  const quickOpenReview = (item: InboxItem) => {
+    closeQuick();
+    const existing = reviewByPr.get(`${item.repo}#${item.number}`);
+    if (existing == null) {
+      openPr.mutate(item);
+      return;
+    }
+    api
+      .boardTrack(item.url)
+      .catch(() => {})
+      .finally(() => {
+        invalidate();
+        queryClient.invalidateQueries({ queryKey: ["board-tracked"] });
+        queryClient.invalidateQueries({ queryKey: ["board"] });
+      });
+    openReview(existing);
+  };
+
+  // Quick view: approve in the background. The PR is tracked up front so it leaves the
+  // inbox at once; the toast says whether GitHub accepted it.
+  const quickApprove = (item: InboxItem, merge: boolean, autoMergeOn: boolean) => {
+    closeQuick();
+    const [owner, name] = item.repo.split("/");
+    const label = `#${item.number}`;
+    api
+      .boardTrack(item.url)
+      .catch(() => {})
+      .finally(() => {
+        invalidate();
+        queryClient.invalidateQueries({ queryKey: ["board-tracked"] });
+        queryClient.invalidateQueries({ queryKey: ["board"] });
+      });
+    const run = merge ? approveAndAutoMerge(owner, name, item.number, autoMergeOn) : api.approvePr(owner, name, item.number);
+    run
+      .then(() => {
+        toast.success(merge ? `Approved ${label}, auto-merge enabled` : `Approved ${label}`);
+        queryClient.invalidateQueries({ queryKey: ["board"] });
+        queryClient.invalidateQueries({ queryKey: ["mirror-pr-meta", owner, name, item.number] });
+      })
+      .catch((e) => toast.error(`${merge ? "Approve & merge" : "Approve"} ${label} failed:\n${String(e)}`));
+  };
 
   const botSet = useMemo(() => parseBotLogins(botLogins), [botLogins]);
   const isBot = (item: InboxItem) =>
@@ -408,6 +457,7 @@ export function InboxView() {
                   if (!item.viewed_at) markViewed.mutate(item.id);
                   openReview(existingReviewId);
                 }}
+                onQuickView={() => setQuickItem(item)}
                 boardTracked={trackedIds.has(item.id)}
                 onBoardTrack={() => track.mutate(item)}
               />
@@ -420,6 +470,16 @@ export function InboxView() {
           )}
         </div>
       </div>
+      )}
+      {quickItem && (
+        <QuickViewPane
+          item={quickItem}
+          viewerLogin={metaQuery.data?.viewerLogin ?? null}
+          onClose={closeQuick}
+          onOpenReview={() => quickOpenReview(quickItem)}
+          onApprove={() => quickApprove(quickItem, false, false)}
+          onApproveAndMerge={(on) => quickApprove(quickItem, true, on)}
+        />
       )}
     </section>
   );
