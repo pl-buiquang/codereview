@@ -6643,6 +6643,9 @@ tr.def-flash > td {
 .quick-view-body .diff-file {
   scroll-margin-top: var(--qv-bar-h);
 }
+.quick-view-body > .diff-files {
+  padding: 12px;
+}
 .quick-view-filebar {
   position: sticky;
   top: 0;
