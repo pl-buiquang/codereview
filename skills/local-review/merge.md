@@ -14,7 +14,7 @@ Inputs (each optional):
 | `codex.json` | Codex run | the companion's JSON payload (parse as below) |
 | `codex-skipped.txt` | orchestrator | why Codex was skipped or failed |
 
-A missing file for a layer that ran means that layer failed: note it in the report and the body.
+A missing file for a layer that ran means that layer failed: note it in the report.
 
 ## 1. Collect findings
 
@@ -25,7 +25,7 @@ unless `file` is `null`. Keep each axis in its own bucket.
 
 **Codex adversarial**: the review is `payload.result` (`verdict`: `approve` | `needs-attention`, `summary`,
 `findings`, `next_steps`). If `payload.result` is null (see `payload.parseError`), record "codex returned
-unparseable output" and put `payload.rawOutput` in the review body under `## Codex` instead of making
+unparseable output" and put `payload.rawOutput` in the report under `## Codex` instead of making
 comments. Each finding has `severity` (critical|high|medium|low), `title`, `body`, `file`, `line_start`,
 `line_end`, `confidence` (0–1) and `recommendation`. Convert each to the common shape:
 
@@ -35,9 +35,9 @@ kind = "codex-<severity>", ref = "confidence <n>", fix = recommendation
 ```
 
 Drop findings with `confidence < 0.3`. Keep `line_end` to write `L<start>-<end>` in file-level comments.
-Keep `verdict` and `summary` for the body. `next_steps` are optional extra bullets there, not comments.
+Keep `verdict` and `summary` for the report. `next_steps` are optional extra bullets there, not comments.
 
-**Codex native**: the text is `payload.codex.stdout`. Put it in the body under `## Codex (native)`, trimmed
+**Codex native**: the text is `payload.codex.stdout`. Put it in the report under `## Codex (native)`, trimmed
 to its findings. No comments.
 
 ## 2. Anchor each finding
@@ -46,7 +46,7 @@ Take hunks from `cr focus hunks RID --json` (it works without `--focus` too). A 
 lines `new_start` … `new_start + d - 1`, where `+c,d` is read from its `header`. A finding whose `file`
 and `line` fall inside a hunk's range is line-anchored (side RIGHT). Otherwise it becomes a file comment,
 with `L<start>-<end>` in the body when it has a range. Findings with no `file` (a missing requirement) go
-only into the review body.
+only into the report.
 
 ## 3. Post them
 
@@ -74,7 +74,10 @@ Without `--focus` there is no plan; just post the comments.
 
 Keep the layers separate. Never merge or rerank findings across axes.
 
-## 4. Set the review summary
+## 4. Compose the summary (report only)
+
+Never write the review body or verdict (`cr update`): the body is what gets published to GitHub. The
+summary only goes in your report.
 
 Start from `summary.md`. Append a section per layer that ran, each with the finding count and the worst
 finding in that layer only:
@@ -84,12 +87,10 @@ finding in that layer only:
 ## Spec        — N findings. Worst: …          (or "no spec available")
 ## Codex       — verdict needs-attention|approve. <Codex summary>   (or "skipped: …")
 ```
-```bash
-cr update RID --body "…" --verdict comment
-```
-Use `--verdict comment`. Never `approve` or `request_changes`: this is an aid, not an approval gate.
 
-## Report (at most 150 words)
+## Report (at most 250 words)
 
-Comments added per tag (`ai:review`, `ai:codex`); with `--focus`, the tier counts printed by
-`cr focus set` and the `critical` hunks; each layer skipped or failed and why; the worst finding per layer.
+The summary from §4 (including what is body-only: file-less findings, Codex verdict/summary/next steps,
+raw or native Codex output); comments added per tag (`ai:review`, `ai:codex`); with `--focus`, the tier
+counts printed by `cr focus set` and the `critical` hunks; each layer skipped or failed and why; the worst
+finding per layer.

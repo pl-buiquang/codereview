@@ -164,7 +164,7 @@ stderr>` to `/tmp/cr-RID/codex-skipped.txt`) and for the agents. Then launch one
 (common header, plus the flags and which of `plan.json`, `summary.md`, `standards.json`, `spec.json`,
 `codex.json`, `codex-skipped.txt` exist): "Read `<dir>/merge.md`." It returns a report of at most 150 words.
 
-No layer: skip this step. The Explain agent already set the summary (and submitted the plan with `--focus`).
+No layer: skip this step. The Explain agent already reported the summary (and submitted the plan with `--focus`).
 
 ### Step 5: Open the app and report
 
@@ -175,9 +175,9 @@ If it fails (older build), fall back to `open "codereview://review/RID"`.
 
 Tell the user, from the agents' reports only: the review id and the mode used (and why, if auto); comments
 added per tag (`ai:explain`, `ai:review`, `ai:codex`); with `--focus`, the tier counts and the `critical`
-hunks; any layer skipped or failed and why; that the app is open on the review; and the summary written.
+hunks; any layer skipped or failed and why; that the app is open on the review; and the summary (from the agents' reports; it is not saved to the review, so nothing is published).
 
-Verdict is always `comment`. Never `approve` or `request_changes`: this is an aid, not an approval gate.
+Never set the review body or verdict: the body is what gets published to GitHub. This is an aid, not an approval gate.
 
 ## Reply mode: draft replies to existing GitHub threads
 

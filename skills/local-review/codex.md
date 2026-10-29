@@ -10,7 +10,7 @@ can't be invoked from a skill, so call its companion script directly. It reviews
 - `--codex` or `--codex=adversarial`: `adversarial-review`. Challenges the approach, assumptions and failure
   modes. Returns structured findings. Takes optional focus text (the quoted text after the flag).
 - `--codex=native`: `review`, Codex's built-in reviewer. Returns **plain text only** (no structured findings,
-  no focus text). It goes into the review body; it never becomes comments.
+  no focus text). It goes into the merge report; it never becomes comments.
 
 ## 1. Locate the plugin
 

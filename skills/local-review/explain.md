@@ -50,12 +50,11 @@ Follow `focus.md` (read it) to gather and tier the hunks and build the plan, wit
 2–4 sentences on the whole change (with `--focus`, reuse the plan's `summary`).
 
 - **Other layers running:** write it to `/tmp/cr-RID/summary.md`. The merge agent appends the per-layer
-  sections and sets the body.
-- **No other layers:** set it yourself:
-  ```bash
-  cr update RID --body "…" --verdict comment
-  ```
-  Use `--verdict comment`. Never `approve` or `request_changes`.
+  sections and returns them in its report.
+- **No other layers:** put it in your report.
+
+Never write it to the review (`cr update --body`): the body is what gets published to GitHub.
+Never set the verdict either.
 
 ## Report (at most 150 words)
 

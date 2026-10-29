@@ -92,5 +92,5 @@ finding count and its worst finding (at most 150 words, no full findings). The f
 
 `skipped` is a reason string when the agent could not run (see Spec source 4), else `null`. `line` and
 `file` are `null` for findings that don't belong to one place (a missing requirement that has no code yet).
-Those go into the review body only. The merge agent (`merge.md`) validates findings against the diff,
+Those go into the merge report only. The merge agent (`merge.md`) validates findings against the diff,
 anchors them, tags them `ai:review` and posts them.
