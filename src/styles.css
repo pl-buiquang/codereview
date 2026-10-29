@@ -6618,25 +6618,73 @@ tr.def-flash > td {
 .quick-view-note {
   padding: 12px;
 }
-.quick-view-files {
-  list-style: none;
-  margin: 0;
+.quick-view-body {
+  --qv-bar-h: 45px;
+}
+/* The per-file headers stick too: park them under the file bar. */
+.quick-view-body .diff-file-header {
+  top: var(--qv-bar-h);
+}
+.quick-view-body .diff-file {
+  scroll-margin-top: var(--qv-bar-h);
+}
+.quick-view-filebar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  height: var(--qv-bar-h);
+  box-sizing: border-box;
   padding: 8px 12px;
-  font-size: 12px;
+  background: var(--surface-2);
   border-bottom: 1px solid var(--border);
 }
-.quick-view-files .add {
+.quick-view-select {
+  position: relative;
+}
+.quick-view-select .input {
+  width: 100%;
+}
+.quick-view-options {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 50vh;
+  overflow: auto;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-m);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+.quick-view-options li {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 4px 8px;
+  border-radius: var(--radius-s, 4px);
+  font-size: 12px;
+  cursor: pointer;
+}
+.quick-view-options li.active {
+  background: var(--accent-soft, rgba(127, 127, 127, 0.2));
+}
+.quick-view-option-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+}
+.quick-view-options .add {
   color: var(--success);
 }
-.quick-view-files .del {
+.quick-view-options .del {
   color: var(--danger);
 }
-.quick-view-files button {
-  background: none;
-  border: 0;
-  padding: 0;
-  color: var(--accent);
-  cursor: pointer;
-  font: inherit;
-  text-align: left;
+.quick-view-empty {
+  cursor: default;
 }
