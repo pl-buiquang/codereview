@@ -939,6 +939,21 @@ button:disabled,
   white-space: nowrap;
   flex: 1;
 }
+.diff-file-toggle {
+  cursor: pointer;
+  user-select: none;
+}
+.diff-file-chev {
+  flex: none;
+  transition: transform 0.12s ease;
+}
+.diff-file-toggle.collapsed .diff-file-chev {
+  transform: rotate(-90deg);
+}
+.diff-file-toggle.collapsed {
+  border-bottom: none;
+  border-radius: var(--radius-l);
+}
 .diff-file-header .btn {
   font-family: var(--font-ident);
   font-size: 13px;

@@ -1,8 +1,9 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Diff, Hunk, parseDiff, type FileData, type ViewType } from "react-diff-view";
 import { countChanges, fileDisplayPath, languageForPath, tokenizeFile } from "../lib/diff";
 import { useSyntaxReady } from "../lib/highlight";
 import { useSettingsStore } from "../lib/settings";
+import { Icon } from "./icons";
 
 function filePath(file: FileData): string {
   if (file.type === "delete") return file.oldPath;
@@ -38,6 +39,7 @@ export function DiffViewer({
 
 function DiffFile({ file, viewType }: { file: FileData; viewType: ViewType }) {
   const { add, del } = countChanges(file);
+  const [collapsed, setCollapsed] = useState(false);
   const maxLines = useSettingsStore((s) => s.largeDiffMaxLines);
   const tooLarge = add + del > maxLines;
   const syntaxReady = useSyntaxReady(languageForPath(fileDisplayPath(file)));
@@ -47,14 +49,27 @@ function DiffFile({ file, viewType }: { file: FileData; viewType: ViewType }) {
   );
   return (
     <div className="diff-file" data-file-path={fileDisplayPath(file)}>
-      <div className="diff-file-header">
+      <div
+        className={`diff-file-header diff-file-toggle${collapsed ? " collapsed" : ""}`}
+        role="button"
+        tabIndex={0}
+        aria-expanded={!collapsed}
+        title={collapsed ? "Expand file" : "Collapse file"}
+        onClick={() => setCollapsed((c) => !c)}
+        onKeyDown={(e) => {
+          if (e.key !== "Enter" && e.key !== " ") return;
+          e.preventDefault();
+          setCollapsed((c) => !c);
+        }}
+      >
+        <Icon name="chev" size={12} className="diff-file-chev" />
         <span className="file-path">{filePath(file)}</span>
         <span className="diff-stats">
           <span className="add">+{add}</span>
           <span className="del">−{del}</span>
         </span>
       </div>
-      {file.isBinary ? (
+      {collapsed ? null : file.isBinary ? (
         <p className="muted binary-note">Binary file not shown.</p>
       ) : tooLarge ? (
         <p className="muted binary-note">
