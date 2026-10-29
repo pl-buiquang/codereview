@@ -14,7 +14,7 @@ import { UpdateBanner } from "./components/UpdateBanner";
 import { SettingsView } from "./components/SettingsView";
 import { api } from "./lib/api";
 import { toast } from "./lib/toast";
-import { isCloseTabShortcut, isCommandPaletteShortcut, isEditableTarget, navHistoryDirection } from "./lib/keyboard";
+import { isCloseTabShortcut, isCommandPaletteShortcut, isEditableTarget, navHistoryDirection, tabSwitchDirection } from "./lib/keyboard";
 import { goBack, goForward, startNavHistory } from "./lib/navHistory";
 import { toggleCommandPalette } from "./lib/commandPalette";
 import { useApplySettings } from "./lib/useApplySettings";
@@ -172,6 +172,20 @@ function App() {
       if (!isCommandPaletteShortcut(e)) return;
       e.preventDefault();
       toggleCommandPalette();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const dir = tabSwitchDirection(e);
+      if (dir == null) return;
+      e.preventDefault();
+      const { tabs, activeTabId, setActiveTab } = useUIStore.getState();
+      if (tabs.length < 2) return;
+      const i = Math.max(0, tabs.findIndex((t) => t.id === activeTabId));
+      setActiveTab(tabs[(i + dir + tabs.length) % tabs.length].id);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);

@@ -7,6 +7,7 @@ export interface Binding {
 export const BINDINGS: Binding[] = [
   { keys: ["⌘/Ctrl + P"], description: "Quick access — search reviews" },
   { keys: ["⌘/Ctrl + W"], description: "Close current tab" },
+  { keys: ["Ctrl + PageUp", "Ctrl + PageDown"], description: "Previous / next tab" },
   { keys: ["⌘/Alt + ←", "⌘/Alt + →"], description: "Navigate back / forward" },
   { keys: ["]", "["], description: "Next / previous file" },
   { keys: ["↑", "↓"], description: "Previous / next commit (repository graph) or file (diff preview)" },
@@ -49,6 +50,17 @@ export function isCloseTabShortcut(
     !event.shiftKey &&
     event.key.toLowerCase() === "w"
   );
+}
+
+/** -1 for Ctrl+PageUp (tab to the left), 1 for Ctrl+PageDown (tab to the right),
+ *  null otherwise. Ctrl only, on every platform. */
+export function tabSwitchDirection(
+  event: Pick<KeyboardEvent, "key" | "ctrlKey" | "metaKey" | "altKey" | "shiftKey">,
+): -1 | 1 | null {
+  if (!event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return null;
+  if (event.key === "PageUp") return -1;
+  if (event.key === "PageDown") return 1;
+  return null;
 }
 
 /** -1 for back (⌘← / Alt+←), 1 for forward (⌘→ / Alt+→), null otherwise.

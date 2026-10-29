@@ -4,6 +4,7 @@ import {
   isEditableTarget,
   navHistoryDirection,
   pickThread,
+  tabSwitchDirection,
   moveCursorKey,
 } from "./keyboard";
 
@@ -154,5 +155,26 @@ describe("moveCursorKey", () => {
     expect(moveCursorKey(keys, "z", 1)).toBe("a");
     expect(moveCursorKey([], null, 1)).toBeNull();
     expect(moveCursorKey([], "a", -1)).toBeNull();
+  });
+});
+
+describe("tabSwitchDirection", () => {
+  const ev = (key: string, mods: Partial<Record<"ctrlKey" | "metaKey" | "altKey" | "shiftKey", boolean>> = {}) => ({
+    key,
+    ctrlKey: true,
+    metaKey: false,
+    altKey: false,
+    shiftKey: false,
+    ...mods,
+  });
+  it("maps Ctrl+PageUp/PageDown to left/right", () => {
+    expect(tabSwitchDirection(ev("PageUp"))).toBe(-1);
+    expect(tabSwitchDirection(ev("PageDown"))).toBe(1);
+  });
+  it("ignores other keys and extra modifiers", () => {
+    expect(tabSwitchDirection(ev("PageUp", { ctrlKey: false }))).toBeNull();
+    expect(tabSwitchDirection(ev("PageUp", { shiftKey: true }))).toBeNull();
+    expect(tabSwitchDirection(ev("PageUp", { metaKey: true }))).toBeNull();
+    expect(tabSwitchDirection(ev("ArrowLeft"))).toBeNull();
   });
 });
