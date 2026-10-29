@@ -632,7 +632,16 @@ export async function pickSavePath(
     defaultPath: defaultName,
     filters: [{ name: ext.toUpperCase(), extensions: [ext] }],
   });
-  return selected ?? null;
+  return selected ? withSingleExtension(selected, ext) : null;
+}
+
+/** The dialog can hand back `a.md.md` (it appends the filter extension to a name that has it). */
+function withSingleExtension(path: string, ext: string): string {
+  const suffix = `.${ext}`;
+  const lower = suffix.toLowerCase();
+  let out = path;
+  while (out.toLowerCase().endsWith(lower + lower)) out = out.slice(0, -suffix.length);
+  return out.toLowerCase().endsWith(lower) ? out : out + suffix;
 }
 
 export type { ReviewEvent };

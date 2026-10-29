@@ -177,6 +177,19 @@ describe("native dialog helpers", () => {
     });
   });
 
+  it("pickSavePath keeps a single extension", async () => {
+    for (const [chosen, expected] of [
+      ["/x/a.md.md", "/x/a.md"],
+      ["/x/a.MD.md", "/x/a.MD"],
+      ["/x/a.md.md.md", "/x/a.md"],
+      ["/x/a", "/x/a.md"],
+      ["/x/a.md", "/x/a.md"],
+    ]) {
+      save.mockResolvedValueOnce(chosen);
+      await expect(pickSavePath("review.md", "md")).resolves.toBe(expected);
+    }
+  });
+
   it("pickSavePath returns null when cancelled", async () => {
     save.mockResolvedValueOnce(null);
     await expect(pickSavePath("review.md", "md")).resolves.toBeNull();
