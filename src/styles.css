@@ -6688,3 +6688,15 @@ tr.def-flash > td {
 .quick-view-empty {
   cursor: default;
 }
+
+.import-types {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 12px 0;
+}
+.import-type {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}

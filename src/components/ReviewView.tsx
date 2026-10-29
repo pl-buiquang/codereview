@@ -79,6 +79,7 @@ import { UpdateReviewButton } from "./UpdateReviewButton";
 import { PrMetaPanel, usePrMeta } from "./PrMetaPanel";
 import { ReviewSummaryRow } from "./ReviewSummaryRow";
 import { ReviewSwitcher } from "./ReviewSwitcher";
+import { ImportCommentsDialog } from "./ImportCommentsDialog";
 import { AutoMergeBadge, CiBadge, ReviewDecisionBadge, StatusPill } from "./InboxBadges";
 import { Icon } from "./icons";
 import { AgentSessionItems, KebabMenu } from "./KebabMenu";
@@ -1208,6 +1209,11 @@ function ReviewHeader({
   const { review, target } = detail;
   const isActiveTab = useUIStore((s) => s.activeTabId === `review-${review.id}`);
   const [showExport, setShowExport] = useState(false);
+  const [showImport, setShowImport] = useState(false);
+  const targetReviewsQuery = useQuery({
+    queryKey: ["target-reviews", target.id],
+    queryFn: () => api.listTargetReviews(target.id),
+  });
   const [showRoutines, setShowRoutines] = useState(false);
   const showRoutineRun = useUIStore((s) => s.showRoutineRun);
   const routineContextKey =
@@ -2022,6 +2028,16 @@ function ReviewHeader({
                 >
                   New review
                 </button>
+                {(targetReviewsQuery.data?.length ?? 0) > 1 && (
+                  <button
+                    role="menuitem"
+                    disabled={readOnly}
+                    title={readOnly ? "Published reviews cannot be edited" : "Copy comments from an earlier review on this PR"}
+                    onClick={run(() => setShowImport(true))}
+                  >
+                    Import comments…
+                  </button>
+                )}
                 <hr className="btn-split-menu-separator" />
                 <button
                   role="menuitem"
@@ -2084,6 +2100,10 @@ function ReviewHeader({
 
       {showRoutines && (
         <RoutineLaunchModal kind="review" id={String(review.id)} title={target.title} onClose={() => setShowRoutines(false)} />
+      )}
+
+      {showImport && (
+        <ImportCommentsDialog reviewId={review.id} targetId={target.id} onClose={() => setShowImport(false)} />
       )}
 
       {showExport && (

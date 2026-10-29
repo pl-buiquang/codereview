@@ -309,6 +309,7 @@ pub fn run() {
             commands::review::refresh_review,
             commands::review::update_review_pin,
             commands::review::reanchor_comments,
+            commands::review::import_comments,
             commands::export::preview_review,
             commands::export::export_review,
             commands::export::export_vscode_review,

@@ -664,6 +664,159 @@ pub fn reanchor_comments(review_id: i64, db: State<Db>) -> AppResult<ReanchorRes
     reanchor_review_comments(&conn, &detail)
 }
 
+/// What `import_comments` did: copies made, duplicates skipped, and how the
+/// follow-up re-anchor went (`reanchor_error` when it failed after a good copy).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportCommentsResult {
+    pub imported: usize,
+    pub skipped: usize,
+    pub reanchor: Option<ReanchorResult>,
+    pub reanchor_error: Option<String>,
+}
+
+/// Copy the selected unpublished comment threads of `source_id` into the draft
+/// `review_id` (same target). `types` holds `"mine"` (untagged) and/or comment
+/// tags. Skips roots the destination already has (same file/side/line/body).
+/// Returns `(imported, skipped)`. Pure DB work; the caller re-anchors.
+fn copy_comments(
+    conn: &Connection,
+    review_id: i64,
+    source_id: i64,
+    types: &[String],
+) -> AppResult<(usize, usize)> {
+    ensure_draft(conn, review_id)?;
+    if review_id == source_id {
+        return Err(AppError::Other("pick a different review to import from".into()));
+    }
+    let source = get_review_row(conn, source_id)?;
+    let dest = get_review_row(conn, review_id)?;
+    if source.target_id != dest.target_id {
+        return Err(AppError::Other("can only import from a review on the same PR".into()));
+    }
+    for t in types {
+        if t != "mine" {
+            validate_tag(Some(t))?;
+        }
+    }
+
+    let mut stmt = conn.prepare(
+        "SELECT * FROM comment
+         WHERE review_id = ?1 AND parent_id IS NULL
+           AND github_comment_id IS NULL AND github_thread_root_id IS NULL
+         ORDER BY file_path, line, created_at",
+    )?;
+    let roots: Vec<Comment> = stmt
+        .query_map(params![source_id], Comment::from_row)?
+        .collect::<rusqlite::Result<_>>()?;
+    let mut reply_stmt = conn.prepare(
+        "SELECT * FROM comment WHERE parent_id = ?1 AND github_comment_id IS NULL ORDER BY created_at, id",
+    )?;
+
+    let tx = conn.unchecked_transaction()?;
+    let (mut imported, mut skipped) = (0, 0);
+    for root in roots {
+        let kind = root.tag.as_deref().unwrap_or("mine");
+        if !types.iter().any(|t| t == kind) {
+            continue;
+        }
+        let dup: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM comment
+                WHERE review_id = ?1 AND parent_id IS NULL AND file_path = ?2 AND subject_type = ?3
+                  AND side = ?4 AND line = ?5 AND body = ?6)",
+            params![review_id, root.file_path, root.subject_type, root.side, root.line, root.body],
+            |r| r.get(0),
+        )?;
+        if dup {
+            skipped += 1;
+            continue;
+        }
+        // An unpinned comment was written against the source's commits, so
+        // pin it there and let re-anchoring map it forward.
+        let head = root.anchored_head_sha.clone().or_else(|| source.head_sha.clone());
+        let base = root
+            .anchored_base_sha
+            .clone()
+            .or_else(|| (root.side == "LEFT").then(|| source.base_sha.clone()).flatten());
+        let ts = now();
+        let insert = |parent: Option<i64>, c: &Comment| -> AppResult<i64> {
+            tx.execute(
+                "INSERT INTO comment
+                    (review_id, file_path, subject_type, origin, side, line, start_line, diff_hunk, body,
+                     parent_id, anchored_head_sha, anchored_base_sha, resolved_at, tag, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?15)",
+                params![
+                    review_id,
+                    c.file_path,
+                    c.subject_type,
+                    c.origin,
+                    c.side,
+                    c.line,
+                    c.start_line,
+                    c.diff_hunk,
+                    c.body,
+                    parent,
+                    head,
+                    base,
+                    c.resolved_at,
+                    c.tag,
+                    ts,
+                ],
+            )?;
+            Ok(tx.last_insert_rowid())
+        };
+        let new_root = insert(None, &root)?;
+        let replies: Vec<Comment> = reply_stmt
+            .query_map(params![root.id], Comment::from_row)?
+            .collect::<rusqlite::Result<_>>()?;
+        for reply in &replies {
+            insert(Some(new_root), reply)?;
+        }
+        imported += 1;
+    }
+    if imported > 0 {
+        tx.execute("UPDATE review SET updated_at = ?1 WHERE id = ?2", params![now(), review_id])?;
+    }
+    tx.commit()?;
+    Ok((imported, skipped))
+}
+
+pub fn import_comments_impl(
+    db: &Db,
+    review_id: i64,
+    source_review_id: i64,
+    types: Vec<String>,
+) -> AppResult<ImportCommentsResult> {
+    let (imported, skipped, detail) = {
+        let conn = db.0.lock().unwrap();
+        let (imported, skipped) = copy_comments(&conn, review_id, source_review_id, &types)?;
+        let detail = if imported > 0 { Some(load_detail(&conn, review_id)?) } else { None };
+        (imported, skipped, detail)
+    };
+    let (mut reanchor, mut reanchor_error) = (None, None);
+    if let Some(detail) = detail {
+        // Same as `reanchor_comments`: the lock is held while it remaps.
+        let conn = db.0.lock().unwrap();
+        match reanchor_review_comments(&conn, &detail) {
+            Ok(r) => reanchor = Some(r),
+            Err(e) => reanchor_error = Some(e.to_string()),
+        }
+    }
+    Ok(ImportCommentsResult { imported, skipped, reanchor, reanchor_error })
+}
+
+/// Import comments from an earlier review of the same target, then re-anchor
+/// them onto this review's commits.
+#[tauri::command(async)]
+pub fn import_comments(
+    review_id: i64,
+    source_review_id: i64,
+    types: Vec<String>,
+    db: State<Db>,
+) -> AppResult<ImportCommentsResult> {
+    import_comments_impl(&db, review_id, source_review_id, types)
+}
+
 /// A new draft pinned at `pin` (the target's live SHAs right now).
 fn new_review_for_target(conn: &Connection, target_id: i64, pin: &LiveShas) -> AppResult<Review> {
     let ts = now();
@@ -2907,6 +3060,54 @@ mod tests {
         assert_ne!(second.id, first.id);
         assert_eq!(second.status, "draft");
         assert_eq!(list_target_reviews_impl(&conn, target.id).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn copy_comments_filters_types_skips_published_and_duplicates() {
+        let conn = open_memory();
+        let repo = seed_repo(&conn, None, None);
+        let target =
+            get_or_create_local_target(&conn, repo, "/nope", "main", "feature", true).unwrap().0;
+        let src = new_review_for_target(&conn, target.id, &LiveShas::default()).unwrap();
+        let dest = new_review_on_target_impl(&conn, target.id, &LiveShas::default()).unwrap();
+
+        let mine = seed_comment(&conn, src.id, "a.rs", "RIGHT", 1, None, "mine");
+        seed_reply(&conn, src.id, mine, "reply");
+        let ai = seed_comment(&conn, src.id, "a.rs", "RIGHT", 2, None, "ai");
+        set_comment_tag_impl(&conn, ai, Some("ai:review")).unwrap();
+        let local = seed_comment(&conn, src.id, "a.rs", "RIGHT", 3, None, "local");
+        set_comment_tag_impl(&conn, local, Some("local")).unwrap();
+        let published = seed_comment(&conn, src.id, "a.rs", "RIGHT", 4, None, "published");
+        conn.execute("UPDATE comment SET github_comment_id = 9 WHERE id = ?1", params![published]).unwrap();
+
+        let types = vec!["mine".to_string(), "ai:review".to_string()];
+        assert_eq!(copy_comments(&conn, dest.id, src.id, &types).unwrap(), (2, 0));
+        let copied = load_detail(&conn, dest.id).unwrap().comments;
+        assert_eq!(copied.len(), 3, "two roots plus one reply");
+        let root = copied.iter().find(|c| c.body == "mine").unwrap();
+        let reply = copied.iter().find(|c| c.body == "reply").unwrap();
+        assert_eq!(reply.parent_id, Some(root.id));
+        assert!(copied.iter().all(|c| c.body != "local" && c.body != "published"));
+
+        assert_eq!(copy_comments(&conn, dest.id, src.id, &types).unwrap(), (0, 2));
+        assert!(copy_comments(&conn, dest.id, dest.id, &types).is_err());
+        assert!(copy_comments(&conn, dest.id, src.id, &["bogus".to_string()]).is_err());
+    }
+
+    #[test]
+    fn copy_comments_rejects_other_target_and_non_draft_destination() {
+        let conn = open_memory();
+        let repo = seed_repo(&conn, None, None);
+        let t1 = get_or_create_local_target(&conn, repo, "/nope", "main", "feature", true).unwrap().0;
+        let t2 = get_or_create_local_target(&conn, repo, "/nope", "main", "other", true).unwrap().0;
+        let a = new_review_for_target(&conn, t1.id, &LiveShas::default()).unwrap();
+        let b = new_review_for_target(&conn, t2.id, &LiveShas::default()).unwrap();
+        let types = vec!["mine".to_string()];
+        assert!(copy_comments(&conn, a.id, b.id, &types).is_err());
+
+        let c = new_review_for_target(&conn, t1.id, &LiveShas::default()).unwrap();
+        conn.execute("UPDATE review SET status = 'published' WHERE id = ?1", params![c.id]).unwrap();
+        assert!(copy_comments(&conn, c.id, a.id, &types).is_err());
     }
 
     #[test]

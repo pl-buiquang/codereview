@@ -57,6 +57,7 @@ import type {
   PublishDraftRepliesResult,
   RefInfo,
   ReanchorResult,
+  ImportCommentsResult,
   RepoSyncState,
   Repository,
   Review,
@@ -209,6 +210,8 @@ export const api = {
     invoke<FreshnessResult>("refresh_review", { reviewId }),
   reanchorComments: (reviewId: number) =>
     invoke<ReanchorResult>("reanchor_comments", { reviewId }),
+  importComments: (reviewId: number, sourceReviewId: number, types: string[]) =>
+    invoke<ImportCommentsResult>("import_comments", { reviewId, sourceReviewId, types }),
   updateReviewPin: (reviewId: number) =>
     invoke<UpdateReviewResult>("update_review_pin", { reviewId }),
 

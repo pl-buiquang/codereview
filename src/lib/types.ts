@@ -508,6 +508,13 @@ export interface ReanchorResult {
   skippedNoChange: number;
 }
 
+export interface ImportCommentsResult {
+  imported: number;
+  skipped: number;
+  reanchor: ReanchorResult | null;
+  reanchorError: string | null;
+}
+
 export interface InboxMeta {
   lastRefreshAt: string | null;
   viewerLogin: string | null;
