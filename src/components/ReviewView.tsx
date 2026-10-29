@@ -1922,7 +1922,7 @@ function ReviewHeader({
                       title={autoMergeDisabledReason ?? "Approve the PR and enable auto-merge (squash)"}
                       onClick={doApproveAndMerge}
                     >
-                      {approveAndMerge.isPending ? "Approving…" : "Approve & merge"}
+                      {approveAndMerge.isPending ? "Approving…" : "🚀 Approve & merge"}
                     </button>
                     <button
                       role="menuitem"
