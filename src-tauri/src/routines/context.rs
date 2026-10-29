@@ -146,7 +146,7 @@ pub fn resolve(app: &AppHandle, routine: &Routine, r: &ContextRef) -> AppResult<
             };
             if routine.needs_worktree {
                 let (owner, name, number) = board::pr_card_coords(&db, &r.id)?;
-                let rev = review::create_review_for_pr_impl(&db, &owner, &name, number, &r.base_paths)?;
+                let rev = review::create_review_for_pr_impl(&db, &owner, &name, number, &r.base_paths, true)?;
                 facts.review_id = Some(rev.id);
             }
         }

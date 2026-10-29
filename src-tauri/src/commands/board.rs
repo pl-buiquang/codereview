@@ -254,8 +254,8 @@ pub fn board_list_impl(conn: &Connection) -> AppResult<Vec<BoardCardWithExtras>>
              FROM review rv
              JOIN target t ON t.id = rv.target_id
              JOIN repository r ON r.id = t.repo_id
-             WHERE t.kind = 'github_pr' AND rv.status != 'published'
-             ORDER BY rv.updated_at DESC",
+             WHERE t.kind = 'github_pr'
+             ORDER BY rv.status = 'published', rv.updated_at DESC",
         )?;
         let rows = stmt.query_map([], |r| {
             Ok((
@@ -635,11 +635,11 @@ pub fn board_monitor_log(limit: i64, db: State<Db>) -> AppResult<Vec<crate::boar
 // Review / VSCode actions
 // ---------------------------------------------------------------------------
 
-/// Open the PR card's review: its unpublished one, else a new draft.
+/// Open the PR card's review: its unpublished one, else its latest published one, else a new draft.
 #[tauri::command]
 pub async fn board_open_review(card_id: String, base_paths: Vec<String>, db: State<'_, Db>) -> AppResult<Review> {
     let (owner, name, number) = pr_card_coords(&db, &card_id)?;
-    crate::commands::review::create_review_for_pr_impl(&db, &owner, &name, number, &base_paths)
+    crate::commands::review::create_review_for_pr_impl(&db, &owner, &name, number, &base_paths, true)
 }
 
 /// Open the PR card's review (as `board_open_review`), ensure its chat/edit
@@ -647,7 +647,7 @@ pub async fn board_open_review(card_id: String, base_paths: Vec<String>, db: Sta
 #[tauri::command]
 pub async fn board_open_vscode(card_id: String, base_paths: Vec<String>, db: State<'_, Db>) -> AppResult<()> {
     let (owner, name, number) = pr_card_coords(&db, &card_id)?;
-    let review = crate::commands::review::create_review_for_pr_impl(&db, &owner, &name, number, &base_paths)?;
+    let review = crate::commands::review::create_review_for_pr_impl(&db, &owner, &name, number, &base_paths, true)?;
     let worktree_path = crate::commands::chat::ensure_chat_worktree(review.id, db).await?;
     crate::commands::worktree::open_in_vscode(worktree_path, None, None)
 }
@@ -663,7 +663,7 @@ pub async fn board_open_shell(
     db: State<'_, Db>,
 ) -> AppResult<()> {
     let (owner, name, number) = pr_card_coords(&db, &card_id)?;
-    let review = crate::commands::review::create_review_for_pr_impl(&db, &owner, &name, number, &base_paths)?;
+    let review = crate::commands::review::create_review_for_pr_impl(&db, &owner, &name, number, &base_paths, true)?;
     let worktree_path = crate::commands::chat::ensure_chat_worktree(review.id, db).await?;
     crate::terminal::open_shell(
         host,
@@ -687,7 +687,7 @@ pub async fn board_open_agent(
     db: State<'_, Db>,
 ) -> AppResult<()> {
     let (owner, name, number) = pr_card_coords(&db, &card_id)?;
-    let review = crate::commands::review::create_review_for_pr_impl(&db, &owner, &name, number, &base_paths)?;
+    let review = crate::commands::review::create_review_for_pr_impl(&db, &owner, &name, number, &base_paths, true)?;
     let worktree_path = crate::commands::chat::ensure_chat_worktree(review.id, db.clone()).await?;
     let live: std::collections::HashSet<String> =
         crate::claude_sessions::live_sessions().into_iter().map(|s| s.session_id).collect();

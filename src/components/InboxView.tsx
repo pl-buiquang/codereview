@@ -127,13 +127,16 @@ export function InboxView() {
   // InboxItem.repo. list_reviews is newest-first, so the first id seen per key
   // is the most recent one.
   const reviewByPr = useMemo(() => {
+    // Unpublished reviews first, so a published one is only reopened when it is the PR's only review.
     const m = new Map<string, number>();
+    const published = new Map<string, number>();
     for (const s of reviewsQuery.data ?? []) {
       if (s.target.kind !== "github_pr" || s.target.github_pr_number == null || !s.repo_remote) continue;
-      if (s.review.status === "published") continue;
       const key = `${s.repo_remote}#${s.target.github_pr_number}`;
-      if (!m.has(key)) m.set(key, s.review.id);
+      const into = s.review.status === "published" ? published : m;
+      if (!into.has(key)) into.set(key, s.review.id);
     }
+    for (const [key, id] of published) if (!m.has(key)) m.set(key, id);
     return m;
   }, [reviewsQuery.data]);
 

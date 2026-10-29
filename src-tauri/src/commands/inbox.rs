@@ -401,7 +401,7 @@ pub async fn open_pr_review(
     base_paths: Vec<String>,
     db: State<'_, Db>,
 ) -> AppResult<Review> {
-    let review = crate::commands::review::create_review_for_pr_impl(&db, &owner, &name, number, &base_paths)?;
+    let review = crate::commands::review::create_review_for_pr_impl(&db, &owner, &name, number, &base_paths, true)?;
     // Starting a review means working on it. Opening must not fail on this.
     // The review open just put this PR in the mirror, so track it by id instead of resolving again.
     let node_id: Option<String> = db

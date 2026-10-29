@@ -757,6 +757,7 @@ fn run(cmd: Cmd, json: bool, db: &Db) -> AppResult<()> {
                     &base_ref,
                     &head_ref,
                     three_dot,
+                    false,
                 )?;
                 if json {
                     println!("{}", serde_json::to_string_pretty(&r)?);
@@ -796,7 +797,7 @@ fn run(cmd: Cmd, json: bool, db: &Db) -> AppResult<()> {
                     .map(|s| s.trim().to_string())
                     .filter(|s| !s.is_empty())
                     .collect();
-                let r = review::create_review_for_pr_impl(db, &owner, &repo_name, pr_number, &base_paths)?;
+                let r = review::create_review_for_pr_impl(db, &owner, &repo_name, pr_number, &base_paths, false)?;
                 if json {
                     println!("{}", serde_json::to_string_pretty(&r)?);
                 } else {
