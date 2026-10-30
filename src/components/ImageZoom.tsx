@@ -63,6 +63,8 @@ export function ImageZoom({ src, onClose }: { src: string; onClose: () => void }
         if (e.target === e.currentTarget) onClose();
       }}
       onPointerDown={(e) => {
+        // Pointer capture would retarget the release to the backdrop and swallow the close click.
+        if ((e.target as HTMLElement).closest(".image-zoom-close")) return;
         drag.current = { px: e.clientX, py: e.clientY, x: view.x, y: view.y };
         e.currentTarget.setPointerCapture(e.pointerId);
       }}

@@ -7086,6 +7086,16 @@ tr.def-flash > td {
   position: fixed;
   top: 8px;
   right: 12px;
+  padding: 6px 10px;
+  font-size: 16px;
+  line-height: 1;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.7);
+  border-radius: var(--radius-s);
+  cursor: pointer;
+}
+.image-zoom-close:hover {
+  background: rgba(255, 255, 255, 0.2);
   color: #fff;
 }
 .image-diff-tabs {
@@ -7098,9 +7108,19 @@ tr.def-flash > td {
   padding: 6px 12px;
   border: 0;
   border-bottom: 2px solid transparent;
+  border-radius: 0;
   background: transparent;
+  box-shadow: none;
   color: var(--text-2);
   cursor: pointer;
+}
+.image-diff-tabs button:hover {
+  background: transparent;
+  color: var(--text);
+}
+.image-diff-tabs button:focus-visible {
+  outline: none;
+  color: var(--text);
 }
 .image-diff-tabs button.active {
   border-bottom-color: var(--accent);
