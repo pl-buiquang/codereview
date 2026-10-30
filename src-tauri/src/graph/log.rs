@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use crate::error::{AppError, AppResult};
-use crate::git::run_git;
+use crate::git::{run_git, validate_commit_ref};
 
 use super::{GraphCommit, RefInfo, RefKind, Scope};
 
@@ -44,6 +44,23 @@ pub fn graph_log(
     args.push("--");
 
     let out = run_git(checkout, &args)?;
+    out.split('\x1e')
+        .map(|rec| rec.trim_start_matches(['\n', '\r']))
+        .filter(|rec| !rec.is_empty())
+        .map(parse_commit)
+        .collect()
+}
+
+/// The commits `head` has on top of `base` (`git log base..head`), newest first. Both must
+/// resolve locally (callers `ensure_commit` first). Used for a PR's own commit list.
+pub fn range_log(checkout: &Path, base: &str, head: &str) -> AppResult<Vec<GraphCommit>> {
+    validate_commit_ref(base)?;
+    validate_commit_ref(head)?;
+    let range = format!("{base}..{head}");
+    let out = run_git(
+        checkout,
+        &["log", "--topo-order", "--no-color", LOG_FORMAT, "--end-of-options", &range, "--"],
+    )?;
     out.split('\x1e')
         .map(|rec| rec.trim_start_matches(['\n', '\r']))
         .filter(|rec| !rec.is_empty())
@@ -237,6 +254,18 @@ mod tests {
         assert_eq!(log[0].author_name, "Test");
         assert!(log[0].author_time > log[2].author_time);
         assert!(log[0].committer_time >= log[0].author_time);
+    }
+
+    #[test]
+    fn range_log_lists_only_commits_above_base() {
+        let f = Fixture::new();
+        let c1 = f.commit("a.txt", "first");
+        let c2 = f.commit("a.txt", "second");
+        let c3 = f.commit("a.txt", "third");
+
+        assert_eq!(shas(&range_log(f.path(), &c1, &c3).unwrap()), vec![c3.clone(), c2.clone()]);
+        assert!(range_log(f.path(), &c3, &c3).unwrap().is_empty());
+        assert!(range_log(f.path(), "--output=x", &c3).is_err());
     }
 
     #[test]

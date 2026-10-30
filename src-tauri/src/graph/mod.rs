@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 pub use branches::{delete_gone_branches, list_gone};
 pub use commit::{commit_detail, commit_file_diff};
-pub use log::{graph_log, list_refs};
+pub use log::{graph_log, list_refs, range_log};
 pub use wip::{worktree_file_diff, worktree_status};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

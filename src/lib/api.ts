@@ -108,6 +108,8 @@ export const api = {
   newReviewSince: (reviewId: number, pin?: { baseSha: string; headSha: string }) =>
     invoke<Review>("new_review_since", { reviewId, ...pin }),
   /** What a review of the PR's new commits would contain, with nothing stored. */
+  /** A review's own commits (pinned base..head, newest first); needs a local clone. */
+  reviewCommits: (reviewId: number) => invoke<GraphCommit[]>("review_commits", { reviewId }),
   quickInterdiff: (reviewId: number) => invoke<QuickInterdiff>("quick_interdiff", { reviewId }),
   reviewInterdiffMeta: (reviewId: number) =>
     invoke<InterdiffMeta | null>("review_interdiff_meta", { reviewId }),

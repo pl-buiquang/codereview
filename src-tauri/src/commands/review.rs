@@ -1500,6 +1500,27 @@ pub async fn new_review_since(
     new_review_since_impl(&db, review_id, pin)
 }
 
+/// The commits between a review's pinned base and head (a PR's own commits, newest
+/// first). Fetches missing PR commits from origin first. Needs a local clone.
+#[tauri::command]
+pub async fn review_commits(review_id: i64, db: State<'_, Db>) -> AppResult<Vec<crate::graph::GraphCommit>> {
+    let (review, target) = {
+        let conn = db.0.lock().unwrap();
+        let review = get_review_row(&conn, review_id)?;
+        let target = get_target(&conn, review.target_id)?;
+        (review, target)
+    };
+    let (Some(base), Some(head)) = (review.base_sha, review.head_sha) else {
+        return Err(AppError::Other("this review has no pinned commits".into()));
+    };
+    let clone = repo_local_path_of(&db, target.repo_id)?
+        .ok_or_else(|| AppError::Other("the commit list requires a local clone".into()))?;
+    let clone = Path::new(&clone);
+    git::ensure_commit(clone, &base)?;
+    git::ensure_commit(clone, &head)?;
+    crate::graph::range_log(clone, &base, &head)
+}
+
 /// The preview behind "Quick view new commits": the diff a since-review would
 /// start with, and the commits it would pin, with nothing stored.
 #[derive(Debug, Serialize)]

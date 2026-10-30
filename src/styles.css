@@ -6812,3 +6812,75 @@ tr.def-flash > td {
   border-right: 1px solid var(--border);
   background: var(--surface-1, var(--surface-2));
 }
+
+/* PR commit picker (review header): popover list of the PR's commits with range selection. */
+.commit-picker {
+  position: relative;
+}
+.commit-picker-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 20;
+  width: min(560px, 80vw);
+  box-shadow: var(--shadow-pop);
+  display: flex;
+  flex-direction: column;
+}
+.commit-picker-note {
+  padding: 12px;
+  margin: 0;
+}
+.commit-picker-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+.commit-picker-row {
+  user-select: none;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 8px;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-s);
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+}
+.commit-picker-row:hover {
+  background: var(--bg-hover, var(--surface-2));
+}
+.commit-picker-row.selected {
+  background: var(--accent-soft, var(--surface-2));
+  box-shadow: inset 2px 0 0 var(--accent, currentColor);
+}
+.commit-picker-sha {
+  flex: none;
+}
+.commit-picker-subject {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.commit-picker-meta {
+  flex: none;
+  font-size: 12px;
+}
+.commit-picker-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border-top: 1px solid var(--border);
+}
+.commit-picker-footer > span {
+  flex: 1;
+  font-size: 12px;
+}

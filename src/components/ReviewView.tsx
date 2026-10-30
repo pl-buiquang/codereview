@@ -76,6 +76,7 @@ import { ShortcutHelp } from "./ShortcutHelp";
 import { Markdown } from "./Markdown";
 import { ChatPanel } from "./ChatPanel";
 import { PublishButton } from "./PublishButton";
+import { CommitPicker } from "./CommitPicker";
 import { NewCommitsQuickView } from "./NewCommitsQuickView";
 import { UpdateReviewButton } from "./UpdateReviewButton";
 import { PrMetaPanel, usePrMeta } from "./PrMetaPanel";
@@ -1710,6 +1711,14 @@ function ReviewHeader({
               enabledBy={prMetaQuery.data?.autoMerge?.enabledBy?.login}
             />
           </span>
+        )}
+        {isPr && (
+          <CommitPicker
+            reviewId={review.id}
+            repoId={target.repo_id}
+            headSha={review.head_sha}
+            hasClone={detail.local_path != null}
+          />
         )}
         <span className="save-state">{saveState === "saving" ? "Saving…" : "Saved"}</span>
         <div className="view-toggle">
