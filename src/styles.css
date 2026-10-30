@@ -6891,3 +6891,200 @@ tr.def-flash > td {
   flex: 1;
   font-size: 12px;
 }
+
+/* Image diffs panel (review menu → View image diffs): before / after / diff of the changed images. */
+.image-diff-note {
+  margin: 0;
+  padding: 8px 12px;
+  background: var(--warning-soft);
+  border-bottom: 1px solid var(--border);
+}
+.image-diff-note.error {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+.image-diff-list {
+  width: 260px;
+  flex-shrink: 0;
+}
+.image-diff-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--text-2);
+  text-align: left;
+  cursor: pointer;
+  font-size: 12px;
+}
+.image-diff-item:hover {
+  background: var(--surface-2);
+}
+.image-diff-item.active {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+.image-diff-item-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.image-diff-badge,
+.image-diff-chip {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: var(--radius-s);
+  background: var(--surface-3);
+  color: var(--text-2);
+  font-size: 11px;
+}
+.image-diff-badge.changed {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+.image-diff-body {
+  min-width: 0;
+  padding: 12px;
+}
+.image-diff-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 48px 12px;
+}
+.image-diff-legend {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 10px;
+  font-size: 12px;
+}
+.image-diff-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 4px;
+  border-radius: 2px;
+  vertical-align: middle;
+}
+.image-diff-file-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.image-diff-toggle {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text-2);
+}
+.image-diff-cols {
+  display: grid;
+  gap: 12px;
+  align-items: start;
+}
+.image-diff-col h4 {
+  margin: 0 0 6px;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.image-diff-frame {
+  position: relative;
+  line-height: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-s);
+  background: #fff;
+}
+.image-diff-img {
+  display: block;
+  width: 100%;
+  height: auto;
+  cursor: zoom-in;
+}
+.image-diff-box {
+  position: absolute;
+  min-width: 6px;
+  min-height: 6px;
+  border: 2px solid var(--accent);
+  border-radius: 2px;
+  box-shadow: 0 0 0 1px #fff;
+  pointer-events: none;
+}
+.image-diff-regions {
+  margin-top: 16px;
+}
+.image-diff-regions summary {
+  cursor: pointer;
+  color: var(--text-2);
+}
+.image-diff-region {
+  margin-top: 12px;
+}
+.image-diff-region-label {
+  margin-bottom: 4px;
+  font-size: 12px;
+}
+.image-diff-crops {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.image-diff-crop {
+  width: 100%;
+  height: auto;
+  max-height: 360px;
+  object-fit: contain;
+  object-position: top left;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-s);
+  cursor: zoom-in;
+}
+.image-zoom {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.92);
+  user-select: none;
+  touch-action: none;
+  overscroll-behavior: contain;
+  cursor: grab;
+}
+.image-zoom:active {
+  cursor: grabbing;
+}
+.image-zoom img {
+  position: absolute;
+  top: 0;
+  left: 0;
+  max-width: none;
+  transform-origin: 0 0;
+  image-rendering: pixelated;
+  background: #fff;
+}
+.image-zoom-hint {
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  padding: 4px 10px;
+  border-radius: var(--radius-s);
+  background: rgba(0, 0, 0, 0.7);
+  color: #fff;
+  font-size: 12px;
+  pointer-events: none;
+}
+.image-zoom-close {
+  position: fixed;
+  top: 8px;
+  right: 12px;
+  color: #fff;
+}

@@ -57,6 +57,8 @@ import type {
   PublishDraftRepliesResult,
   RefInfo,
   ReanchorResult,
+  ImageDiffManifest,
+  ImageDiffStatus,
   ImportCommentsResult,
   RepoSyncState,
   Repository,
@@ -142,6 +144,12 @@ export const api = {
   runAiReview: (reviewId: number, layer: AiReviewLayer, model?: string) =>
     invoke<void>("run_ai_review", { reviewId, layer, model: model || null }),
   aiReviewStatus: (reviewId: number) => invoke<AiReviewLayer | null>("ai_review_status", { reviewId }),
+
+  // Image diffs (PNG/JPEG/SVG before/after/diff, generated in the background)
+  imageDiffStatus: (reviewId: number) => invoke<ImageDiffStatus>("image_diff_status", { reviewId }),
+  imageDiffManifest: (reviewId: number) => invoke<ImageDiffManifest | null>("image_diff_manifest", { reviewId }),
+  imageDiffGenerate: (reviewId: number) => invoke<void>("image_diff_generate", { reviewId }),
+  imageDiffCancel: (reviewId: number) => invoke<void>("image_diff_cancel", { reviewId }),
 
   // Routines
   routineList: () => invoke<Routine[]>("routine_list"),

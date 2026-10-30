@@ -111,6 +111,9 @@ import { anchorPin, isCommentOutdated } from "../lib/staleness";
 import { summaryLine } from "../lib/text";
 import { prContextKey, useActiveRoutineRuns } from "../lib/routines";
 import { RoutineLaunchModal } from "./routines/RoutineLaunchModal";
+import { ImageDiffLink } from "./ImageDiffLink";
+import { ImageDiffPane } from "./ImageDiffPane";
+import { imageDiffAction, isImagePath, openImageDiffs, useImageDiffStatus, useImageDiffUi } from "../lib/imageDiff";
 import { AI_SUBTAGS, isAiTag, tagLabel, tagTitle, type CommentTag } from "../lib/commentTag";
 import type {
   AiReviewLayer,
@@ -379,6 +382,8 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
     () => (diffQuery.data != null ? parseDiff(diffQuery.data) : []),
     [diffQuery.data],
   );
+
+  const imageFileCount = useMemo(() => files.filter((f) => isImagePath(fileDisplayPath(f))).length, [files]);
 
   const fileTestPatterns = useSettingsStore((s) => s.fileTestPatterns);
   const fileConfigPatterns = useSettingsStore((s) => s.fileConfigPatterns);
@@ -908,6 +913,7 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
         bodyRef={summaryBodyRef}
         collapsed={prDetailsCollapsed}
         togglePrDetails={togglePrDetails}
+        imageFileCount={imageFileCount}
       />
 
       <div
@@ -1224,9 +1230,12 @@ function ReviewHeader({
   bodyRef,
   collapsed,
   togglePrDetails,
+  imageFileCount,
 }: {
   collapsed: boolean;
   togglePrDetails: () => void;
+  /** PNG/JPEG/SVG files the diff changes. */
+  imageFileCount: number;
   detail: ReviewDetail;
   saveState: SaveState;
   readOnly: boolean;
@@ -1398,6 +1407,18 @@ function ReviewHeader({
     onError: (e) => toast.error(`Could not start a new review:\n${String(e)}`),
   });
   const [newCommitsOpen, setNewCommitsOpen] = useState(false);
+  const [imageDiffOpen, setImageDiffOpen] = useState(false);
+  const [imageDiffFile, setImageDiffFile] = useState<string | null>(null);
+  const imageDiffStatus = useImageDiffStatus(review.id, imageFileCount > 0);
+  const imageDiffMenu = imageDiffAction(imageDiffStatus.data, imageFileCount);
+  // Asked from elsewhere (an image file's link, the "ready" toast): open the panel on this review.
+  const imageDiffRequest = useImageDiffUi((s) => s.request);
+  useEffect(() => {
+    if (imageDiffRequest?.reviewId !== review.id) return;
+    setImageDiffFile(imageDiffRequest.file);
+    setImageDiffOpen(true);
+    useImageDiffUi.getState().clear();
+  }, [imageDiffRequest, review.id]);
   const newReviewSince = useMutation({
     mutationFn: (pin: { baseSha: string; headSha: string }) => api.newReviewSince(review.id, pin),
     onSuccess: (r) => {
@@ -1940,6 +1961,23 @@ function ReviewHeader({
             };
             return (
               <>
+                {imageFileCount > 0 && (
+                  <>
+                    <button
+                      role="menuitem"
+                      disabled={imageDiffMenu.disabled}
+                      title={imageDiffMenu.title}
+                      onClick={run(() =>
+                        imageDiffMenu.viewOnly
+                          ? (setImageDiffFile(null), setImageDiffOpen(true))
+                          : openImageDiffs(review.id, imageDiffStatus.data?.state),
+                      )}
+                    >
+                      {imageDiffStatus.data?.state === "running" && <span className="spinner" />} {imageDiffMenu.label}
+                    </button>
+                    <hr className="btn-split-menu-separator" />
+                  </>
+                )}
                 {prUrl && (
                   <button role="menuitem" onClick={run(() => copyPrUrl(prUrl))}>
                     Copy PR URL
@@ -2155,6 +2193,9 @@ function ReviewHeader({
         </KebabMenu>
       </div>
 
+      {imageDiffOpen && (
+        <ImageDiffPane reviewId={review.id} initialFile={imageDiffFile} onClose={() => setImageDiffOpen(false)} />
+      )}
       {showRoutines && (
         <RoutineLaunchModal kind="review" id={String(review.id)} title={target.title} onClose={() => setShowRoutines(false)} />
       )}
@@ -2911,6 +2952,7 @@ const FileReview = memo(function FileReview({
               <button className="btn btn-sm btn-ghost" onClick={() => setShowSvgAnyway(true)}>
                 Show anyway
               </button>{" "}
+              <ImageDiffLink reviewId={reviewId} path={path} />{" "}
             </>
           )}
           {!isDeleted && (
@@ -3071,7 +3113,10 @@ function FileBody({
         </div>
       )}
       {file.isBinary ? (
-        <p className="muted binary-note">Binary file not shown.</p>
+        <p className="muted binary-note">
+          Binary file not shown.{" "}
+          {isImagePath(fileDisplayPath(file)) && <ImageDiffLink reviewId={reviewId} path={fileDisplayPath(file)} />}
+        </p>
       ) : (
         <Diff
           viewType={viewType}

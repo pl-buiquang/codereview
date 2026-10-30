@@ -39,6 +39,70 @@ export interface AiReviewUpdated {
   summary: string | null;
 }
 
+export type ImageDiffState = "none" | "running" | "ready" | "stale" | "interrupted" | "failed";
+export interface ImageDiffStatus {
+  state: ImageDiffState;
+  done: number;
+  total: number;
+  error: string | null;
+  generated_at: string | null;
+  /** Started without a click. */
+  auto: boolean;
+  /** The pin the cache was generated for. */
+  base_sha: string | null;
+  head_sha: string | null;
+}
+export type ImageChange = "added" | "deleted" | "modified" | "renamed";
+export interface ImageDiffDim {
+  width: number;
+  height: number;
+}
+export interface ImageDiffRegion {
+  id: number;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  changed_px: number;
+}
+export interface ImageDiffFile {
+  /** The cache subdirectory is `f<index>`. */
+  index: number;
+  path: string;
+  old_path: string | null;
+  change: ImageChange;
+  before: ImageDiffDim | null;
+  after: ImageDiffDim | null;
+  /** Real differences; anti-aliasing is counted apart. */
+  mismatch_px: number;
+  aa_px: number;
+  diff_pct: number;
+  regions: ImageDiffRegion[];
+  other_regions: number;
+  /** Why there is no diff for this file. */
+  skipped: string | null;
+}
+export interface ImageDiffManifest {
+  version: number;
+  review_id: number;
+  pin: string;
+  base_sha: string | null;
+  head_sha: string | null;
+  generated_at: string;
+  /** Images wider than this have `preview-*.png` next to the full-size ones. */
+  preview_width: number;
+  auto: boolean;
+  files: ImageDiffFile[];
+}
+export interface ImageDiffUpdated {
+  review_id: number;
+  state: "running" | "ready" | "failed" | "none";
+  done: number;
+  total: number;
+  error: string | null;
+  auto: boolean;
+}
+
 export type UsageRange = "today" | "7d" | "30d" | "all";
 
 export interface UsageTotals {

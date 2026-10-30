@@ -8,6 +8,8 @@ import {
   type ViewType,
 } from "react-diff-view";
 import { api } from "../lib/api";
+import { isImagePath } from "../lib/imageDiff";
+import { ImageDiffLink } from "./ImageDiffLink";
 import { headFileSourceQuery, reviewDiffQuery } from "../lib/reviewQueries";
 import {
   buildFullFileFile,
@@ -318,7 +320,11 @@ export function FileViewPane({
         {sourceQuery.isError && (
           <p className="error">Could not load file: {String(sourceQuery.error)}</p>
         )}
-        {diffFile?.isBinary && <p className="muted binary-note">Binary file not shown.</p>}
+        {diffFile?.isBinary && (
+          <p className="muted binary-note">
+            Binary file not shown. {isImagePath(filePath) && <ImageDiffLink reviewId={reviewId} path={filePath} />}
+          </p>
+        )}
         {synthetic && !diffFile?.isBinary && (
           <>
             {orphans.length > 0 && (
