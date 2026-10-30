@@ -7,6 +7,7 @@ pub mod export;
 pub mod focus;
 pub mod gh;
 pub mod graph;
+pub mod image_diff;
 pub mod inbox;
 pub mod issue_session;
 pub mod overview;

@@ -40,3 +40,38 @@ impl BlobSource for GitBlobs {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn git(dir: &std::path::Path, args: &[&str]) {
+        let ok = std::process::Command::new("git")
+            .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"])
+            .args(args)
+            .current_dir(dir)
+            .status()
+            .unwrap()
+            .success();
+        assert!(ok, "git {args:?}");
+    }
+
+    #[test]
+    fn reads_binary_blobs_from_the_local_clone_byte_for_byte() {
+        let dir = std::env::temp_dir().join(format!("cr-blob-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        git(&dir, &["init", "-q"]);
+        // Not valid UTF-8: a lossy string conversion would corrupt it.
+        let bytes: Vec<u8> = vec![0x89, b'P', b'N', b'G', 0xff, 0xfe, 0x00, 0x80];
+        std::fs::write(dir.join("a.png"), &bytes).unwrap();
+        git(&dir, &["add", "."]);
+        git(&dir, &["commit", "-q", "-m", "x"]);
+
+        let blobs = GitBlobs { local: Some(dir.clone()), owner_name: None, left: Some("HEAD".into()), right: None };
+        assert_eq!(blobs.read(Side::Left, "a.png").unwrap(), bytes);
+        assert!(blobs.read(Side::Left, "missing.png").is_err());
+        assert!(blobs.read(Side::Right, "a.png").is_err(), "a side without a source");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+}

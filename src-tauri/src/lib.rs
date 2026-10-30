@@ -166,6 +166,24 @@ pub fn run() {
                 }
             }
         })
+        // Serves the generated image diffs (PNGs under the review's cache directory) to the webview.
+        .register_asynchronous_uri_scheme_protocol("crimg", |ctx, request, responder| {
+            let db_path = ctx.app_handle().state::<db::DbPath>().0.clone();
+            let path = request.uri().path().to_string();
+            std::thread::spawn(move || {
+                let png = image_diff::store::resolve_asset(&db_path, &path).and_then(|file| std::fs::read(file).ok());
+                let response = match png {
+                    Some(bytes) => tauri::http::Response::builder()
+                        .status(200)
+                        .header("Content-Type", "image/png")
+                        .header("Cache-Control", "no-cache")
+                        .header("Access-Control-Allow-Origin", "*")
+                        .body(bytes),
+                    None => tauri::http::Response::builder().status(404).body(Vec::new()),
+                };
+                responder.respond(response.expect("static response parts are valid"));
+            });
+        })
         .manage(CrNote(Mutex::new(cr_note)))
         .manage(watch::Watchers::default())
         .manage(routines::manager::RoutineManager::default())
@@ -272,6 +290,10 @@ pub fn run() {
             commands::routines::routine_set_max_concurrency,
             commands::routines::routine_settings,
             commands::routines::routine_set_settings,
+            commands::image_diff::image_diff_status,
+            commands::image_diff::image_diff_manifest,
+            commands::image_diff::image_diff_generate,
+            commands::image_diff::image_diff_cancel,
             commands::review::create_review,
             commands::review::list_reviews,
             commands::review::list_target_reviews,

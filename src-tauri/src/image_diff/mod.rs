@@ -8,6 +8,7 @@ pub mod blob;
 pub mod job;
 pub mod pixelmatch;
 pub mod regions;
+pub mod runner;
 pub mod store;
 
 use std::io::Cursor;
@@ -16,6 +17,7 @@ use store::Change;
 
 /// A review is gone: drop its generated image diffs.
 pub fn forget_review(conn: &rusqlite::Connection, review_id: i64) {
+    runner::cancel(review_id);
     if let Some(dir) = store::cache_dir_for_conn(conn, review_id) {
         store::remove_cache(&dir);
     }

@@ -125,7 +125,7 @@ pub(crate) fn repo_owner_name(conn: &Connection, repo_id: i64) -> AppResult<Opti
     Ok(owner.zip(name))
 }
 
-fn get_review_row(conn: &Connection, id: i64) -> AppResult<Review> {
+pub(crate) fn get_review_row(conn: &Connection, id: i64) -> AppResult<Review> {
     conn.query_row("SELECT * FROM review WHERE id = ?1", params![id], Review::from_row)
         .map_err(Into::into)
 }
@@ -1135,7 +1135,7 @@ pub fn diff_source(conn: &Connection, review_id: i64) -> AppResult<DiffSource> {
 }
 
 /// The earlier pin a "changes since" review diffs from, when it has one.
-fn review_since(review: &Review) -> Option<(String, String)> {
+pub(crate) fn review_since(review: &Review) -> Option<(String, String)> {
     Some((review.since_base_sha.clone()?, review.since_head_sha.clone()?))
 }
 
@@ -1227,9 +1227,12 @@ pub fn review_diff_impl(conn: &Connection, review_id: i64) -> AppResult<Arc<Stri
 }
 
 #[tauri::command(async)]
-pub fn review_diff(review_id: i64, db: State<Db>) -> AppResult<String> {
+pub fn review_diff(review_id: i64, app: tauri::AppHandle, db: State<Db>) -> AppResult<String> {
     let source = diff_source(&db.0.lock().unwrap(), review_id)?;
-    Ok(source.load()?.as_ref().clone())
+    let diff = source.load()?;
+    // A small set of changed images is diffed in the background without being asked.
+    crate::image_diff::runner::maybe_auto(&app, review_id, diff.clone());
+    Ok(diff.as_ref().clone())
 }
 
 /// Full source of one side of a file (LEFT→base, RIGHT→head), used to reveal
