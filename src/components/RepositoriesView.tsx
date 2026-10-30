@@ -57,7 +57,7 @@ export function RepositoriesView() {
     onSuccess: (repo) => {
       if (repo) {
         queryClient.invalidateQueries({ queryKey: ["repositories"] });
-        toast.success(`Linked local clone for ${repoLabel(repo)}`);
+        toast.info(`Linked local clone for ${repoLabel(repo)}`);
       }
     },
     onError: (err) => toast.error(`Could not link path:\n${String(err)}`),
@@ -67,7 +67,7 @@ export function RepositoriesView() {
     mutationFn: () => api.autoLinkRepos(parseRepoBasePaths(repoBasePaths)),
     onSuccess: (count) => {
       queryClient.invalidateQueries({ queryKey: ["repositories"] });
-      toast.success(count > 0 ? `Auto-linked ${count} repo${count === 1 ? "" : "s"}` : "No new repos to auto-link");
+      toast.info(count > 0 ? `Auto-linked ${count} repo${count === 1 ? "" : "s"}` : "No new repos to auto-link");
     },
     onError: (err) => toast.error(`Auto-link failed:\n${String(err)}`),
   });

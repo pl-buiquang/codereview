@@ -90,7 +90,7 @@ export function ReviewsView() {
         queryClient.invalidateQueries({ queryKey: ["reviews"] });
         queryClient.invalidateQueries({ queryKey: ["target-reviews"] });
       }
-      toast.success(deleted === 0 ? "No reviews of merged or closed PRs" : `Deleted ${deleted} review${deleted === 1 ? "" : "s"}`);
+      toast.info(deleted === 0 ? "No reviews of merged or closed PRs" : `Deleted ${deleted} review${deleted === 1 ? "" : "s"}`);
     },
     onError: (e) => toast.error(`Clean up failed:\n${String(e)}`),
   });
@@ -104,7 +104,7 @@ export function ReviewsView() {
     onSuccess: (review) => {
       if (!review) return;
       queryClient.invalidateQueries({ queryKey: ["reviews"] });
-      toast.success("Review imported");
+      toast.info("Review imported");
       openReview(review.id);
     },
     onError: (e) => toast.error(`Import failed:\n${String(e)}`),

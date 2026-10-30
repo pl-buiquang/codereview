@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { RefInfo } from "../../lib/types";
 
-vi.mock("../../lib/toast", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
+vi.mock("../../lib/toast", () => ({ toast: { error: vi.fn(), info: vi.fn() } }));
 
 import { CommitActionsMenu } from "./GitRefItems";
 

@@ -80,7 +80,7 @@ export function WorktreesView() {
     mutationFn: (apply: boolean) => api.worktreeGcRun(apply, apply),
     onSuccess: (report, apply) => {
       queryClient.setQueryData(WORKTREE_GC_KEY, report);
-      if (apply) toast.success(summarizeActions(report.actions));
+      if (apply) toast.info(summarizeActions(report.actions));
     },
     onError: (e) => toast.error(`Worktree scan failed:\n${String(e)}`),
   });
@@ -134,7 +134,7 @@ export function WorktreesView() {
   const remove = useMutation({
     mutationFn: ({ repoId, path }: { repoId: number; path: string }) => api.removeWorktree(repoId, path),
     onSuccess: (_d, { path }) => {
-      toast.success("Worktree removed");
+      toast.info("Worktree removed");
       patchRow(path, () => null);
     },
     onError: (e) => toast.error(`Remove failed:\n${String(e)}`),
@@ -142,7 +142,7 @@ export function WorktreesView() {
   const sync = useMutation({
     mutationFn: ({ repoId, path }: { repoId: number; path: string }) => api.worktreeSync(repoId, path),
     onSuccess: (msg, { path }) => {
-      toast.success(msg);
+      toast.info(msg);
       patchRow(path, (w) => ({ ...w, verdict: { kind: "keep", reason: msg } }));
     },
     onError: (e) => toast.error(`Sync failed:\n${String(e)}`),

@@ -265,7 +265,7 @@ function CustomThemeEditor() {
       const dest = await pickSavePath("codereview-theme.json", "json");
       if (!dest) return;
       await api.writeSettingsFile(dest, exportCustomTheme(useSettingsStore.getState().customTheme));
-      toast.success("Theme exported");
+      toast.info("Theme exported");
     } catch (err) {
       toast.error(`Export failed:\n${String(err)}`);
     }
@@ -277,7 +277,7 @@ function CustomThemeEditor() {
       if (!src) return;
       const imported = importCustomTheme(await api.readSettingsFile(src));
       editCustomTheme(() => imported);
-      toast.success("Theme imported (undo to revert)");
+      toast.info("Theme imported (undo to revert)");
     } catch (err) {
       toast.error(`Import failed:\n${err instanceof Error ? err.message : String(err)}`);
     }
@@ -403,7 +403,7 @@ function AiSuggest({ tab }: { tab: SubTab }) {
     onSuccess: ({ suggested, inspiration, issues, scope }) => {
       editCustomTheme((t) => mergeScope(t, suggested, scope));
       toast.info(`Applied “${inspiration}” — ⌘Z to undo`);
-      if (issues.length > 0) toast.error(`Some contrast is still low:\n${issues.join("\n")}`);
+      if (issues.length > 0) toast.warning(`Some contrast is still low:\n${issues.join("\n")}`);
     },
     onError: (err) => toast.error(`AI suggest failed:\n${err instanceof Error ? err.message : String(err)}`),
   });

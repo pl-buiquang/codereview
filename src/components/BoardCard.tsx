@@ -108,7 +108,7 @@ export function MetaRow({
   const copyResume = () => {
     const cmd = `cd ${meta.cwd ?? "."}; claude --resume ${meta.value}`;
     navigator.clipboard.writeText(cmd).then(
-      () => toast.success("Copied resume command"),
+      () => toast.info("Copied resume command"),
       (e) => toast.error(String(e)),
     );
   };
@@ -452,7 +452,7 @@ function PrActionsMenu({
 
 function copyCardUrl(url: string) {
   navigator.clipboard.writeText(url).then(
-    () => toast.success("GitHub link copied to clipboard"),
+    () => toast.info("GitHub link copied to clipboard"),
     (e) => toast.error(`Could not copy link: ${String(e)}`),
   );
 }

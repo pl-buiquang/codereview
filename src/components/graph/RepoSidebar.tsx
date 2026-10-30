@@ -115,7 +115,7 @@ export function RepoSidebar({
     mutationFn: () => api.pruneWorktrees(repo.id),
     onSuccess: () => {
       invalidateWorktrees();
-      toast.success("Stale worktrees pruned.");
+      toast.info("Stale worktrees pruned.");
     },
     onError: (e) => toast.error(`Prune failed: ${String(e)}`),
   });
@@ -141,7 +141,7 @@ export function RepoSidebar({
       if (!outcome) return;
       queryClient.invalidateQueries({ queryKey: ["refs", repo.id] });
       queryClient.invalidateQueries({ queryKey: ["graph", repo.id] });
-      if (outcome.deleted.length) toast.success(`Deleted ${outcome.deleted.length} gone branch(es).`);
+      if (outcome.deleted.length) toast.info(`Deleted ${outcome.deleted.length} gone branch(es).`);
       for (const f of outcome.failed) toast.error(`Could not delete ${f.name}: ${f.error}`);
     },
     onError: (e) => toast.error(`Prune failed: ${String(e)}`),

@@ -14,7 +14,7 @@ export function TrackPrDialog({ onClose }: { onClose: () => void }) {
     mutationFn: (ref: string) => api.boardTrackPr(ref),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["board"] });
-      toast.success("PR tracked");
+      toast.info("PR tracked");
       onClose();
     },
   });

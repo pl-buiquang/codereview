@@ -5,7 +5,7 @@ import userEvent from "@testing-library/user-event";
 const success = vi.fn();
 const error = vi.fn();
 vi.mock("../../lib/toast", () => ({
-  toast: { success: (m: string) => success(m), error: (m: string) => error(m) },
+  toast: { info: (m: string) => success(m), error: (m: string) => error(m) },
 }));
 
 import { CommitPanel } from "./CommitPanel";

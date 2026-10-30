@@ -118,7 +118,7 @@ function LogsSection() {
   const copyPath = () => {
     if (!pathQuery.data) return;
     navigator.clipboard.writeText(pathQuery.data).then(
-      () => toast.success("Copied log path"),
+      () => toast.info("Copied log path"),
       (e) => toast.error(String(e)),
     );
   };
@@ -245,7 +245,7 @@ function GeneralSection() {
         (await api.promptsList()).flatMap((p) => (p.override != null ? [[p.key, p.override]] : [])),
       );
       await api.writeSettingsFile(dest, exportSettings(prompts));
-      toast.success("Settings exported");
+      toast.info("Settings exported");
     } catch (err) {
       toast.error(`Export failed:\n${String(err)}`);
     }
@@ -267,7 +267,7 @@ function GeneralSection() {
         );
         queryClient.invalidateQueries({ queryKey: ["prompts"] });
       }
-      toast.success(`Imported ${count} setting${count === 1 ? "" : "s"}`);
+      toast.info(`Imported ${count} setting${count === 1 ? "" : "s"}`);
     } catch (err) {
       toast.error(`Import failed:\n${err instanceof Error ? err.message : String(err)}`);
     }
@@ -278,7 +278,7 @@ function GeneralSection() {
     mutationFn: api.resetMirror,
     onSuccess: () => {
       invalidateMirrorQueries();
-      toast.success("Mirror reset — rebuilding from GitHub");
+      toast.info("Mirror reset — rebuilding from GitHub");
     },
     onError: (err) => toast.error(`Reset failed:\n${String(err)}`),
   });
@@ -295,7 +295,7 @@ function GeneralSection() {
     mutationFn: () => api.autoLinkRepos(parseRepoBasePaths(repoBasePaths)),
     onSuccess: (count) => {
       queryClient.invalidateQueries({ queryKey: ["repositories"] });
-      toast.success(count > 0 ? `Linked ${count} repo${count === 1 ? "" : "s"}` : "No repos to auto-link");
+      toast.info(count > 0 ? `Linked ${count} repo${count === 1 ? "" : "s"}` : "No repos to auto-link");
     },
     onError: (err) => toast.error(`Auto-link failed:\n${String(err)}`),
   });

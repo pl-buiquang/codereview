@@ -31,7 +31,7 @@ export function OpenPrButton({ url, size }: { url: string; size?: "xs" }) {
     setMenuOpen(false);
     try {
       await navigator.clipboard.writeText(url);
-      toast.success("PR URL copied to clipboard");
+      toast.info("PR URL copied to clipboard");
     } catch (e) {
       toast.error(`Could not copy URL:\n${String(e)}`);
     }

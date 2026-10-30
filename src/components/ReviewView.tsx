@@ -1152,7 +1152,7 @@ export function newCommitsLabel(live: FreshnessResult | undefined, pinnedHead: s
 
 function copyPrUrl(prUrl: string) {
   navigator.clipboard.writeText(prUrl).then(
-    () => toast.success("PR URL copied to clipboard"),
+    () => toast.info("PR URL copied to clipboard"),
     (e) => toast.error(`Could not copy URL: ${String(e)}`),
   );
 }
@@ -1357,7 +1357,7 @@ function ReviewHeader({
     mutationFn: () => api.discardPendingReview(review.id),
     onSuccess: () => {
       invalidateReview();
-      toast.success("Pending review discarded — draft unlocked.");
+      toast.info("Pending review discarded — draft unlocked.");
     },
     onError: (e) => toast.error(`Discard failed:\n${String(e)}`),
   });
@@ -1423,7 +1423,7 @@ function ReviewHeader({
         return;
       }
       const { reanchored, lost, relocated } = r.reanchor;
-      toast.success(
+      (lost ? toast.warning : toast.info)(
         `Review updated to the latest commits.${reanchored ? ` ${reanchored} comment${reanchored === 1 ? "" : "s"} moved${relocated ? ` (${relocated} found by content)` : ""}.` : ""}${lost ? ` ${lost} could not follow and are marked outdated.` : ""}`,
       );
     },
@@ -1516,7 +1516,7 @@ function ReviewHeader({
   const trackPr = useMutation({
     mutationFn: () => api.boardTrack(`${owner}/${name}#${prNumber}`),
     onSuccess: () => {
-      toast.success("Tracked on the board");
+      toast.info("Tracked on the board");
       queryClient.invalidateQueries({ queryKey: ["board-card-for-pr", owner, name, prNumber] });
       queryClient.invalidateQueries({ queryKey: ["board"] });
       queryClient.invalidateQueries({ queryKey: ["board-tracked"] });
@@ -1565,7 +1565,7 @@ function ReviewHeader({
     mutationFn: () => api.reanchorComments(review.id),
     onSuccess: (r) => {
       queryClient.invalidateQueries({ queryKey: ["review", review.id] });
-      toast.success(
+      (r.lost ? toast.warning : toast.info)(
         `Re-anchored ${r.reanchored}${r.relocated ? ` (${r.relocated} found by content)` : ""}, ${r.lost} could not be moved`,
       );
     },
@@ -2788,7 +2788,7 @@ const FileReview = memo(function FileReview({
             onClick={(e) => {
               e.stopPropagation();
               navigator.clipboard.writeText(path);
-              toast.success("Path copied to clipboard");
+              toast.info("Path copied to clipboard");
             }}
           >
             <Icon name="copy" size={12} />
@@ -3770,7 +3770,7 @@ function ExportModal({
       await api.exportReview(reviewId, path, format);
       onExported();
       await navigator.clipboard.writeText(path);
-      toast.success(`Exported to ${path} (path copied)`);
+      toast.info(`Exported to ${path} (path copied)`);
       onClose();
     } catch (e) {
       toast.error(String(e));
@@ -3781,7 +3781,7 @@ function ExportModal({
     try {
       const content = await api.previewReview(reviewId, format);
       await navigator.clipboard.writeText(content);
-      toast.success(`${format === "markdown" ? "Markdown" : "JSON"} copied to clipboard`);
+      toast.info(`${format === "markdown" ? "Markdown" : "JSON"} copied to clipboard`);
     } catch (e) {
       toast.error(String(e));
     }
@@ -3793,7 +3793,7 @@ function ExportModal({
       const path = await api.exportVscodeReview(reviewId);
       onExported();
       await navigator.clipboard.writeText(path);
-      toast.success(`Exported to VSCode: ${path} (path copied)`);
+      toast.info(`Exported to VSCode: ${path} (path copied)`);
       onClose();
     } catch (e) {
       toast.error(String(e));

@@ -80,7 +80,7 @@ function TabContextMenu({
           className="tab-context-item"
           onClick={() => {
             navigator.clipboard.writeText(link).then(() => {
-              toast.success("Link copied");
+              toast.info("Link copied");
             });
             onClose();
           }}

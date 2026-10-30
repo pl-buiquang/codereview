@@ -58,7 +58,7 @@ export function RoutinesRunsTab() {
   });
   const copyCommand = (command: string) =>
     navigator.clipboard.writeText(command).then(
-      () => toast.success("Resume command copied to clipboard"),
+      () => toast.info("Resume command copied to clipboard"),
       (e) => toast.error(`Could not copy: ${String(e)}`),
     );
   const relaunch = useMutation({

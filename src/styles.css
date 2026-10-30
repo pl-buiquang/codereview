@@ -2445,8 +2445,11 @@ tr.kb-focus {
 .toast.error {
   border-left: 3px solid var(--danger);
 }
+.toast.warning {
+  border-left: 3px solid var(--warning);
+}
 .toast.success {
-  border-left: 3px solid var(--accent);
+  border-left: 3px solid var(--success);
 }
 .toast.info {
   border-left: 3px solid var(--info);

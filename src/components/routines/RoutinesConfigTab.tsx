@@ -99,7 +99,7 @@ export function RoutinesConfigTab() {
     onSuccess: (r) => {
       refresh();
       load(toInput(r), r.builtin);
-      toast.success("Routine saved");
+      toast.info("Routine saved");
     },
     onError: (e) => toast.error(String(e)),
   });
@@ -116,7 +116,7 @@ export function RoutinesConfigTab() {
     onSuccess: (r) => {
       refresh();
       load(toInput(r), r.builtin);
-      toast.success("Reset to default");
+      toast.info("Reset to default");
     },
     onError: (e) => toast.error(String(e)),
   });

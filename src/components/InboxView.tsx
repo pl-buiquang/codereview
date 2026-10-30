@@ -160,7 +160,7 @@ export function InboxView() {
       invalidate();
       queryClient.invalidateQueries({ queryKey: ["board-tracked"] });
       queryClient.invalidateQueries({ queryKey: ["board"] });
-      toast.success("Tracked on the board");
+      toast.info("Tracked on the board");
     },
     onError: (e) => toast.error(`Could not track:\n${String(e)}`),
   });

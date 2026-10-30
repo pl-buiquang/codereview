@@ -94,7 +94,7 @@ function TerminalSessions() {
   const stop = useMutation({
     mutationFn: api.stopClaudeSession,
     onSuccess: () => {
-      toast.success("Background session stopped");
+      toast.info("Background session stopped");
       queryClient.invalidateQueries({ queryKey: ["claude-sessions"] });
     },
     onError: (e) => toast.error(`Could not stop session:\n${String(e)}`),
@@ -128,7 +128,7 @@ function TerminalSessions() {
 
   const copyCommand = (command: string, what: string) =>
     navigator.clipboard.writeText(command).then(
-      () => toast.success(`${what} command copied to clipboard`),
+      () => toast.info(`${what} command copied to clipboard`),
       (e) => toast.error(`Could not copy: ${String(e)}`),
     );
 

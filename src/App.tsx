@@ -94,7 +94,7 @@ function App() {
       if (payload.status === "failed") {
         toast.error(`AI review (${payload.layer}) failed:\n${payload.error ?? "unknown error"}`);
       } else {
-        toast.success(`AI review (${payload.layer}) finished${payload.summary ? `:\n${payload.summary}` : ""}`);
+        toast.info(`AI review (${payload.layer}) finished${payload.summary ? `:\n${payload.summary}` : ""}`);
       }
     })
       .then((dispose) => {
@@ -235,7 +235,7 @@ function App() {
   useEffect(() => {
     if (!isTauriRuntime()) return;
     api.crInstallNote().then((note) => {
-      if (note) toast.success(note);
+      if (note) toast.info(note);
     });
   }, []);
 

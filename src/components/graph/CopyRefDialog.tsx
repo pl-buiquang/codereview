@@ -6,7 +6,7 @@ import "./RepoSidebar.css";
 
 export function copyToClipboard(text: string) {
   navigator.clipboard.writeText(text).then(
-    () => toast.success(`Copied ${text}`),
+    () => toast.info(`Copied ${text}`),
     (e) => toast.error(`Could not copy: ${String(e)}`),
   );
 }

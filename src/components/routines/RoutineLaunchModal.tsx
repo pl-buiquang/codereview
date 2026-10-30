@@ -42,7 +42,7 @@ export function RoutineLaunchModal({
     onSuccess: (run) => {
       queryClient.invalidateQueries({ queryKey: ["routine-runs"] });
       queryClient.invalidateQueries({ queryKey: ["routine-options"] });
-      toast.success(`${run.routine_name} ${run.status === "queued" ? "queued" : "started"}`);
+      toast.info(`${run.routine_name} ${run.status === "queued" ? "queued" : "started"}`);
       onClose();
     },
     onError: (e) => toast.error(String(e)),

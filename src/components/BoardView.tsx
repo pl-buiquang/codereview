@@ -134,7 +134,7 @@ export function BoardView() {
     if (match) openRepo(match.id);
     else {
       api.openUrl(`https://github.com/${repo}`).catch(onErr);
-      toast.success("Repository not added locally — opened on GitHub instead");
+      toast.warning("Repository not added locally — opened on GitHub instead");
     }
   };
 
@@ -209,7 +209,7 @@ export function BoardView() {
       if (!res) return;
       invalidate();
       const { pushed, skipped_local } = res.report;
-      toast.success(
+      (skipped_local.length ? toast.warning : toast.success)(
         `Rebased ${pushed.length} branch${pushed.length === 1 ? "" : "es"}` +
           (skipped_local.length ? `\nLeft local copy of ${skipped_local.join(", ")} (changed meanwhile) — Resync it from Worktrees` : ""),
       );
@@ -246,7 +246,7 @@ export function BoardView() {
     mutationFn: () => api.boardArchiveDone(archiveDays),
     onSuccess: (n) => {
       invalidate();
-      toast.success(n === 1 ? "Archived 1 card" : `Archived ${n} cards`);
+      toast.info(n === 1 ? "Archived 1 card" : `Archived ${n} cards`);
     },
     onError: onErr,
   });

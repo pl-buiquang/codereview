@@ -72,7 +72,7 @@ export function ImportCommentsDialog({
           );
         if (r.reanchor.lost) parts.push(`${r.reanchor.lost} outdated`);
       }
-      toast.success(parts.join(", "));
+      (r.reanchor?.lost ? toast.warning : toast.info)(parts.join(", "));
       if (r.reanchorError) toast.error(`Re-anchor failed:\n${r.reanchorError}`);
       onClose();
     },

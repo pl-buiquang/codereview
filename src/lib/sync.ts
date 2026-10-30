@@ -85,7 +85,7 @@ export function useSyncNow(scope: SyncScope) {
     mutationFn: ({ mode, visibleIds }: SyncVars) => api.syncNow(scope, mode, visibleIds ?? []),
     onSuccess: (r, { mode }) => {
       invalidateMirrorQueries();
-      toast.success(syncSummary(scope, mode, r));
+      toast.info(syncSummary(scope, mode, r));
     },
     onError: (e) => toast.error(`Sync failed:\n${String(e)}`),
   });
@@ -124,7 +124,7 @@ function useTauriListener<T>(event: string, onPayload: (payload: T) => void) {
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
 /** Toast text for a monitor round, or null when it did nothing worth showing. */
-export function monitorSummary({ actions, error }: BoardMonitorPayload): { text: string; isError: boolean } | null {
+export function monitorSummary({ actions, error }: BoardMonitorPayload): { text: string; isError: boolean; warn: boolean } | null {
   const ref = (a: { repo: string; number: number }) => `${a.repo}#${a.number}`;
   const of = (kind: string) => actions.filter((a) => a.kind === kind);
   const updated = of("updated");
@@ -139,7 +139,7 @@ export function monitorSummary({ actions, error }: BoardMonitorPayload): { text:
     error && error,
   ].filter(Boolean);
   if (parts.length === 0) return null;
-  return { text: `Monitor: ${parts.join(" · ")}`, isError: errors.length > 0 || error != null };
+  return { text: `Monitor: ${parts.join(" · ")}`, isError: errors.length > 0 || error != null, warn: gaveUp.length > 0 };
 }
 
 /** App-level wiring: mirror/status events, window visibility + focus, and the
@@ -153,7 +153,8 @@ export function useSyncBridge() {
     const summary = monitorSummary(payload);
     if (!summary) return;
     if (summary.isError) toast.error(summary.text);
-    else toast.success(summary.text);
+    else if (summary.warn) toast.warning(summary.text);
+    else toast.info(summary.text);
   });
 
   const autoSync = useSettingsStore((s) => s.autoSync);

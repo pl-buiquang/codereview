@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-export type ToastKind = "error" | "success" | "info";
+export type ToastKind = "error" | "warning" | "success" | "info";
 
 export interface Toast {
   id: number;
@@ -38,6 +38,9 @@ function show(kind: ToastKind, message: string, ttlMs: number): number {
 /** App-wide notifications. Usable outside React (e.g. mutation `onError`). */
 export const toast = {
   error: (message: string) => show("error", message, 8000),
+  /** The action worked, but only partly or with a caveat worth reading. */
+  warning: (message: string) => show("warning", message, 6000),
+  /** The action changed something on GitHub or a remote. */
   success: (message: string) => show("success", message, 4000),
   /** Neutral notice: nothing failed, nothing was changed or needs attention. */
   info: (message: string) => show("info", message, 4000),

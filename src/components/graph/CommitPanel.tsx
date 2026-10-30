@@ -119,7 +119,7 @@ function CommitMode({
   const copySha = async () => {
     try {
       await navigator.clipboard.writeText(detail.sha);
-      toast.success(`Copied ${shortSha(detail.sha)}`);
+      toast.info(`Copied ${shortSha(detail.sha)}`);
     } catch (e) {
       toast.error(`Copy failed: ${String(e)}`);
     }

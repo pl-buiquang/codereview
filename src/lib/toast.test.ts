@@ -33,6 +33,14 @@ describe("toast", () => {
     expect(useToastStore.getState().toasts).toHaveLength(0);
   });
 
+  it("keeps warning toasts for 6s", () => {
+    toast.warning("careful");
+    vi.advanceTimersByTime(5999);
+    expect(useToastStore.getState().toasts).toHaveLength(1);
+    vi.advanceTimersByTime(1);
+    expect(useToastStore.getState().toasts).toHaveLength(0);
+  });
+
   it("dismiss removes a specific toast immediately", () => {
     const id = useToastStore.getState().push("error", "x");
     useToastStore.getState().push("success", "y");
