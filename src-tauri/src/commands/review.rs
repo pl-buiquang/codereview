@@ -2330,7 +2330,6 @@ pub fn discard_pending_review(review_id: i64, db: State<Db>) -> AppResult<Review
     get_review_row(&conn, review_id)
 }
 
-#[tauri::command]
 pub fn delete_review_impl(conn: &Connection, review_id: i64) -> AppResult<()> {
     if review_status(conn, review_id)? == "published_pending" {
         return Err(AppError::Other(
@@ -2339,6 +2338,8 @@ pub fn delete_review_impl(conn: &Connection, review_id: i64) -> AppResult<()> {
         ));
     }
     conn.execute("DELETE FROM review WHERE id = ?1", params![review_id])?;
+    // The generated image diffs go with the review.
+    crate::image_diff::forget_review(conn, review_id);
     Ok(())
 }
 
@@ -3949,6 +3950,31 @@ mod tests {
     fn new_comment_defaults_unresolved() {
         let (conn, _review_id, root_id) = review_with_root_comment();
         assert!(resolved_at_of(&conn, root_id).is_none());
+    }
+
+    #[test]
+    fn deleting_a_review_removes_its_image_diff_cache() {
+        let dir = std::env::temp_dir().join(format!("cr-delete-cache-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let db_path = dir.join("codereview.db");
+        let conn = crate::db::open(&db_path).unwrap();
+        let repo = seed_repo(&conn, None, None);
+        let target = get_or_create_local_target(&conn, repo, "/nope", "main", "feature", true).unwrap().0;
+        let review = new_review_for_target(&conn, target.id, &LiveShas::default()).unwrap();
+        let other = new_review_for_target(&conn, target.id, &LiveShas::default()).unwrap();
+        let cache = crate::image_diff::store::cache_dir(&db_path, review.id);
+        let other_cache = crate::image_diff::store::cache_dir(&db_path, other.id);
+        for c in [&cache, &other_cache] {
+            std::fs::create_dir_all(c.join("f0")).unwrap();
+            std::fs::write(c.join("f0/diff.png"), b"x").unwrap();
+        }
+
+        delete_review_impl(&conn, review.id).unwrap();
+
+        assert!(!cache.exists(), "the deleted review's cache is gone");
+        assert!(other_cache.exists(), "another review's cache is untouched");
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

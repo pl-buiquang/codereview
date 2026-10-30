@@ -17,6 +17,7 @@ pub mod export;
 pub mod gh;
 pub mod git;
 pub mod graph;
+pub mod image_diff;
 pub mod inbox;
 pub mod logging;
 pub mod mirror;

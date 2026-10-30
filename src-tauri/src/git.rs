@@ -50,6 +50,32 @@ pub fn run_git_env(repo: &Path, args: &[&str], env: &[(&str, &str)]) -> AppResul
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
+/// [`run_git`] returning raw stdout, for binary blobs (`git cat-file blob`).
+pub fn run_git_bytes(repo: &Path, args: &[&str]) -> AppResult<Vec<u8>> {
+    let output = Command::new(crate::tools::git_bin())
+        .env("GIT_OPTIONAL_LOCKS", "0")
+        .arg("-C")
+        .arg(repo)
+        .args(args)
+        .output()
+        .map_err(|e| AppError::Git(format!("failed to spawn git: {e}")))?;
+    if !output.status.success() {
+        return Err(AppError::Git(String::from_utf8_lossy(&output.stderr).trim().to_string()));
+    }
+    Ok(output.stdout)
+}
+
+/// Raw bytes of `path` at `rev` (`git cat-file blob rev:path`).
+pub fn show_blob_bytes(repo: &Path, rev: &str, path: &str) -> AppResult<Vec<u8>> {
+    validate_commit_ref(rev)?;
+    run_git_bytes(repo, &["cat-file", "blob", &format!("{rev}:{path}")])
+}
+
+/// Whether a background fetch ([`fetch_commits_in_background`]) is running in `repo`.
+pub fn background_fetch_running(repo: &Path) -> bool {
+    BG_FETCHES.lock().unwrap().as_ref().is_some_and(|set| set.contains(repo))
+}
+
 pub fn is_git_repo(path: &Path) -> bool {
     run_git(path, &["rev-parse", "--is-inside-work-tree"])
         .map(|s| s.trim() == "true")

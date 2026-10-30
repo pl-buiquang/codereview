@@ -121,7 +121,7 @@ fn strip_side_prefix(p: &str) -> Option<String> {
 
 /// Split the `a/X b/Y` tail of a `diff --git` line. Unrenamed files have X == Y,
 /// which disambiguates paths containing " b/".
-fn split_git_paths(rest: &str) -> (Option<String>, Option<String>) {
+pub(crate) fn split_git_paths(rest: &str) -> (Option<String>, Option<String>) {
     if rest.len() >= 5 && (rest.len() - 5).is_multiple_of(2) {
         let n = (rest.len() - 5) / 2;
         if rest.is_char_boundary(2 + n) && rest.is_char_boundary(3 + n) {

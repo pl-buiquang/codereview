@@ -265,6 +265,19 @@ pub fn file_at_ref(owner: &str, name: &str, file_path: &str, git_ref: &str) -> A
     )
 }
 
+/// [`file_at_ref`] as raw bytes, for binary files (images).
+pub fn file_bytes_at_ref(owner: &str, name: &str, file_path: &str, git_ref: &str) -> AppResult<Vec<u8>> {
+    let endpoint = format!("repos/{owner}/{name}/contents/{file_path}?ref={git_ref}");
+    let output = Command::new(crate::tools::gh_bin())
+        .args(["api", &endpoint, "-H", "Accept: application/vnd.github.raw"])
+        .output()
+        .map_err(|e| AppError::Gh(format!("failed to spawn gh: {e}")))?;
+    if !output.status.success() {
+        return Err(AppError::Gh(String::from_utf8_lossy(&output.stderr).trim().to_string()));
+    }
+    Ok(output.stdout)
+}
+
 pub fn auth_status() -> bool {
     Command::new(crate::tools::gh_bin())
         .args(["auth", "status"])
