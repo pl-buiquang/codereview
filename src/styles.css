@@ -1401,6 +1401,13 @@ td.diff-code {
   gap: 6px;
   min-height: 22px;
 }
+.pr-meta-base a {
+  color: var(--accent);
+  text-decoration: none;
+}
+.pr-meta-base a:hover {
+  text-decoration: underline;
+}
 .pr-meta-divider {
   border: none;
   border-top: 1px solid var(--border);

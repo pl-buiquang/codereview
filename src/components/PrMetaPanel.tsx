@@ -516,7 +516,7 @@ function BaseField({ pr, base }: { pr: PrRef; base: PrBase }) {
   const tree = `https://github.com/${pr.owner}/${pr.name}/tree`;
   const parent = base.pr;
   return (
-    <div className="pr-meta-val">
+    <div className="pr-meta-val pr-meta-base">
       <ExtLink href={`${tree}/${base.refName}`}>
         <code>{base.refName}</code>
       </ExtLink>
