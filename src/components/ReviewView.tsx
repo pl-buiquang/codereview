@@ -50,6 +50,7 @@ import { DefinitionPopover } from "./DefinitionPopover";
 import { filterDiffMatches, wrapIndex, type DiffMatch } from "../lib/diffSearch";
 import { categorize, compileCategoryRules, type FileCategory } from "../lib/fileCategory";
 import { FileJumpList } from "./FileJumpList";
+import { FileJumpPicker, type FileEntry } from "./FileJumpPicker";
 import {
   FocusDigest,
   FocusGenerate,
@@ -179,6 +180,7 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
   // and jumps between them (Enter / Shift+Enter), expanding a collapsed ("viewed")
   // file when a match lands inside it.
   const [searchOpen, setSearchOpen] = useState(false);
+  const [fileJumpOpen, setFileJumpOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchIdx, setSearchIdx] = useState(0);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -439,6 +441,17 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
     });
     return set;
   }, [files, categoryRules, typeFilter, focusHiddenPaths]);
+
+  // Files the `t` jump picker offers: the same set the sidebar list shows.
+  const jumpPickerFiles = useMemo(
+    (): FileEntry[] =>
+      files.flatMap((f, i) =>
+        visibleFileIdx == null || visibleFileIdx.has(i)
+          ? [{ path: fileDisplayPath(f), ...countChanges(f) }]
+          : [],
+      ),
+    [files, visibleFileIdx],
+  );
 
   const jumpToFile = useCallback((fileIndex: number) => {
     // Deferred a frame: revealing a focus-hidden file re-renders it into the
@@ -827,6 +840,10 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
         case "b":
           toggleSidebar();
           break;
+        case "t":
+          if (!jl || jl.fileCount === 0) return;
+          setFileJumpOpen(true);
+          break;
         case " ": {
           // Keep native Space activation on focused controls.
           if (e.shiftKey || !hasPrMeta) return;
@@ -914,6 +931,22 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
         />
         {!sidebarCollapsed && <div className="resize-handle" onMouseDown={startResize("left")} />}
         <div className="diff-area" ref={diffAreaRef}>
+          {fileJumpOpen && (
+            <>
+              <div className="file-jump-backdrop" onClick={() => setFileJumpOpen(false)} />
+              <div className="file-jump-popup" role="dialog" aria-label="Jump to file">
+                <FileJumpPicker
+                  autoFocus
+                  files={jumpPickerFiles}
+                  onDismiss={() => setFileJumpOpen(false)}
+                  onPick={(path) => {
+                    const idx = files.findIndex((f) => fileDisplayPath(f) === path);
+                    if (idx >= 0) jumpListRef.current?.jumpTo(idx);
+                  }}
+                />
+              </div>
+            </>
+          )}
           {searchOpen && (
             <DiffSearchBar
               inputRef={searchInputRef}

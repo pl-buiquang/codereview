@@ -15,6 +15,7 @@ export const BINDINGS: Binding[] = [
   { keys: ["j", "k"], description: "Move line cursor down / up (active file)" },
   { keys: ["c"], description: "Comment on the focused line" },
   { keys: ["b"], description: "Toggle file list sidebar" },
+  { keys: ["t"], description: "Jump to file" },
   { keys: ["Space"], description: "Expand / collapse PR details" },
   { keys: ["⌘/Ctrl + F"], description: "Find in the diff" },
   { keys: ["?"], description: "Toggle this help" },

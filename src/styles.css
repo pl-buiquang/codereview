@@ -6769,3 +6769,28 @@ tr.def-flash > td {
   align-items: center;
   gap: 8px;
 }
+
+/* `t` file-jump overlay in the review: the quick view's picker, floated over the diff. */
+.file-jump-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+}
+.file-jump-popup {
+  position: fixed;
+  top: 18vh;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(560px, 90vw);
+  z-index: 41;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+}
+.file-jump-popup .quick-view-filebar {
+  position: static;
+  height: auto;
+  border-bottom: 0;
+  border-radius: 8px;
+}
