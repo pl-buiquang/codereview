@@ -164,20 +164,66 @@ pub fn validate_commit_ref(rev: &str) -> AppResult<()> {
     Ok(())
 }
 
-/// Make sure `sha` is present as a local object, fetching it from `origin` if not.
-/// GitHub serves any commit reachable from a PR (fork PRs included) this way.
-pub fn ensure_commit(repo: &Path, sha: &str) -> AppResult<()> {
-    validate_commit_ref(sha)?;
-    if run_git(repo, &["cat-file", "-e", &format!("{sha}^{{commit}}")]).is_ok() {
+/// Whether `sha` is already a local commit object.
+pub fn has_commit(repo: &Path, sha: &str) -> bool {
+    validate_commit_ref(sha).is_ok() && run_git(repo, &["cat-file", "-e", &format!("{sha}^{{commit}}")]).is_ok()
+}
+
+/// Fetch `shas` from `origin` in a single negotiation.
+pub fn fetch_commits(repo: &Path, shas: &[&str]) -> AppResult<()> {
+    for sha in shas {
+        validate_commit_ref(sha)?;
+    }
+    let mut args = vec!["fetch", "--quiet", "--no-tags", "origin"];
+    args.extend_from_slice(shas);
+    run_git(repo, &args).map(|_| ()).map_err(|e| {
+        AppError::Git(format!(
+            "commits {} are not in the local clone and could not be fetched from origin: {e}",
+            shas.join(", ")
+        ))
+    })
+}
+
+/// Make sure every one of `shas` is present as a local object, fetching the missing ones from
+/// `origin` in one go. GitHub serves any commit reachable from a PR (fork PRs included) this way.
+pub fn ensure_commits(repo: &Path, shas: &[&str]) -> AppResult<()> {
+    for sha in shas {
+        validate_commit_ref(sha)?;
+    }
+    let missing: Vec<&str> = shas.iter().copied().filter(|sha| !has_commit(repo, sha)).collect();
+    if missing.is_empty() {
         return Ok(());
     }
-    run_git(repo, &["fetch", "--quiet", "origin", sha])
-        .map(|_| ())
-        .map_err(|e| {
-            AppError::Git(format!(
-                "commit {sha} is not in the local clone and could not be fetched from origin: {e}"
-            ))
-        })
+    fetch_commits(repo, &missing)
+}
+
+/// Make sure `sha` is present as a local object, fetching it from `origin` if not.
+pub fn ensure_commit(repo: &Path, sha: &str) -> AppResult<()> {
+    ensure_commits(repo, &[sha])
+}
+
+static BG_FETCHES: std::sync::Mutex<Option<std::collections::HashSet<std::path::PathBuf>>> =
+    std::sync::Mutex::new(None);
+
+/// Fetch `shas` on a background thread, so a diff served from the GitHub API doesn't wait for the
+/// objects (a PR with big screenshots is hundreds of MB). One fetch per clone at a time: a repeat
+/// request while one runs is dropped, the next open finds the commits missing and asks again.
+pub fn fetch_commits_in_background(repo: &Path, shas: &[&str]) {
+    let repo = repo.to_path_buf();
+    if !BG_FETCHES.lock().unwrap().get_or_insert_with(Default::default).insert(repo.clone()) {
+        return;
+    }
+    let shas: Vec<String> = shas.iter().map(|s| s.to_string()).collect();
+    std::thread::spawn(move || {
+        let refs: Vec<&str> = shas.iter().map(String::as_str).collect();
+        match fetch_commits(&repo, &refs) {
+            Ok(()) => log::info!(target: "git", "background fetch of {} commit(s) done in {}", refs.len(), repo.display()),
+            Err(e) => log::warn!(target: "git", "background fetch failed in {}: {e}", repo.display()),
+        }
+        if let Some(set) = BG_FETCHES.lock().unwrap().as_mut() {
+            set.remove(&repo);
+        }
+    });
 }
 
 pub fn rev_parse(path: &Path, rev: &str) -> AppResult<String> {
@@ -436,9 +482,7 @@ fn replay_tree(repo: &Path, old_base: &str, old_head: &str, new_base: &str) -> O
 /// Resolve the since side of an interdiff between an earlier pin
 /// (`old_base`, `old_head`) and the new merge-base.
 pub fn interdiff_base(repo: &Path, old_base: &str, old_head: &str, new_base: &str) -> AppResult<InterdiffBase> {
-    for sha in [old_base, old_head, new_base] {
-        ensure_commit(repo, sha)?;
-    }
+    ensure_commits(repo, &[old_base, old_head, new_base])?;
     let old_base = rev_parse(repo, old_base)?;
     let old_head = rev_parse(repo, old_head)?;
     let new_base = rev_parse(repo, new_base)?;
@@ -465,7 +509,7 @@ pub fn interdiff(
     new_base: &str,
     new_head: &str,
 ) -> AppResult<String> {
-    ensure_commit(repo, new_head)?;
+    ensure_commits(repo, &[new_head, old_base, old_head, new_base])?;
     let new_head = rev_parse(repo, new_head)?;
     let base = interdiff_base(repo, old_base, old_head, new_base)?;
     let mut args: Vec<String> = ["diff", "--no-color", "--no-ext-diff", "--no-textconv"]
@@ -692,6 +736,18 @@ mod tests {
 
         ensure_commit(clone.path(), &missing_sha).unwrap();
         assert_eq!(rev_parse(clone.path(), &missing_sha).unwrap(), missing_sha);
+    }
+
+    #[test]
+    fn has_commit_tells_present_from_missing_and_ensure_commits_fetches_in_one_go() {
+        let (_origin, clone, missing_sha) = fixture_clone_missing_commit();
+        assert!(!has_commit(clone.path(), &missing_sha));
+        assert!(!has_commit(clone.path(), "--all"));
+
+        ensure_commits(clone.path(), &[&missing_sha]).unwrap();
+        assert!(has_commit(clone.path(), &missing_sha));
+        // Nothing missing: no fetch needed, still ok.
+        ensure_commits(clone.path(), &[&missing_sha]).unwrap();
     }
 
     #[test]

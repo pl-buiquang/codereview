@@ -1173,9 +1173,20 @@ fn pinned_pr_diff(
     base: &str,
     head: &str,
 ) -> AppResult<String> {
+    // A clone that lacks the commits would first download every object of the PR (screenshots
+    // included) before the diff could show. The compare API serves the same diff right away while
+    // the clone catches up in the background; if it fails, fall back to fetching first.
+    if let (Some(repo), Some((owner, name))) = (clone, owner_name) {
+        let missing: Vec<&str> = [base, head].into_iter().filter(|sha| !git::has_commit(repo, sha)).collect();
+        if !missing.is_empty() {
+            if let Ok(diff) = provider_for().compare_diff(owner, name, base, head) {
+                git::fetch_commits_in_background(repo, &missing);
+                return Ok(diff);
+            }
+        }
+    }
     let local = clone.map(|repo| -> AppResult<String> {
-        git::ensure_commit(repo, base)?;
-        git::ensure_commit(repo, head)?;
+        git::ensure_commits(repo, &[base, head])?;
         // `base` is already the merge-base, so two-dot is the PR's diff.
         git::diff(repo, base, head, false)
     });
