@@ -34,6 +34,7 @@ import {
   languageForPath,
   hunkContextSnippet,
   indexFile,
+  exceedsDiffLimit,
   isLargeDiff,
   leadingExpandRange,
   rightLinesText,
@@ -2447,7 +2448,13 @@ const FileReview = memo(function FileReview({
   );
   const markEditsEnabled = useSettingsStore((s) => s.markEdits);
   const largeDiffMaxLines = useSettingsStore((s) => s.largeDiffMaxLines);
-  const tooLarge = useMemo(() => isLargeDiff(file, largeDiffMaxLines), [file, largeDiffMaxLines]);
+  const overLimit = useMemo(() => exceedsDiffLimit(file, largeDiffMaxLines), [file, largeDiffMaxLines]);
+  // An SVG is only collapsed by default; one over the line limit can't be shown at all.
+  const [showSvgAnyway, setShowSvgAnyway] = useState(false);
+  const tooLarge = useMemo(
+    () => overLimit || (isLargeDiff(file, largeDiffMaxLines) && !showSvgAnyway),
+    [file, largeDiffMaxLines, overLimit, showSvgAnyway],
+  );
   const [selection, setSelection] = useState<Selection | null>(null);
   const viewed = detail.viewed_files.includes(path);
   const syntaxReady = useSyntaxReady(languageForPath(path));
@@ -2893,8 +2900,19 @@ const FileReview = memo(function FileReview({
       )}
       {viewed ? null : tooLarge ? (
         <p className="muted binary-note">
-          Diff too large to display ({(add + del).toLocaleString()} changed lines, limit{" "}
-          {largeDiffMaxLines.toLocaleString()}).{" "}
+          {overLimit ? (
+            <>
+              Diff too large to display ({(add + del).toLocaleString()} changed lines, limit{" "}
+              {largeDiffMaxLines.toLocaleString()}).{" "}
+            </>
+          ) : (
+            <>
+              SVG source diff collapsed ({(add + del).toLocaleString()} changed lines).{" "}
+              <button className="btn btn-sm btn-ghost" onClick={() => setShowSvgAnyway(true)}>
+                Show anyway
+              </button>{" "}
+            </>
+          )}
           {!isDeleted && (
             <button
               className="btn btn-sm btn-ghost"

@@ -16,6 +16,7 @@ import {
   changeKeyOf,
   countChanges,
   hunkContextSnippet,
+  exceedsDiffLimit,
   isLargeDiff,
   leadingExpandRange,
   rightLinesText,
@@ -173,6 +174,13 @@ describe("isLargeDiff", () => {
     const [file] = parseDiff(SAMPLE_DIFF);
     expect(isLargeDiff(file, 2)).toBe(false);
     expect(isLargeDiff(file, 1)).toBe(true);
+  });
+
+  it("collapses SVG files whatever their size, but they are not over the limit", () => {
+    const [file] = parseDiff(SAMPLE_DIFF);
+    const svg = { ...file, oldPath: "a/logo.SVG", newPath: "a/logo.SVG" };
+    expect(isLargeDiff(svg, 1000)).toBe(true);
+    expect(exceedsDiffLimit(svg, 1000)).toBe(false);
   });
 });
 

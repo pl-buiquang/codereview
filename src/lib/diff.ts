@@ -420,9 +420,21 @@ export function countChanges(file: FileData): { add: number; del: number } {
   return { add, del };
 }
 
-export function isLargeDiff(file: FileData, maxLines: number): boolean {
+/** A path that's an SVG: its text diff is often one huge minified or base64-carrying line, which
+ *  freezes highlighting and word diff, so it's collapsed by default. */
+export function isSvgPath(path: string): boolean {
+  return /\.svg$/i.test(path);
+}
+
+/** Over the line limit: never rendered. */
+export function exceedsDiffLimit(file: FileData, maxLines: number): boolean {
   const { add, del } = countChanges(file);
   return add + del > maxLines;
+}
+
+/** Not rendered by default: over the line limit, or an SVG. */
+export function isLargeDiff(file: FileData, maxLines: number): boolean {
+  return exceedsDiffLimit(file, maxLines) || isSvgPath(fileDisplayPath(file));
 }
 
 /** A one-hunk `FileData` from a GitHub `diffHunk` (the hunk header plus the
