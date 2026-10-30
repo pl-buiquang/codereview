@@ -15,7 +15,13 @@ mkdir -p src-tauri/binaries
 cp "src-tauri/target/release/cr${EXT}" "src-tauri/binaries/cr-${TRIPLE}${EXT}"
 chmod +x "src-tauri/binaries/cr-${TRIPLE}${EXT}" || true
 
-# Config override used by `pnpm tauri build` to inject externalBin
-echo '{"bundle":{"externalBin":["binaries/cr"]}}' > src-tauri/tauri.sidecar.conf.json
+# Config override used by `pnpm tauri build` to inject externalBin. Skipped on Linux:
+# the bundler already ships the `cr` [[bin]] as /usr/bin/cr, and the sidecar would
+# add the same path twice (the rpm bundler rejects that).
+if [[ "$TRIPLE" == *"linux"* ]]; then
+  echo '{}' > src-tauri/tauri.sidecar.conf.json
+else
+  echo '{"bundle":{"externalBin":["binaries/cr"]}}' > src-tauri/tauri.sidecar.conf.json
+fi
 
 echo "Done → src-tauri/binaries/cr-${TRIPLE}${EXT}"

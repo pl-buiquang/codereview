@@ -176,8 +176,14 @@ jobs:
           cp "$SRC" "cr-${TRIPLE}${EXT}"
           echo "CR_ASSET=cr-${TRIPLE}${EXT}" >> "$GITHUB_ENV"
 
-          # Config override that injects externalBin into the Tauri bundle
-          echo '{"bundle":{"externalBin":["binaries/cr"]}}' > src-tauri/tauri.sidecar.conf.json
+          # Config override that injects externalBin into the Tauri bundle. Skipped on
+          # Linux: the bundler already ships the `cr` [[bin]] as /usr/bin/cr, and the
+          # sidecar would add the same path twice (the rpm bundler rejects that).
+          if [[ "$TRIPLE" == *"linux"* ]]; then
+            echo '{}' > src-tauri/tauri.sidecar.conf.json
+          else
+            echo '{"bundle":{"externalBin":["binaries/cr"]}}' > src-tauri/tauri.sidecar.conf.json
+          fi
 
       - name: Build and upload to draft release
         uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1.0.0
