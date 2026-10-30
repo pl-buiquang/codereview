@@ -7,8 +7,14 @@ const imageDiffStatus = vi.fn();
 const imageDiffManifest = vi.fn();
 const imageDiffGenerate = vi.fn();
 const imageDiffCancel = vi.fn();
+const imageDiffReport = vi.fn();
+const imageDiffRunReport = vi.fn();
+const checkEnvironment = vi.fn();
 vi.mock("../lib/api", () => ({
   api: {
+    imageDiffReport: (...a: unknown[]) => imageDiffReport(...a),
+    imageDiffRunReport: (...a: unknown[]) => imageDiffRunReport(...a),
+    checkEnvironment: () => checkEnvironment(),
     imageDiffStatus: (...a: unknown[]) => imageDiffStatus(...a),
     imageDiffManifest: (...a: unknown[]) => imageDiffManifest(...a),
     imageDiffGenerate: (...a: unknown[]) => imageDiffGenerate(...a),
@@ -16,6 +22,7 @@ vi.mock("../lib/api", () => ({
   },
 }));
 
+import { useSettingsStore, AI_DISABLED_REASON } from "../lib/settings";
 import { ImageDiffPane, fileBadge, initialIndex } from "./ImageDiffPane";
 import type { ImageDiffFile, ImageDiffManifest } from "../lib/types";
 
@@ -47,7 +54,18 @@ const manifest = (files: ImageDiffFile[]): ImageDiffManifest => ({
   files,
 });
 
-const ready = { state: "ready", done: 2, total: 2, error: null, generated_at: "2026-10-30T10:00:00+00:00", auto: false, base_sha: "b", head_sha: "h" };
+const ready = {
+  state: "ready",
+  done: 2,
+  total: 2,
+  error: null,
+  generated_at: "2026-10-30T10:00:00+00:00",
+  auto: false,
+  base_sha: "b",
+  head_sha: "h",
+  has_report: false,
+  report_running: false,
+};
 
 function setup(initialFile: string | null = null) {
   const onClose = vi.fn();
@@ -64,6 +82,10 @@ beforeEach(() => {
   imageDiffManifest.mockReset();
   imageDiffGenerate.mockReset().mockResolvedValue(undefined);
   imageDiffCancel.mockReset().mockResolvedValue(undefined);
+  imageDiffReport.mockReset().mockResolvedValue(null);
+  imageDiffRunReport.mockReset().mockResolvedValue(undefined);
+  checkEnvironment.mockReset().mockResolvedValue({ claude: "/usr/bin/claude" });
+  useSettingsStore.setState({ aiEnabled: true });
 });
 
 describe("fileBadge / initialIndex", () => {
@@ -160,5 +182,76 @@ describe("ImageDiffPane", () => {
     await userEvent.keyboard("{Escape}");
     expect(document.querySelector(".image-zoom")).toBeNull();
     expect(onClose).not.toHaveBeenCalled();
+  });
+
+  describe("AI report", () => {
+    const finding = {
+      n: 0,
+      file: "e2e/home.png",
+      file_index: 0,
+      bbox: [10, 20, 50, 50] as [number, number, number, number],
+      region_ids: [0],
+      title: "Header is taller",
+      description: "The navbar wraps onto two lines.",
+      kind: "layout" as const,
+    };
+    const report = { summary: "One layout change.", generated_at: "2026-10-30T11:00:00+00:00", findings: [finding], dropped: 0 };
+
+    it("is disabled, with the reason, while AI is off", async () => {
+      useSettingsStore.setState({ aiEnabled: false });
+      imageDiffStatus.mockResolvedValue(ready);
+      imageDiffManifest.mockResolvedValue(manifest([entry({})]));
+      setup();
+      const button = await screen.findByRole("button", { name: "AI report" });
+      expect(button).toBeDisabled();
+      expect(button).toHaveAttribute("title", AI_DISABLED_REASON);
+    });
+
+    it("is disabled without claude and without changed pixels", async () => {
+      imageDiffStatus.mockResolvedValue(ready);
+      imageDiffManifest.mockResolvedValue(manifest([entry({ mismatch_px: 0, regions: [] })]));
+      setup();
+      const button = await screen.findByRole("button", { name: "AI report" });
+      expect(button).toBeDisabled();
+      expect(button).toHaveAttribute("title", "No changed pixels to describe");
+    });
+
+    it("starts the routine and shows the Report tab", async () => {
+      imageDiffStatus.mockResolvedValue(ready);
+      imageDiffManifest.mockResolvedValue(manifest([entry({})]));
+      setup();
+      await userEvent.click(await screen.findByRole("button", { name: "AI report" }));
+      expect(imageDiffRunReport).toHaveBeenCalledWith(9, undefined);
+      expect(await screen.findByText(/No report yet/)).toBeInTheDocument();
+    });
+
+    it("shows a running report as waiting, and cannot be started twice", async () => {
+      imageDiffStatus.mockResolvedValue({ ...ready, report_running: true });
+      imageDiffManifest.mockResolvedValue(manifest([entry({})]));
+      setup();
+      expect(await screen.findByRole("button", { name: /Writing report/ })).toBeDisabled();
+      await userEvent.click(screen.getByRole("tab", { name: /Report/ }));
+      expect(screen.getByText(/looking at the images/)).toBeInTheDocument();
+    });
+
+    it("lists the findings with their three close-ups and jumps to the picture", async () => {
+      imageDiffStatus.mockResolvedValue({ ...ready, has_report: true });
+      imageDiffManifest.mockResolvedValue(manifest([entry({}), entry({ index: 1, path: "e2e/other.png" })]));
+      imageDiffReport.mockResolvedValue(report);
+      setup();
+      await userEvent.click(await screen.findByRole("tab", { name: /Report/ }));
+      expect(await screen.findByText("One layout change.")).toBeInTheDocument();
+      expect(screen.getByText("Header is taller")).toBeInTheDocument();
+      expect(screen.getByText("The navbar wraps onto two lines.")).toBeInTheDocument();
+      const srcs = screen.getAllByRole("img").map((i) => i.getAttribute("src"));
+      for (const slot of ["before", "after", "diff"]) {
+        expect(srcs).toContain(`crimg://localhost/9/report/0-${slot}.png?v=2026-10-30T11%3A00%3A00%2B00%3A00`);
+      }
+      expect(screen.getByRole("button", { name: "Regenerate AI report" })).toBeEnabled();
+
+      await userEvent.click(screen.getByRole("button", { name: "e2e/home.png" }));
+      expect(document.querySelector(".image-diff-item.active")?.getAttribute("title")).toBe("e2e/home.png");
+      expect(screen.getByRole("tab", { name: /Images/ })).toHaveAttribute("aria-selected", "true");
+    });
   });
 });

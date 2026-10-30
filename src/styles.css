@@ -7088,3 +7088,50 @@ tr.def-flash > td {
   right: 12px;
   color: #fff;
 }
+.image-diff-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--border);
+}
+.image-diff-tabs button {
+  padding: 6px 12px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.image-diff-tabs button.active {
+  border-bottom-color: var(--accent);
+  color: var(--text);
+}
+.image-diff-summary {
+  margin: 0 0 16px;
+  font-size: 14px;
+}
+.image-diff-finding {
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+.image-diff-finding.noise {
+  opacity: 0.6;
+}
+.image-diff-finding header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.image-diff-finding p {
+  margin: 6px 0 10px;
+}
+.image-diff-finding figure {
+  margin: 0;
+}
+.image-diff-finding figcaption {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}

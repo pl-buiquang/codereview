@@ -27,6 +27,8 @@ const status = (over: Partial<ImageDiffStatus> = {}): ImageDiffStatus => ({
   auto: false,
   base_sha: null,
   head_sha: null,
+  has_report: false,
+  report_running: false,
   ...over,
 });
 

@@ -58,6 +58,7 @@ import type {
   RefInfo,
   ReanchorResult,
   ImageDiffManifest,
+  ImageDiffReport,
   ImageDiffStatus,
   ImportCommentsResult,
   RepoSyncState,
@@ -150,6 +151,9 @@ export const api = {
   imageDiffManifest: (reviewId: number) => invoke<ImageDiffManifest | null>("image_diff_manifest", { reviewId }),
   imageDiffGenerate: (reviewId: number) => invoke<void>("image_diff_generate", { reviewId }),
   imageDiffCancel: (reviewId: number) => invoke<void>("image_diff_cancel", { reviewId }),
+  imageDiffReport: (reviewId: number) => invoke<ImageDiffReport | null>("image_diff_report", { reviewId }),
+  imageDiffRunReport: (reviewId: number, model?: string) =>
+    invoke<void>("image_diff_run_report", { reviewId, model: model || null }),
 
   // Routines
   routineList: () => invoke<Routine[]>("routine_list"),

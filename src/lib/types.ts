@@ -51,6 +51,34 @@ export interface ImageDiffStatus {
   /** The pin the cache was generated for. */
   base_sha: string | null;
   head_sha: string | null;
+  /** An AI report was written for these image diffs. */
+  has_report: boolean;
+  report_running: boolean;
+}
+export type ImageDiffReportKind = "layout" | "text" | "color" | "content" | "noise";
+export interface ImageDiffFinding {
+  /** Its crops are `report/<n>-{before,after,diff}.png`. */
+  n: number;
+  file: string;
+  file_index: number;
+  /** x, y, w, h in the compared image. */
+  bbox: [number, number, number, number];
+  region_ids: number[];
+  title: string;
+  description: string;
+  kind: ImageDiffReportKind;
+}
+export interface ImageDiffReport {
+  summary: string;
+  generated_at: string;
+  findings: ImageDiffFinding[];
+  /** Findings left out because they named an unknown file or no compared pair. */
+  dropped: number;
+}
+export interface ImageDiffReportUpdated {
+  review_id: number;
+  status: "running" | "done" | "failed";
+  error: string | null;
 }
 export type ImageChange = "added" | "deleted" | "modified" | "renamed";
 export interface ImageDiffDim {

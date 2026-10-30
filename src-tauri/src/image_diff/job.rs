@@ -159,21 +159,35 @@ fn write_preview(fdir: &Path, name: &str, rgba: &[u8], w: u32, h: u32) -> Result
     write_png(&fdir.join(format!("preview-{name}.png")), &resize(rgba, w, h, PREVIEW_WIDTH, nh), PREVIEW_WIDTH, nh)
 }
 
-fn write_crop(fdir: &Path, region: &Region, name: &str, rgba: &[u8], w: u32, h: u32) -> Result<(), String> {
-    let x = region.x.saturating_sub(CROP_PADDING);
-    let y = region.y.saturating_sub(CROP_PADDING);
-    let x1 = (region.x + region.w + CROP_PADDING).min(w);
-    let y1 = (region.y + region.h + CROP_PADDING).min(h);
-    let (cw, ch) = (x1 - x, y1 - y);
+/// Write the window around `bbox` (x, y, w, h) with [`CROP_PADDING`] of context, scaled down when
+/// big, to `path`.
+pub fn write_window(path: &Path, bbox: (u32, u32, u32, u32), rgba: &[u8], w: u32, h: u32) -> Result<(), String> {
+    let (bx, by, bw, bh) = bbox;
+    let x = bx.saturating_sub(CROP_PADDING);
+    let y = by.saturating_sub(CROP_PADDING);
+    let x1 = (bx + bw + CROP_PADDING).min(w);
+    let y1 = (by + bh + CROP_PADDING).min(h);
+    let (cw, ch) = (x1.saturating_sub(x).max(1), y1.saturating_sub(y).max(1));
     let window = crop(rgba, w, h, x, y, cw, ch);
     let scale = (CROP_MAX_WIDTH as f64 / cw as f64).min(CROP_MAX_HEIGHT as f64 / ch as f64).min(1.0);
-    let path = fdir.join(format!("crop-{}-{name}.png", region.id));
     if scale < 1.0 {
         let (nw, nh) = (((cw as f64 * scale) as u32).max(1), ((ch as f64 * scale) as u32).max(1));
-        write_png(&path, &resize(&window, cw, ch, nw, nh), nw, nh)
+        write_png(path, &resize(&window, cw, ch, nw, nh), nw, nh)
     } else {
-        write_png(&path, &window, cw, ch)
+        write_png(path, &window, cw, ch)
     }
+}
+
+fn write_crop(fdir: &Path, region: &Region, name: &str, rgba: &[u8], w: u32, h: u32) -> Result<(), String> {
+    let path = fdir.join(format!("crop-{}-{name}.png", region.id));
+    write_window(&path, (region.x, region.y, region.w, region.h), rgba, w, h)
+}
+
+/// Decode a PNG written by [`generate`] back to pixels.
+pub fn read_png(path: &Path) -> Result<Raster, String> {
+    let img = image::open(path).map_err(|e| format!("{}: {e}", path.display()))?.into_rgba8();
+    let (w, h) = img.dimensions();
+    Ok(Raster { w, h, rgba: img.into_raw() })
 }
 
 fn process(

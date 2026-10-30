@@ -153,11 +153,26 @@ pub struct Status {
     pub auto: bool,
     pub base_sha: Option<String>,
     pub head_sha: Option<String>,
+    /// An AI report was written for these image diffs.
+    pub has_report: bool,
+    /// An AI report run is queued or running (filled by the command: it lives in the routines tables).
+    pub report_running: bool,
 }
 
 impl Status {
     fn bare(state: &'static str) -> Self {
-        Status { state, done: 0, total: 0, error: None, generated_at: None, auto: false, base_sha: None, head_sha: None }
+        Status {
+            state,
+            done: 0,
+            total: 0,
+            error: None,
+            generated_at: None,
+            auto: false,
+            base_sha: None,
+            head_sha: None,
+            has_report: false,
+            report_running: false,
+        }
     }
 }
 
@@ -176,6 +191,7 @@ pub fn status_of(dir: &Path, current_pin: &str, active: bool) -> Status {
             auto: m.auto,
             base_sha: m.base_sha,
             head_sha: m.head_sha,
+            has_report: dir.join(store::REPORT_FINAL).exists(),
             ..Status::bare(if m.pin == current_pin { "ready" } else { "stale" })
         };
     }
@@ -303,6 +319,9 @@ fn run(app: &AppHandle, req: &Request, cancel: &AtomicBool) {
                     let _ = std::fs::remove_file(dir.join(store::PROGRESS));
                     log::info!(target: "image_diff", "review {id}: {total} image(s) diffed in {}ms", started.elapsed().as_millis());
                     emit(app, id, "ready", total, total, None, req.auto);
+                    if req.auto {
+                        chain_report(app, id, &manifest.files);
+                    }
                 }
                 Err(e) => fail(format!("writing the manifest failed: {e}")),
             }
@@ -312,6 +331,25 @@ fn run(app: &AppHandle, req: &Request, cancel: &AtomicBool) {
             emit(app, id, "none", 0, 0, None, req.auto);
         }
         Err(e) => fail(e.to_string()),
+    }
+}
+
+/// Whether there is something for an AI report to describe: a compared pair with changed pixels.
+pub fn has_changes_to_describe(files: &[store::FileEntry]) -> bool {
+    files.iter().any(|f| f.skipped.is_none() && f.mismatch_px > 0)
+}
+
+/// After an automatic generation: write the AI report too, when AI is on, `claude` is there and
+/// some pixels really changed. A failure here is only logged: the pictures are already usable.
+fn chain_report(app: &AppHandle, review_id: i64, files: &[store::FileEntry]) {
+    if !crate::ai_gate::is_enabled() || !has_changes_to_describe(files) {
+        return;
+    }
+    let ctx = crate::routines::context::ContextRef { kind: "review".into(), id: review_id.to_string(), base_paths: vec![] };
+    let launched = crate::commands::routines::builtin(&app.state::<Db>(), crate::routines::IMAGE_DIFF_REPORT_KEY)
+        .and_then(|routine| crate::commands::routines::launch(app, &routine, &ctx, "", ""));
+    if let Err(e) = launched {
+        log::info!(target: "image_diff", "review {review_id}: no automatic AI report: {e}");
     }
 }
 
@@ -511,6 +549,16 @@ mod tests {
     }
 
     #[test]
+    fn only_a_compared_pair_with_changed_pixels_is_worth_a_report() {
+        let mut files = manifest("p", false).files;
+        assert!(!has_changes_to_describe(&files), "nothing differs");
+        files[1].mismatch_px = 3;
+        assert!(has_changes_to_describe(&files));
+        files[1].skipped = Some("bad".into());
+        assert!(!has_changes_to_describe(&files), "a skipped file has no crops");
+    }
+
+    #[test]
     fn status_follows_the_files_and_the_pin() {
         let dir = tmp("flow");
         assert_eq!(status_of(&dir, "p", false).state, "none");
@@ -527,6 +575,9 @@ mod tests {
         store::write_json(&dir, store::MANIFEST, &manifest("p", true)).unwrap();
         let ready = status_of(&dir, "p", false);
         assert_eq!((ready.state, ready.total, ready.done, ready.auto), ("ready", 2, 1, true));
+        assert!(!ready.has_report);
+        std::fs::write(dir.join(store::REPORT_FINAL), "{}").unwrap();
+        assert!(status_of(&dir, "p", false).has_report);
         assert_eq!(status_of(&dir, "moved", false).state, "stale");
         std::fs::remove_dir_all(&dir).unwrap();
     }

@@ -5,9 +5,16 @@ import { create } from "zustand";
 import { api } from "./api";
 import { toast } from "./toast";
 import { useUIStore } from "../store";
-import type { ImageDiffFile, ImageDiffState, ImageDiffStatus, ImageDiffUpdated } from "./types";
+import type {
+  ImageDiffFile,
+  ImageDiffReportUpdated,
+  ImageDiffState,
+  ImageDiffStatus,
+  ImageDiffUpdated,
+} from "./types";
 
 export const IMAGE_DIFF_UPDATED_EVENT = "image-diff-updated";
+export const IMAGE_DIFF_REPORT_EVENT = "image-diff-report-updated";
 
 export const isImagePath = (path: string) => /\.(png|jpe?g|svg)$/i.test(path);
 
@@ -34,6 +41,11 @@ export function imageAssetRel(file: ImageDiffFile, slot: ImageSlot, previewWidth
 export function diffDim(file: ImageDiffFile): { width: number; height: number } | null {
   if (!file.before || !file.after) return null;
   return { width: Math.max(file.before.width, file.after.width), height: Math.max(file.before.height, file.after.height) };
+}
+
+/** Cache path of a report finding's crop. */
+export function reportCropRel(n: number, slot: ImageSlot): string {
+  return `report/${n}-${slot}.png`;
 }
 
 export function cropRel(file: ImageDiffFile, regionId: number, slot: ImageSlot): string {
@@ -136,30 +148,36 @@ export function useImageDiffEvents() {
   useEffect(() => {
     if (!isTauriRuntime()) return;
     let disposed = false;
-    let unlisten: (() => void) | undefined;
-    listen<ImageDiffUpdated>(IMAGE_DIFF_UPDATED_EVENT, ({ payload }) => {
+    const unlisteners: (() => void)[] = [];
+    const register = <T,>(event: string, fn: (payload: T) => void) =>
+      listen<T>(event, ({ payload }) => fn(payload))
+        .then((dispose) => (disposed ? dispose() : unlisteners.push(dispose)))
+        .catch((e) => console.warn(`Could not register ${event} listener`, e));
+    const view = (reviewId: number) => () => {
+      useUIStore.getState().openReview(reviewId);
+      useImageDiffUi.getState().open(reviewId);
+    };
+    register<ImageDiffUpdated>(IMAGE_DIFF_UPDATED_EVENT, (payload) => {
       queryClient.invalidateQueries({ queryKey: imageDiffStatusKey(payload.review_id) });
       queryClient.invalidateQueries({ queryKey: ["image-diff-manifest", payload.review_id] });
       if (payload.state === "ready" && payload.auto) {
-        toast.info(`Image diffs ready (${payload.total})`, {
-          label: "View",
-          onClick: () => {
-            useUIStore.getState().openReview(payload.review_id);
-            useImageDiffUi.getState().open(payload.review_id);
-          },
-        });
+        toast.info(`Image diffs ready (${payload.total})`, { label: "View", onClick: view(payload.review_id) });
       } else if (payload.state === "failed") {
         toast.error(`Image diffs failed:\n${payload.error ?? "unknown error"}`);
       }
-    })
-      .then((dispose) => {
-        if (disposed) dispose();
-        else unlisten = dispose;
-      })
-      .catch((e) => console.warn("Could not register image diff listener", e));
+    });
+    register<ImageDiffReportUpdated>(IMAGE_DIFF_REPORT_EVENT, (payload) => {
+      queryClient.invalidateQueries({ queryKey: imageDiffStatusKey(payload.review_id) });
+      queryClient.invalidateQueries({ queryKey: ["image-diff-report", payload.review_id] });
+      if (payload.status === "done") {
+        toast.info("Image diff report ready", { label: "View", onClick: view(payload.review_id) });
+      } else if (payload.status === "failed") {
+        toast.error(`Image diff report failed:\n${payload.error ?? "unknown error"}`);
+      }
+    });
     return () => {
       disposed = true;
-      unlisten?.();
+      unlisteners.forEach((u) => u());
     };
   }, [queryClient]);
 }

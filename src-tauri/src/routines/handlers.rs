@@ -19,10 +19,12 @@ use crate::ai_usage::{RunTag, RunUsage};
 use crate::commands::chat::resolve_model;
 use crate::commands::focus::{begin_generation, finish_generation, review_local_path};
 use crate::commands::{board::board_list_impl, overview, review::ensure_draft};
-use crate::db::Db;
+use crate::db::{Db, DbPath};
+use crate::image_diff::{report, store};
 use crate::error::{AppError, AppResult};
 
 const AI_REVIEW_PREFIX: &str = "ai_review_";
+pub const IMAGE_DIFF_REPORT_EVENT: &str = "image-diff-report-updated";
 
 /// What a handler adds to a run before it spawns.
 #[derive(Default)]
@@ -55,6 +57,17 @@ struct FocusUpdated {
     review_id: i64,
 }
 
+#[derive(Clone, Serialize)]
+struct ImageDiffReportUpdated {
+    review_id: i64,
+    status: &'static str,
+    error: Option<String>,
+}
+
+fn emit_report(app: &AppHandle, review_id: i64, status: &'static str, error: Option<String>) {
+    let _ = app.emit(IMAGE_DIFF_REPORT_EVENT, ImageDiffReportUpdated { review_id, status, error });
+}
+
 /// Open-card ids each overview run was generated from, until the run ends.
 static OVERVIEW_IDS: Mutex<Option<HashMap<i64, Vec<String>>>> = Mutex::new(None);
 
@@ -78,6 +91,7 @@ pub fn usage_tag(routine: &Routine, run: &RoutineRun) -> RunTag {
         Some("overview") => RunTag::new("board_overview").label("Board overview"),
         Some("focus") => RunTag::new("focus"),
         Some("ai_review") => RunTag::new("ai_review").variant(layer(routine)),
+        Some("image_diff_report") => RunTag::new("image_diff_report").label("Image diff report"),
         _ => {
             return RunTag::new("routine")
                 .variant(routine.key.clone())
@@ -128,9 +142,26 @@ pub fn pre_launch(app: &AppHandle, routine: &Routine, ctx: &ContextRef, light: &
             drop(conn);
             emit_ai_review(app, id, layer(routine), "running", None, None);
         }
+        Some("image_diff_report") => {
+            let id = review_id(ctx)?;
+            let dir = image_diff_dir(app, id);
+            let manifest = store::read_manifest(&dir)
+                .ok_or_else(|| AppError::Other("generate the image diffs first".into()))?;
+            if !manifest.files.iter().any(|f| f.skipped.is_none() && f.mismatch_px > 0) {
+                return Err(AppError::Other("no changed pixels to describe".into()));
+            }
+            if active_image_diff_report(&db.0.lock().unwrap(), id) {
+                return Err(AppError::Other("an image diff report is already running for this review".into()));
+            }
+            emit_report(app, id, "running", None);
+        }
         _ => {}
     }
     Ok(())
+}
+
+fn image_diff_dir(app: &AppHandle, review_id: i64) -> PathBuf {
+    store::cache_dir(&app.state::<DbPath>().0, review_id)
 }
 
 /// The launch failed after `pre_launch` succeeded.
@@ -142,6 +173,7 @@ pub fn rollback(app: &AppHandle, routine: &Routine, ctx: &ContextRef, error: &st
             let _ = app.emit("focus-updated", FocusUpdated { review_id: id });
         }
         Some("ai_review") => emit_ai_review(app, id, layer(routine), "failed", Some(error.to_string()), None),
+        Some("image_diff_report") => emit_report(app, id, "failed", Some(error.to_string())),
         _ => {}
     }
 }
@@ -218,6 +250,22 @@ pub fn prepare(app: &AppHandle, routine: &Routine, run: &RoutineRun) -> AppResul
                 prep.extra_dirs.push(home.join(".claude/skills/local-review"));
                 prep.extra_dirs.push(home.join(".claude/plugins/cache/openai-codex"));
             }
+        }
+        Some("image_diff_report") => {
+            let id = review_id(&run.context)?;
+            let dir = image_diff_dir(app, id).canonicalize()?;
+            let report = dir.join(report::RAW);
+            // The raw report may be rewritten by a previous run's leftovers: start clean.
+            let _ = std::fs::remove_file(&report);
+            prep.extra_tools.push(format!("Edit(/{})", report.display()));
+            prep.system_suffix = format!(
+                "\n\n---\n\nApp mode. Review id = {id}. The image diffs are in `{}` (your working directory). \
+                 Write the report with the Write tool to `{}` (the only writable path).",
+                dir.display(),
+                report.display()
+            );
+            prep.cwd = Some(dir.clone());
+            prep.extra_dirs.push(dir);
         }
         Some("issue_plan") => {
             // The plan lands in the notes vault, outside the clone the run starts in: grant exactly that tree.
@@ -296,6 +344,19 @@ pub fn finish(app: &AppHandle, routine: &Routine, run: &RoutineRun, status: &str
                 }
             }
         }
+        Some("image_diff_report") => {
+            if let Ok(id) = review_id(&run.context) {
+                let outcome = if succeeded {
+                    report::finalize(&image_diff_dir(app, id)).map(|_| ()).map_err(|e| e.to_string())
+                } else {
+                    Err(failure())
+                };
+                match outcome {
+                    Ok(()) => emit_report(app, id, "done", None),
+                    Err(e) => emit_report(app, id, "failed", Some(e)),
+                }
+            }
+        }
         _ => {}
     }
 }
@@ -310,6 +371,19 @@ pub fn finish_dropped(app: &AppHandle, run_id: i64) {
     if let Ok((run, routine)) = loaded {
         finish(app, &routine, &run, "killed", "", Some("stopped before it started"), &RunUsage::default());
     }
+}
+
+/// Whether an image diff report run is queued or running for the review.
+pub fn active_image_diff_report(conn: &rusqlite::Connection, review_id: i64) -> bool {
+    conn.query_row(
+        "SELECT 1 FROM routine_run r JOIN routine ro ON ro.id = r.routine_id
+         WHERE ro.handler = 'image_diff_report' AND r.status IN ('queued', 'running')
+           AND json_extract(r.context_json, '$.kind') = 'review'
+           AND json_extract(r.context_json, '$.id') = ?1",
+        params![review_id.to_string()],
+        |_| Ok(()),
+    )
+    .is_ok()
 }
 
 /// The AI review layer running on a review, if any.

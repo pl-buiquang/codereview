@@ -180,6 +180,12 @@ never use AskUserQuestion; pick sensible defaults. This session ends when you st
 cannot wait for background notifications: run the Codex companion in the foreground, never as \
 a background Bash call. Finish with a summary of at most 5 lines.";
 
+const IMAGE_DIFF_REPORT_SYSTEM: &str = include_str!("builtin/image_diff_report.md");
+
+const IMAGE_DIFF_REPORT_TOOLS: &[&str] = &["Read", "Glob", "Bash(cr:*)", "Bash(ls:*)"];
+
+pub const IMAGE_DIFF_REPORT_KEY: &str = "image_diff_report";
+
 const fn ai_review(
     key: &'static str,
     name: &'static str,
@@ -295,6 +301,22 @@ pub const DEFAULTS: &[Defaults] = &[
         extra_args: &[],
         timeout_min: 60,
         handler: None,
+    },
+    Defaults {
+        key: IMAGE_DIFF_REPORT_KEY,
+        name: "Image diff report",
+        description: "Look at a review's generated image diffs and describe what changed in each, with before / after / diff crops. Shown in the image diffs panel; the app-mode suffix with the paths is always appended to the system prompt.",
+        context_type: "review",
+        prompt_template: "Write the image diff report for review {{review_id}}.",
+        system_prompt: IMAGE_DIFF_REPORT_SYSTEM,
+        system_prompt_mode: "append",
+        needs_worktree: false,
+        // Explicit so the user's own settings never leak in; the report file is granted by the handler.
+        permission_mode: "default",
+        allowed_tools: IMAGE_DIFF_REPORT_TOOLS,
+        extra_args: &[],
+        timeout_min: 30,
+        handler: Some("image_diff_report"),
     },
     ai_review("ai_review_explain", "AI review: explain", "Headless `/local-review`: one explanatory comment per change.", "/local-review {{review_id}}"),
     ai_review("ai_review_critique", "AI review: critique", "Headless `/local-review --critique` (Standards + Spec sub-agents).", "/local-review {{review_id}} --critique"),

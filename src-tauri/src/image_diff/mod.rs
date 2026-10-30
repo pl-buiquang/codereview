@@ -8,6 +8,7 @@ pub mod blob;
 pub mod job;
 pub mod pixelmatch;
 pub mod regions;
+pub mod report;
 pub mod runner;
 pub mod store;
 

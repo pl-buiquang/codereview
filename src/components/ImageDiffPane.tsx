@@ -7,11 +7,19 @@ import {
   hasImages,
   imageAssetRel,
   imageDiffUrl,
+  reportCropRel,
   useImageDiffStatus,
   type ImageSlot,
 } from "../lib/imageDiff";
+import { useAiDisabledReason, useSettingsStore } from "../lib/settings";
 import { toast } from "../lib/toast";
-import type { ImageChange, ImageDiffFile, ImageDiffManifest, ImageDiffStatus } from "../lib/types";
+import type {
+  ImageChange,
+  ImageDiffFile,
+  ImageDiffManifest,
+  ImageDiffReport,
+  ImageDiffStatus,
+} from "../lib/types";
 import { ImageZoom } from "./ImageZoom";
 
 const CHANGE_LABEL: Record<ImageChange, string> = {
@@ -183,6 +191,80 @@ function FileDetail({
   );
 }
 
+const KIND_LABEL: Record<string, string> = {
+  layout: "layout",
+  text: "text",
+  color: "color",
+  content: "content",
+  noise: "noise",
+};
+
+/** The AI report: a summary, then each finding with its before / after / diff close-ups. */
+function ReportView({
+  reviewId,
+  status,
+  onZoom,
+  onShowFile,
+}: {
+  reviewId: number;
+  status: ImageDiffStatus;
+  onZoom: (src: string) => void;
+  onShowFile: (path: string) => void;
+}) {
+  const reportQuery = useQuery({
+    queryKey: ["image-diff-report", reviewId, status.generated_at],
+    queryFn: () => api.imageDiffReport(reviewId),
+    enabled: status.has_report,
+  });
+  const report: ImageDiffReport | null = reportQuery.data ?? null;
+  if (status.report_running) {
+    return (
+      <p className="muted quick-view-note">
+        <span className="spinner" /> The AI is looking at the images…
+      </p>
+    );
+  }
+  if (!status.has_report || !report) {
+    return (
+      <p className="muted quick-view-note">
+        No report yet. “AI report” asks Claude to go through the changed regions and describe each change.
+      </p>
+    );
+  }
+  return (
+    <div className="image-diff-report">
+      {report.summary && <p className="image-diff-summary">{report.summary}</p>}
+      {report.findings.length === 0 && <p className="muted">The report lists no changes.</p>}
+      {report.findings.map((f) => (
+        <section key={f.n} className={`image-diff-finding${f.kind === "noise" ? " noise" : ""}`}>
+          <header>
+            <strong>{f.title}</strong>
+            <span className="image-diff-chip">{KIND_LABEL[f.kind] ?? f.kind}</span>
+            <button className="btn btn-sm btn-ghost" title="Show the whole picture" onClick={() => onShowFile(f.file)}>
+              {f.file}
+            </button>
+          </header>
+          {f.description && <p>{f.description}</p>}
+          <div className="image-diff-crops">
+            {(["before", "after", "diff"] as ImageSlot[]).map((slot) => {
+              const src = imageDiffUrl(reviewId, reportCropRel(f.n, slot), report.generated_at);
+              return (
+                <figure key={slot}>
+                  <img className="image-diff-crop" loading="lazy" alt={`${slot} ${f.title}`} src={src} onClick={() => onZoom(src)} />
+                  <figcaption className="muted">{slot}</figcaption>
+                </figure>
+              );
+            })}
+          </div>
+        </section>
+      ))}
+      {report.dropped > 0 && (
+        <p className="muted">{report.dropped} finding(s) left out: they named no compared image.</p>
+      )}
+    </div>
+  );
+}
+
 function Legend() {
   return (
     <div className="image-diff-legend muted">
@@ -227,6 +309,11 @@ export function ImageDiffPane({
   const manifest = manifestQuery.data ?? null;
   const [picked, setPicked] = useState<string | null>(initialFile);
   const [zoom, setZoom] = useState<string | null>(null);
+  const [tab, setTab] = useState<"images" | "report">("images");
+  const aiOff = useAiDisabledReason();
+  const chatModel = useSettingsStore((s) => s.chatModel);
+  const envQuery = useQuery({ queryKey: ["environment"], queryFn: api.checkEnvironment, staleTime: Infinity });
+  const claudeAvailable = envQuery.data ? envQuery.data.claude != null : true;
 
   useEffect(() => setPicked(initialFile), [initialFile]);
   useEffect(() => {
@@ -244,6 +331,14 @@ export function ImageDiffPane({
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["image-diff-status", reviewId] }),
     onError: (e) => toast.error(`Could not generate image diffs:\n${String(e)}`),
   });
+  const runReport = useMutation({
+    mutationFn: () => api.imageDiffRunReport(reviewId, chatModel || undefined),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["image-diff-status", reviewId] });
+      setTab("report");
+    },
+    onError: (e) => toast.error(`Could not start the AI report:\n${String(e)}`),
+  });
   const cancel = useMutation({
     mutationFn: () => api.imageDiffCancel(reviewId),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["image-diff-status", reviewId] }),
@@ -257,6 +352,17 @@ export function ImageDiffPane({
   }, [files, picked]);
   const running = status?.state === "running";
   const note = status ? stateNote(status) : null;
+  const anyChange = files.some((f) => !f.skipped && f.mismatch_px > 0);
+  // The AI report needs the app's AI switch, `claude`, and pixels that really changed.
+  const reportBlocked =
+    aiOff ??
+    (!claudeAvailable
+      ? "Claude CLI not found"
+      : !anyChange
+        ? "No changed pixels to describe"
+        : status?.report_running
+          ? "The report is being written…"
+          : null);
 
   return (
     <>
@@ -274,6 +380,24 @@ export function ImageDiffPane({
               </button>
             </>
           )}
+          {showing && (
+            <button
+              className="btn btn-sm"
+              disabled={reportBlocked != null || runReport.isPending}
+              title={reportBlocked ?? "Ask Claude to describe each change, with before / after / diff close-ups"}
+              onClick={() => runReport.mutate()}
+            >
+              {status?.report_running ? (
+                <>
+                  <span className="spinner" /> Writing report…
+                </>
+              ) : status?.has_report ? (
+                "Regenerate AI report"
+              ) : (
+                "AI report"
+              )}
+            </button>
+          )}
           {!running && status && status.state !== "none" && (
             <button
               className="btn btn-sm"
@@ -289,8 +413,18 @@ export function ImageDiffPane({
           </button>
         </div>
         {note && <p className={`image-diff-note${status?.state === "failed" ? " error" : ""}`}>{note}</p>}
+        {showing && (
+          <div className="image-diff-tabs" role="tablist">
+            <button role="tab" aria-selected={tab === "images"} className={tab === "images" ? "active" : ""} onClick={() => setTab("images")}>
+              Images
+            </button>
+            <button role="tab" aria-selected={tab === "report"} className={tab === "report" ? "active" : ""} onClick={() => setTab("report")}>
+              Report{status?.has_report ? " ✓" : ""}
+            </button>
+          </div>
+        )}
         <div className="quick-view-split">
-          {manifest && files.length > 0 && (
+          {manifest && files.length > 0 && tab === "images" && (
             <nav className="jump-list quick-view-tree image-diff-list" aria-label="Images">
               <div className="jump-list-content">
                 {files.map((f) => (
@@ -319,7 +453,18 @@ export function ImageDiffPane({
             )}
             {running && !manifest && <p className="muted quick-view-note">Generating the image diffs in the background…</p>}
             {manifest && files.length === 0 && <p className="muted quick-view-note">This review changes no images.</p>}
-            {manifest && selected && (
+            {showing && status && tab === "report" && (
+              <ReportView
+                reviewId={reviewId}
+                status={status}
+                onZoom={setZoom}
+                onShowFile={(path) => {
+                  setPicked(path);
+                  setTab("images");
+                }}
+              />
+            )}
+            {manifest && selected && tab === "images" && (
               <>
                 <Legend />
                 <FileDetail key={selected.index} reviewId={reviewId} file={selected} manifest={manifest} onZoom={setZoom} />
