@@ -3977,6 +3977,8 @@ mod tests {
 
         assert!(!cache.exists(), "the deleted review's cache is gone");
         assert!(other_cache.exists(), "another review's cache is untouched");
+        // Windows can't delete the directory while the SQLite handle is open.
+        drop(conn);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
