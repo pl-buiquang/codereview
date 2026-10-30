@@ -26,6 +26,9 @@ Each area has a page under [`docs/features/`](docs/features/).
   multi-line and whole-file comments, suggested changes, threaded replies, resolve, outdated-comment
   re-anchoring, and a keyboard-driven workflow. Everything autosaves to SQLite.
   → [review](docs/features/review.md)
+- **Image diffs** — before / after / pixel diff of the PNG, JPEG and SVG files a review changes,
+  generated in the background into a disk cache, with an optional AI report that describes each
+  change with close-ups. → [image diffs](docs/features/image-diffs.md)
 - **Two diff sources, one flow** — a real GitHub PR (via `gh`) or a *virtual PR* between any two
   local branches (three-dot by default, two-dot toggle).
   → [GitHub](docs/features/github.md)
@@ -176,6 +179,7 @@ src-tauri/                 # Rust backend
     provider.rs            # forge-provider trait over gh.rs
     anchor.rs              # comment line re-anchoring through diffs
     diff_cache.rs          # LRU of parsed diffs per (repo, PR, base, head)
+    image_diff/            # pixel diffs of changed images: engine, background jobs, disk cache
     inbox.rs, board.rs     # inbox / kanban pipelines; board_monitor.rs = auto-merge monitor
     claude_sessions.rs     # Claude Code session discovery (+ terminal/, session_summaries.rs)
     worktree.rs, worktree_gc.rs   # worktree helpers and the janitor
