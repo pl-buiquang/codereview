@@ -3,6 +3,8 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tansta
 import { api } from "../lib/api";
 import { useSettingsStore } from "../lib/settings";
 import { autoSyncRefetch } from "../lib/sync";
+import { useUIStore } from "../store";
+import { Icon } from "./icons";
 import { Markdown } from "./Markdown";
 import { toast } from "../lib/toast";
 import { useDebouncedCallback } from "../lib/useDebouncedCallback";
@@ -43,11 +45,14 @@ export function PrMetaPanel({
   name,
   number,
   active = true,
+  repoId = null,
 }: {
   owner: string;
   name: string;
   number: number;
   active?: boolean;
+  /** The local repository to open base refs in; null when the PR's repo isn't cloned. */
+  repoId?: number | null;
 }) {
   const q = usePrMeta(owner, name, number, active);
 
@@ -76,7 +81,7 @@ export function PrMetaPanel({
         {meta.base && (
           <>
             <span className="pr-meta-key">Base</span>
-            <BaseField pr={pr} base={meta.base} />
+            <BaseField pr={pr} base={meta.base} repoId={repoId} />
           </>
         )}
       </div>
@@ -498,41 +503,58 @@ function ChecksList({ checks }: { checks: PrCheck[] }) {
   );
 }
 
-function ExtLink({ href, children }: { href: string; children: ReactNode }) {
-  return (
-    <a
-      href={href}
-      onClick={(e) => {
-        e.preventDefault();
-        api.openUrl(href);
-      }}
-    >
-      {children}
-    </a>
-  );
-}
-
-function BaseField({ pr, base }: { pr: PrRef; base: PrBase }) {
-  const tree = `https://github.com/${pr.owner}/${pr.name}/tree`;
+function BaseField({ pr, base, repoId }: { pr: PrRef; base: PrBase; repoId: number | null }) {
+  const focusGraph = useUIStore((s) => s.focusGraph);
+  const openReview = useUIStore((s) => s.openReview);
   const parent = base.pr;
+  const reviews = useQuery({
+    queryKey: ["reviews", null],
+    queryFn: () => api.listReviews(null),
+    enabled: parent != null,
+  });
+  // Unpublished review first; list_reviews is newest-first.
+  const parentReviews = parent
+    ? (reviews.data ?? []).filter(
+        (r) =>
+          r.target.kind === "github_pr" &&
+          r.target.github_pr_number === parent.number &&
+          r.repo_remote?.toLowerCase() === `${pr.owner}/${pr.name}`.toLowerCase(),
+      )
+    : [];
+  const parentReview = parentReviews.find((r) => r.review.status !== "published") ?? parentReviews[0];
+
+  const repoLink = (label: string, title: string, focus: { ref: string | null; sha: string | null }) =>
+    repoId != null ? (
+      <button
+        className="pr-link pr-link-repo"
+        title={title}
+        onClick={() => focusGraph({ repoId, worktree: null, ...focus })}
+      >
+        <code>{label}</code>
+      </button>
+    ) : (
+      <code title="No local clone of this repository">{label}</code>
+    );
+
   return (
-    <div className="pr-meta-val pr-meta-base">
-      <ExtLink href={`${tree}/${base.refName}`}>
-        <code>{base.refName}</code>
-      </ExtLink>
-      {base.oid && (
-        <ExtLink href={`${tree}/${base.oid}`}>
-          <code>{base.oid.slice(0, 7)}</code>
-        </ExtLink>
-      )}
-      {parent && (
-        <>
-          <ExtLink href={parent.url}>
+    <div className="pr-meta-val">
+      {repoLink(base.refName, `Show ${base.refName} in the graph`, { ref: base.refName, sha: null })}
+      {base.oid && repoLink(base.oid.slice(0, 7), `Show ${base.oid.slice(0, 7)} in the graph`, { ref: null, sha: base.oid })}
+      {parent &&
+        (parentReview ? (
+          <button
+            className="pr-link pr-link-review"
+            title="Open the review of this PR"
+            onClick={() => openReview(parentReview.review.id)}
+          >
             #{parent.number} {parent.title}
-          </ExtLink>
-          {parent.state !== "OPEN" && <span className="faint">{humanState(parent.state)}</span>}
-        </>
-      )}
+          </button>
+        ) : (
+          <button className="pr-link pr-link-gh" title="Open on GitHub" onClick={() => api.openUrl(parent.url)}>
+            #{parent.number} {parent.title} <Icon name="ext" size={10} />
+          </button>
+        ))}
+      {parent && parent.state !== "OPEN" && <span className="faint">{humanState(parent.state)}</span>}
     </div>
   );
 }

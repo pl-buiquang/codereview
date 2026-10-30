@@ -8,16 +8,19 @@ const prMeta = vi.fn();
 const openUrl = vi.fn();
 const setPrLabel = vi.fn();
 const setPrReviewer = vi.fn();
+const listReviews = vi.fn();
 vi.mock("../lib/api", () => ({
   api: {
     prMeta: (owner: string, name: string, number: number) => prMeta(owner, name, number),
     openUrl: (url: string) => openUrl(url),
     setPrLabel: (...args: unknown[]) => setPrLabel(...args),
     setPrReviewer: (...args: unknown[]) => setPrReviewer(...args),
+    listReviews: () => listReviews(),
   },
 }));
 
 import { PrMetaPanel } from "./PrMetaPanel";
+import { useUIStore } from "../store";
 import type { PrMeta } from "../lib/types";
 
 const meta = (over: Partial<PrMeta> = {}): PrMeta => ({
@@ -47,18 +50,19 @@ const meta = (over: Partial<PrMeta> = {}): PrMeta => ({
   ...over,
 });
 
-function renderPanel(active = true) {
+function renderPanel(active = true, repoId: number | null = null) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}>{children}</QueryClientProvider>
   );
-  return render(<PrMetaPanel owner="acme" name="widget" number={42} active={active} />, {
+  return render(<PrMetaPanel owner="acme" name="widget" number={42} active={active} repoId={repoId} />, {
     wrapper,
   });
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
+  listReviews.mockResolvedValue([]);
 });
 
 describe("PrMetaPanel", () => {
@@ -78,24 +82,54 @@ describe("PrMetaPanel", () => {
     expect(screen.getByText("Summary").tagName).toBe("STRONG");
   });
 
-  it("shows the base with its branch, commit and parent PR links only when set", async () => {
-    const user = userEvent.setup();
-    prMeta.mockResolvedValue(
-      meta({
-        base: {
-          refName: "feat/parent",
-          oid: "abcdef1234567890",
-          pr: { number: 41, title: "Parent", url: "https://github.com/acme/widget/pull/41", state: "OPEN" },
-        },
-      }),
-    );
-    renderPanel();
+  const stacked = meta({
+    base: {
+      refName: "feat/parent",
+      oid: "abcdef1234567890",
+      pr: { number: 41, title: "Parent", url: "https://github.com/acme/widget/pull/41", state: "OPEN" },
+    },
+  });
 
-    expect(await screen.findByText("Base")).toBeInTheDocument();
-    await user.click(screen.getByText("abcdef1"));
-    expect(openUrl).toHaveBeenCalledWith("https://github.com/acme/widget/tree/abcdef1234567890");
-    await user.click(screen.getByText("#41 Parent"));
+  it("opens the base commit in the local graph and the parent PR on GitHub when it has no review", async () => {
+    const user = userEvent.setup();
+    const focusGraph = vi.spyOn(useUIStore.getState(), "focusGraph");
+    useUIStore.setState({ focusGraph });
+    prMeta.mockResolvedValue(stacked);
+    renderPanel(true, 7);
+
+    await user.click(await screen.findByText("abcdef1"));
+    expect(focusGraph).toHaveBeenCalledWith({ repoId: 7, worktree: null, ref: null, sha: "abcdef1234567890" });
+    await user.click(screen.getByText(/#41 Parent/));
     expect(openUrl).toHaveBeenCalledWith("https://github.com/acme/widget/pull/41");
+  });
+
+  it("opens the parent PR's review when one exists", async () => {
+    const user = userEvent.setup();
+    const openReview = vi.fn();
+    useUIStore.setState({ openReview });
+    listReviews.mockResolvedValue([
+      {
+        review: { id: 99, status: "draft" },
+        target: { kind: "github_pr", github_pr_number: 41 },
+        repo_remote: "acme/widget",
+      },
+    ]);
+    prMeta.mockResolvedValue(stacked);
+    renderPanel(true, 7);
+
+    const link = await screen.findByText("#41 Parent");
+    await waitFor(() => expect(link).toHaveClass("pr-link-review"));
+    await user.click(link);
+    expect(openReview).toHaveBeenCalledWith(99);
+    expect(openUrl).not.toHaveBeenCalled();
+  });
+
+  it("does not link the base to GitHub when the repo has no local clone", async () => {
+    prMeta.mockResolvedValue(stacked);
+    renderPanel(true, null);
+
+    expect(await screen.findByText("abcdef1")).toBeInTheDocument();
+    expect(screen.getByText("abcdef1").closest("button")).toBeNull();
   });
 
   it("hides the base row when the base is the default branch", async () => {

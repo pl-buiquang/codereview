@@ -411,7 +411,10 @@ export function GraphView({ repo }: { repo: Repository }) {
     const ref =
       (["local", "tag", "remote"] as const)
         .map((kind) => refsQuery.data.find((r) => r.kind === kind && r.name === name))
-        .find((r) => r != null) ?? null;
+        .find((r) => r != null) ??
+      // A bare branch name (a PR base) may exist only as a remote ref.
+      refsQuery.data.find((r) => r.kind === "remote" && r.name.endsWith(`/${name}`)) ??
+      null;
     if (!ref) {
       toast.error(`Ref ${name} not found`);
       clearGraphFocus();

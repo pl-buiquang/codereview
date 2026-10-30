@@ -2139,6 +2139,7 @@ function ReviewHeader({
           name={detail.remote_name!}
           number={target.github_pr_number!}
           active={isActiveTab}
+          repoId={detail.local_path ? target.repo_id : null}
         />
       )}
     </header>

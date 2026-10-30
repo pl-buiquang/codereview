@@ -1401,11 +1401,36 @@ td.diff-code {
   gap: 6px;
   min-height: 22px;
 }
-.pr-meta-base a {
-  color: var(--accent);
-  text-decoration: none;
+.pr-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
 }
-.pr-meta-base a:hover {
+/* Branch / commit in the local graph. */
+.pr-link-repo {
+  color: var(--text-1);
+  border-bottom: 1px dotted var(--text-3);
+}
+.pr-link-repo:hover {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+/* A PR with a review in this app. */
+.pr-link-review {
+  color: var(--accent);
+}
+.pr-link-review:hover {
+  text-decoration: underline;
+}
+/* A PR only on GitHub. */
+.pr-link-gh {
+  color: var(--text-2);
+}
+.pr-link-gh:hover {
+  color: var(--text-1);
   text-decoration: underline;
 }
 .pr-meta-divider {
