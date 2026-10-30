@@ -11,6 +11,8 @@ export type IconName =
   | "plus"
   | "min"
   | "max"
+  | "expand"
+  | "collapse"
   | "inbox"
   | "review"
   | "archive"
@@ -76,6 +78,8 @@ const STROKE: Record<Exclude<IconName, "dot" | "kebab">, ReactNode> = {
   plus: <path d="M8 3v10M3 8h10" />,
   min: <path d="M3 11.5h10" />,
   max: <rect x="3.5" y="3.5" width="9" height="9" rx="1" />,
+  expand: <path d="M9.5 2.5h4v4M6.5 13.5h-4v-4M13.5 2.5 9 7M2.5 13.5 7 9" />,
+  collapse: <path d="M13.5 6.5h-4v-4M2.5 9.5h4v4M9.5 6.5 14 2M6.5 9.5 2 14" />,
   inbox: (
     <>
       <path d="M2.5 9.5h3.2l1 1.8h2.6l1-1.8h3.2" />

@@ -1,12 +1,15 @@
-import { useEffect, useMemo, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { parseDiff } from "react-diff-view";
 import { api } from "../lib/api";
 import { countChanges, fileDisplayPath } from "../lib/diff";
+import { categorize, compileCategoryRules } from "../lib/fileCategory";
 import { useSettingsStore } from "../lib/settings";
 import type { InboxItem } from "../lib/types";
 import { DiffViewer } from "./DiffViewer";
 import { FileJumpPicker } from "./FileJumpPicker";
+import { FileTree, useTreeCollapse, type FileRow } from "./FileTree";
+import { Icon } from "./icons";
 
 /**
  * Right-hand slide-out previewing an Inbox PR's diff. Nothing is stored: the diff comes
@@ -118,6 +121,11 @@ export function QuickDiffPane({
   onClose: () => void;
 }) {
   const viewType = useSettingsStore((s) => s.defaultViewType);
+  const fileTestPatterns = useSettingsStore((s) => s.fileTestPatterns);
+  const fileConfigPatterns = useSettingsStore((s) => s.fileConfigPatterns);
+  const [expanded, setExpanded] = useState(false);
+  const [activePath, setActivePath] = useState<string | null>(null);
+  const { collapsed, toggleDir } = useTreeCollapse();
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -132,12 +140,33 @@ export function QuickDiffPane({
   const files = useMemo(
     () =>
       diffText != null
-        ? parseDiff(diffText).map((f) => ({ path: fileDisplayPath(f), ...countChanges(f) }))
+        ? parseDiff(diffText).map((f) => ({
+            path: fileDisplayPath(f),
+            status: f.type,
+            ...countChanges(f),
+          }))
         : [],
     [diffText],
   );
 
+  // The expanded view's tree: same rows as a normal review's Files tab (no comments or viewed marks).
+  const rows = useMemo((): FileRow[] => {
+    const rules = compileCategoryRules(fileTestPatterns, fileConfigPatterns);
+    return files.map((f, index) => ({
+      index,
+      path: f.path,
+      add: f.add,
+      del: f.del,
+      count: 0,
+      viewed: false,
+      category: categorize(f.path, rules),
+      status: f.status,
+    }));
+  }, [files, fileTestPatterns, fileConfigPatterns]);
+  const activeIndex = Math.max(0, files.findIndex((f) => f.path === activePath));
+
   const jumpTo = (path: string) => {
+    setActivePath(path);
     for (const el of document.querySelectorAll<HTMLElement>(".quick-view-body [data-file-path]")) {
       if (el.dataset.filePath === path) {
         el.scrollIntoView({ block: "start" });
@@ -149,8 +178,16 @@ export function QuickDiffPane({
   return (
     <>
       <div className="quick-view-backdrop" onClick={onClose} />
-      <aside className="file-view-pane" aria-label="Quick view">
+      <aside className={`file-view-pane${expanded ? " quick-view-expanded" : ""}`} aria-label="Quick view">
         <div className="file-view-pane-header">
+          <button
+            className="btn-icon"
+            title={expanded ? "Collapse to side pane" : "Expand to full view"}
+            aria-pressed={expanded}
+            onClick={() => setExpanded((e) => !e)}
+          >
+            <Icon name={expanded ? "collapse" : "expand"} size={14} />
+          </button>
           <span className="file-path" title={titleText}>
             {title}
           </span>
@@ -159,6 +196,20 @@ export function QuickDiffPane({
             ✕
           </button>
         </div>
+        <div className="quick-view-split">
+        {expanded && files.length > 0 && (
+          <nav className="jump-list quick-view-tree" aria-label="Files">
+            <div className="jump-list-content">
+              <FileTree
+                rows={rows}
+                activeIndex={activeIndex}
+                collapsed={collapsed}
+                onToggleDir={toggleDir}
+                onPick={(i) => jumpTo(files[i].path)}
+              />
+            </div>
+          </nav>
+        )}
         <div className="file-view-pane-body quick-view-body">
           {isLoading && <p className="muted quick-view-note">Loading diff…</p>}
           {error != null && (
@@ -172,6 +223,7 @@ export function QuickDiffPane({
               <DiffViewer diffText={diffText} viewType={viewType} />
             </>
           )}
+        </div>
         </div>
       </aside>
     </>

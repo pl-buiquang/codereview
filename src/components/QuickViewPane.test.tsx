@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
@@ -99,5 +99,20 @@ describe("QuickViewPane", () => {
     expect(screen.queryByText("new")).not.toBeInTheDocument();
     await userEvent.click(header);
     expect(screen.getByText("new")).toBeInTheDocument();
+  });
+
+  it("expands to a full view with a file tree and collapses back", async () => {
+    setup();
+    await screen.findByRole("button", { name: /a\.txt/ });
+    const pane = document.querySelector(".file-view-pane")!;
+    expect(pane).not.toHaveClass("quick-view-expanded");
+    expect(screen.queryByRole("navigation", { name: "Files" })).toBeNull();
+
+    await userEvent.click(screen.getByRole("button", { name: "Expand to full view" }));
+    expect(pane).toHaveClass("quick-view-expanded");
+    expect(within(screen.getByRole("navigation", { name: "Files" })).getByTitle("a.txt")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Collapse to side pane" }));
+    expect(pane).not.toHaveClass("quick-view-expanded");
   });
 });

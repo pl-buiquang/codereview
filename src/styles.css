@@ -6794,3 +6794,21 @@ tr.def-flash > td {
   border-bottom: 0;
   border-radius: 8px;
 }
+
+/* Quick view: the body sits in a row so the expanded view can put a file tree beside the diff. */
+.quick-view-split {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+.quick-view-split > .file-view-pane-body {
+  min-width: 0;
+}
+.file-view-pane.quick-view-expanded {
+  width: 100vw;
+  max-width: none;
+}
+.quick-view-tree {
+  border-right: 1px solid var(--border);
+  background: var(--surface-1, var(--surface-2));
+}
