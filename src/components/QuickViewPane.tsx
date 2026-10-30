@@ -210,7 +210,7 @@ export function QuickDiffPane({
             </div>
           </nav>
         )}
-        <div className="file-view-pane-body quick-view-body">
+        <div className={`file-view-pane-body quick-view-body${files.length > 1 ? " has-filebar" : ""}`}>
           {isLoading && <p className="muted quick-view-note">Loading diff…</p>}
           {error != null && (
             <p className="muted quick-view-note">

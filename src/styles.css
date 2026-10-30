@@ -6688,6 +6688,10 @@ tr.def-flash > td {
   padding: 12px;
 }
 .quick-view-body {
+  --qv-bar-h: 0px;
+}
+/* The file bar only exists for multi-file diffs. */
+.quick-view-body.has-filebar {
   --qv-bar-h: 45px;
 }
 /* The per-file headers stick too: park them under the file bar. */
