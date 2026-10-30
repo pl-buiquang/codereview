@@ -1760,6 +1760,20 @@ function ReviewHeader({
         {focusView?.focus.planned_at != null && (
           <FocusLevelSelect level={focusView.focus.level} onChange={focusActions.setLevel} />
         )}
+        {imageFileCount > 0 && (
+          <button
+            className="btn"
+            disabled={imageDiffMenu.disabled}
+            title={imageDiffMenu.title}
+            onClick={() =>
+              imageDiffMenu.viewOnly
+                ? (setImageDiffFile(null), setImageDiffOpen(true))
+                : openImageDiffs(review.id, imageDiffStatus.data?.state)
+            }
+          >
+            {imageDiffStatus.data?.state === "running" && <span className="spinner" />} {imageDiffMenu.label}
+          </button>
+        )}
         {(!hasFocus || focusGenerating) && (
           <FocusGenerate
             key={focusView?.focus.planned_at ?? "none"}
@@ -1961,23 +1975,6 @@ function ReviewHeader({
             };
             return (
               <>
-                {imageFileCount > 0 && (
-                  <>
-                    <button
-                      role="menuitem"
-                      disabled={imageDiffMenu.disabled}
-                      title={imageDiffMenu.title}
-                      onClick={run(() =>
-                        imageDiffMenu.viewOnly
-                          ? (setImageDiffFile(null), setImageDiffOpen(true))
-                          : openImageDiffs(review.id, imageDiffStatus.data?.state),
-                      )}
-                    >
-                      {imageDiffStatus.data?.state === "running" && <span className="spinner" />} {imageDiffMenu.label}
-                    </button>
-                    <hr className="btn-split-menu-separator" />
-                  </>
-                )}
                 {prUrl && (
                   <button role="menuitem" onClick={run(() => copyPrUrl(prUrl))}>
                     Copy PR URL
