@@ -8,15 +8,53 @@
 //! silently fail.
 //!
 //! No-op on a terminal launch (PATH already good) and on non-unix targets.
+//!
+//! On Linux the login shell is deliberately NOT sourced (the macOS heuristic
+//! below would always see `/usr/local/bin` and skip it anyway). Instead we
+//! prepend well-known per-user bin dirs (`~/.local/bin`, …) when they exist,
+//! which is where `claude` is typically installed.
 
 pub fn ensure_login_path() {
     // Kept for compatibility; the real work is in ensure_login_env.
     ensure_login_env();
 }
 
+/// Prepend each of `dirs` that is not already a PATH entry of `current`,
+/// preserving the order of `dirs`. Pure so it can be unit-tested.
+#[cfg(unix)]
+fn prepend_missing(current: &str, dirs: &[std::path::PathBuf]) -> String {
+    let present: Vec<&str> = current.split(':').filter(|s| !s.is_empty()).collect();
+    let mut out: Vec<String> = Vec::new();
+    for d in dirs {
+        let s = d.to_string_lossy().into_owned();
+        if !present.contains(&s.as_str()) && !out.contains(&s) {
+            out.push(s);
+        }
+    }
+    if !current.is_empty() {
+        out.push(current.to_string());
+    }
+    out.join(":")
+}
+
+/// Linux: add existing per-user bin dirs to PATH (no shell rc files are run).
+#[cfg(all(unix, not(target_os = "macos")))]
+pub fn ensure_login_env() {
+    let Some(home) = std::env::var_os("HOME").map(std::path::PathBuf::from) else {
+        return;
+    };
+    let dirs: Vec<std::path::PathBuf> = [".local/bin", "bin", ".cargo/bin", ".claude/local"]
+        .iter()
+        .map(|d| home.join(d))
+        .filter(|p| p.is_dir())
+        .collect();
+    let current = std::env::var("PATH").unwrap_or_default();
+    std::env::set_var("PATH", prepend_missing(&current, &dirs));
+}
+
 /// Source the login shell's full environment into the current process. Existing
 /// vars are NOT overwritten — we only fill in what's missing.
-#[cfg(unix)]
+#[cfg(target_os = "macos")]
 pub fn ensure_login_env() {
     use std::process::Command;
 
@@ -69,3 +107,27 @@ pub fn ensure_login_env() {
 
 #[cfg(not(unix))]
 pub fn ensure_login_env() {}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn prepends_missing_dir() {
+        let r = prepend_missing("/usr/bin:/bin", &[PathBuf::from("/h/.local/bin")]);
+        assert_eq!(r, "/h/.local/bin:/usr/bin:/bin");
+    }
+
+    #[test]
+    fn skips_dir_already_present() {
+        let r = prepend_missing("/usr/bin:/h/.local/bin", &[PathBuf::from("/h/.local/bin")]);
+        assert_eq!(r, "/usr/bin:/h/.local/bin");
+    }
+
+    #[test]
+    fn empty_current_path() {
+        let r = prepend_missing("", &[PathBuf::from("/a"), PathBuf::from("/b")]);
+        assert_eq!(r, "/a:/b");
+    }
+}
