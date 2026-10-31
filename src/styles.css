@@ -5869,6 +5869,12 @@ input[type="range"] {
 .sessions-list {
   gap: 8px;
 }
+/* Column flex container: the shared flex:1 would stretch the filter vertically. */
+.sessions-list .archive-search {
+  flex: none;
+  align-self: flex-start;
+  width: 420px;
+}
 .sessions-group-head {
   margin: 8px 0 0;
   font-size: 11px;
