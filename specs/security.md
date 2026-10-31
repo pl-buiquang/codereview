@@ -162,6 +162,14 @@ RustSec advisories are still enforced, except RUSTSEC-2026-0367/0368/0369 (`zip`
 4.6.1 `extract()` issues, fixed only in zip >=9): the updater is the sole consumer
 and only extracts archives from our own minisign-verified releases. Same deadline.
 
+GitHub Dependabot alerts #57 (critical, GHSA-m665-v7pm-7grj, zip cloaking), #58 and
+#59 (zip <9) are the same class and were dismissed as tolerable risk on 2026-10-31.
+Reachability: `zip` is compiled only on Windows (updater `extract_zip`), runs only after
+the minisign signature check, and our releases ship `x64-setup.exe`, not a `.zip`. An
+attacker would need the updater signing key, which already allows shipping any
+installer. Dependabot alert #54 (glib 0.18.5, RUSTSEC-2024-0429) is dismissed for the
+GTK3 pin documented above. Re-check all four when the review deadline arrives.
+
 Remove the `[yanked]` section once the updater moves to a non-yanked `zip`
 (`cargo update -p tauri-plugin-updater`, then check `cargo audit`).
 
