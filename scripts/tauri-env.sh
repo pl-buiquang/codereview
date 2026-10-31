@@ -39,13 +39,17 @@ keyring_clear() {
 }
 
 ask_password() {
-  local prompt="$1" pw
-  if [[ -r /dev/tty ]]; then
+  local prompt="$1" pw=""
+  if { : </dev/tty; } 2>/dev/null; then
     read -rsp "$prompt" pw </dev/tty >&2 || true
     echo >&2
     printf %s "$pw"
   elif [[ -n "${SSH_ASKPASS:-}" ]]; then
     "$SSH_ASKPASS" "$prompt"
+  elif [[ ! -t 0 ]]; then
+    # no terminal: take the password from stdin (e.g. piped from a password manager)
+    IFS= read -r pw || true
+    printf %s "$pw"
   else
     echo "no terminal or SSH_ASKPASS available to ask for the password" >&2
     return 1
