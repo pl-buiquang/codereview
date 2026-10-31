@@ -21,7 +21,7 @@ pub fn ensure_login_path() {
 
 /// Prepend each of `dirs` that is not already a PATH entry of `current`,
 /// preserving the order of `dirs`. Pure so it can be unit-tested.
-#[cfg(unix)]
+#[cfg(all(unix, not(target_os = "macos")))]
 fn prepend_missing(current: &str, dirs: &[std::path::PathBuf]) -> String {
     let present: Vec<&str> = current.split(':').filter(|s| !s.is_empty()).collect();
     let mut out: Vec<String> = Vec::new();
@@ -108,7 +108,7 @@ pub fn ensure_login_env() {
 #[cfg(not(unix))]
 pub fn ensure_login_env() {}
 
-#[cfg(all(test, unix))]
+#[cfg(all(test, unix, not(target_os = "macos")))]
 mod tests {
     use super::*;
     use std::path::PathBuf;
