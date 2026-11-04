@@ -2,6 +2,7 @@
 //! pipeline (`pipeline::run`) shared by the app and the `cr` CLI; the app adds
 //! a scheduler (`scheduler`) that decides when to run it.
 
+pub mod exclude;
 pub mod inflight;
 pub mod pipeline;
 pub mod scheduler;

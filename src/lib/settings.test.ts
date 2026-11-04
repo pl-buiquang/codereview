@@ -94,6 +94,7 @@ describe("useSettingsStore", () => {
         "diffFontSize",
         "direction",
         "discoveryIntervalMin",
+        "excludedRepos",
         "fileConfigPatterns",
         "fileTestPatterns",
         "largeDiffMaxLines",
@@ -129,7 +130,7 @@ describe("exportSettings / importSettings", () => {
     s.setFileTestPatterns("");
     const applied = importSettings(json);
     const n = useSettingsStore.getState();
-    expect(applied).toBe(40);
+    expect(applied).toBe(41);
     expect(n.mode).toBe("light");
     expect(n.diffFontSize).toBe(15);
     expect(n.fileTestPatterns).toBe("*.spec.rb");

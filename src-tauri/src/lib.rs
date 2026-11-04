@@ -451,6 +451,7 @@ pub fn run() {
             commands::sync::sync_hint,
             commands::sync::sync_window_state,
             commands::sync::sync_configure,
+            commands::sync::set_excluded_repos,
             commands::sync::sync_status,
             commands::sync::sync_now,
             commands::sync::reset_mirror,

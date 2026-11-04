@@ -161,6 +161,15 @@ export function useSyncBridge() {
   const discoveryIntervalMin = useSettingsStore((s) => s.discoveryIntervalMin);
   const boardMonitor = useSettingsStore((s) => s.boardMonitor);
   const boardMonitorIntervalMin = useSettingsStore((s) => s.boardMonitorIntervalMin);
+  const excludedRepos = useSettingsStore((s) => s.excludedRepos);
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    api
+      .setExcludedRepos(excludedRepos)
+      .then(() => queryClient.invalidateQueries({ queryKey: ["inbox"] }))
+      .catch(() => {});
+  }, [excludedRepos]);
+
   useEffect(() => {
     if (!isTauriRuntime()) return;
     log.debug(

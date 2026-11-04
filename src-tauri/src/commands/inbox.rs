@@ -273,7 +273,12 @@ pub fn list_inbox_impl(conn: &Connection) -> AppResult<Vec<ItemWithReasons>> {
 #[tauri::command]
 pub fn list_inbox(db: State<Db>) -> AppResult<Vec<ItemWithReasons>> {
     let conn = db.0.lock().unwrap();
-    list_inbox_impl(&conn)
+    let mut items = list_inbox_impl(&conn)?;
+    let excluded = crate::sync::exclude::ExcludedRepos::load(&conn);
+    if !excluded.is_empty() {
+        items.retain(|i| !excluded.matches(&i.item.repo));
+    }
+    Ok(items)
 }
 
 /// Everything triaged: archived items and items put on the Board. `cause`

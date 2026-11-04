@@ -23,6 +23,12 @@ pub fn sync_configure(config: SyncConfig, engine: State<SyncEngine>) {
     engine.configure(config);
 }
 
+/// Replace the excluded-repositories patterns (one per line, `*` wildcard).
+#[tauri::command]
+pub fn set_excluded_repos(patterns: String, db: State<Db>) -> AppResult<()> {
+    crate::sync::exclude::save(&db.0.lock().unwrap(), &patterns)
+}
+
 #[tauri::command]
 pub fn sync_status(engine: State<SyncEngine>) -> SyncStatus {
     engine.status()

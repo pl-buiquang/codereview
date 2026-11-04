@@ -188,6 +188,8 @@ function GeneralSection() {
   const defaultViewType = useSettingsStore((s) => s.defaultViewType);
   const defaultThreeDot = useSettingsStore((s) => s.defaultThreeDot);
   const botLogins = useSettingsStore((s) => s.botLogins);
+  const excludedRepos = useSettingsStore((s) => s.excludedRepos);
+  const setExcludedRepos = useSettingsStore((s) => s.setExcludedRepos);
   const repoStripPrefixes = useSettingsStore((s) => s.repoStripPrefixes);
   const repoBasePaths = useSettingsStore((s) => s.repoBasePaths);
   const setDefaultViewType = useSettingsStore((s) => s.setDefaultViewType);
@@ -653,6 +655,22 @@ function GeneralSection() {
           <span className="settings-hint muted">
             Comma-separated GitHub logins routed to the Bots tab (case-insensitive; GitHub
             strips the <code>[bot]</code> suffix).
+          </span>
+        </label>
+        <label className="settings-row settings-row-stack">
+          <span>Excluded repositories</span>
+          <textarea
+            className="input"
+            rows={4}
+            spellCheck={false}
+            placeholder={"some-org/*\nowner/old-repo\n*/archive-*"}
+            value={excludedRepos}
+            onChange={(e) => setExcludedRepos(e.target.value)}
+          />
+          <span className="settings-hint muted">
+            One <code>owner/name</code> pattern per line, case-insensitive; <code>*</code> matches any
+            text (<code>acme/*</code> skips a whole org). Excluded repositories are skipped by the
+            Inbox and Board syncs and hidden from the Inbox. Already-tracked Board cards stay.
           </span>
         </label>
         <label className="settings-row settings-row-stack">

@@ -212,6 +212,11 @@ fn discover(
         (Vec::new(), authored)
     };
 
+    let excluded = super::exclude::ExcludedRepos::load(&db.0.lock().unwrap());
+    let is_excluded = |n: &Node| n.repo().is_some_and(|r| excluded.matches(r));
+    let merged: Vec<inbox::ReasonedNode> = merged.into_iter().filter(|r| !is_excluded(&r.node)).collect();
+    let authored: Vec<Node> = authored.into_iter().filter(|n| !is_excluded(n)).collect();
+
     let nodes: Vec<&Node> = merged.iter().map(|r| &r.node).chain(&authored).collect();
     let ids: Vec<String> = nodes.iter().map(|n| n.id.clone()).collect();
     let ts = now();
@@ -555,8 +560,9 @@ fn sync_notifications(db: &Db) -> AppResult<Vec<String>> {
             .format("%Y-%m-%dT%H:%M:%SZ")
             .to_string()
     };
+    let excluded = super::exclude::ExcludedRepos::load(&db.0.lock().unwrap());
     let notifications = match crate::gh::fetch_notifications(&since) {
-        Ok(n) => n,
+        Ok(n) => n.into_iter().filter(|n| !excluded.matches(&format!("{}/{}", n.owner, n.name))).collect::<Vec<_>>(),
         Err(e) => {
             crate::logging::warn(&format!("[sync.notifications] fetch failed: {e}"));
             drop(claim);

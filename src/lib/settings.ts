@@ -116,6 +116,7 @@ type PersistedSettings = Pick<
   | "defaultViewType"
   | "defaultThreeDot"
   | "botLogins"
+  | "excludedRepos"
   | "conversationIgnoreRules"
   | "repoStripPrefixes"
   | "repoBasePaths"
@@ -160,6 +161,7 @@ const DEFAULTS: PersistedSettings = {
   defaultViewType: "split",
   defaultThreeDot: true,
   botLogins: "",
+  excludedRepos: "",
   conversationIgnoreRules: DEFAULT_IGNORE_RULES,
   repoStripPrefixes: "",
   repoBasePaths: "~/projects",
@@ -209,6 +211,8 @@ interface SettingsState {
   defaultThreeDot: boolean;
   /** Comma-separated GitHub logins treated as bots in the inbox "Bots" bucket. */
   botLogins: string;
+  /** Repositories the sync skips (Inbox and Board): one `owner/name` pattern per line, `*` wildcard. */
+  excludedRepos: string;
   /** Rules hiding Inbox conversations (Conversations tab). */
   conversationIgnoreRules: IgnoreRule[];
   /** Comma-separated prefixes stripped from repo names shown in the inbox. */
@@ -281,6 +285,7 @@ interface SettingsState {
   setDefaultThreeDot: (b: boolean) => void;
   setBotLogins: (s: string) => void;
   setConversationIgnoreRules: (rules: IgnoreRule[]) => void;
+  setExcludedRepos: (s: string) => void;
   setRepoStripPrefixes: (s: string) => void;
   setRepoBasePaths: (s: string) => void;
   setAutoSync: (mode: AutoSync) => void;
@@ -382,6 +387,7 @@ export const useSettingsStore = create<SettingsState>()(
       setDefaultViewType: (defaultViewType) => set({ defaultViewType }),
       setDefaultThreeDot: (defaultThreeDot) => set({ defaultThreeDot }),
       setBotLogins: (botLogins) => set({ botLogins }),
+      setExcludedRepos: (excludedRepos) => set({ excludedRepos }),
       setConversationIgnoreRules: (conversationIgnoreRules) => set({ conversationIgnoreRules }),
       setRepoStripPrefixes: (repoStripPrefixes) => set({ repoStripPrefixes }),
       setRepoBasePaths: (repoBasePaths) => set({ repoBasePaths }),

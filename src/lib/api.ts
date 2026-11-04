@@ -328,6 +328,8 @@ export const api = {
   /** Archived and tracked items; `cause` is an ArchiveCause or "tracked". */
   listInboxArchive: (search: string | null, cause: string | null, limit: number) =>
     invoke<InboxItem[]>("list_inbox_archive", { search, cause, limit }),
+  /** Patterns (one per line, `*` wildcard) of repositories the sync skips. */
+  setExcludedRepos: (patterns: string) => invoke<void>("set_excluded_repos", { patterns }),
   listConversations: (filters: ConversationFilters, botLogins: string[], rules: IgnoreRule[], limit: number, keepIds: string[] = []) =>
     invoke<ConversationList>("list_conversations", { filters: { ...filters, botLogins, rules, keepIds }, limit }),
   setConversationPinned: (id: string, subjectId: string, pinned: boolean) =>
