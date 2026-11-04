@@ -328,8 +328,8 @@ export const api = {
   /** Archived and tracked items; `cause` is an ArchiveCause or "tracked". */
   listInboxArchive: (search: string | null, cause: string | null, limit: number) =>
     invoke<InboxItem[]>("list_inbox_archive", { search, cause, limit }),
-  listConversations: (filters: ConversationFilters, botLogins: string[], rules: IgnoreRule[], limit: number) =>
-    invoke<ConversationList>("list_conversations", { filters: { ...filters, botLogins, rules }, limit }),
+  listConversations: (filters: ConversationFilters, botLogins: string[], rules: IgnoreRule[], limit: number, keepIds: string[] = []) =>
+    invoke<ConversationList>("list_conversations", { filters: { ...filters, botLogins, rules, keepIds }, limit }),
   setConversationPinned: (id: string, subjectId: string, pinned: boolean) =>
     invoke<void>("set_conversation_pinned", { id, subjectId, pinned }),
   /** Read up to `seenAt` (a conversation's latest comment time); an earlier time marks it unread. */

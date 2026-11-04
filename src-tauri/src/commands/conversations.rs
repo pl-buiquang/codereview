@@ -24,6 +24,8 @@ pub struct ConversationFilters {
     pub repos: Vec<String>,
     pub pinned: bool,
     pub unread: bool,
+    /// Conversation ids shown even when read, so one opened under the unread filter doesn't vanish.
+    pub keep_ids: Vec<String>,
     pub unresolved: bool,
     pub show_bots: bool,
     /// Extra bot logins from the settings (lower-case).
@@ -508,7 +510,7 @@ pub fn list_conversations_impl(conn: &Connection, f: &ConversationFilters, limit
         .filter(|c| f.subject_ids.is_empty() || f.subject_ids.contains(&c.subject.id))
         .filter(|c| repos.is_empty() || repos.contains(&format!("{}/{}", c.subject.owner, c.subject.name).to_lowercase()))
         .filter(|c| !f.pinned || c.pinned)
-        .filter(|c| !f.unread || c.unread_count > 0)
+        .filter(|c| !f.unread || c.unread_count > 0 || f.keep_ids.contains(&c.id))
         .filter(|c| !f.unresolved || (c.kind == "thread" && !c.is_resolved))
         .collect();
     items.sort_by(|a, b| b.last_comment_at.cmp(&a.last_comment_at));
@@ -646,6 +648,18 @@ mod tests {
         assert_eq!(list(&conn, unread, 10).total, 0);
         set_seen_impl(&conn, "T", "PR_1", Some("1970-01-01T00:00:00Z")).unwrap();
         assert_eq!(list(&conn, ConversationFilters { unread: true, ..Default::default() }, 10).total, 1);
+    }
+
+    #[test]
+    fn keep_ids_survive_the_unread_filter_once_read() {
+        let conn = open_memory();
+        seed(&conn, vec![thread("T", &[("bob", "User", "2026-01-02T00:00:00Z")])]);
+        set_seen_impl(&conn, "T", "PR_1", Some("2026-01-02T00:00:00Z")).unwrap();
+        let kept = ConversationFilters { unread: true, keep_ids: vec!["T".into()], ..Default::default() };
+        let got = list(&conn, kept, 10);
+        assert_eq!(got.total, 1);
+        assert_eq!(got.items[0].unread_count, 0);
+        assert_eq!(list(&conn, ConversationFilters { unread: true, ..Default::default() }, 10).total, 0);
     }
 
     #[test]

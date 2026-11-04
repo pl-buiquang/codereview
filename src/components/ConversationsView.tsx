@@ -32,15 +32,21 @@ export function ConversationsView() {
   const [limit, setLimit] = useState(PAGE);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
+  /** Opened under the Unread filter: stay listed (as read) until the filters change. */
+  const [kept, setKept] = useState<string[]>([]);
+
   const filtersKey = JSON.stringify(filters);
-  useEffect(() => setLimit(PAGE), [filtersKey]);
+  useEffect(() => {
+    setLimit(PAGE);
+    setKept([]);
+  }, [filtersKey]);
 
   const bots = useMemo(() => [...parseBotLogins(botLogins)], [botLogins]);
   const rules = useSettingsStore((s) => s.conversationIgnoreRules);
   const ruleNames = useMemo(() => new Map(rules.map((r) => [r.id, r.name])), [rules]);
   const query = useQuery({
-    queryKey: ["conversations", filters, bots, rules, limit],
-    queryFn: () => api.listConversations(filters, bots, rules, limit),
+    queryKey: ["conversations", filters, bots, rules, limit, kept],
+    queryFn: () => api.listConversations(filters, bots, rules, limit, kept),
     placeholderData: keepPreviousData,
   });
   const items = query.data?.items ?? [];
@@ -72,7 +78,10 @@ export function ConversationsView() {
       else next.delete(c.id);
       return next;
     });
-    if (open && c.unreadCount > 0) seen.mutate({ c, read: true });
+    if (open && c.unreadCount > 0) {
+      if (filters.unread) setKept((prev) => (prev.includes(c.id) ? prev : [...prev, c.id]));
+      seen.mutate({ c, read: true });
+    }
   };
 
   const openInReview = useMutation({
