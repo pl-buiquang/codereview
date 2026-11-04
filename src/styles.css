@@ -2629,8 +2629,7 @@ tr.kb-focus {
 
 .settings-version {
   font-size: 11px;
-  text-align: center;
-  padding: 12px 0 4px;
+  padding: 6px 10px 0;
 }
 
 /* --- Settings: direction picker (Phase 1; restyled in Phase 8) ----------- */

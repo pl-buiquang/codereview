@@ -720,7 +720,6 @@ function GeneralSection() {
         <EnvironmentPanel />
       </section>
 
-      <AppVersionRow />
     </div>
   );
 }
@@ -748,6 +747,7 @@ export function SettingsView() {
               <span>{s.label}</span>
             </button>
           ))}
+          <AppVersionRow />
         </nav>
 
         <div className="settings-content">
