@@ -82,7 +82,7 @@ also controls whether Done cards count in the filter numbers.
 
 ### Metadata
 
-Each card carries metadata: a **file** (plan or spec), a **link**, a **note**, or a **claude_session**
+Each card carries metadata: a **file** (plan or spec), a **link**, a **note**, or a **claude_session** (an `ai_session` is the same for another harness)
 (with a one-click "copy resume command": `cd <cwd>; claude --resume <id>`). Items can have a free
 tag. A PR card also shows its linked issue's metadata, marked "from issue". More than three items
 collapse behind a chevron.

@@ -127,7 +127,7 @@ Glossary of domain terms used in this app.
 ## Board
 
 - **Card session** — a live session that belongs to a PR card: either recorded on the card as a
-  `claude_session` metadata item, or running in a checkout of the card's head branch.
+  `claude_session` (or, for another harness, `ai_session`) metadata item, or running in a checkout of the card's head branch.
 - **Chat worktree** — the checkout of a PR's head branch the app uses for chat and editing
   (an existing worktree on that branch, or one it creates). Looked up again on every chat turn:
   whichever checkout holds the branch now wins, including the main checkout (the chat shows a

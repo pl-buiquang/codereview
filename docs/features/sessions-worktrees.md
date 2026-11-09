@@ -42,12 +42,17 @@ refreshes every 3 seconds while Home is visible.
   are not listed twice.
 - **Names**: summary title, else custom title, agent name, AI title, or last prompt.
 
+Other harnesses (see the README table) report their live sessions through `Harness::live_sessions`
+(`src-tauri/src/ai/`); they are merged into the list with the basics only: id, working directory,
+last activity, live or not, title. With more than one harness listed, rows get a harness badge and
+a filter appears in the header. Focus, attach, stop, history and summaries are Claude-only.
+
 ### Rows
 
 - Status dot (busy, idle, waiting, ended), badges (`background` / `attached` for background
   sessions, `detached`, what it is waiting for), working directory, branch, tmux window, age.
 - Board badges (`repo#n`) for live sessions on a tracked PR card: recorded as `claude_session`
-  metadata, or running in a checkout of the card's head branch. Click to jump to the card.
+  metadata (`ai_session` for another harness, which needs one that can pin a session id), or running in a checkout of the card's head branch. Click to jump to the card.
 
 ### Actions
 
