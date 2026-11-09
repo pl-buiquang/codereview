@@ -362,8 +362,10 @@ mod tests {
         assert_eq!(current_branch(&a).as_deref(), Some("feat/x"));
         assert_eq!(current_branch(&b).as_deref(), Some("feat-x"));
         // a repeat finds each one again
-        assert_eq!(ensure_branch_worktree_in(repo.path(), &local_target("feat/x"), None, base.path()).unwrap(), a);
-        assert_eq!(ensure_branch_worktree_in(repo.path(), &local_target("feat-x"), None, base.path()).unwrap(), b);
+        // (compared resolved: git reports the real path, and macOS temp dirs sit behind the /var symlink)
+        let again = |branch| ensure_branch_worktree_in(repo.path(), &local_target(branch), None, base.path()).unwrap().canonicalize().unwrap();
+        assert_eq!(again("feat/x"), a.canonicalize().unwrap());
+        assert_eq!(again("feat-x"), b.canonicalize().unwrap());
     }
 
     #[test]

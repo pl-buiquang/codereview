@@ -321,7 +321,8 @@ mod tests {
         let first = resolve_in(&f.conn, &s, &f.base, &no_gh, true).unwrap();
         assert!(first.starts_with(&f.base) && first.join("a.txt").exists(), "{first:?}");
         let second = resolve_in(&f.conn, &s, &f.base, &no_gh, true).unwrap();
-        assert_eq!(first, second);
+        // git reports the resolved path (macOS temp dirs sit behind the /var symlink)
+        assert_eq!(first.canonicalize().unwrap(), second.canonicalize().unwrap());
         let missing = spec("acme/widgets", WorkspaceKind::BranchWorktree, None, Some("nope"));
         assert_eq!(resolve_in(&f.conn, &missing, &f.base, &no_gh, true).unwrap_err().code, ErrorCode::NoWorktree);
         assert_eq!(
