@@ -433,12 +433,19 @@ fn canon(p: &Path) -> PathBuf {
     std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf())
 }
 
+/// The paths of the live sessions plus the cwds of live TUIs (which count even with no session).
+fn session_paths(session_cwds: impl IntoIterator<Item = String>, tui_cwds: impl IntoIterator<Item = String>) -> Vec<PathBuf> {
+    session_cwds.into_iter().chain(tui_cwds).map(|c| canon(Path::new(&c))).collect()
+}
+
 impl InUse {
     pub fn collect(chat_paths: Vec<String>) -> Self {
-        let sessions = crate::commands::sessions::all_live_sessions()
-            .into_iter()
-            .map(|s| canon(Path::new(&s.cwd)))
-            .collect();
+        // A TUI's cwd protects its worktree on its own: whether its session could be looked up
+        // (that may fail or time out) must not decide GC safety.
+        let sessions = session_paths(
+            crate::commands::sessions::all_live_sessions().into_iter().map(|s| s.cwd),
+            crate::ai::opencode::live_tui_cwds(),
+        );
         let panes = std::process::Command::new("tmux")
             .args(["list-panes", "-a", "-F", "#{pane_current_path}"])
             .output()
@@ -779,6 +786,14 @@ mod tests {
             Verdict::Keep { .. } => "keep",
             Verdict::InUse { .. } => "in_use",
         }
+    }
+
+    #[test]
+    fn a_tui_cwd_protects_its_worktree_without_a_session() {
+        // The session lookup found nothing (failed, timed out, or the session isn't created yet).
+        let in_use = InUse { sessions: session_paths(Vec::new(), vec!["/wt/tui/sub".to_string()]), ..InUse::default() };
+        assert_eq!(in_use.reason_for(Path::new("/wt/tui")).as_deref(), Some("live agent session"));
+        assert_eq!(in_use.reason_for(Path::new("/wt/other")), None);
     }
 
     #[test]
