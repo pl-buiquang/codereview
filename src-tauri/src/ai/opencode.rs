@@ -27,7 +27,8 @@ use super::{
     Access, AgentSession, Caps, Event, FinalResult, Harness, Interactive, OneShot, RunAcc, SessionMode, StreamRun, SystemPrompt,
     ToolPolicy, TurnResult,
 };
-use crate::ai_usage::{self, RunUsage};
+use crate::ai_usage;
+use crate::run_usage::{self, RunUsage};
 use crate::error::{AppError, AppResult};
 
 pub struct OpenCode;
@@ -73,7 +74,7 @@ impl Harness for OpenCode {
     fn one_shot(&self, req: &OneShot<'_>) -> AppResult<TurnResult> {
         let message = message(req)?;
         let mut cmd = command(req, false)?;
-        let started_at = ai_usage::now_stamp();
+        let started_at = run_usage::now_stamp();
         let started = std::time::Instant::now();
         let (result, usage) = execute(&mut cmd, &message);
         let mut tag = req.usage_tag.clone();
@@ -747,7 +748,7 @@ fn live_sessions_now() -> Vec<AgentSession> {
 mod tests {
     use super::*;
     use crate::ai::norm_json;
-    use crate::ai_usage::RunTag;
+    use crate::run_usage::RunTag;
     use std::path::Path;
 
     const STREAM: &str = include_str!("fixtures/opencode_stream.jsonl");

@@ -2,7 +2,7 @@
 
 use tauri::State;
 
-use crate::ai_usage::RunTag;
+use crate::run_usage::RunTag;
 use crate::ai::profiles::{self, Feature};
 use crate::ai::{Access, OneShot, SessionMode, SystemPrompt, SystemPromptMode, ToolPolicy};
 use crate::db::Db;

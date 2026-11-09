@@ -6,7 +6,7 @@ use std::path::Path;
 
 
 use crate::ai::{FinalResult, Harness};
-use crate::ai_usage::RunUsage;
+use crate::run_usage::RunUsage;
 
 pub const STDERR_FILE: &str = "stderr.log";
 pub const STDOUT_FILE: &str = "stdout.jsonl";

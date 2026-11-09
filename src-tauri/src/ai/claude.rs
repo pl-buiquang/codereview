@@ -13,7 +13,8 @@ use super::{
     Access, AgentSession, Caps, Event, Harness, Interactive, OneShot, SessionMode, StreamRun, SystemPrompt,
     SystemPromptMode, ToolPolicy, TurnResult,
 };
-use crate::ai_usage::{self, ModelTokens, RunTag, RunUsage};
+use crate::ai_usage;
+use crate::run_usage::{self, ModelTokens, RunTag, RunUsage};
 use crate::error::{AppError, AppResult};
 
 pub struct ClaudeCode;
@@ -347,7 +348,7 @@ fn run_one_shot(req: &OneShot<'_>) -> AppResult<TurnResult> {
 /// Spawn a prepared `claude -p --output-format json` command, feed it `text` on stdin, and parse
 /// the JSON envelope. Every run, failed ones included, lands in the usage log under `tag`.
 fn run_command(cmd: Command, text: &str, tag: &RunTag) -> AppResult<TurnResult> {
-    let started_at = ai_usage::now_stamp();
+    let started_at = run_usage::now_stamp();
     let started = std::time::Instant::now();
     let (result, usage) = execute(cmd, text);
     let error = result.as_ref().err().map(|e| e.to_string());

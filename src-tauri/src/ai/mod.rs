@@ -18,7 +18,7 @@ use std::time::Duration;
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::ai_usage::{RunTag, RunUsage};
+use crate::run_usage::{RunTag, RunUsage};
 use crate::error::{AppError, AppResult};
 
 pub mod claude;

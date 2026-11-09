@@ -15,7 +15,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use super::context::{ContextRef, Light};
 use super::manager::{get_run, routine_settings, RoutineRun};
 use super::Routine;
-use crate::ai_usage::{RunTag, RunUsage};
+use crate::run_usage::{RunTag, RunUsage};
 use crate::ai::profiles;
 use crate::commands::focus::{begin_generation, finish_generation, review_local_path};
 use crate::commands::{board::board_list_impl, overview, review::ensure_draft};

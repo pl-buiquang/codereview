@@ -16,7 +16,7 @@ use std::time::Duration;
 
 use crate::ai::{Access, Harness, OneShot, SystemPrompt, SystemPromptMode, ToolPolicy};
 use crate::ai::SessionMode;
-use crate::ai_usage::{RunTag, RunUsage};
+use crate::run_usage::{RunTag, RunUsage};
 use crate::error::AppResult;
 
 pub mod engine;
@@ -156,9 +156,11 @@ mod tests {
     /// The engine must stay usable from `cr serve`: no Tauri anywhere in this module.
     #[test]
     fn engine_has_no_tauri_dependency() {
-        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/run_engine");
-        for entry in std::fs::read_dir(dir).unwrap().flatten() {
-            let path = entry.path();
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        // `run_usage` is the engine's only other import besides `ai` and `error`
+        let mut files: Vec<_> = std::fs::read_dir(src.join("run_engine")).unwrap().flatten().map(|e| e.path()).collect();
+        files.push(src.join("run_usage.rs"));
+        for path in files {
             let text = std::fs::read_to_string(&path).unwrap();
             // the needle is built at run time so this file does not match itself
             let needle = format!("{}{}", "tau", "ri");

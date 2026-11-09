@@ -14,7 +14,7 @@ use super::proc::{process_alive, signal_group, terminate, SIGKILL, SIGTERM};
 use super::tail::{event_json, tail_events, Tail};
 use super::{EventSink, Finished, Prepared, RunStore, RunningRun};
 use crate::ai::{Harness, StreamRun};
-use crate::ai_usage;
+use crate::run_usage;
 use crate::error::{AppError, AppResult};
 
 pub const DEFAULT_CONCURRENCY: i64 = 4;
@@ -226,7 +226,7 @@ impl RunEngine {
 
     fn execute(self: Arc<Self>, run_id: i64) {
         let started = Instant::now();
-        let started_at = ai_usage::now_stamp();
+        let started_at = run_usage::now_stamp();
         let outcome = self.run_process(run_id);
         if outcome.detached {
             return;
@@ -333,7 +333,7 @@ impl RunEngine {
     /// Take over a run a previous session left alive: keep tailing it, then settle it like any other.
     fn adopt(self: Arc<Self>, run: RunningRun) {
         let started = Instant::now();
-        let started_at = ai_usage::now_stamp();
+        let started_at = run_usage::now_stamp();
         let id = run.id;
         let Some(timeout) = self.sink.adopt(id) else { return self.settle_lost(id) };
         let dir = self.run_dir(id);
@@ -428,7 +428,7 @@ mod tests {
     use super::*;
     use crate::ai::{Caps, Event, Interactive, OneShot, TurnResult};
     use crate::ai::{Access, SystemPromptMode, ToolPolicy};
-    use crate::ai_usage::RunTag;
+    use crate::run_usage::RunTag;
     use serde_json::Value;
     use std::path::Path;
     use std::process::{Child, Command, Stdio};

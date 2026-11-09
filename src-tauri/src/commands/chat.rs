@@ -8,7 +8,7 @@ use tauri::State;
 
 use crate::ai::profiles::{self, Feature, Resolved};
 use crate::ai::{Access, OneShot, SessionMode, SystemPrompt, SystemPromptMode, ToolPolicy, TurnResult};
-use crate::ai_usage::RunTag;
+use crate::run_usage::RunTag;
 use crate::db::models::{Chat, ChatMessage, Target};
 use crate::db::Db;
 use crate::error::{AppError, AppResult};

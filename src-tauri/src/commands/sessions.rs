@@ -66,10 +66,10 @@ const FORK_MAX_AGE_MS: i64 = 5 * 60 * 1000;
 const EXTRACT_MAX_BYTES: usize = 400_000;
 const EXTRACT_MODEL: &str = "haiku";
 
-fn session_tag(variant: &str, session: &AgentSession) -> crate::ai_usage::RunTag {
+fn session_tag(variant: &str, session: &AgentSession) -> crate::run_usage::RunTag {
     let project = session.cwd.trim_end_matches('/').rsplit('/').next().unwrap_or("");
     let short: String = session.session_id.chars().take(8).collect();
-    crate::ai_usage::RunTag::new("session_summary").variant(variant).label(format!("{project} ({short})"))
+    crate::run_usage::RunTag::new("session_summary").variant(variant).label(format!("{project} ({short})"))
 }
 
 fn fork_request<'a>(session: &'a AgentSession, prompt: &'a str, harness: &'static str) -> OneShot<'a> {
