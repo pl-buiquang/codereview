@@ -294,8 +294,13 @@ describe("helpers", () => {
   });
 
   it("quotes cwd in resume command", () => {
-    expect(resumeCommand({ cwd: "/a/b", session_id: "id" })).toBe("cd /a/b; claude --resume id");
-    expect(resumeCommand({ cwd: "/a b/it's", session_id: "id" })).toBe(`cd '/a b/it'\\''s'; claude --resume id`);
+    expect(resumeCommand({ cwd: "/a/b", session_id: "id", harness: "claude" })).toBe("cd /a/b; claude --resume id");
+    expect(resumeCommand({ cwd: "/a b/it's", session_id: "id", harness: "claude" })).toBe(`cd '/a b/it'\\''s'; claude --resume id`);
+    expect(resumeCommand({ cwd: "/a", session_id: "ses_x", harness: "opencode" })).toBe("cd /a; opencode --session ses_x");
+    // An unknown or missing harness has no resume command: never silently `claude --resume`.
+    expect(resumeCommand({ cwd: "/a", session_id: "id", harness: "codex" })).toBeNull();
+    expect(resumeCommand({ cwd: "/a", session_id: "id", harness: null })).toBeNull();
+    expect(resumeCommand({ cwd: "/a", session_id: "id" })).toBeNull();
   });
   it("matches session search on all words, case-insensitively, across fields", () => {
     const s = session({

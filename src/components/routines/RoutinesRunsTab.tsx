@@ -169,13 +169,15 @@ export function RoutinesRunsTab() {
                     Run again
                   </button>
                 )}
-                {!isActiveRun(selected.status) && selected.session_id && selected.cwd && (
+                {!isActiveRun(selected.status) && selected.session_id && selected.cwd && (() => {
+                  const cmd = resumeCommand({ cwd: selected.cwd, session_id: selected.session_id, harness: selected.harness });
+                  return (
                   <div className="btn-split">
                     <button
                       type="button"
                       className="btn btn-sm"
-                      disabled={resume.isPending}
-                      title={`Open a new terminal running: ${resumeCommand({ cwd: selected.cwd, session_id: selected.session_id, harness: selected.harness })}`}
+                      disabled={resume.isPending || cmd === null}
+                      title={cmd === null ? `No resume command for harness ${selected.harness}` : `Open a new terminal running: ${cmd}`}
                       onClick={() => resume.mutate({ session_id: selected.session_id!, cwd: selected.cwd!, harness: selected.harness })}
                     >
                       <Icon name="terminal" size={13} /> Resume
@@ -183,14 +185,16 @@ export function RoutinesRunsTab() {
                     <button
                       type="button"
                       className="btn btn-sm"
-                      title={`Copy: ${resumeCommand({ cwd: selected.cwd, session_id: selected.session_id, harness: selected.harness })}`}
+                      disabled={cmd === null}
+                      title={cmd === null ? `No resume command for harness ${selected.harness}` : `Copy: ${cmd}`}
                       aria-label="Copy resume command"
-                      onClick={() => copyCommand(resumeCommand({ cwd: selected.cwd!, session_id: selected.session_id!, harness: selected.harness }))}
+                      onClick={() => cmd && copyCommand(cmd)}
                     >
                       <Icon name="copy" size={12} />
                     </button>
                   </div>
-                )}
+                  );
+                })()}
               </div>
             </div>
             {selected.note && <p className="muted">Note: {selected.note}</p>}

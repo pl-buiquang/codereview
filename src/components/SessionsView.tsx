@@ -42,8 +42,19 @@ export function harnessIds(sessions: Pick<AgentSession, "harness">[]): string[] 
   return [...new Set(sessions.map((s) => s.harness))].sort();
 }
 
-export function resumeCommand(s: Pick<AgentSession, "cwd" | "session_id"> & { harness?: string }): string {
-  const resume = s.harness === "opencode" ? `opencode --session ${s.session_id}` : `claude --resume ${s.session_id}`;
+/** The shell command resuming a session, or `null` when its harness has no known resume command. */
+export function resumeCommand(s: Pick<AgentSession, "cwd" | "session_id"> & { harness?: string | null }): string | null {
+  let resume: string;
+  switch (s.harness) {
+    case "claude":
+      resume = `claude --resume ${shellQuote(s.session_id)}`;
+      break;
+    case "opencode":
+      resume = `opencode --session ${shellQuote(s.session_id)}`;
+      break;
+    default:
+      return null;
+  }
   return `cd ${shellQuote(s.cwd)}; ${resume}`;
 }
 
@@ -242,35 +253,39 @@ function TerminalSessions() {
             {filtering && filteredHistory.length === 0 && history.length > 0 && (
               <p className="muted faint">No sessions match “{historySearch.trim()}”.</p>
             )}
-            {filteredHistory.map((s) => (
-              <SessionRow
-                key={s.session_id}
-                session={s}
-                showHarness={showHarness}
-                cards={[]}
-                onShowCard={showBoardCard}
-                action={
-                  <div className="btn-split">
-                    <button
-                      className="btn btn-sm"
-                      disabled={resume.isPending}
-                      title={`Open a new terminal running: ${resumeCommand(s)}`}
-                      onClick={() => resume.mutate(s)}
-                    >
-                      <Icon name="terminal" size={13} /> Resume
-                    </button>
-                    <button
-                      className="btn btn-sm"
-                      title={`Copy: ${resumeCommand(s)}`}
-                      aria-label="Copy resume command"
-                      onClick={() => copyCommand(resumeCommand(s), "Resume")}
-                    >
-                      <Icon name="copy" size={12} />
-                    </button>
-                  </div>
-                }
-              />
-            ))}
+            {filteredHistory.map((s) => {
+              const cmd = resumeCommand(s);
+              return (
+                <SessionRow
+                  key={s.session_id}
+                  session={s}
+                  showHarness={showHarness}
+                  cards={[]}
+                  onShowCard={showBoardCard}
+                  action={
+                    <div className="btn-split">
+                      <button
+                        className="btn btn-sm"
+                        disabled={resume.isPending || cmd === null}
+                        title={cmd === null ? `No resume command for harness ${s.harness}` : `Open a new terminal running: ${cmd}`}
+                        onClick={() => resume.mutate(s)}
+                      >
+                        <Icon name="terminal" size={13} /> Resume
+                      </button>
+                      <button
+                        className="btn btn-sm"
+                        disabled={cmd === null}
+                        title={cmd === null ? `No resume command for harness ${s.harness}` : `Copy: ${cmd}`}
+                        aria-label="Copy resume command"
+                        onClick={() => cmd && copyCommand(cmd, "Resume")}
+                      >
+                        <Icon name="copy" size={12} />
+                      </button>
+                    </div>
+                  }
+                />
+              );
+            })}
           </>
         )}
       </div>
