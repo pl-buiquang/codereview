@@ -1,0 +1,947 @@
+//! The `/v1` HTTP+SSE API (axum). Handlers are thin: validation, the store and the run engines do
+//! the work. Blocking work (git, the app DB, a harness call) runs on the blocking pool.
+
+use std::collections::HashMap;
+use std::convert::Infallible;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
+use std::sync::Arc;
+use std::time::Duration;
+
+use axum::body::Bytes;
+use axum::extract::{DefaultBodyLimit, Path as UrlPath, Query, State};
+use axum::http::{HeaderMap, StatusCode};
+use axum::response::sse::{Event, KeepAlive, Sse};
+use axum::response::{IntoResponse, Response};
+use axum::routing::{get, post};
+use axum::{Json, Router};
+use serde::de::DeserializeOwned;
+use serde::Deserialize;
+use serde_json::{json, Value};
+use tokio::sync::{broadcast, mpsc};
+use tokio_stream::wrappers::ReceiverStream;
+
+use super::request::{OneShotRequest, OneShotResponse, OneShotUsage, RunRequest, ToolsWire};
+use super::sink::{Changes, ServeSink};
+use super::store::{is_terminal, ServeDb, ServeStore};
+use super::{workspace, ApiError, ErrorCode, PROTOCOL};
+use crate::ai::{check_caps, Harness, Needs, OneShot, SessionMode, SystemPrompt, SystemPromptMode};
+use crate::error::AppResult;
+use crate::run_engine::engine::RunEngine;
+use crate::run_usage::RunTag;
+
+pub type PrHeadFn = Box<dyn Fn(&Path, i64) -> AppResult<(String, String)> + Send + Sync>;
+
+/// Queued plus running runs beyond which new ones are refused with `queue_full`.
+pub const MAX_QUEUE: i64 = 100;
+
+pub struct Shared {
+    pub db: Arc<ServeDb>,
+    /// The interactive app DB, read for the repo registry.
+    pub app_db: PathBuf,
+    pub serve_db_path: PathBuf,
+    pub harnesses: Vec<&'static dyn Harness>,
+    pub engines: HashMap<String, Arc<RunEngine>>,
+    pub changes: broadcast::Sender<i64>,
+    pub cap: Arc<AtomicI64>,
+    pub worktree_base: PathBuf,
+    pub pr_head: PrHeadFn,
+    pub max_queue: i64,
+    /// `<data_dir>/serve_runs`: parent of the per-harness run roots and the scratch dirs.
+    pub runs_base: PathBuf,
+}
+
+pub type SharedState = Arc<Shared>;
+
+pub struct Settings {
+    pub app_db: PathBuf,
+    pub serve_db_path: PathBuf,
+    /// Runs, scratch dirs and the like live under `<data_dir>/serve_runs`.
+    pub data_dir: PathBuf,
+    pub max_concurrency: i64,
+    pub worktree_base: PathBuf,
+    pub pr_head: PrHeadFn,
+}
+
+/// Build the shared state: one run engine per available harness, each over its own view of the store.
+pub fn build(settings: Settings, harnesses: Vec<&'static dyn Harness>) -> AppResult<SharedState> {
+    let db = ServeDb::open(&settings.serve_db_path)?;
+    let cap = Arc::new(AtomicI64::new(settings.max_concurrency.max(1)));
+    let (tx, _) = broadcast::channel(256);
+    let changes = Changes::default();
+    {
+        let tx = tx.clone();
+        changes.subscribe(move |id| {
+            let _ = tx.send(id);
+        });
+    }
+    let mut engines = HashMap::new();
+    for h in &harnesses {
+        let root = settings.data_dir.join("serve_runs").join(h.id());
+        let store = ServeStore::new(db.clone(), h.id(), cap.clone(), root);
+        let sink = Arc::new(ServeSink { store: store.clone(), changes: changes.clone(), db_path: settings.serve_db_path.clone(), harness_id: h.id() });
+        engines.insert(h.id().to_string(), RunEngine::new(store, sink, *h));
+    }
+    Ok(Arc::new(Shared {
+        db,
+        app_db: settings.app_db,
+        serve_db_path: settings.serve_db_path,
+        harnesses,
+        engines,
+        changes: tx,
+        cap,
+        worktree_base: settings.worktree_base,
+        pr_head: settings.pr_head,
+        max_queue: MAX_QUEUE,
+        runs_base: settings.data_dir.join("serve_runs"),
+    }))
+}
+
+impl Shared {
+    fn harness(&self, id: &str) -> Result<&'static dyn Harness, ApiError> {
+        let h = self
+            .harnesses
+            .iter()
+            .copied()
+            .find(|h| h.id() == id)
+            .ok_or_else(|| ApiError::new(ErrorCode::HarnessUnavailable, format!("unknown harness `{id}`")))?;
+        if !h.available() {
+            return Err(ApiError::new(ErrorCode::HarnessUnavailable, format!("{} is not installed on this host", h.name())));
+        }
+        Ok(h)
+    }
+
+    fn resolve_workspace(&self, spec: &super::request::WorkspaceSpec) -> Result<PathBuf, ApiError> {
+        let conn = crate::db::open(&self.app_db)?;
+        workspace::resolve_in(&conn, spec, &self.worktree_base, &*self.pr_head)
+    }
+
+    fn scratch(&self, run_id: i64) -> PathBuf {
+        workspace::scratch_dir(&self.runs_base, run_id)
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Errors and parsing
+// ---------------------------------------------------------------------------------------------
+
+pub struct HttpError(pub ApiError);
+
+impl From<ApiError> for HttpError {
+    fn from(e: ApiError) -> Self {
+        Self(e)
+    }
+}
+
+impl From<crate::error::AppError> for HttpError {
+    fn from(e: crate::error::AppError) -> Self {
+        Self(e.into())
+    }
+}
+
+impl IntoResponse for HttpError {
+    fn into_response(self) -> Response {
+        let status = StatusCode::from_u16(self.0.code.http_status()).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+        (status, Json(json!({ "error": { "code": self.0.code.as_str(), "message": self.0.message } }))).into_response()
+    }
+}
+
+type HttpResult<T> = Result<T, HttpError>;
+
+fn parse<T: DeserializeOwned>(body: &Bytes) -> Result<T, ApiError> {
+    serde_json::from_slice(body).map_err(|e| ApiError::bad_request(format!("invalid request body: {e}")))
+}
+
+async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T, ApiError> + Send + 'static) -> HttpResult<T> {
+    match tokio::task::spawn_blocking(f).await {
+        Ok(r) => r.map_err(HttpError),
+        Err(e) => Err(HttpError(ApiError::internal(e))),
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Router
+// ---------------------------------------------------------------------------------------------
+
+pub fn router(state: SharedState) -> Router {
+    Router::new()
+        .route("/v1/info", get(info))
+        .route("/v1/harnesses/{id}/models", get(models))
+        .route("/v1/oneshot", post(oneshot))
+        .route("/v1/runs", get(list_runs).post(create_run))
+        .route("/v1/runs/{id}", get(get_run))
+        .route("/v1/runs/{id}/events", get(run_events))
+        .route("/v1/runs/{id}/stop", post(stop_run))
+        .route("/v1/runs/{id}/outbox", get(outbox))
+        .route("/v1/runs/{id}/outbox/ack", post(outbox_ack))
+        .route("/v1/sessions", get(sessions))
+        .fallback(|| async { HttpError(ApiError::new(ErrorCode::NotFound, "no such endpoint")) })
+        .layer(DefaultBodyLimit::max(workspace::MAX_ATTACHMENTS_TOTAL * 2))
+        .with_state(state)
+}
+
+fn host_name() -> String {
+    std::fs::read_to_string("/etc/hostname")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .or_else(|| std::env::var("HOSTNAME").ok())
+        .or_else(|| {
+            std::process::Command::new("hostname")
+                .output()
+                .ok()
+                .and_then(|o| String::from_utf8(o.stdout).ok())
+                .map(|s| s.trim().to_string())
+        })
+        .unwrap_or_else(|| "unknown".into())
+}
+
+async fn info(State(s): State<SharedState>) -> HttpResult<Json<Value>> {
+    blocking(move || {
+        let harnesses: Vec<Value> = s
+            .harnesses
+            .iter()
+            .map(|h| {
+                let available = h.available();
+                json!({
+                    "id": h.id(),
+                    "name": h.name(),
+                    "caps": h.caps(),
+                    "available": available,
+                    "version": if available { h.version() } else { None },
+                })
+            })
+            .collect();
+        let (running, queued) = s.db.counts(None);
+        Ok(Json(json!({
+            "protocol": PROTOCOL,
+            "version": env!("CODEREVIEW_VERSION"),
+            "host": host_name(),
+            "harnesses": harnesses,
+            "max_concurrency": s.cap.load(Ordering::Relaxed),
+            "load": { "running": running, "queued": queued },
+        })))
+    })
+    .await
+}
+
+/// Model ids of a harness: opencode lists them itself; Claude Code takes aliases.
+fn models_of(h: &dyn Harness) -> Vec<String> {
+    match h.id() {
+        "claude" => ["sonnet", "opus", "haiku"].map(String::from).to_vec(),
+        "opencode" => std::process::Command::new("opencode")
+            .arg("models")
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).lines().map(str::trim).filter(|l| !l.is_empty()).map(String::from).collect())
+            .unwrap_or_default(),
+        _ => Vec::new(),
+    }
+}
+
+async fn models(State(s): State<SharedState>, UrlPath(id): UrlPath<String>) -> HttpResult<Json<Value>> {
+    blocking(move || {
+        let h = s.harness(&id)?;
+        Ok(Json(json!({ "harness": id, "models": models_of(h) })))
+    })
+    .await
+}
+
+fn needs_of(access: crate::ai::Access, tools: ToolsWire) -> Needs {
+    Needs { access, tools: tools != ToolsWire::None, tool_allowlist: tools == ToolsWire::Allowlist }
+}
+
+fn caps_check(h: &dyn Harness, what: &str, needs: &Needs) -> Result<(), ApiError> {
+    check_caps(h, what, needs).map_err(|e| ApiError::new(ErrorCode::CapabilityMissing, e.to_string()))
+}
+
+async fn oneshot(State(s): State<SharedState>, body: Bytes) -> HttpResult<Json<OneShotResponse>> {
+    let req: OneShotRequest = parse(&body)?;
+    blocking(move || {
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let h = s.harness(&req.harness)?;
+        caps_check(h, "this call", &needs_of(req.access.access(), req.tools))?;
+        let cwd = match &req.workspace {
+            Some(w) => s.resolve_workspace(w)?,
+            None => std::env::temp_dir(),
+        };
+        let tag = format!("remote-oneshot-{}-{}", std::process::id(), COUNTER.fetch_add(1, Ordering::Relaxed));
+        let one = OneShot {
+            model: &req.model,
+            system_prompt: (!req.system_prompt.is_empty()).then_some(SystemPrompt::Text(&req.system_prompt)),
+            system_prompt_mode: if req.system_prompt_replace { SystemPromptMode::Replace } else { SystemPromptMode::Append },
+            file_tag: &tag,
+            prompt: &req.prompt,
+            cwd: &cwd,
+            extra_dirs: Vec::new(),
+            tools: req.tools.policy(&req.allowed_tools),
+            access: req.access.access(),
+            session: SessionMode::Ephemeral,
+            max_turns: req.max_turns,
+            effort: None,
+            env: Vec::new(),
+            extra_args: Vec::new(),
+            usage_tag: RunTag::new("remote_oneshot").harness(h.id()),
+        };
+        Ok(Json(match h.one_shot(&one) {
+            Ok(t) => OneShotResponse {
+                text: t.text,
+                usage: Some(OneShotUsage { input_tokens: t.input_tokens, output_tokens: t.output_tokens, cost_usd: t.cost_usd }),
+                error: None,
+            },
+            Err(e) => OneShotResponse { text: String::new(), usage: None, error: Some(e.to_string()) },
+        }))
+    })
+    .await
+}
+
+fn create_run_blocking(s: &Shared, req: RunRequest) -> Result<(StatusCode, Value), ApiError> {
+    if req.idempotency_key.trim().is_empty() {
+        return Err(ApiError::bad_request("idempotency_key is required"));
+    }
+    if req.prompt.trim().is_empty() {
+        return Err(ApiError::bad_request("prompt is empty"));
+    }
+    let existing = |id: i64| (StatusCode::OK, json!({ "id": id, "created": false }));
+    if let Some(id) = s.db.run_by_key(&req.idempotency_key) {
+        return Ok(existing(id));
+    }
+    let h = s.harness(&req.harness)?;
+    caps_check(h, "this run", &needs_of(req.access.access(), req.tools))?;
+    let engine = s.engines.get(h.id()).ok_or_else(|| ApiError::new(ErrorCode::HarnessUnavailable, format!("no engine for `{}`", h.id())))?;
+    if engine.active_count() as i64 >= s.max_queue {
+        return Err(ApiError::new(ErrorCode::QueueFull, format!("{} runs are already queued or running", s.max_queue)));
+    }
+    let files = workspace::decode_attachments(&req.attachments)?;
+    let cwd = s.resolve_workspace(&req.workspace)?;
+    // The attachment bytes are written to disk, never stored in the row.
+    let stored = RunRequest { attachments: Vec::new(), ..req.clone() };
+    let (id, created) = s
+        .db
+        .insert_run(&req.idempotency_key, h.id(), &req.model, &serde_json::to_string(&stored).map_err(ApiError::internal)?, &cwd, req.timeout_secs.max(1))
+        .map_err(ApiError::from)?;
+    if !created {
+        return Ok(existing(id));
+    }
+    if let Err(e) = workspace::write_attachments(&s.scratch(id), &files) {
+        s.db.delete_run(id);
+        let _ = std::fs::remove_dir_all(s.scratch(id));
+        return Err(ApiError::internal(format!("failed to store the attachments: {e}")));
+    }
+    engine.submit(id);
+    Ok((StatusCode::CREATED, json!({ "id": id, "created": true })))
+}
+
+async fn create_run(State(s): State<SharedState>, body: Bytes) -> HttpResult<(StatusCode, Json<Value>)> {
+    let req: RunRequest = parse(&body)?;
+    let (status, v) = blocking(move || create_run_blocking(&s, req)).await?;
+    Ok((status, Json(v)))
+}
+
+#[derive(Deserialize)]
+struct SinceQuery {
+    since: Option<String>,
+    limit: Option<i64>,
+}
+
+async fn list_runs(State(s): State<SharedState>, Query(q): Query<SinceQuery>) -> HttpResult<Json<Value>> {
+    let runs = s.db.list_runs(q.since.as_deref(), q.limit.unwrap_or(200).clamp(1, 1000))?;
+    Ok(Json(json!({ "runs": runs })))
+}
+
+fn run_or_404(s: &Shared, id: i64) -> Result<super::store::RunRow, ApiError> {
+    s.db.get_run(id)?.ok_or_else(|| ApiError::new(ErrorCode::NotFound, format!("no run {id}")))
+}
+
+async fn get_run(State(s): State<SharedState>, UrlPath(id): UrlPath<i64>) -> HttpResult<Json<Value>> {
+    Ok(Json(json!(run_or_404(&s, id)?)))
+}
+
+#[derive(Deserialize)]
+struct EventsQuery {
+    after_seq: Option<i64>,
+}
+
+/// SSE: replay stored events after `after_seq` (or `Last-Event-ID`), then follow live, and end with a
+/// terminal `status` event once the run is over and every event was sent.
+async fn run_events(
+    State(s): State<SharedState>,
+    UrlPath(id): UrlPath<i64>,
+    Query(q): Query<EventsQuery>,
+    headers: HeaderMap,
+) -> HttpResult<Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>>> {
+    run_or_404(&s, id)?;
+    let mut after = q
+        .after_seq
+        .or_else(|| headers.get("last-event-id").and_then(|v| v.to_str().ok()).and_then(|v| v.parse().ok()))
+        .unwrap_or(0);
+    let (tx, rx) = mpsc::channel::<Result<Event, Infallible>>(64);
+    // Subscribe before the first read so a change in between is not missed.
+    let mut changes = s.changes.subscribe();
+    tokio::spawn(async move {
+        const BATCH: i64 = 500;
+        loop {
+            // The status is read before the events: every event of a finished run is stored before
+            // its status flips, so a terminal status followed by an empty read means "all sent".
+            let Ok(Some(run)) = s.db.get_run(id) else { return };
+            let Ok(events) = s.db.events_after(id, after, BATCH) else { return };
+            let n = events.len() as i64;
+            for e in events {
+                after = e.seq;
+                let data = json!({ "seq": e.seq, "kind": e.kind, "json": e.json, "norm": e.norm }).to_string();
+                if tx.send(Ok(Event::default().event("event").id(e.seq.to_string()).data(data))).await.is_err() {
+                    return;
+                }
+            }
+            if n == BATCH {
+                continue;
+            }
+            if is_terminal(&run.status) {
+                if n > 0 {
+                    continue;
+                }
+                let data = json!({
+                    "status": run.status, "error": run.error, "text": run.text, "usage": run.usage, "last_seq": after,
+                })
+                .to_string();
+                let _ = tx.send(Ok(Event::default().event("status").data(data))).await;
+                return;
+            }
+            tokio::select! {
+                _ = changes.recv() => {}
+                _ = tokio::time::sleep(Duration::from_secs(1)) => {}
+                _ = tx.closed() => return,
+            }
+        }
+    });
+    Ok(Sse::new(ReceiverStream::new(rx)).keep_alive(KeepAlive::default()))
+}
+
+async fn stop_run(State(s): State<SharedState>, UrlPath(id): UrlPath<i64>) -> HttpResult<(StatusCode, Json<Value>)> {
+    blocking(move || {
+        let run = run_or_404(&s, id)?;
+        if is_terminal(&run.status) {
+            return Err(ApiError::bad_request(format!("run {id} is already {}", run.status)));
+        }
+        let engine = s.engines.get(&run.harness).ok_or_else(|| ApiError::internal("no engine for the run's harness"))?;
+        engine.stop(id).map_err(|e| ApiError::bad_request(e.to_string()))?;
+        // A run stopped while queued never launched, so nothing else removes its attachments.
+        if s.db.status(id).as_deref() == Some("killed") {
+            let _ = std::fs::remove_dir_all(s.scratch(id));
+        }
+        Ok((StatusCode::ACCEPTED, Json(json!({ "id": id, "stopping": true }))))
+    })
+    .await
+}
+
+async fn sessions(State(s): State<SharedState>) -> HttpResult<Json<Value>> {
+    blocking(move || {
+        let mut out = Vec::new();
+        for h in &s.harnesses {
+            for session in h.live_sessions() {
+                let mut v = serde_json::to_value(&session).map_err(ApiError::internal)?;
+                if let Some(o) = v.as_object_mut() {
+                    o.insert("harness".into(), json!(h.id()));
+                }
+                out.push(v);
+            }
+        }
+        Ok(Json(json!({ "sessions": out })))
+    })
+    .await
+}
+
+#[derive(Deserialize)]
+struct OutboxQuery {
+    after: Option<i64>,
+}
+
+async fn outbox(State(s): State<SharedState>, UrlPath(id): UrlPath<i64>, Query(q): Query<OutboxQuery>) -> HttpResult<Json<Value>> {
+    run_or_404(&s, id)?;
+    Ok(Json(json!({ "ops": s.db.outbox_after(id, q.after.unwrap_or(0))? })))
+}
+
+#[derive(Deserialize)]
+struct AckBody {
+    upto: i64,
+}
+
+async fn outbox_ack(State(s): State<SharedState>, UrlPath(id): UrlPath<i64>, body: Bytes) -> HttpResult<Json<Value>> {
+    run_or_404(&s, id)?;
+    let ack: AckBody = parse(&body)?;
+    Ok(Json(json!({ "acked": s.db.ack_outbox(id, ack.upto)? })))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ai::{Access, Caps, Event as AiEvent, Interactive, StreamRun, TurnResult};
+    use crate::error::AppError;
+    use std::net::SocketAddr;
+    use std::process::{Child, Command, Stdio};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    /// Runs `sh -c <model>` as a group leader; `EXTRA` names the run's first extra directory.
+    struct Fake;
+
+    impl Harness for Fake {
+        fn id(&self) -> &'static str {
+            "fake"
+        }
+        fn name(&self) -> &'static str {
+            "Fake"
+        }
+        fn caps(&self) -> Caps {
+            Caps {
+                sessions: false,
+                resume: false,
+                fork: false,
+                tools: true,
+                tool_allowlist: false,
+                streaming: true,
+                interactive_tui: false,
+                reports_cost: false,
+                replaces_system_prompt: false,
+                access_levels: vec![Access::ReadOnly, Access::Edit],
+                pins_session_id: false,
+            }
+        }
+        fn available(&self) -> bool {
+            true
+        }
+        fn one_shot(&self, req: &OneShot<'_>) -> AppResult<TurnResult> {
+            if req.prompt == "fail" {
+                return Err(AppError::Other("the harness failed".into()));
+            }
+            Ok(TurnResult { text: format!("echo:{}@{}", req.prompt, req.cwd.display()), input_tokens: 3, output_tokens: 4, cost_usd: 0.5 })
+        }
+        fn spawn(&self, run: StreamRun<'_>) -> AppResult<Child> {
+            use std::os::unix::process::CommandExt;
+            let mut cmd = Command::new("sh");
+            cmd.arg("-c").arg(run.req.model).current_dir(run.req.cwd);
+            if let Some(d) = run.req.extra_dirs.first() {
+                cmd.env("EXTRA", d);
+            }
+            for (k, v) in &run.req.env {
+                cmd.env(k, v);
+            }
+            cmd.stdin(Stdio::piped()).stdout(Stdio::from(run.stdout)).stderr(Stdio::from(run.stderr));
+            cmd.process_group(0);
+            cmd.spawn().map_err(|e| AppError::Other(e.to_string()))
+        }
+        fn parse_line(&self, line: &str) -> (String, Option<Value>) {
+            match serde_json::from_str::<Value>(line) {
+                Ok(v) => (v.get("type").and_then(Value::as_str).unwrap_or("unknown").to_string(), Some(v)),
+                Err(_) => ("raw".to_string(), None),
+            }
+        }
+        fn normalize(&self, line: &str) -> Vec<AiEvent> {
+            match serde_json::from_str::<Value>(line) {
+                Ok(v) if v["type"] == "result" => vec![AiEvent::Final {
+                    ok: true,
+                    text: v["result"].as_str().unwrap_or_default().to_string(),
+                    usage: Default::default(),
+                }],
+                Ok(v) => vec![AiEvent::Other { kind: "x".into(), raw: v }],
+                Err(_) => vec![AiEvent::Other { kind: "raw".into(), raw: Value::Null }],
+            }
+        }
+        fn is_own_process(&self, _: i32, _: Option<&str>) -> bool {
+            false
+        }
+        fn interactive_argv(&self, _: &Interactive<'_>) -> Option<Vec<String>> {
+            None
+        }
+    }
+
+    fn git(dir: &Path, args: &[&str]) {
+        let o = Command::new("git").current_dir(dir).args(args).output().unwrap();
+        assert!(o.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&o.stderr));
+    }
+
+    struct Server {
+        addr: SocketAddr,
+        state: SharedState,
+        repo: PathBuf,
+        _dir: tempfile::TempDir,
+    }
+
+    async fn server(max_concurrency: i64) -> Server {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path().join("widgets");
+        std::fs::create_dir_all(&repo).unwrap();
+        git(&repo, &["init", "-q", "-b", "main"]);
+        git(&repo, &["config", "user.email", "t@example.com"]);
+        git(&repo, &["config", "user.name", "t"]);
+        git(&repo, &["remote", "add", "origin", "https://github.com/acme/widgets.git"]);
+        std::fs::write(repo.join("a.txt"), "a").unwrap();
+        git(&repo, &["add", "."]);
+        git(&repo, &["commit", "-q", "-m", "init"]);
+        let app_db = dir.path().join("app.db");
+        let conn = crate::db::open(&app_db).unwrap();
+        crate::commands::repo::add_repository_impl(&conn, repo.to_str().unwrap()).unwrap();
+        drop(conn);
+        let harness: &'static dyn Harness = Box::leak(Box::new(Fake));
+        let state = build(
+            Settings {
+                app_db,
+                serve_db_path: dir.path().join("serve.db"),
+                data_dir: dir.path().to_path_buf(),
+                max_concurrency,
+                worktree_base: dir.path().join("wt"),
+                pr_head: Box::new(|_, _| Err(crate::error::AppError::Other("no gh in tests".into()))),
+            },
+            vec![harness],
+        )
+        .unwrap();
+        super::super::daemon::start_engines(&state);
+        let bound = super::super::daemon::Bound::bind(&crate::serve::Listen::Tcp("127.0.0.1:0".parse().unwrap())).await.unwrap();
+        let addr = bound.local_addr().unwrap();
+        tokio::spawn(super::super::daemon::serve(state.clone(), bound, std::future::pending()));
+        Server { addr, state, repo, _dir: dir }
+    }
+
+    /// One request over a fresh connection; chunked bodies are decoded.
+    async fn call<S: AsyncReadExt + AsyncWriteExt + Unpin>(mut s: S, method: &str, path: &str, body: Option<&str>) -> (u16, String) {
+        let body = body.unwrap_or("");
+        let req = format!(
+            "{method} {path} HTTP/1.1\r\nHost: t\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        );
+        s.write_all(req.as_bytes()).await.unwrap();
+        let mut raw = Vec::new();
+        s.read_to_end(&mut raw).await.unwrap();
+        let text = String::from_utf8_lossy(&raw).to_string();
+        let (head, rest) = text.split_once("\r\n\r\n").unwrap();
+        let status: u16 = head.split_whitespace().nth(1).unwrap().parse().unwrap();
+        let body = if head.to_ascii_lowercase().contains("transfer-encoding: chunked") { dechunk(rest) } else { rest.to_string() };
+        (status, body)
+    }
+
+    fn dechunk(mut s: &str) -> String {
+        let mut out = String::new();
+        while let Some((size, rest)) = s.split_once("\r\n") {
+            let n = usize::from_str_radix(size.trim(), 16).unwrap_or(0);
+            if n == 0 {
+                break;
+            }
+            out.push_str(&rest[..n]);
+            s = &rest[n + 2..];
+        }
+        out
+    }
+
+    async fn req(srv: &Server, method: &str, path: &str, body: Option<&str>) -> (u16, Value) {
+        let (status, text) = call(tokio::net::TcpStream::connect(srv.addr).await.unwrap(), method, path, body).await;
+        (status, serde_json::from_str(&text).unwrap_or(Value::String(text)))
+    }
+
+    fn run_body(key: &str, script: &str) -> String {
+        json!({
+            "idempotency_key": key, "harness": "fake", "model": script, "prompt": "go",
+            "workspace": {"repo": "acme/widgets", "kind": "main-clone"}
+        })
+        .to_string()
+    }
+
+    async fn create(srv: &Server, key: &str, script: &str) -> i64 {
+        let (status, v) = req(srv, "POST", "/v1/runs", Some(&run_body(key, script))).await;
+        assert!(status == 201 || status == 200, "{status} {v}");
+        v["id"].as_i64().unwrap()
+    }
+
+    async fn wait_done(srv: &Server, id: i64) -> Value {
+        for _ in 0..200 {
+            let (_, v) = req(srv, "GET", &format!("/v1/runs/{id}"), None).await;
+            if !matches!(v["status"].as_str(), Some("queued" | "running")) {
+                return v;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        panic!("run {id} did not finish");
+    }
+
+    /// `(event name, data)` pairs of an SSE body.
+    fn sse(body: &str) -> Vec<(String, Value)> {
+        body.split("\n\n")
+            .filter_map(|block| {
+                let name = block.lines().find_map(|l| l.strip_prefix("event:"))?.trim().to_string();
+                let data = block.lines().find_map(|l| l.strip_prefix("data:"))?.trim();
+                Some((name, serde_json::from_str(data).unwrap()))
+            })
+            .collect()
+    }
+
+    const OK_RUN: &str = r#"echo '{"type":"a"}'; echo '{"type":"b"}'; echo '{"type":"result","result":"done"}'"#;
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn info_reports_protocol_harnesses_and_load() {
+        let srv = server(2).await;
+        let (status, v) = req(&srv, "GET", "/v1/info", None).await;
+        assert_eq!(status, 200);
+        assert_eq!(v["protocol"], PROTOCOL);
+        assert_eq!(v["version"], env!("CODEREVIEW_VERSION"));
+        assert_eq!(v["max_concurrency"], 2);
+        assert_eq!(v["load"], json!({"running": 0, "queued": 0}));
+        assert_eq!(v["harnesses"][0]["id"], "fake");
+        assert_eq!(v["harnesses"][0]["available"], true);
+        assert_eq!(v["harnesses"][0]["caps"]["streaming"], true);
+        let (status, v) = req(&srv, "GET", "/v1/nope", None).await;
+        assert_eq!((status, v["error"]["code"].as_str()), (404, Some("not_found")));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn models_and_unknown_harness() {
+        let srv = server(1).await;
+        let (status, v) = req(&srv, "GET", "/v1/harnesses/fake/models", None).await;
+        assert_eq!((status, v["models"].as_array().map(Vec::len)), (200, Some(0)));
+        let (status, v) = req(&srv, "GET", "/v1/harnesses/ghost/models", None).await;
+        assert_eq!((status, v["error"]["code"].as_str()), (422, Some("harness_unavailable")));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn oneshot_returns_text_usage_and_harness_errors() {
+        let srv = server(1).await;
+        let body = json!({"harness": "fake", "prompt": "hi"}).to_string();
+        let (status, v) = req(&srv, "POST", "/v1/oneshot", Some(&body)).await;
+        assert_eq!(status, 200);
+        assert!(v["text"].as_str().unwrap().starts_with("echo:hi@"), "{v}");
+        assert_eq!(v["usage"], json!({"input_tokens": 3, "output_tokens": 4, "cost_usd": 0.5}));
+        assert!(v["error"].is_null());
+        let body = json!({"harness": "fake", "prompt": "fail"}).to_string();
+        let (status, v) = req(&srv, "POST", "/v1/oneshot", Some(&body)).await;
+        assert_eq!(status, 200);
+        assert_eq!(v["error"], "the harness failed");
+        assert_eq!(v["text"], "");
+        // with a workspace the call runs in the repo
+        let body = json!({"harness": "fake", "prompt": "w", "workspace": {"repo": "acme/widgets", "kind": "main-clone"}}).to_string();
+        let (_, v) = req(&srv, "POST", "/v1/oneshot", Some(&body)).await;
+        assert!(v["text"].as_str().unwrap().ends_with(srv.repo.to_str().unwrap()), "{v}");
+        // a capability the harness lacks is refused up front
+        let body = json!({"harness": "fake", "prompt": "x", "access": "full"}).to_string();
+        let (status, v) = req(&srv, "POST", "/v1/oneshot", Some(&body)).await;
+        assert_eq!((status, v["error"]["code"].as_str()), (422, Some("capability_missing")));
+        let (status, v) = req(&srv, "POST", "/v1/oneshot", Some("{not json")).await;
+        assert_eq!((status, v["error"]["code"].as_str()), (400, Some("bad_request")));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_run_goes_queued_to_ok_and_its_events_replay_from_a_seq() {
+        let srv = server(2).await;
+        let id = create(&srv, "k-life", OK_RUN).await;
+        let done = wait_done(&srv, id).await;
+        assert_eq!(done["status"], "ok", "{done}");
+        assert_eq!(done["text"], "done");
+        assert_eq!(done["harness"], "fake");
+        assert_eq!(done["last_seq"], 3);
+        assert!(done["finished_at"].is_string() && done["started_at"].is_string());
+
+        let (status, body) = call(tokio::net::TcpStream::connect(srv.addr).await.unwrap(), "GET", &format!("/v1/runs/{id}/events"), None).await;
+        assert_eq!(status, 200);
+        let events = sse(&body);
+        let seqs: Vec<i64> = events.iter().filter(|(n, _)| n == "event").map(|(_, d)| d["seq"].as_i64().unwrap()).collect();
+        assert_eq!(seqs, vec![1, 2, 3]);
+        assert_eq!(events[0].1["json"]["type"], "a");
+        assert_eq!(events[2].1["norm"]["events"][0]["type"], "final");
+        let (name, last) = events.last().unwrap();
+        assert_eq!((name.as_str(), last["status"].as_str(), last["text"].as_str()), ("status", Some("ok"), Some("done")));
+
+        // replay after seq 2 sends only the third event, then the terminal status
+        let (_, body) = call(tokio::net::TcpStream::connect(srv.addr).await.unwrap(), "GET", &format!("/v1/runs/{id}/events?after_seq=2"), None).await;
+        let events = sse(&body);
+        assert_eq!(events.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(), vec!["event", "status"]);
+        assert_eq!(events[0].1["seq"], 3);
+
+        // the list reports it, and `since` filters by update stamp
+        let (_, list) = req(&srv, "GET", "/v1/runs", None).await;
+        assert_eq!(list["runs"][0]["id"], id);
+        let stamp = done["updated_at"].as_str().unwrap();
+        let (_, later) = req(&srv, "GET", &format!("/v1/runs?since={stamp}"), None).await;
+        assert!(later["runs"].as_array().unwrap().is_empty());
+        let (status, v) = req(&srv, "GET", "/v1/runs/999", None).await;
+        assert_eq!((status, v["error"]["code"].as_str()), (404, Some("not_found")));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_stream_opened_while_the_run_is_live_follows_it_to_the_end() {
+        let srv = server(2).await;
+        let id = create(&srv, "k-live", r#"echo '{"type":"a"}'; sleep 1; echo '{"type":"result","result":"late"}'"#).await;
+        let (status, body) = call(tokio::net::TcpStream::connect(srv.addr).await.unwrap(), "GET", &format!("/v1/runs/{id}/events"), None).await;
+        assert_eq!(status, 200);
+        let events = sse(&body);
+        assert_eq!(events.iter().filter(|(n, _)| n == "event").count(), 2, "{body}");
+        assert_eq!(events.last().unwrap().1["status"], "ok");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn create_is_idempotent_on_the_key() {
+        let srv = server(2).await;
+        let (s1, a) = req(&srv, "POST", "/v1/runs", Some(&run_body("same", OK_RUN))).await;
+        let (s2, b) = req(&srv, "POST", "/v1/runs", Some(&run_body("same", "echo different"))).await;
+        assert_eq!((s1, s2), (201, 200));
+        assert_eq!(a["id"], b["id"]);
+        assert_eq!((a["created"].clone(), b["created"].clone()), (json!(true), json!(false)));
+        wait_done(&srv, a["id"].as_i64().unwrap()).await;
+        let (_, list) = req(&srv, "GET", "/v1/runs", None).await;
+        assert_eq!(list["runs"].as_array().unwrap().len(), 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn stop_kills_a_running_run_and_a_queued_one() {
+        let srv = server(1).await;
+        let running = create(&srv, "k-run", "sleep 30").await;
+        let queued = create(&srv, "k-queue", "sleep 30").await;
+        for _ in 0..100 {
+            let (_, v) = req(&srv, "GET", &format!("/v1/runs/{running}"), None).await;
+            if v["status"] == "running" {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(30)).await;
+        }
+        assert_eq!(req(&srv, "GET", &format!("/v1/runs/{queued}"), None).await.1["status"], "queued", "cap of 1");
+        let (_, info) = req(&srv, "GET", "/v1/info", None).await;
+        assert_eq!(info["load"], json!({"running": 1, "queued": 1}));
+        let (status, _) = req(&srv, "POST", &format!("/v1/runs/{queued}/stop"), None).await;
+        assert_eq!(status, 202);
+        assert_eq!(wait_done(&srv, queued).await["status"], "killed");
+        let (status, _) = req(&srv, "POST", &format!("/v1/runs/{running}/stop"), None).await;
+        assert_eq!(status, 202);
+        assert_eq!(wait_done(&srv, running).await["status"], "killed");
+        let (status, v) = req(&srv, "POST", &format!("/v1/runs/{running}/stop"), None).await;
+        assert_eq!((status, v["error"]["code"].as_str()), (400, Some("bad_request")));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn requests_that_cannot_run_fail_with_stable_codes() {
+        let srv = server(1).await;
+        let post = |body: Value| {
+            let srv = &srv;
+            async move { req(srv, "POST", "/v1/runs", Some(&body.to_string())).await }
+        };
+        let base = |f: &dyn Fn(&mut Value)| {
+            let mut v: Value = serde_json::from_str(&run_body("k-err", "true")).unwrap();
+            f(&mut v);
+            v
+        };
+        let (s, v) = post(base(&|v| v["workspace"]["repo"] = json!("acme/ghost"))).await;
+        assert_eq!((s, v["error"]["code"].as_str()), (422, Some("unknown_repo")));
+        let (s, v) = post(base(&|v| v["harness"] = json!("ghost"))).await;
+        assert_eq!((s, v["error"]["code"].as_str()), (422, Some("harness_unavailable")));
+        let (s, v) = post(base(&|v| v["access"] = json!("full"))).await;
+        assert_eq!((s, v["error"]["code"].as_str()), (422, Some("capability_missing")));
+        let (s, v) = post(base(&|v| v["tools"] = json!("allowlist"))).await;
+        assert_eq!((s, v["error"]["code"].as_str()), (422, Some("capability_missing")));
+        let (s, v) = post(base(&|v| v["prompt"] = json!("  "))).await;
+        assert_eq!((s, v["error"]["code"].as_str()), (400, Some("bad_request")));
+        let (s, v) = post(base(&|v| v["workspace"] = json!({"repo": "acme/widgets", "kind": "branch-worktree"}))).await;
+        assert_eq!((s, v["error"]["code"].as_str()), (400, Some("bad_request")));
+        let (s, v) = post(base(&|v| v["workspace"] = json!({"repo": "acme/widgets", "kind": "pr-worktree", "pr": 4}))).await;
+        assert_eq!((s, v["error"]["code"].as_str()), (422, Some("no_worktree")));
+        let (s, v) = post(base(&|v| v["attachments"] = json!([{"name": "../x", "content_base64": "eA=="}]))).await;
+        assert_eq!((s, v["error"]["code"].as_str()), (400, Some("bad_request")));
+        // nothing was created by any of them
+        assert!(req(&srv, "GET", "/v1/runs", None).await.1["runs"].as_array().unwrap().is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_full_queue_is_refused() {
+        let srv = server(1).await;
+        // the state is shared with the serving task, so serve a copy with a smaller limit
+        let state = {
+            let s = &srv.state;
+            Arc::new(Shared {
+                db: s.db.clone(),
+                app_db: s.app_db.clone(),
+                serve_db_path: s.serve_db_path.clone(),
+                harnesses: s.harnesses.clone(),
+                engines: s.engines.clone(),
+                changes: s.changes.clone(),
+                cap: s.cap.clone(),
+                worktree_base: s.worktree_base.clone(),
+                pr_head: Box::new(|_, _| Err(crate::error::AppError::Other("x".into()))),
+                max_queue: 1,
+                runs_base: s.runs_base.clone(),
+            })
+        };
+        let bound = super::super::daemon::Bound::bind(&crate::serve::Listen::Tcp("127.0.0.1:0".parse().unwrap())).await.unwrap();
+        let addr = bound.local_addr().unwrap();
+        tokio::spawn(super::super::daemon::serve(state.clone(), bound, std::future::pending()));
+        let small = Server { addr, state, repo: srv.repo.clone(), _dir: tempfile::tempdir().unwrap() };
+        let first = create(&small, "q1", "sleep 30").await;
+        let (s, v) = req(&small, "POST", "/v1/runs", Some(&run_body("q2", "true"))).await;
+        assert_eq!((s, v["error"]["code"].as_str()), (429, Some("queue_full")));
+        req(&small, "POST", &format!("/v1/runs/{first}/stop"), None).await;
+        wait_done(&small, first).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn attachments_and_the_remote_environment_reach_the_run() {
+        let srv = server(1).await;
+        let script = r#"printf '{"type":"result","result":"%s|%s|%s|%s"}\n' "$(cat "$EXTRA/note.txt")" "$CODEREVIEW_REMOTE_RUN" "$(cat "$CODEREVIEW_REMOTE_DIR/context.json" | tr -d ' "')" "$(pwd)""#;
+        let mut v: Value = serde_json::from_str(&run_body("k-att", script)).unwrap();
+        v["attachments"] = json!([{"name": "note.txt", "content_base64": "aGVsbG8="}]);
+        v["context"] = json!({"cards": []});
+        let (status, created) = req(&srv, "POST", "/v1/runs", Some(&v.to_string())).await;
+        assert_eq!(status, 201, "{created}");
+        let id = created["id"].as_i64().unwrap();
+        let done = wait_done(&srv, id).await;
+        assert_eq!(done["status"], "ok", "{done}");
+        let text = done["text"].as_str().unwrap();
+        let parts: Vec<&str> = text.split('|').collect();
+        assert_eq!(parts[0], "hello");
+        assert_eq!(parts[1], id.to_string());
+        assert_eq!(parts[2], "{cards:[]}");
+        assert_eq!(Path::new(parts[3]).canonicalize().unwrap(), srv.repo.canonicalize().unwrap());
+        // the scratch dir goes with the run
+        assert!(!srv.state.runs_base.join("scratch").join(id.to_string()).exists());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_outbox_lists_ops_after_a_cursor_and_prunes_on_ack() {
+        let srv = server(1).await;
+        let id = create(&srv, "k-out", OK_RUN).await;
+        wait_done(&srv, id).await;
+        let remote = crate::serve::remote::RemoteRun { run_id: id, db: srv.state.serve_db_path.clone(), dir: PathBuf::new() };
+        remote.append("board_link", json!({"issue_id": "i1", "pr_reference": "acme/widgets#2"})).unwrap();
+        remote.append("notify", json!({"message": "m"})).unwrap();
+        let (_, v) = req(&srv, "GET", &format!("/v1/runs/{id}/outbox"), None).await;
+        let ops = v["ops"].as_array().unwrap();
+        assert_eq!(ops.iter().map(|o| o["type"].as_str().unwrap()).collect::<Vec<_>>(), vec!["board_link", "notify"]);
+        assert_eq!(ops[0]["op_id"], format!("{id}:1"));
+        let (_, v) = req(&srv, "GET", &format!("/v1/runs/{id}/outbox?after=1"), None).await;
+        assert_eq!(v["ops"].as_array().unwrap().len(), 1);
+        let (status, v) = req(&srv, "POST", &format!("/v1/runs/{id}/outbox/ack"), Some(r#"{"upto":2}"#)).await;
+        assert_eq!((status, v["acked"].clone()), (200, json!(2)));
+        let (_, v) = req(&srv, "GET", &format!("/v1/runs/{id}/outbox"), None).await;
+        assert!(v["ops"].as_array().unwrap().is_empty());
+        let (status, _) = req(&srv, "POST", &format!("/v1/runs/{id}/outbox/ack"), Some("nope")).await;
+        assert_eq!(status, 400);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn sessions_lists_live_sessions_of_the_harnesses() {
+        let srv = server(1).await;
+        let (status, v) = req(&srv, "GET", "/v1/sessions", None).await;
+        assert_eq!((status, v["sessions"].as_array().map(Vec::len)), (200, Some(0)));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_api_is_reachable_over_a_unix_socket() {
+        let srv = server(1).await;
+        let sock = srv._dir.path().join("run").join("serve.sock");
+        let bound = super::super::daemon::Bound::bind(&crate::serve::Listen::Unix(sock.clone())).await.unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(std::fs::metadata(&sock).unwrap().permissions().mode() & 0o777, 0o600);
+        tokio::spawn(super::super::daemon::serve(srv.state.clone(), bound, std::future::pending()));
+        let (status, body) = call(tokio::net::UnixStream::connect(&sock).await.unwrap(), "GET", "/v1/info", None).await;
+        assert_eq!(status, 200);
+        assert_eq!(serde_json::from_str::<Value>(&body).unwrap()["protocol"], PROTOCOL);
+        // the blocking probe used by `cr serve --status` sees the same
+        let listen = crate::serve::Listen::Unix(sock.clone());
+        let info = tokio::task::spawn_blocking(move || super::super::install::probe_info(&listen)).await.unwrap().unwrap();
+        assert_eq!(info["protocol"], PROTOCOL);
+        // a second daemon on a live socket is refused
+        assert!(super::super::daemon::Bound::bind(&crate::serve::Listen::Unix(sock)).await.is_err());
+    }
+}

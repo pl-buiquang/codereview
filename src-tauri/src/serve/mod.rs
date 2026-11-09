@@ -13,6 +13,10 @@ use serde::Serialize;
 
 use crate::error::{AppError, AppResult};
 
+#[cfg(all(feature = "serve", unix))]
+pub mod daemon;
+#[cfg(all(feature = "serve", unix))]
+pub mod http;
 pub mod remote;
 pub mod request;
 pub mod sink;
