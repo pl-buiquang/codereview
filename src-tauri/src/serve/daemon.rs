@@ -1,4 +1,4 @@
-//! Starting the daemon: bind the listener (unix socket or loopback port), start the run engines
+//! Starting the daemon: bind the listener (unix socket or loopback port), start the run engine
 //! (re-adopting runs a previous daemon left alive), serve until a signal, then detach.
 
 use std::future::Future;
@@ -82,9 +82,9 @@ pub async fn serve(state: SharedState, bound: Bound, shutdown: impl Future<Outpu
     }
 }
 
-/// Start the engines: timeouts, re-adoption of runs left alive by an earlier daemon, queued runs,
+/// Start the engine: timeouts, re-adoption of runs left alive by an earlier daemon, queued runs,
 /// and the sweep of attachment dirs whose run is over.
-pub fn start_engines(state: &SharedState) {
+pub fn start_engine(state: &SharedState) {
     // Rows a crashed daemon left half-created never became runs; their scratch goes with the sweep.
     state.db.purge_preparing();
     sweep_scratch(state);
@@ -151,7 +151,7 @@ pub fn run(cfg: Config) -> AppResult<()> {
     let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
     runtime.block_on(async {
         let bound = Bound::bind(&cfg.listen).await?;
-        start_engines(&state);
+        start_engine(&state);
         eprintln!(
             "cr serve: protocol {PROTOCOL}, listening on {} (app db {}, serve db {})",
             cfg.listen,

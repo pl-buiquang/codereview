@@ -194,6 +194,9 @@ pub fn usage_json(u: &RunUsage) -> Value {
     })
 }
 
+/// A `preparing` run older than this is a leftover (a panic between insert and queue), not a request in flight.
+pub const PREPARING_TTL: Duration = Duration::from_secs(300);
+
 /// The shared connection of the daemon.
 pub struct ServeDb(pub Mutex<Connection>);
 
@@ -254,6 +257,19 @@ impl ServeDb {
             .and_then(|mut st| st.query_map([], |r| r.get(0))?.collect())
             .unwrap_or_default();
         let _ = conn.execute("DELETE FROM serve_run WHERE status = 'preparing'", []);
+        ids
+    }
+
+    /// Rows left `preparing` for longer than `ttl` (a panic between insert and queue): no request is
+    /// still preparing them. Deletes them and returns their ids so the caller can sweep their scratch.
+    pub fn purge_stale_preparing(&self, ttl: Duration) -> Vec<i64> {
+        let cutoff = crate::run_usage::stamp(chrono::Utc::now() - chrono::Duration::from_std(ttl).unwrap_or_default());
+        let conn = self.0.lock().unwrap();
+        let ids: Vec<i64> = conn
+            .prepare("SELECT id FROM serve_run WHERE status = 'preparing' AND updated_at < ?1")
+            .and_then(|mut st| st.query_map(params![cutoff], |r| r.get(0))?.collect())
+            .unwrap_or_default();
+        let _ = conn.execute("DELETE FROM serve_run WHERE status = 'preparing' AND updated_at < ?1", params![cutoff]);
         ids
     }
 
@@ -450,7 +466,14 @@ impl RunStore for ServeStore {
     }
 
     fn active_count(&self) -> AppResult<usize> {
-        Ok(self.count(&["preparing", "queued", "running"])? as usize)
+        // A `preparing` row that outlived its request does not take a slot of the queue.
+        let cutoff = crate::run_usage::stamp(chrono::Utc::now() - chrono::Duration::from_std(PREPARING_TTL).unwrap_or_default());
+        let fresh: i64 = self.db.0.lock().unwrap().query_row(
+            "SELECT COUNT(*) FROM serve_run WHERE status = 'preparing' AND updated_at >= ?1",
+            params![cutoff],
+            |r| r.get(0),
+        )?;
+        Ok((self.count(&["queued", "running"])? + fresh) as usize)
     }
 
     /// The engine calls this when it detaches (a restart, a stop of the service). Unlike the app, the

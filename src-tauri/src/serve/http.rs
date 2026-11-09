@@ -1,4 +1,4 @@
-//! The `/v1` HTTP+SSE API (axum). Handlers are thin: validation, the store and the run engines do
+//! The `/v1` HTTP+SSE API (axum). Handlers are thin: validation, the store and the run engine do
 //! the work. Blocking work (git, the app DB, a harness call) runs on the blocking pool.
 
 use std::convert::Infallible;
@@ -23,7 +23,7 @@ use tokio_stream::wrappers::ReceiverStream;
 
 use super::request::{OneShotRequest, OneShotResponse, OneShotUsage, RunRequest, ToolsWire};
 use super::sink::{Changes, ServeSink};
-use super::store::{is_terminal, ServeDb, ServeStore};
+use super::store::{is_terminal, ServeDb, ServeStore, PREPARING_TTL};
 use super::{workspace, ApiError, ErrorCode, PROTOCOL};
 use crate::ai::{check_caps, Harness, Needs, OneShot, SessionMode, SystemPrompt, SystemPromptMode};
 use crate::error::{AppError, AppResult};
@@ -34,6 +34,9 @@ pub type PrHeadFn = Box<dyn Fn(&Path, i64) -> AppResult<(String, String)> + Send
 
 /// How long `/v1/oneshot` waits for the harness before answering `timeout`.
 pub const ONESHOT_TIMEOUT: Duration = Duration::from_secs(600);
+
+/// How long one `git` / `gh` call of a workspace resolution may take before it is killed.
+pub const WORKSPACE_CMD_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Queued plus running runs beyond which new ones are refused with `queue_full`.
 pub const MAX_QUEUE: i64 = 100;
@@ -51,12 +54,15 @@ pub struct Shared {
     pub worktree_base: PathBuf,
     pub pr_head: PrHeadFn,
     pub max_queue: AtomicI64,
-    /// Serialises workspace resolution: two requests for the same branch must not both run `git worktree add`.
-    /// There is no lock on the worktree itself: a queued run does not hold its worktree (ADR 0007).
     /// Bounds concurrent one-shot calls (they run outside the run engine).
     pub oneshot_slots: Arc<tokio::sync::Semaphore>,
     pub oneshot_timeout: Duration,
+    /// Serialises the worktree-creating part of workspace resolution: two requests for the same branch
+    /// must not both run `git worktree add`. There is no lock on the worktree itself: a queued run does
+    /// not hold its worktree (ADR 0007).
     pub workspace_lock: std::sync::Mutex<()>,
+    /// Limit for each `git` / `gh` call made while resolving a workspace.
+    pub workspace_cmd_timeout: Duration,
     /// `<data_dir>/serve_runs`: the run directories (`<id>`) and the attachment scratch dirs (`scratch/<id>`).
     pub runs_base: PathBuf,
 }
@@ -74,7 +80,7 @@ pub struct Settings {
     pub pr_head: PrHeadFn,
 }
 
-/// Build the shared state: one run engine per available harness, each over its own view of the store.
+/// Build the shared state: the single run engine (each run names its harness) over the serve store.
 pub fn build(settings: Settings, harnesses: Vec<&'static dyn Harness>) -> AppResult<SharedState> {
     // Runs hold prompts, answers and attachments: owner-only, whatever the umask.
     let runs_base = settings.data_dir.join("serve_runs");
@@ -112,6 +118,7 @@ pub fn build(settings: Settings, harnesses: Vec<&'static dyn Harness>) -> AppRes
         oneshot_slots: Arc::new(tokio::sync::Semaphore::new(settings.max_concurrency.max(1) as usize)),
         oneshot_timeout: settings.oneshot_timeout,
         workspace_lock: std::sync::Mutex::new(()),
+        workspace_cmd_timeout: WORKSPACE_CMD_TIMEOUT,
         runs_base,
     }))
 }
@@ -132,9 +139,11 @@ impl Shared {
 
     /// `read_only`: the run can't write, so a branch checked out in the main clone may be shared.
     fn resolve_workspace(&self, spec: &super::request::WorkspaceSpec, read_only: bool) -> Result<PathBuf, ApiError> {
-        let _guard = self.workspace_lock.lock().unwrap_or_else(|e| e.into_inner());
         let conn = crate::db::open(&self.app_db)?;
-        workspace::resolve_in(&conn, spec, &self.worktree_base, &*self.pr_head, read_only)
+        // Every git / gh call of the resolution is bounded, so a hung one cannot hold the lock for good.
+        crate::cmd_deadline::with_timeout(self.workspace_cmd_timeout, || {
+            workspace::resolve_locked(&conn, spec, &self.worktree_base, &*self.pr_head, read_only, Some(&self.workspace_lock))
+        })
     }
 
     fn scratch(&self, run_id: i64) -> PathBuf {
@@ -397,6 +406,11 @@ fn create_run_blocking(s: &Shared, req: RunRequest) -> Result<(StatusCode, Value
     if req.prompt.trim().is_empty() {
         return Err(ApiError::bad_request("prompt is empty"));
     }
+    // A row stuck `preparing` (its request panicked) would answer every retry with a conflict and take a
+    // queue slot: age it out, scratch included.
+    for stale in s.db.purge_stale_preparing(PREPARING_TTL) {
+        let _ = std::fs::remove_dir_all(s.scratch(stale));
+    }
     // The attachment bytes are written to disk, never stored in the row (nor compared on a retry).
     let stored = RunRequest { attachments: Vec::new(), ..req.clone() };
     let stored_json = serde_json::to_string(&stored).map_err(ApiError::internal)?;
@@ -540,10 +554,6 @@ async fn stop_run(State(s): State<SharedState>, UrlPath(id): UrlPath<i64>) -> Ht
             return Err(ApiError::bad_request(format!("run {id} is already {}", run.status)));
         }
         s.engine.stop(id).map_err(|e| ApiError::bad_request(e.to_string()))?;
-        // A run stopped while queued never launched, so nothing else removes its attachments.
-        if s.db.status(id).as_deref() == Some("killed") {
-            let _ = std::fs::remove_dir_all(s.scratch(id));
-        }
         Ok((StatusCode::ACCEPTED, Json(json!({ "id": id, "stopping": true }))))
     })
     .await
@@ -717,7 +727,7 @@ mod tests {
             vec![harness],
         )
         .unwrap();
-        super::super::daemon::start_engines(&state);
+        super::super::daemon::start_engine(&state);
         let bound = super::super::daemon::Bound::bind(&crate::serve::Listen::Tcp("127.0.0.1:0".parse().unwrap())).await.unwrap();
         let addr = bound.local_addr().unwrap();
         tokio::spawn(super::super::daemon::serve(state.clone(), bound, std::future::pending()));
@@ -1149,7 +1159,7 @@ mod tests {
             srv.state.harnesses.clone(),
         )
         .unwrap();
-        super::super::daemon::start_engines(&state);
+        super::super::daemon::start_engine(&state);
         for _ in 0..200 {
             if state.db.status(queued).as_deref() == Some("ok") {
                 break;
@@ -1182,6 +1192,43 @@ mod tests {
         assert_eq!(wait_done(&srv, running).await["status"], "killed");
         let (status, v) = req(&srv, "POST", &format!("/v1/runs/{running}/stop"), None).await;
         assert_eq!((status, v["error"]["code"].as_str()), (400, Some("bad_request")));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn stopping_a_queued_run_removes_its_attachments() {
+        let srv = server(1).await;
+        create(&srv, "k-busy", "sleep 30").await;
+        let mut body: Value = serde_json::from_str(&run_body("k-att", "true")).unwrap();
+        body["attachments"] = json!([{"name": "note.txt", "content_base64": "aGVsbG8="}]);
+        let (_, v) = req(&srv, "POST", "/v1/runs", Some(&body.to_string())).await;
+        let queued = v["id"].as_i64().unwrap();
+        assert!(srv.state.scratch(queued).join("note.txt").is_file());
+        // through the engine, not the HTTP handler
+        srv.state.engine.stop(queued).unwrap();
+        assert!(!srv.state.scratch(queued).exists());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_stale_preparing_row_neither_blocks_a_retry_nor_takes_a_queue_slot() {
+        let srv = server(2).await;
+        let (stale, _) = srv.state.db.insert_run("k-stale", "fake", "", &run_body("k-stale", "true"), &srv.repo, 60).unwrap();
+        std::fs::create_dir_all(srv.state.scratch(stale)).unwrap();
+        std::fs::write(srv.state.scratch(stale).join("x"), "x").unwrap();
+        let old = crate::run_usage::stamp(chrono::Utc::now() - chrono::Duration::minutes(10));
+        srv.state.db.0.lock().unwrap().execute("UPDATE serve_run SET updated_at = ?1 WHERE id = ?2", rusqlite::params![old, stale]).unwrap();
+        // it does not count against the queue
+        assert_eq!(srv.state.engine.active_count(), 0);
+        // a fresh one does
+        srv.state.db.insert_run("k-fresh", "fake", "", &run_body("k-fresh", "true"), &srv.repo, 60).unwrap();
+        assert_eq!(srv.state.engine.active_count(), 1);
+        // the retry of the stale key is a new run, and the leftover scratch is gone
+        let id = create(&srv, "k-stale", OK_RUN).await;
+        assert_ne!(id, stale);
+        assert!(!srv.state.scratch(stale).exists());
+        assert_eq!(wait_done(&srv, id).await["status"], "ok");
+        // the fresh one is still a request in flight
+        let (s, v) = req(&srv, "POST", "/v1/runs", Some(&run_body("k-fresh", "true"))).await;
+        assert_eq!((s, v["error"]["code"].as_str()), (409, Some("conflict")));
     }
 
     #[tokio::test(flavor = "multi_thread")]

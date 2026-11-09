@@ -74,6 +74,8 @@ impl EventSink for ServeSink {
     }
 
     fn dropped(&self, id: i64) {
+        // A queued run never reached `prepare`, so nothing else would remove its attachments.
+        let _ = std::fs::remove_dir_all(super::workspace::scratch_dir(&self.store.runs_root(), id));
         self.changes.notify(id);
     }
 
