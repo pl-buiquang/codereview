@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -172,7 +172,32 @@ pub fn private_dir() -> AppResult<PathBuf> {
     Ok(dir)
 }
 
+/// What other threads may read about a host without waiting for its connection work. The entry lock
+/// is held across a whole ssh connect (seconds); the UI thread and the app exit must not queue behind it.
+struct View {
+    state: Mutex<ConnState>,
+    addr: Mutex<Option<Addr>>,
+    /// Pid of the running ssh (0: none), so `forget` can kill it while a connect holds the entry lock.
+    pid: AtomicU32,
+    /// The host was forgotten: an in-flight connect gives up and publishes nothing.
+    cancel: AtomicBool,
+}
+
+impl View {
+    fn new() -> Arc<Self> {
+        Arc::new(Self { state: Mutex::new(ConnState::Disconnected), addr: Mutex::new(None), pid: AtomicU32::new(0), cancel: AtomicBool::new(false) })
+    }
+
+    fn kill_ssh(&self) {
+        let pid = self.pid.swap(0, Ordering::SeqCst);
+        if pid != 0 {
+            unsafe { libc::kill(pid as i32, libc::SIGKILL) };
+        }
+    }
+}
+
 struct Entry {
+    view: Arc<View>,
     spec: HostSpec,
     child: Option<Child>,
     addr: Option<Addr>,
@@ -189,6 +214,7 @@ struct Inner {
     cfg: SshConfig,
     health: Arc<dyn Health>,
     hosts: Mutex<HashMap<i64, Arc<Mutex<Entry>>>>,
+    views: Mutex<HashMap<i64, Arc<View>>>,
     on_state: Box<StateFn>,
     stop: AtomicBool,
 }
@@ -201,13 +227,14 @@ pub struct TunnelManager {
 
 impl TunnelManager {
     pub fn new(cfg: SshConfig, health: Arc<dyn Health>, on_state: Box<StateFn>) -> Self {
-        Self { inner: Arc::new(Inner { cfg, health, hosts: Mutex::new(HashMap::new()), on_state, stop: AtomicBool::new(false) }) }
+        Self { inner: Arc::new(Inner { cfg, health, hosts: Mutex::new(HashMap::new()), views: Mutex::new(HashMap::new()), on_state, stop: AtomicBool::new(false) }) }
     }
 
     fn entry(&self, spec: &HostSpec) -> Arc<Mutex<Entry>> {
         let mut hosts = self.inner.hosts.lock().unwrap();
         let entry = hosts.entry(spec.id).or_insert_with(|| {
             Arc::new(Mutex::new(Entry {
+                view: View::new(),
                 spec: spec.clone(),
                 child: None,
                 addr: None,
@@ -217,27 +244,37 @@ impl TunnelManager {
                 in_use: false,
             }))
         });
-        entry.clone()
+        let entry = entry.clone();
+        let view = entry.lock().unwrap().view.clone();
+        self.inner.views.lock().unwrap().entry(spec.id).or_insert(view);
+        entry
     }
 
     fn set_state(&self, id: i64, e: &mut Entry, state: ConnState) {
         if e.state != state {
             e.state = state.clone();
-            (self.inner.on_state)(id, &state);
+            if !e.view.cancel.load(Ordering::SeqCst) {
+                *e.view.state.lock().unwrap() = state.clone();
+                (self.inner.on_state)(id, &state);
+            }
         }
+    }
+
+    fn view(&self, host_id: i64) -> Option<Arc<View>> {
+        self.inner.views.lock().unwrap().get(&host_id).cloned()
     }
 
     /// The connection state of a host (`Disconnected` when it was never used).
     pub fn state(&self, host_id: i64) -> ConnState {
-        let entry = self.inner.hosts.lock().unwrap().get(&host_id).cloned();
-        entry.map_or(ConnState::Disconnected, |e| e.lock().unwrap().state.clone())
+        self.view(host_id).map_or(ConnState::Disconnected, |v| v.state.lock().unwrap().clone())
     }
 
     /// The local address of a connected host, if any (no connection attempt).
     pub fn addr_if_connected(&self, host_id: i64) -> Option<Addr> {
-        let entry = self.inner.hosts.lock().unwrap().get(&host_id).cloned()?;
-        let e = entry.lock().unwrap();
-        if e.state.is_connected() { e.addr.clone() } else { None }
+        let v = self.view(host_id)?;
+        let connected = v.state.lock().unwrap().is_connected();
+        let addr = v.addr.lock().unwrap().clone();
+        if connected { addr } else { None }
     }
 
     /// The local address to talk to `spec`, connecting first when needed. Fails fast with
@@ -286,9 +323,15 @@ impl TunnelManager {
         self.close(e);
         self.set_state(id, e, ConnState::Connecting);
         match self.open(e) {
+            Ok((child, _, _)) if e.view.cancel.load(Ordering::SeqCst) => {
+                e.child = Some(child);
+                self.close(e);
+                Err(RemoteError::unreachable("the host was removed or edited"))
+            }
             Ok((child, addr, info)) => {
                 e.child = Some(child);
                 e.addr = Some(addr.clone());
+                *e.view.addr.lock().unwrap() = Some(addr.clone());
                 e.failures = 0;
                 e.retry_at = None;
                 self.set_state(id, e, ConnState::Connected { protocol: info.protocol, version: info.version });
@@ -343,9 +386,16 @@ impl TunnelManager {
         let mut child = spawned
             .expect("the loop always ends with a result")
             .map_err(|err| Failed::Unreachable(format!("cannot run `{}`: {err}", cfg.program.to_string_lossy())))?;
+        e.view.pid.store(child.id(), Ordering::SeqCst);
         let deadline = Instant::now() + cfg.ready_timeout;
         let mut last;
         loop {
+            if e.view.cancel.load(Ordering::SeqCst) {
+                e.view.pid.store(0, Ordering::SeqCst);
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(Failed::Unreachable("the host was removed or edited".into()));
+            }
             if let Ok(Some(status)) = child.try_wait() {
                 let tail = last_lines(&stderr_path, 3);
                 return Err(Failed::Unreachable(if tail.is_empty() { format!("ssh exited with {status}") } else { tail }));
@@ -370,6 +420,8 @@ impl TunnelManager {
     }
 
     fn close(&self, e: &mut Entry) {
+        *e.view.addr.lock().unwrap() = None;
+        e.view.pid.store(0, Ordering::SeqCst);
         if let Some(mut child) = e.child.take() {
             let _ = child.kill();
             let _ = child.wait();
@@ -381,11 +433,20 @@ impl TunnelManager {
 
     /// Close the tunnel of a host (it was deleted, edited or disabled) and forget its state.
     pub fn forget(&self, host_id: i64) {
-        let entry = self.inner.hosts.lock().unwrap().remove(&host_id);
-        if let Some(entry) = entry {
-            let mut e = entry.lock().unwrap();
-            self.close(&mut e);
-            self.set_state(host_id, &mut e, ConnState::Disconnected);
+        // Never waits for the entry lock: a connect in flight holds it for seconds. The view is cancelled
+        // and its ssh killed; the connect notices, gives up and cleans its own socket.
+        self.inner.hosts.lock().unwrap().remove(&host_id);
+        if let Some(view) = self.inner.views.lock().unwrap().remove(&host_id) {
+            view.cancel.store(true, Ordering::SeqCst);
+            view.kill_ssh();
+            let was = std::mem::replace(&mut *view.state.lock().unwrap(), ConnState::Disconnected);
+            let addr = view.addr.lock().unwrap().take();
+            if let Some(Addr::Unix(p)) = addr {
+                let _ = std::fs::remove_file(p);
+            }
+            if was != ConnState::Disconnected {
+                (self.inner.on_state)(host_id, &ConnState::Disconnected);
+            }
         }
     }
 
@@ -442,7 +503,8 @@ impl TunnelManager {
     /// Close every tunnel and stop the monitor (app exit).
     pub fn shutdown(&self) {
         self.inner.stop.store(true, Ordering::Relaxed);
-        let ids: Vec<i64> = self.inner.hosts.lock().unwrap().keys().copied().collect();
+        let mut ids: Vec<i64> = self.inner.hosts.lock().unwrap().keys().copied().collect();
+        ids.extend(self.inner.views.lock().unwrap().keys().copied());
         for id in ids {
             self.forget(id);
         }
@@ -722,6 +784,27 @@ mod tests {
         r.mgr.forget(1);
         assert_eq!(r.mgr.addr_if_connected(1), None);
         r.mgr.shutdown();
+    }
+
+    #[test]
+    fn state_and_forget_do_not_wait_for_a_connect_in_flight() {
+        let r = rig();
+        r.health.up.store(false, Ordering::Relaxed); // the daemon never answers: the connect waits out its timeout
+        let mgr = r.mgr.clone();
+        let t0 = Instant::now();
+        let connecting = std::thread::spawn(move || mgr.ensure(&spec(RemoteEndpoint::Port(7777))));
+        r.started(1);
+        assert_eq!(r.mgr.state(1), ConnState::Connecting);
+        assert_eq!(r.mgr.addr_if_connected(1), None);
+        let t = Instant::now();
+        r.mgr.forget(1);
+        r.mgr.shutdown();
+        assert!(t.elapsed() < Duration::from_millis(300), "forget/shutdown waited {:?}", t.elapsed());
+        assert_eq!(r.mgr.state(1), ConnState::Disconnected);
+        // the connect notices and gives up well before its own timeout
+        let err = connecting.join().unwrap().unwrap_err();
+        assert!(err.is_connection(), "{err}");
+        assert!(t0.elapsed() < Duration::from_millis(450), "the connect was not cancelled: {:?}", t0.elapsed());
     }
 
     #[test]
