@@ -40,7 +40,7 @@ pub(crate) fn ensure_branch_worktree_in(
     }
 
     let repo_name = repo.file_name().and_then(|n| n.to_str()).unwrap_or("repo");
-    let worktree_path = base.join(repo_name).join(branch.replace('/', "-"));
+    let worktree_path = slot_path(&base.join(repo_name), branch);
 
     if worktree_path.exists() {
         return switch_existing_to_branch(&worktree_path, target);
@@ -89,6 +89,21 @@ pub(crate) fn ensure_branch_worktree_in(
     }
 
     Ok(worktree_path)
+}
+
+/// Where the worktree of `branch` lives under `dir`: `/` becomes `-`, so `feat/x` and `feat-x` share
+/// a name. When that directory already holds a different named branch the slot gets a hash suffix
+/// instead, so one branch's worktree is never switched onto another. Worktrees created before this
+/// keep their plain names.
+fn slot_path(dir: &Path, branch: &str) -> PathBuf {
+    let plain = dir.join(branch.replace('/', "-"));
+    let taken_by_other = plain.exists() && current_branch(&plain).is_some_and(|b| b != branch && !is_on_branch(&plain, branch));
+    if !taken_by_other {
+        return plain;
+    }
+    // FNV-1a: stable across Rust versions, unlike `DefaultHasher`.
+    let hash = branch.bytes().fold(0xcbf29ce484222325u64, |h, b| (h ^ b as u64).wrapping_mul(0x100000001b3));
+    dir.join(format!("{}-{:08x}", branch.replace('/', "-"), hash as u32))
 }
 
 /// The slot path for `target.head_ref` already exists but isn't on that
@@ -333,6 +348,22 @@ mod tests {
             three_dot: true,
             created_at: "now".into(),
         }
+    }
+
+    #[test]
+    fn branches_that_differ_only_by_slash_get_separate_worktrees() {
+        let repo = fixture_repo();
+        git(repo.path(), &["branch", "feat/x"]);
+        git(repo.path(), &["branch", "feat-x"]);
+        let base = TempDir::new().unwrap();
+        let a = ensure_branch_worktree_in(repo.path(), &local_target("feat/x"), None, base.path()).unwrap();
+        let b = ensure_branch_worktree_in(repo.path(), &local_target("feat-x"), None, base.path()).unwrap();
+        assert_ne!(a, b);
+        assert_eq!(current_branch(&a).as_deref(), Some("feat/x"));
+        assert_eq!(current_branch(&b).as_deref(), Some("feat-x"));
+        // a repeat finds each one again
+        assert_eq!(ensure_branch_worktree_in(repo.path(), &local_target("feat/x"), None, base.path()).unwrap(), a);
+        assert_eq!(ensure_branch_worktree_in(repo.path(), &local_target("feat-x"), None, base.path()).unwrap(), b);
     }
 
     #[test]
