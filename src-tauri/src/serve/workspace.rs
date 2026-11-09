@@ -93,8 +93,8 @@ fn target(kind: &str, pr: Option<i64>, head_ref: &str) -> Target {
 }
 
 /// `<runs base>/scratch/<run id>`: attachments of a run, removed with its cleanup. Run ids are
-/// unique across harnesses, so one directory serves them all. `runs_base` is the parent of the
-/// per-harness run roots.
+/// unique across harnesses, so one directory serves them all. `runs_base` is the run root
+/// (`serve_runs`).
 pub fn scratch_dir(runs_base: &Path, run_id: i64) -> PathBuf {
     runs_base.join("scratch").join(run_id.to_string())
 }

@@ -78,11 +78,9 @@ pub async fn serve(state: SharedState, bound: Bound, shutdown: impl Future<Outpu
 /// and the sweep of attachment dirs whose run is over.
 pub fn start_engines(state: &SharedState) {
     sweep_scratch(state);
-    for engine in state.engines.values() {
-        engine.start_ticker();
-        engine.adopt_detached();
-        engine.pump();
-    }
+    state.engine.start_ticker();
+    state.engine.adopt_detached();
+    state.engine.pump();
 }
 
 /// Remove scratch directories of runs that are over or gone (a queued run stopped before it launched).
@@ -102,9 +100,7 @@ pub fn sweep_scratch(state: &SharedState) {
 
 /// Exiting: the runs keep going and the next daemon re-adopts them.
 pub fn detach(state: &SharedState) {
-    for engine in state.engines.values() {
-        engine.detach_all();
-    }
+    state.engine.detach_all();
 }
 
 async fn wait_for_signal() {

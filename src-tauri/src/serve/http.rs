@@ -1,7 +1,6 @@
 //! The `/v1` HTTP+SSE API (axum). Handlers are thin: validation, the store and the run engines do
 //! the work. Blocking work (git, the app DB, a harness call) runs on the blocking pool.
 
-use std::collections::HashMap;
 use std::convert::Infallible;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
@@ -26,7 +25,7 @@ use super::sink::{Changes, ServeSink};
 use super::store::{is_terminal, ServeDb, ServeStore};
 use super::{workspace, ApiError, ErrorCode, PROTOCOL};
 use crate::ai::{check_caps, Harness, Needs, OneShot, SessionMode, SystemPrompt, SystemPromptMode};
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 use crate::run_engine::engine::RunEngine;
 use crate::run_usage::RunTag;
 
@@ -41,13 +40,14 @@ pub struct Shared {
     pub app_db: PathBuf,
     pub serve_db_path: PathBuf,
     pub harnesses: Vec<&'static dyn Harness>,
-    pub engines: HashMap<String, Arc<RunEngine>>,
+    /// The one run engine; each run names its own harness.
+    pub engine: Arc<RunEngine>,
     pub changes: broadcast::Sender<i64>,
     pub cap: Arc<AtomicI64>,
     pub worktree_base: PathBuf,
     pub pr_head: PrHeadFn,
     pub max_queue: i64,
-    /// `<data_dir>/serve_runs`: parent of the per-harness run roots and the scratch dirs.
+    /// `<data_dir>/serve_runs`: the run directories (`<id>`) and the attachment scratch dirs (`scratch/<id>`).
     pub runs_base: PathBuf,
 }
 
@@ -75,19 +75,21 @@ pub fn build(settings: Settings, harnesses: Vec<&'static dyn Harness>) -> AppRes
             let _ = tx.send(id);
         });
     }
-    let mut engines = HashMap::new();
-    for h in &harnesses {
-        let root = settings.data_dir.join("serve_runs").join(h.id());
-        let store = ServeStore::new(db.clone(), h.id(), cap.clone(), root);
-        let sink = Arc::new(ServeSink { store: store.clone(), changes: changes.clone(), db_path: settings.serve_db_path.clone(), harness_id: h.id() });
-        engines.insert(h.id().to_string(), RunEngine::new(store, sink, *h));
-    }
+    let default = *harnesses.first().ok_or_else(|| AppError::Other("no harness".into()))?;
+    let store = ServeStore::new(db.clone(), cap.clone(), settings.data_dir.join("serve_runs"));
+    let sink = Arc::new(ServeSink {
+        store: store.clone(),
+        changes: changes.clone(),
+        db_path: settings.serve_db_path.clone(),
+        harnesses: harnesses.clone(),
+    });
+    let engine = RunEngine::new(store, sink, default);
     Ok(Arc::new(Shared {
         db,
         app_db: settings.app_db,
         serve_db_path: settings.serve_db_path,
         harnesses,
-        engines,
+        engine,
         changes: tx,
         cap,
         worktree_base: settings.worktree_base,
@@ -212,7 +214,7 @@ async fn info(State(s): State<SharedState>) -> HttpResult<Json<Value>> {
                 })
             })
             .collect();
-        let (running, queued) = s.db.counts(None);
+        let (running, queued) = s.db.counts();
         Ok(Json(json!({
             "protocol": PROTOCOL,
             "version": env!("CODEREVIEW_VERSION"),
@@ -225,25 +227,20 @@ async fn info(State(s): State<SharedState>) -> HttpResult<Json<Value>> {
     .await
 }
 
-/// Model ids of a harness: opencode lists them itself; Claude Code takes aliases.
-fn models_of(h: &dyn Harness) -> Vec<String> {
-    match h.id() {
-        "claude" => ["sonnet", "opus", "haiku"].map(String::from).to_vec(),
-        "opencode" => std::process::Command::new("opencode")
-            .arg("models")
-            .output()
-            .ok()
-            .filter(|o| o.status.success())
-            .map(|o| String::from_utf8_lossy(&o.stdout).lines().map(str::trim).filter(|l| !l.is_empty()).map(String::from).collect())
-            .unwrap_or_default(),
-        _ => Vec::new(),
+/// Model ids of a harness: the registry's cached listing (`ai::models`); a harness outside the
+/// registry (a test double) answers for itself.
+fn models_of(h: &dyn Harness) -> AppResult<Vec<String>> {
+    if crate::ai::harness_by_id(h.id()).is_some() {
+        Ok(crate::ai::models::for_harness(h.id(), false)?.into_iter().flat_map(|g| g.models).collect())
+    } else {
+        h.models()
     }
 }
 
 async fn models(State(s): State<SharedState>, UrlPath(id): UrlPath<String>) -> HttpResult<Json<Value>> {
     blocking(move || {
         let h = s.harness(&id)?;
-        Ok(Json(json!({ "harness": id, "models": models_of(h) })))
+        Ok(Json(json!({ "harness": id, "models": models_of(h)? })))
     })
     .await
 }
@@ -309,7 +306,7 @@ fn create_run_blocking(s: &Shared, req: RunRequest) -> Result<(StatusCode, Value
     }
     let h = s.harness(&req.harness)?;
     caps_check(h, "this run", &needs_of(req.access.access(), req.tools))?;
-    let engine = s.engines.get(h.id()).ok_or_else(|| ApiError::new(ErrorCode::HarnessUnavailable, format!("no engine for `{}`", h.id())))?;
+    let engine = &s.engine;
     if engine.active_count() as i64 >= s.max_queue {
         return Err(ApiError::new(ErrorCode::QueueFull, format!("{} runs are already queued or running", s.max_queue)));
     }
@@ -424,8 +421,7 @@ async fn stop_run(State(s): State<SharedState>, UrlPath(id): UrlPath<i64>) -> Ht
         if is_terminal(&run.status) {
             return Err(ApiError::bad_request(format!("run {id} is already {}", run.status)));
         }
-        let engine = s.engines.get(&run.harness).ok_or_else(|| ApiError::internal("no engine for the run's harness"))?;
-        engine.stop(id).map_err(|e| ApiError::bad_request(e.to_string()))?;
+        s.engine.stop(id).map_err(|e| ApiError::bad_request(e.to_string()))?;
         // A run stopped while queued never launched, so nothing else removes its attachments.
         if s.db.status(id).as_deref() == Some("killed") {
             let _ = std::fs::remove_dir_all(s.scratch(id));
@@ -855,7 +851,7 @@ mod tests {
                 app_db: s.app_db.clone(),
                 serve_db_path: s.serve_db_path.clone(),
                 harnesses: s.harnesses.clone(),
-                engines: s.engines.clone(),
+                engine: s.engine.clone(),
                 changes: s.changes.clone(),
                 cap: s.cap.clone(),
                 worktree_base: s.worktree_base.clone(),

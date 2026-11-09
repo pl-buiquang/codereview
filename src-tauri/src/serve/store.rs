@@ -1,5 +1,5 @@
 //! The serve DB: runs, their events and the outbox of `cr` ops. A SQLite file of its own, separate
-//! from the interactive app DB. `ServeStore` plugs it into the run engine (one per harness).
+//! from the interactive app DB. `ServeStore` plugs it into the run engine (one engine for every harness).
 //!
 //! `cr` inside a remote run opens the same file to append outbox ops (see [`super::remote`]), so
 //! the connection uses WAL and a busy timeout.
@@ -37,7 +37,7 @@ CREATE TABLE serve_run (
     finished_at  TEXT,
     updated_at   TEXT NOT NULL
 );
-CREATE INDEX serve_run_status ON serve_run(harness, status);
+CREATE INDEX serve_run_status ON serve_run(status);
 CREATE INDEX serve_run_updated ON serve_run(updated_at);
 
 CREATE TABLE serve_event (
@@ -247,12 +247,12 @@ impl ServeDb {
         Ok(rows)
     }
 
-    pub fn counts(&self, harness: Option<&str>) -> (i64, i64) {
+    pub fn counts(&self) -> (i64, i64) {
         let conn = self.0.lock().unwrap();
         let count = |status: &str| -> i64 {
             conn.query_row(
-                "SELECT COUNT(*) FROM serve_run WHERE status = ?1 AND (?2 IS NULL OR harness = ?2)",
-                params![status, harness],
+                "SELECT COUNT(*) FROM serve_run WHERE status = ?1",
+                params![status],
                 |r| r.get(0),
             )
             .unwrap_or(0)
@@ -301,17 +301,16 @@ pub fn append_outbox(conn: &Connection, run_id: i64, op_type: &str, args: &Value
     Ok(op_id)
 }
 
-/// The run engine's view of the serve DB, for one harness' runs.
+/// The run engine's view of the serve DB. One engine serves every harness (each run names its own).
 pub struct ServeStore {
     pub db: Arc<ServeDb>,
-    harness: String,
     cap: Arc<AtomicI64>,
     root: PathBuf,
 }
 
 impl ServeStore {
-    pub fn new(db: Arc<ServeDb>, harness: &str, cap: Arc<AtomicI64>, root: PathBuf) -> Arc<Self> {
-        Arc::new(Self { db, harness: harness.to_string(), cap, root })
+    pub fn new(db: Arc<ServeDb>, cap: Arc<AtomicI64>, root: PathBuf) -> Arc<Self> {
+        Arc::new(Self { db, cap, root })
     }
 
     fn exec(&self, sql: &str, p: impl rusqlite::Params) -> AppResult<usize> {
@@ -323,8 +322,8 @@ impl ServeStore {
         let mut n = 0;
         for s in statuses {
             n += conn.query_row(
-                "SELECT COUNT(*) FROM serve_run WHERE harness = ?1 AND status = ?2",
-                params![self.harness, s],
+                "SELECT COUNT(*) FROM serve_run WHERE status = ?1",
+                params![s],
                 |r| r.get::<_, i64>(0),
             )?;
         }
@@ -349,8 +348,8 @@ impl RunStore for ServeStore {
         let conn = self.db.0.lock().unwrap();
         Ok(conn
             .query_row(
-                "SELECT id FROM serve_run WHERE harness = ?1 AND status = 'queued' ORDER BY id LIMIT 1",
-                params![self.harness],
+                "SELECT id FROM serve_run WHERE status = 'queued' ORDER BY id LIMIT 1",
+                [],
                 |r| r.get(0),
             )
             .optional()?)
@@ -383,8 +382,8 @@ impl RunStore for ServeStore {
     fn kill_queued(&self) -> AppResult<()> {
         let now = now_stamp();
         self.exec(
-            "UPDATE serve_run SET status = 'killed', finished_at = ?2, updated_at = ?2 WHERE harness = ?1 AND status = 'queued'",
-            params![self.harness, now],
+            "UPDATE serve_run SET status = 'killed', finished_at = ?1, updated_at = ?1 WHERE status = 'queued'",
+            params![now],
         )?;
         Ok(())
     }
@@ -393,8 +392,8 @@ impl RunStore for ServeStore {
         let now = now_stamp();
         self.exec(
             "UPDATE serve_run SET status = 'killed', finished_at = ?2, updated_at = ?2
-             WHERE harness = ?1 AND status IN ('queued', 'running')",
-            params![self.harness, now],
+             WHERE status IN ('queued', 'running')",
+            params![now],
         )?;
         Ok(())
     }
@@ -430,10 +429,16 @@ impl RunStore for ServeStore {
     fn running_runs(&self) -> AppResult<Vec<RunningRun>> {
         let conn = self.db.0.lock().unwrap();
         let mut stmt =
-            conn.prepare("SELECT id, pid, session_id, started_at FROM serve_run WHERE harness = ?1 AND status = 'running'")?;
+            conn.prepare("SELECT id, harness, pid, session_id, started_at FROM serve_run WHERE status = 'running'")?;
         let rows = stmt
-            .query_map(params![self.harness], |r| {
-                Ok(RunningRun { id: r.get(0)?, pid: r.get::<_, i64>(1)? as i32, harness: self.harness.clone(), session_id: r.get(2)?, started_at: r.get(3)? })
+            .query_map([], |r| {
+                Ok(RunningRun {
+                    id: r.get(0)?,
+                    harness: r.get(1)?,
+                    pid: r.get::<_, i64>(2)? as i32,
+                    session_id: r.get(3)?,
+                    started_at: r.get(4)?,
+                })
             })?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(rows)
@@ -451,10 +456,10 @@ impl RunStore for ServeStore {
     fn prune(&self, keep: i64) {
         // Runs whose outbox the client has not acknowledged yet stay, so no op is lost.
         let _ = self.exec(
-            "DELETE FROM serve_run WHERE harness = ?1 AND status NOT IN ('queued', 'running')
-               AND id NOT IN (SELECT id FROM serve_run WHERE harness = ?1 ORDER BY id DESC LIMIT ?2)
+            "DELETE FROM serve_run WHERE status NOT IN ('queued', 'running')
+               AND id NOT IN (SELECT id FROM serve_run ORDER BY id DESC LIMIT ?1)
                AND NOT EXISTS (SELECT 1 FROM serve_outbox o WHERE o.run_id = serve_run.id AND o.acked = 0)",
-            params![self.harness, keep],
+            params![keep],
         );
     }
 
@@ -497,7 +502,7 @@ mod tests {
     fn events_replay_after_a_seq_and_are_idempotent() {
         let (d, db) = temp_db("ev");
         let (id, _) = db.insert_run("k", "claude", "", "{}", Path::new("/tmp"), 60).unwrap();
-        let store = ServeStore::new(db.clone(), "claude", Arc::new(AtomicI64::new(2)), d.path().join("runs"));
+        let store = ServeStore::new(db.clone(), Arc::new(AtomicI64::new(2)), d.path().join("runs"));
         for seq in 1..=3 {
             store.append_event(id, seq, "assistant", &format!(r#"{{"n":{seq}}}"#), r#"{"v":1,"events":[]}"#);
         }
@@ -514,7 +519,7 @@ mod tests {
     fn lifecycle_transitions_are_guarded() {
         let (d, db) = temp_db("life");
         let (id, _) = db.insert_run("k", "claude", "", "{}", Path::new("/tmp"), 60).unwrap();
-        let store = ServeStore::new(db.clone(), "claude", Arc::new(AtomicI64::new(1)), d.path().join("runs"));
+        let store = ServeStore::new(db.clone(), Arc::new(AtomicI64::new(1)), d.path().join("runs"));
         assert_eq!(store.next_queued().unwrap(), Some(id));
         assert!(store.mark_running(id).unwrap());
         assert!(!store.mark_running(id).unwrap());
@@ -534,7 +539,7 @@ mod tests {
     fn outbox_ops_are_numbered_acked_and_keep_the_run_from_pruning() {
         let (d, db) = temp_db("out");
         let (id, _) = db.insert_run("k", "claude", "", "{}", Path::new("/tmp"), 60).unwrap();
-        let store = ServeStore::new(db.clone(), "claude", Arc::new(AtomicI64::new(1)), d.path().join("runs"));
+        let store = ServeStore::new(db.clone(), Arc::new(AtomicI64::new(1)), d.path().join("runs"));
         {
             let conn = db.0.lock().unwrap();
             assert_eq!(append_outbox(&conn, id, "board_link", &json!({"a": 1})).unwrap(), format!("{id}:1"));

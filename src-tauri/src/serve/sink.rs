@@ -11,7 +11,7 @@ pub use changes::Changes;
 use super::remote;
 use super::request::RunRequest;
 use super::store::ServeStore;
-use crate::ai::SystemPromptMode;
+use crate::ai::{Harness, SystemPromptMode};
 use crate::commands::chat::new_session_id;
 use crate::commands::focus::child_path;
 use crate::run_engine::{EventSink, Finished, Prepared, RunStore};
@@ -45,7 +45,8 @@ pub struct ServeSink {
     pub changes: Changes,
     /// The serve DB file, handed to `cr` inside the run so it can append to the outbox.
     pub db_path: PathBuf,
-    pub harness_id: &'static str,
+    /// The harnesses a run may name (the registry plus whatever a test plugs in).
+    pub harnesses: Vec<&'static dyn Harness>,
 }
 
 impl ServeSink {
@@ -82,15 +83,20 @@ impl EventSink for ServeSink {
         if stopped() {
             return Ok(None);
         }
+        let harness = self
+            .harnesses
+            .iter()
+            .copied()
+            .find(|h| h.id() == req.harness)
+            .ok_or_else(|| format!("unknown harness `{}`", req.harness))?;
         let dir = self.store.runs_root().join(id.to_string());
         remote::write_snapshot(&dir, &req.context).map_err(|e| format!("failed to write the context snapshot: {e}"))?;
         let mut env: Vec<(String, std::ffi::OsString)> = remote::run_env(id, &self.db_path, &dir);
         if let Some(path) = child_path() {
             env.push(("PATH".into(), path));
         }
-        let scratch = super::workspace::scratch_dir(self.store.runs_root().parent().unwrap_or(std::path::Path::new(".")), id);
+        let scratch = super::workspace::scratch_dir(&self.store.runs_root(), id);
         let has_scratch = scratch.is_dir();
-        let harness = crate::ai::harness_by_id(self.harness_id).ok_or_else(|| format!("unknown harness `{}`", self.harness_id))?;
         Ok(Some(Prepared {
             harness,
             model: req.model.clone(),
@@ -104,7 +110,7 @@ impl EventSink for ServeSink {
             session_id: new_session_id(),
             env,
             extra_args: Vec::new(),
-            usage_tag: RunTag::new("remote_run").harness(self.harness_id).label(format!("run {id}")),
+            usage_tag: RunTag::new("remote_run").harness(harness.id()).label(format!("run {id}")),
             timeout: Duration::from_secs(req.timeout_secs.max(1)),
             cleanup: if has_scratch { vec![scratch] } else { Vec::new() },
         }))
