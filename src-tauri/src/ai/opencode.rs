@@ -194,23 +194,20 @@ impl Harness for OpenCode {
             SessionMode::Fork(_) => return None,
         }
         // No system prompt flag: the instructions go in as the opening prompt of a new session.
-        if let (Some(file), SessionMode::New(_) | SessionMode::Ephemeral) = (opts.system_prompt_file, opts.session) {
-            if let Ok(text) = std::fs::read_to_string(file) {
-                if !text.trim().is_empty() {
-                    argv.extend(["--prompt".to_string(), text]);
-                }
-            }
+        if let Some(text) = opening_prompt(opts) {
+            argv.extend(["--prompt".to_string(), text]);
         }
         Some(argv)
     }
 
     fn context_file_note(&self, opts: &Interactive<'_>) -> Option<String> {
         opts.system_prompt_file?;
-        Some(match opts.session {
-            SessionMode::New(_) | SessionMode::Ephemeral => {
-                "opencode has no system prompt flag: the context was passed as the opening prompt".to_string()
-            }
-            _ => "context file skipped: opencode can only take it as the opening prompt of a new session".to_string(),
+        Some(if opening_prompt(opts).is_some() {
+            "opencode has no system prompt flag: the context was passed as the opening prompt".to_string()
+        } else if matches!(opts.session, SessionMode::New(_) | SessionMode::Ephemeral) {
+            "context file skipped: it is empty or could not be read".to_string()
+        } else {
+            "context file skipped: opencode can only take it as the opening prompt of a new session".to_string()
         })
     }
 
@@ -244,6 +241,14 @@ impl Harness for OpenCode {
         }
         args
     }
+}
+
+/// The context file as the opening prompt: only for a new or ephemeral session, and only when the
+/// file is readable and not blank. `interactive_argv` and `context_file_note` both go through it, so
+/// the note always matches the argv.
+fn opening_prompt(opts: &Interactive<'_>) -> Option<String> {
+    let (file, SessionMode::New(_) | SessionMode::Ephemeral) = (opts.system_prompt_file?, opts.session) else { return None };
+    std::fs::read_to_string(file).ok().filter(|t| !t.trim().is_empty())
 }
 
 /// The ids `opencode models` prints, one `provider/model` per line.
@@ -804,9 +809,15 @@ mod tests {
         let _ = std::fs::remove_file(path);
     }
 
+    fn opts_for<'a>(session: SessionMode<'a>, file: Option<&'a Path>) -> Interactive<'a> {
+        Interactive { session, system_prompt_file: file, system_prompt_mode: super::super::SystemPromptMode::Append }
+    }
+
     #[test]
     fn a_context_file_gets_a_note_telling_how_it_was_used() {
-        let path = Path::new("/tmp/ctx.md");
+        let file = std::env::temp_dir().join(format!("cr_oc_ctx_{}.md", std::process::id()));
+        std::fs::write(&file, "ctx").unwrap();
+        let path = file.as_path();
         let opts = |session, file| Interactive { session, system_prompt_file: file, system_prompt_mode: super::super::SystemPromptMode::Append };
         assert_eq!(OpenCode.context_file_note(&opts(SessionMode::New("a"), None)), None);
         let new = OpenCode.context_file_note(&opts(SessionMode::New("a"), Some(path))).unwrap();
@@ -814,6 +825,16 @@ mod tests {
         let resumed = OpenCode.context_file_note(&opts(SessionMode::Resume("a"), Some(path))).unwrap();
         assert!(resumed.contains("skipped"), "{resumed}");
         assert_eq!(crate::ai::ClaudeCode.context_file_note(&opts(SessionMode::New("a"), Some(path))), None);
+        // A readable file really is passed; an empty or missing one is not, and the note says so.
+        let real = std::env::temp_dir().join(format!("cr_oc_note_{}.txt", std::process::id()));
+        std::fs::write(&real, "ctx").unwrap();
+        let ok = OpenCode.context_file_note(&opts(SessionMode::New("a"), Some(&real))).unwrap();
+        assert!(ok.contains("opening prompt") && !ok.contains("skipped"), "{ok}");
+        std::fs::write(&real, "  \n").unwrap();
+        let empty = OpenCode.context_file_note(&opts(SessionMode::New("a"), Some(&real))).unwrap();
+        assert!(empty.contains("skipped") && empty.contains("empty"), "{empty}");
+        assert_eq!(OpenCode.interactive_argv(&opts_for(SessionMode::New("a"), Some(&real))), Some(strs(&["opencode", "--session", "ses_a"])));
+        let _ = std::fs::remove_file(real);
     }
 
     #[test]
