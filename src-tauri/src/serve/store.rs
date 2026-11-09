@@ -366,7 +366,9 @@ impl ServeDb {
 /// Append an op to a run's outbox on an open connection. The op id (`<run>:<seq>`) is unique, so a
 /// client re-applying after a reconnect can recognise ops it already applied.
 pub fn append_outbox(conn: &Connection, run_id: i64, op_type: &str, args: &Value) -> AppResult<String> {
-    let tx = conn.unchecked_transaction()?;
+    // Immediate: take the write lock first, so the busy timeout applies. A deferred transaction that reads
+    // and then writes fails at once (SQLITE_BUSY_SNAPSHOT) when the daemon commits in between.
+    let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)?;
     let seq: i64 =
         tx.query_row("SELECT COALESCE(MAX(seq), 0) + 1 FROM serve_outbox WHERE run_id = ?1", params![run_id], |r| r.get(0))?;
     let op_id = format!("{run_id}:{seq}");
