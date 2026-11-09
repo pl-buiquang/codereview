@@ -136,7 +136,8 @@ See [`skills/board/SKILL.md`](../../skills/board/SKILL.md) for the agent workflo
 `cr serve` runs the harnesses of this machine behind a versioned HTTP+SSE API (`/v1`), so another
 instance of the app can launch runs and one-shot calls here. It listens on a **unix socket** (default
 `$XDG_RUNTIME_DIR/codereview/serve.sock`) or a **loopback** port only; reach it from the other machine with an SSH
-tunnel (`ssh -L 7777:127.0.0.1:7777 host`, or forward the socket). It stores no token. Design:
+tunnel (`ssh -L 7777:127.0.0.1:7777 host`, or forward the socket); the app opens that tunnel itself for the
+hosts configured in Settings → AI → Hosts ([setup guide](remote-hosts.md)). It stores no token. Design:
 [ADR 0007](../adr/0007-remote-agent-daemon.md).
 
 | Command | Description |
@@ -156,6 +157,10 @@ Inside a remote run `cr` does not touch a database. `cr board meta add|rm`, `cr 
 when it mirrors the run); `cr board list|show`, `cr board meta list` and `cr focus show` print
 JSON from the context snapshot that came with the run request. Every other command fails with
 "not available in a remote run". `cr notify` exists only for this case.
+
+At start-up the daemon adds the usual per-user bin directories to its `PATH` (`~/.local/bin`, `~/bin`,
+`~/.cargo/bin`, `~/.claude/local`, `~/.opencode/bin`) when they exist, since a service and a non-interactive ssh do
+not read the rc files that normally add them.
 
 A systemd user service stops when the user's last session ends, so on a server run
 `loginctl enable-linger $USER` once; without it the daemon (and the runs it adopted) disappear at logout.

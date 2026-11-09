@@ -17,6 +17,12 @@ prompt mode, allowed tools, extra args) appears when the resolved harness is Cla
 permission mode set there wins over the access. A launch is refused, naming the missing capability, when
 the harness cannot give the access or tools a routine needs.
 
+A plain routine can also run on another machine: give it a profile that runs on a **host** (Settings → AI →
+Hosts, see [remote hosts](remote-hosts.md)). The run is executed there, with the host's checkout of the
+repository, and mirrored here: same transcript, status and notification, a host badge in the runs list, a
+*disconnected* badge while the connection is down. The context must have a GitHub repository (not the board,
+not a local virtual-PR review). System routines are local only: the config offers them local profiles.
+
 ## Issue to PR: plan, refine, implement
 
 Three built-ins turn an issue into a draft PR, with a plan file you review in between.

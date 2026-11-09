@@ -22,8 +22,8 @@ Glossary of domain terms used in this app.
 
 ## AI harness
 
-- **Harness** — a way of running an AI agent or model (Claude Code, opencode or Codex today; a
-  remote wrapper later). Implements the `Harness` trait; every AI feature of the app calls it
+- **Harness** — a way of running an AI agent or model (Claude Code, opencode or Codex, or the
+  remote wrapper of one of them). Implements the `Harness` trait; every AI feature of the app calls it
   instead of a CLI.
 - **Capabilities (Caps)** — what a harness supports (sessions, resume, fork, tools, streaming,
   cost reporting, access levels). Lets callers refuse an unsupported combination up front.
@@ -36,7 +36,7 @@ Glossary of domain terms used in this app.
   permission mode, allowed tools, extra args, system prompt mode) live in the routine's
   `harness_overrides`, keyed by harness id, and a native permission mode wins over the access.
 - **Profile** — a named configuration of a harness: harness id, model, harness-specific settings
-  and, later, a host. Never holds a secret. One profile is the **default**.
+  and an optional host. Never holds a secret. One profile is the **default**.
 - **Profile resolution** — which profile a run uses: the routine's own profile, else the profile
   mapped to its feature (chat, summaries, theme, sessions), else the default profile. A launch can
   override the model only. With no usable profile it is Claude Code with the legacy model
@@ -55,6 +55,15 @@ Glossary of domain terms used in this app.
 - **Remote agent daemon (`cr serve`)** — a long-lived process that exposes the local harnesses of its
   machine over `/v1` HTTP+SSE on a unix socket or loopback port (reached through an SSH tunnel). A plain
   executor with its own run store; it never sees routine definitions or prompt templates (ADR 0007).
+- **Host** — a machine running `cr serve`, reached over an SSH tunnel the app opens (an SSH alias plus
+  the daemon's endpoint). A profile with a host runs its harness there. Connection states: not connected,
+  connecting, connected, unreachable, protocol mismatch.
+- **Remote profile / remote run** — a profile with a host, and a plain routine run it starts: the host
+  executes it, the app owns the row and the transcript (see Run mirror). System routines, review chats and
+  interactive sessions never use a remote profile.
+- **Run mirror** — the local copy of a remote run: its `routine_run` row (with `host_id` and
+  `remote_run_id`) and its events, copied by sequence number and resumed after a dropped connection, an
+  app restart or a run that ended while the app was closed. Not to be confused with the GitHub mirror below.
 - **Outbox** — the structured, idempotent ops (`board_meta_add`, `focus_set`, `notify`, ...) that `cr`
   records inside a remote run instead of writing to a database; the client applies them when it
   mirrors the run and acknowledges them. Reads inside a remote run come from the run's context snapshot.

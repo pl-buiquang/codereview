@@ -85,7 +85,7 @@ Shows the paths found for `git` and `gh` and whether `gh` is authenticated (`gh 
 
 ## AI
 
-Harness availability, profiles (harness + model), the feature to profile table, and editable prompts. See [focus-and-ai.md](focus-and-ai.md#prompts-and-models-settings--ai).
+Harness availability, remote hosts ([remote-hosts.md](remote-hosts.md)), profiles (harness + model, optionally on a host), the feature to profile table, and editable prompts. See [focus-and-ai.md](focus-and-ai.md#prompts-and-models-settings--ai).
 
 ## Usage
 

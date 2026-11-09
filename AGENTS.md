@@ -101,6 +101,22 @@ list. The serve DB has its own append-only migration list in `serve/store.rs`. A
 The run types the engine and harnesses share (`RunTag`, `RunUsage`, `now_stamp`) live in `run_usage.rs`,
 not in the Tauri-bound `ai_usage.rs`.
 
+**Remote hosts** (`src-tauri/src/remote/`, ADR 0008, `docs/features/remote-hosts.md`) are the app side of
+`cr serve`: `host.rs` (the `host` table, an SSH alias + the daemon's endpoint), `tunnel.rs` (the system
+`ssh -N -L`, health checks, backoff, the per-host `ConnState`; `HostSpec`/`Health` keep it testable with a fake
+`ssh`), `http.rs`/`client.rs` (a blocking HTTP/SSE client of `/v1` over the tunnel's local end; errors are
+`RemoteError` strings `<code>: <message>` with the API's codes plus `host_unreachable`, `protocol_mismatch`,
+`host_disabled`), `harness.rs` (`RemoteHarness`, one-shots only; `for_host` caches one instance per host and
+harness), `runtime.rs` (the global tunnels + cached `/v1/info`), `launch.rs` (the run request of a plain routine),
+`mirror.rs` (follows a remote run into `routine_run` / `routine_run_event`, resuming `after_seq`; Tauri-free,
+plugged in through `MirrorHooks`) and `outbox.rs` (applies the run's outbox ops once, `remote_applied_op`).
+`routines/remote_run.rs` is the app's glue: a profile with a `host_id` makes `commands::routines::launch` take
+`launch_remote` instead of the local engine, and every local-engine query ignores rows with a `host_id`. Local-only
+work (chat, interactive sessions, system routines) calls `Resolved::ensure_local`; a new feature that cannot run
+remotely must do the same. A harness' availability message comes from `Harness::unavailable_reason`. Tests use
+`remote::test_server` (an in-process `cr serve` on a unix socket, a TCP `Proxy` that cuts connections, a fake `ssh`
+script): never a real host.
+
 **Comment anchoring contract** (the subtle cross-layer piece): a comment is identified by
 `(file_path, side, line)` where `side ∈ {LEFT, RIGHT}`. This same triple is the bridge across three
 places and must stay consistent:
