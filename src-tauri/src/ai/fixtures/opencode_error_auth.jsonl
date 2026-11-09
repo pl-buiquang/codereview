@@ -1,0 +1,2 @@
+{"type":"error","timestamp":1794225380309,"sessionID":"ses_e3fd56685ffeP0l4wrRgGVZlYq","error":{"type":"provider.auth","message":"Reconnect OpenCode Console to continue.","status":401,"response":{"body":"{\"error\":{\"type\":\"authentication_error\",\"message\":\"Reconnect OpenCode Console to continue.\"}}"}}}
+{"type":"step_start","timestamp":1794225380120,"sessionID":"ses_e3fd56685ffeP0l4wrRgGVZlYq","part":{"id":"prt_1c02a9b0e001W4EY0KZOsWO6P6_step-start","sessionID":"ses_e3fd56685ffeP0l4wrRgGVZlYq","messageID":"msg_1c02a9b0e001W4EY0KZOsWO6P6","type":"step-start"}}
