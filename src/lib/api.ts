@@ -430,7 +430,7 @@ export const api = {
     tmuxTarget: TmuxTarget,
     tmuxSession: string,
     harness: string | null = null,
-  ) => invoke<void>("board_open_issue_agent", { cardId, host, tmuxTarget, tmuxSession, harness }),
+  ) => invoke<string | null>("board_open_issue_agent", { cardId, host, tmuxTarget, tmuxSession, harness }),
   reviewAgentSessions: (reviewId: number) => invoke<AgentSession[]>("review_agent_sessions", { reviewId }),
   reviewOpenAgent: (
     reviewId: number,

@@ -101,7 +101,7 @@ pub async fn board_open_issue_agent(
     tmux_session: String,
     harness: Option<String>,
     db: State<'_, Db>,
-) -> AppResult<()> {
+) -> AppResult<Option<String>> {
     let live = crate::commands::sessions::live_session_ids();
     let (harness, card, local_path, context, resume) = {
         let conn = db.0.lock().unwrap();
@@ -134,12 +134,14 @@ pub async fn board_open_issue_agent(
         // A harness that can't pin an id can't be linked to the card: nothing is recorded.
         None => crate::ai::SessionMode::Ephemeral,
     };
-    let argv = crate::ai::argv_of(harness, &crate::ai::Interactive {
+    let opts = crate::ai::Interactive {
         session,
         system_prompt_file: Some(&context_file),
         system_prompt_mode: crate::ai::SystemPromptMode::Append,
-    })?;
-    terminal::open_session(host, tmux_target, &tmux_session, &card.repo, &format!("#{}", card.number), &local_path, &argv)
+    };
+    let argv = crate::ai::argv_of(harness, &opts)?;
+    terminal::open_session(host, tmux_target, &tmux_session, &card.repo, &format!("#{}", card.number), &local_path, &argv)?;
+    Ok(harness.context_file_note(&opts))
 }
 
 #[cfg(test)]

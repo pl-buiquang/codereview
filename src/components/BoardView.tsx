@@ -285,7 +285,8 @@ export function BoardView() {
   const openIssueAgent = useMutation({
     mutationFn: ({ cardId, harness }: { cardId: string; harness?: string }) =>
       api.boardOpenIssueAgent(cardId, defaultTerminal, tmuxTarget, tmuxSessionName, harness ?? null),
-    onSuccess: () => {
+    onSuccess: (note) => {
+      if (note) toast.info(note);
       invalidate();
       queryClient.invalidateQueries({ queryKey: ["claude-sessions"] });
     },

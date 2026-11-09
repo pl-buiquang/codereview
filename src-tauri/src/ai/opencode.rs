@@ -204,6 +204,16 @@ impl Harness for OpenCode {
         Some(argv)
     }
 
+    fn context_file_note(&self, opts: &Interactive<'_>) -> Option<String> {
+        opts.system_prompt_file?;
+        Some(match opts.session {
+            SessionMode::New(_) | SessionMode::Ephemeral => {
+                "opencode has no system prompt flag: the context was passed as the opening prompt".to_string()
+            }
+            _ => "context file skipped: opencode can only take it as the opening prompt of a new session".to_string(),
+        })
+    }
+
     fn live_sessions(&self) -> Vec<AgentSession> {
         live_sessions_now()
     }
@@ -792,6 +802,18 @@ mod tests {
         let with_file = Interactive { session: SessionMode::New("a"), system_prompt_file: Some(&path), ..opts(SessionMode::New("a")) };
         assert_eq!(OpenCode.interactive_argv(&with_file), Some(strs(&["opencode", "--session", "ses_a", "--prompt", "instructions"])));
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn a_context_file_gets_a_note_telling_how_it_was_used() {
+        let path = Path::new("/tmp/ctx.md");
+        let opts = |session, file| Interactive { session, system_prompt_file: file, system_prompt_mode: super::super::SystemPromptMode::Append };
+        assert_eq!(OpenCode.context_file_note(&opts(SessionMode::New("a"), None)), None);
+        let new = OpenCode.context_file_note(&opts(SessionMode::New("a"), Some(path))).unwrap();
+        assert!(new.contains("opening prompt") && !new.contains("skipped"), "{new}");
+        let resumed = OpenCode.context_file_note(&opts(SessionMode::Resume("a"), Some(path))).unwrap();
+        assert!(resumed.contains("skipped"), "{resumed}");
+        assert_eq!(crate::ai::ClaudeCode.context_file_note(&opts(SessionMode::New("a"), Some(path))), None);
     }
 
     #[test]

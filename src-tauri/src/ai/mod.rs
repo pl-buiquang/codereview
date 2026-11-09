@@ -288,6 +288,11 @@ pub trait Harness: Send + Sync {
     fn is_own_process(&self, pid: i32, session_id: Option<&str>) -> bool;
     /// The argv that opens an interactive session, or `None` when the harness can't.
     fn interactive_argv(&self, opts: &Interactive<'_>) -> Option<Vec<String>>;
+    /// What happens to `opts.system_prompt_file` when it can't go in as a system prompt: a note for
+    /// the launch result (it was passed another way, or skipped). `None` for Claude, which appends it.
+    fn context_file_note(&self, _opts: &Interactive<'_>) -> Option<String> {
+        None
+    }
     /// Live sessions of this harness, for the Sessions view. Empty when the harness has no
     /// discovery (or is not installed).
     fn live_sessions(&self) -> Vec<AgentSession> {
