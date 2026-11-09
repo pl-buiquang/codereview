@@ -77,6 +77,12 @@ files (runs outlive the app), process groups, stop/timeout, tailing into numbere
 re-adopt. The host plugs in a `RunStore` and an `EventSink`; `routines/manager.rs` is the app's
 adapter (SQLite store, Tauri events, handlers, notifications, usage log, and the preparation of a
 run). Launch processes only through `Harness`; keep Tauri out of the engine.
+Every stored run event keeps the raw line (`routine_run_event.json`, the source of truth) and a
+harness-neutral `norm` (`{"v":1,"events":[..]}` of `ai::Event`: text, tool_call, tool_result, final,
+other), written by `Harness::normalize`. The engine takes a run's status, text and usage from the
+`Final` event; the transcript UI (`buildTranscript`) reads `norm` and falls back to the Claude
+parser for rows without one. A new harness implements `normalize` and ships fixtures; unknown
+lines map to `Other`, never fail.
 
 **Comment anchoring contract** (the subtle cross-layer piece): a comment is identified by
 `(file_path, side, line)` where `side ∈ {LEFT, RIGHT}`. This same triple is the bridge across three

@@ -2,7 +2,7 @@
 
 Every AI feature used to call the `claude` CLI directly, from about six places: the review chat, theme suggestions, session summaries (extract and fork), the routine manager, and three builders of interactive-session argv. Each had its own flag handling, so supporting a second CLI would have meant touching all of them.
 
-`ai::Harness` (`src-tauri/src/ai/`) is the single seam, shaped like `provider.rs`: an object-safe, synchronous trait, an `ai::harness_for()` resolver, a compile-time object-safety assertion and a recipe comment for adding an implementation. `ai/claude.rs` (`ClaudeCode`) is the only code that builds a `claude` command line or parses Claude's output (the `-p` JSON envelope and the `stream-json` lines).
+`ai::Harness` (`src-tauri/src/ai/`) is the single seam, shaped like `provider.rs`: an object-safe, synchronous trait, an `ai::harness_for()` resolver, a compile-time object-safety assertion and a recipe comment for adding an implementation. `ai/claude.rs` (`ClaudeCode`) is the only code that builds a `claude` command line or parses Claude's output (the `-p` JSON envelope and the `stream-json` lines). Run events are stored twice: the raw line and a harness-neutral `norm` produced by `Harness::normalize`, so the transcript and the final status work for any harness.
 
 Requests are neutral: tool policy, access level, session mode (ephemeral, new id, resume, fork), system prompt mode. Each harness translates them to its own flags. Capabilities are data (`Caps`), so the UI and routers can refuse unsupported combinations instead of failing mid-run.
 
