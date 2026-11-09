@@ -2,7 +2,8 @@ import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { toast } from "../lib/toast";
-import { filterModelGroups, OPENCODE_LOGIN_COMMAND } from "../lib/aiProfiles";
+import { filterModelGroups, filterModelProviders, OPENCODE_LOGIN_COMMAND } from "../lib/aiProfiles";
+import { useSettingsStore } from "../lib/settings";
 
 /** Most models shown at once; typing narrows the list. */
 const MAX_SHOWN = 60;
@@ -16,8 +17,10 @@ export function ModelPicker({ harness, value, onChange, hostId = null }: { harne
   const [open, setOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
-  const groups = filterModelGroups(models.data ?? [], value);
-  const total = (models.data ?? []).reduce((n, g) => n + g.models.length, 0);
+  const providers = useSettingsStore((s) => s.opencodeModelProviders);
+  const available = harness === "opencode" ? filterModelProviders(models.data ?? [], providers) : (models.data ?? []);
+  const groups = filterModelGroups(available, value);
+  const total = available.reduce((n, g) => n + g.models.length, 0);
   let budget = MAX_SHOWN;
   const shown = groups
     .map((g) => {

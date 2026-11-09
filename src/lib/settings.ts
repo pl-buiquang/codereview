@@ -159,6 +159,7 @@ type PersistedSettings = Pick<
   | "tmuxTarget"
   | "tmuxSessionName"
   | "sessionHistoryDays"
+  | "opencodeModelProviders"
   | "sessionSummaryDir"
   | "sessionSummaryFork"
 >;
@@ -202,6 +203,7 @@ const DEFAULTS: PersistedSettings = {
   tmuxTarget: "current",
   tmuxSessionName: "codereview",
   sessionHistoryDays: 30,
+  opencodeModelProviders: "",
   sessionSummaryDir: "",
   sessionSummaryFork: false,
 };
@@ -281,6 +283,8 @@ interface SettingsState {
   tmuxSessionName: string;
   /** How many days of past Claude sessions the Sessions view lists. */
   sessionHistoryDays: number;
+  /** Comma-separated opencode providers the model picker lists (for example `openrouter`); empty = all. */
+  opencodeModelProviders: string;
   /** Directory of hook-written session summaries (markdown + frontmatter); empty = off. */
   sessionSummaryDir: string;
   /** Summarize live sessions by forking them (reuses the prompt cache when warm; cost varies). */
@@ -313,6 +317,7 @@ interface SettingsState {
   setTmuxTarget: (t: TmuxTarget) => void;
   setTmuxSessionName: (s: string) => void;
   setSessionHistoryDays: (days: number) => void;
+  setOpencodeModelProviders: (providers: string) => void;
   setSessionSummaryDir: (s: string) => void;
   setSessionSummaryFork: (on: boolean) => void;
   setBoardOverviewOpen: (open: boolean) => void;
@@ -415,6 +420,7 @@ export const useSettingsStore = create<SettingsState>()(
       setTmuxTarget: (tmuxTarget) => set({ tmuxTarget }),
       setTmuxSessionName: (tmuxSessionName) => set({ tmuxSessionName }),
       setSessionHistoryDays: (sessionHistoryDays) => set({ sessionHistoryDays }),
+      setOpencodeModelProviders: (opencodeModelProviders) => set({ opencodeModelProviders }),
       setSessionSummaryDir: (sessionSummaryDir) => set({ sessionSummaryDir }),
       setSessionSummaryFork: (sessionSummaryFork) => set({ sessionSummaryFork }),
       setBoardOverviewOpen: (boardOverviewOpen) => set({ boardOverviewOpen }),

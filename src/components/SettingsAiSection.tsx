@@ -72,6 +72,8 @@ export function AiSection() {
   const aiEnabled = useSettingsStore((s) => s.aiEnabled);
   const setAiEnabled = useSettingsStore((s) => s.setAiEnabled);
   const showRoutinesConfig = useUIStore((s) => s.showRoutinesConfig);
+  const opencodeProviders = useSettingsStore((s) => s.opencodeModelProviders);
+  const setOpencodeProviders = useSettingsStore((s) => s.setOpencodeModelProviders);
   const prompts = useQuery({ queryKey: ["prompts"], queryFn: api.promptsList });
 
   return (
@@ -98,6 +100,24 @@ export function AiSection() {
       </section>
 
       <AiProfilesSection />
+
+      <section className="settings-group">
+        <h3>opencode models</h3>
+        <label className="settings-row">
+          <span>Providers to list</span>
+          <input
+            className="input"
+            placeholder="all (for example: openrouter)"
+            value={opencodeProviders}
+            onChange={(e) => setOpencodeProviders(e.target.value)}
+          />
+        </label>
+        <span className="settings-hint muted">
+          Comma-separated opencode providers shown in the profile model picker (the part of the model id before the first
+          slash, such as <code>openrouter</code>). Empty lists every provider. Only the list is filtered; any model can still
+          be typed in.
+        </span>
+      </section>
 
       <section className="settings-group">
         <h3>Prompts</h3>

@@ -7,6 +7,13 @@ import type { AiProfile, FeatureProfiles, HarnessInfo, ModelGroup } from "./type
 /** The command that adds a provider to opencode (shown, with a copy button, when it lists no model). */
 export const OPENCODE_LOGIN_COMMAND = "opencode auth login";
 
+/** Keep only the groups whose provider is in `providers` (comma-separated, case-insensitive). An empty list keeps everything. */
+export function filterModelProviders(groups: ModelGroup[], providers: string): ModelGroup[] {
+  const wanted = providers.split(",").map((p) => p.trim().toLowerCase()).filter(Boolean);
+  if (wanted.length === 0) return groups;
+  return groups.filter((g) => wanted.includes(g.provider.toLowerCase()));
+}
+
 /** The groups with only the models containing `query` (case-insensitive; a provider name matches all of its models). Empty groups are dropped. */
 export function filterModelGroups(groups: ModelGroup[], query: string): ModelGroup[] {
   const q = query.trim().toLowerCase();

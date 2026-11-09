@@ -7,7 +7,7 @@ import type { HarnessInfo } from "./types";
 const aiImportLegacyModels = vi.fn();
 vi.mock("./api", () => ({ api: { aiImportLegacyModels: (...a: unknown[]) => aiImportLegacyModels(...a) } }));
 
-import { codexSettings, filterModelGroups, profileEditorFields, profileLabel, useImportLegacyAiModels, withCodexSettings } from "./aiProfiles";
+import { codexSettings, filterModelGroups, filterModelProviders, profileEditorFields, profileLabel, useImportLegacyAiModels, withCodexSettings } from "./aiProfiles";
 import { useSettingsStore } from "./settings";
 
 const info = (id: string): HarnessInfo => ({
@@ -46,6 +46,19 @@ describe("profile editor", () => {
     expect(filterModelGroups(groups, "HAIKU")).toEqual([{ provider: "openrouter", models: ["openrouter/anthropic/claude-haiku-4.5"] }]);
     expect(filterModelGroups(groups, "opencode")).toEqual([groups[1]]);
     expect(filterModelGroups(groups, "zzz")).toEqual([]);
+  });
+
+  it("keeps only the configured providers, and everything when none is configured", () => {
+    const groups = [
+      { provider: "openrouter", models: ["openrouter/google/gemma"] },
+      { provider: "opencode", models: ["opencode/beam-free"] },
+      { provider: "anthropic", models: ["anthropic/claude"] },
+    ];
+    expect(filterModelProviders(groups, "")).toBe(groups);
+    expect(filterModelProviders(groups, " , ")).toBe(groups);
+    expect(filterModelProviders(groups, "OpenRouter")).toEqual([groups[0]]);
+    expect(filterModelProviders(groups, "openrouter, anthropic")).toEqual([groups[0], groups[2]]);
+    expect(filterModelProviders(groups, "nope")).toEqual([]);
   });
 
   it("labels a profile with its model when it has one", () => {
