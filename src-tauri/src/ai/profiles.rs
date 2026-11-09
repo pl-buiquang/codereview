@@ -163,6 +163,9 @@ pub fn save(conn: &mut Connection, input: AiProfileInput) -> AppResult<AiProfile
     if let Some(h) = harness_by_id(&input.harness) {
         h.validate_settings(&input.settings)?;
     }
+    if let Some(host_id) = input.host_id {
+        crate::remote::host::require(conn, host_id)?;
+    }
     let settings = serde_json::to_string(&input.settings).unwrap_or_else(|_| "{}".into());
     let model = input.model.trim().to_string();
     let now = chrono::Utc::now().to_rfc3339();
@@ -443,6 +446,22 @@ mod tests {
         let mut missing = input("x");
         missing.id = Some(999);
         assert!(save(&mut conn, missing).is_err());
+    }
+
+    #[test]
+    fn a_profile_may_only_point_at_a_host_that_exists() {
+        let mut conn = open_memory();
+        let mut remote = input("Remote");
+        remote.host_id = Some(42);
+        assert!(save(&mut conn, remote).unwrap_err().to_string().contains("host 42 not found"));
+        let host = crate::remote::host::save(
+            &conn,
+            crate::remote::host::HostInput { id: None, name: "koza".into(), ssh_target: "koza".into(), remote_endpoint: "7777".into(), enabled: true },
+        )
+        .unwrap();
+        let mut remote = input("Remote");
+        remote.host_id = Some(host.id);
+        assert_eq!(save(&mut conn, remote).unwrap().host_id, Some(host.id));
     }
 
     #[test]

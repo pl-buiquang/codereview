@@ -26,6 +26,7 @@ pub mod mirror;
 mod path_env;
 pub mod provider;
 pub mod prompts;
+pub mod remote;
 pub mod repo_sync;
 pub mod routines;
 pub mod run_engine;
@@ -284,6 +285,9 @@ pub fn run() {
             commands::ai_review::run_ai_review,
             commands::ai_review::ai_review_status,
             commands::ai_profiles::ai_profile_list,
+            commands::hosts::host_list,
+            commands::hosts::host_save,
+            commands::hosts::host_delete,
             commands::ai_profiles::ai_profile_save,
             commands::ai_profiles::ai_profile_delete,
             commands::ai_profiles::ai_feature_profiles_get,
