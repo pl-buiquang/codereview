@@ -15,6 +15,7 @@ use std::path::Path;
 use std::process::Child;
 use std::time::Duration;
 
+use serde::Serialize;
 use serde_json::Value;
 
 use crate::ai_usage::{RunTag, RunUsage};
@@ -22,11 +23,12 @@ use crate::claude_sessions::ClaudeSession;
 use crate::error::{AppError, AppResult};
 
 pub mod claude;
+pub mod profiles;
 
 pub use claude::ClaudeCode;
 
 /// What a harness can do.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Caps {
     pub sessions: bool,
     pub resume: bool,
@@ -56,7 +58,8 @@ pub enum ToolPolicy {
 }
 
 /// The permission level of a run.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Access {
     /// The harness' own default (explicit, so the user's global settings never leak in).
     Default,
@@ -174,6 +177,10 @@ pub trait Harness: Send + Sync {
     fn caps(&self) -> Caps;
     /// Whether the harness' binary was found.
     fn available(&self) -> bool;
+    /// The installed version, when it can be told.
+    fn version(&self) -> Option<String> {
+        None
+    }
 
     /// Run to completion, parse the result and record its usage (failed runs included).
     fn one_shot(&self, req: &OneShot<'_>) -> AppResult<TurnResult>;
@@ -200,9 +207,22 @@ pub trait Harness: Send + Sync {
 // Compile-time proof that `Harness` is object-safe: this fails to build if a method breaks it.
 const _: Option<&dyn Harness> = None;
 
-/// The harness to use. Always Claude Code until profiles select one.
+static CLAUDE: ClaudeCode = ClaudeCode;
+
+/// Every harness the app knows, in display order.
+pub fn harnesses() -> [&'static dyn Harness; 1] {
+    [&CLAUDE]
+}
+
+/// The harness with this id (`"claude"`).
+pub fn harness_by_id(id: &str) -> Option<&'static dyn Harness> {
+    harnesses().into_iter().find(|h| h.id() == id)
+}
+
+/// Claude Code, for what is not profile-driven: the run engine's process control and the
+/// availability check. A feature that runs something resolves its harness from a profile
+/// ([`profiles`]) instead.
 pub fn harness_for() -> &'static dyn Harness {
-    static CLAUDE: ClaudeCode = ClaudeCode;
     &CLAUDE
 }
 

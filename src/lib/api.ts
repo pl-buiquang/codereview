@@ -44,6 +44,10 @@ import type {
   PrLabel,
   PrMeta,
   PrChecks,
+  AiProfile,
+  AiProfileInput,
+  FeatureProfiles,
+  HarnessInfo,
   Routine,
   RoutineContextRef,
   RoutineInput,
@@ -156,6 +160,14 @@ export const api = {
     invoke<void>("image_diff_run_report", { reviewId, model: model || null }),
 
   // Routines
+  aiProfileList: () => invoke<AiProfile[]>("ai_profile_list"),
+  aiProfileSave: (profile: AiProfileInput) => invoke<AiProfile>("ai_profile_save", { profile }),
+  aiProfileDelete: (id: number) => invoke<void>("ai_profile_delete", { id }),
+  aiFeatureProfilesGet: () => invoke<FeatureProfiles>("ai_feature_profiles_get"),
+  aiFeatureProfilesSet: (map: FeatureProfiles) => invoke<void>("ai_feature_profiles_set", { map }),
+  aiImportLegacyModels: (chat: string, overview: string) =>
+    invoke<boolean>("ai_import_legacy_models", { chat, overview }),
+  aiHarnesses: () => invoke<HarnessInfo[]>("ai_harnesses"),
   routineList: () => invoke<Routine[]>("routine_list"),
   routineSave: (routine: RoutineInput) => invoke<Routine>("routine_save", { routine }),
   routineDelete: (id: number) => invoke<void>("routine_delete", { id }),

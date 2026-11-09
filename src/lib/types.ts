@@ -1199,3 +1199,49 @@ export interface StackRebasePreview {
 export interface StackRebaseResult {
   report: { pushed: string[]; moved_local: string[]; skipped_local: string[] };
 }
+
+/** What a harness can do; the profile editor shows only the fields it supports. */
+export interface HarnessCaps {
+  sessions: boolean;
+  resume: boolean;
+  fork: boolean;
+  tools: boolean;
+  tool_allowlist: boolean;
+  streaming: boolean;
+  interactive_tui: boolean;
+  reports_cost: boolean;
+  replaces_system_prompt: boolean;
+  access_levels: string[];
+  pins_session_id: boolean;
+}
+
+export interface HarnessInfo {
+  id: string;
+  name: string;
+  caps: HarnessCaps;
+  /** The harness' binary was found. */
+  available: boolean;
+  version: string | null;
+}
+
+/** A named harness + model + settings that features and routines select. */
+export interface AiProfile {
+  id: number;
+  name: string;
+  harness: string;
+  /** Empty: the harness picks its own default. */
+  model: string;
+  settings: Record<string, unknown>;
+  host_id: number | null;
+  is_default: boolean;
+}
+
+export type AiProfileInput = Omit<AiProfile, "id"> & { id: number | null };
+
+/** Features that pick a profile; null falls back to the default profile. */
+export interface FeatureProfiles {
+  chat: number | null;
+  summaries: number | null;
+  theme: number | null;
+  sessions: number | null;
+}

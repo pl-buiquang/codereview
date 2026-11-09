@@ -47,6 +47,12 @@ impl Harness for ClaudeCode {
         crate::tools::claude_path().is_some()
     }
 
+    fn version(&self) -> Option<String> {
+        let out = Command::new(crate::tools::claude_bin()).arg("--version").output().ok()?;
+        let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        (out.status.success() && !text.is_empty()).then_some(text)
+    }
+
     fn one_shot(&self, req: &OneShot<'_>) -> AppResult<TurnResult> {
         run_one_shot(req)
     }

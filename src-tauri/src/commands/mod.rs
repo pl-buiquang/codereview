@@ -1,3 +1,4 @@
+pub mod ai_profiles;
 pub mod ai_review;
 pub mod board;
 pub mod chat;
