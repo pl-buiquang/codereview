@@ -451,6 +451,8 @@ struct Tui {
     cwd: String,
     /// The `--session` it was started on, when given.
     session: Option<String>,
+    /// When the process started, ms since the epoch (from `ps etime`).
+    started_ms: i64,
 }
 
 /// Every subcommand of the opencode CLI across versions (`opencode --help` of 2.2.5 plus the ones
@@ -523,7 +525,24 @@ fn next_field(s: &str) -> Option<(&str, &str)> {
     Some((&s[..end], s[end..].trim_start()))
 }
 
-/// Parse `ps -eo pid=,tty=,args=` output into the running TUIs. `argv_of` gives the exact argv of a
+/// `ps etime` (`[[dd-]hh:]mm:ss`) in seconds.
+fn parse_etime(s: &str) -> Option<i64> {
+    let (days, rest) = match s.split_once('-') {
+        Some((d, r)) => (d.parse::<i64>().ok()?, r),
+        None => (0, s),
+    };
+    let mut secs = 0;
+    let parts: Vec<&str> = rest.split(':').collect();
+    if parts.len() > 3 {
+        return None;
+    }
+    for p in parts {
+        secs = secs * 60 + p.parse::<i64>().ok()?;
+    }
+    Some(days * 86_400 + secs)
+}
+
+/// Parse `ps -eo pid=,tty=,etime=,args=` output into the running TUIs. `argv_of` gives the exact argv of a
 /// pid when the OS has it (`/proc/<pid>/cmdline`), else the whitespace-split `ps` args are used;
 /// `cwd_of` resolves a pid's working directory; `is_dir` says whether a path exists as a directory.
 fn parse_tuis(
@@ -531,12 +550,15 @@ fn parse_tuis(
     argv_of: impl Fn(i64) -> Option<Vec<String>>,
     cwd_of: impl Fn(i64) -> Option<String>,
     is_dir: impl Fn(&str) -> bool,
+    now_ms: i64,
 ) -> Vec<Tui> {
     ps.lines()
         .filter_map(|line| {
             let (pid, rest) = next_field(line)?;
             let pid: i64 = pid.parse().ok()?;
-            let (tty, args) = next_field(rest)?;
+            let (tty, rest) = next_field(rest)?;
+            let (etime, args) = next_field(rest)?;
+            let started_ms = now_ms - parse_etime(etime)? * 1000;
             let ps_argv: Vec<String> = args.split_whitespace().map(String::from).collect();
             if ps_argv.first()?.rsplit('/').next() != Some("opencode") {
                 return None;
@@ -549,7 +571,7 @@ fn parse_tuis(
                 .filter(|d| is_dir(d))
                 .unwrap_or(base);
             // `?` on Linux, `??` on macOS: no controlling terminal.
-            Some(Tui { pid, tty: (tty != "?" && tty != "??").then(|| tty.to_string()), cwd, session })
+            Some(Tui { pid, tty: (tty != "?" && tty != "??").then(|| tty.to_string()), cwd, session, started_ms })
         })
         .collect()
 }
@@ -560,26 +582,24 @@ fn proc_argv(pid: i64) -> Option<Vec<String>> {
     Some(raw.split(|b| *b == 0).filter(|a| !a.is_empty()).map(|a| String::from_utf8_lossy(a).into_owned()).collect())
 }
 
-/// Pair each TUI with its session: the one it was started on (`--session`), else the most
-/// recently updated session of its directory not already taken. A TUI with no match (a brand-new
-/// session not yet created, an unreadable listing) is left out.
+/// How much older than the TUI's start a session may be and still count as created by it.
+const START_SLACK_MS: i64 = 2_000;
+
+/// Pair each TUI with its session.
+/// - A TUI started with `--session <id>` has that session: it is looked up by id in the listing of
+///   the TUI's directory (opencode lists per project, so a session of a subdirectory shows up there
+///   too, whatever its own `directory`). If the listing doesn't have it (not created yet, listing
+///   failed or timed out) the TUI is still reported on that id, with no title.
+/// - An unpinned TUI is paired only when that is unambiguous: it is the one unpinned TUI of its
+///   directory and a session of that directory not taken by a pinned TUI was updated since the TUI
+///   started (opencode creates its session lazily, on the first message; a session untouched since
+///   before the TUI started is not its). The newest such session wins. Otherwise it is left out.
 fn match_tuis(tuis: &[Tui], listed: impl Fn(&str) -> Vec<ListedSession>) -> Vec<AgentSession> {
-    let mut taken: Vec<String> = Vec::new();
-    let mut out = Vec::new();
-    // Pinned TUIs first, so an unpinned one in the same directory can't steal their session.
-    let mut order: Vec<&Tui> = tuis.iter().collect();
-    order.sort_by_key(|t| t.session.is_none());
-    for t in order {
-        let sessions = listed(&t.cwd);
-        let found = match &t.session {
-            Some(id) => sessions.iter().find(|s| &s.id == id),
-            None => sessions.iter().find(|s| normalize_path(&s.directory) == t.cwd && !taken.contains(&s.id)),
-        };
-        let Some(s) = found else { continue };
-        taken.push(s.id.clone());
-        out.push(AgentSession {
+    let mut out: Vec<AgentSession> = Vec::new();
+    let session_of = |t: &Tui, id: &str, s: Option<&ListedSession>| {
+        AgentSession {
             harness: "opencode".into(),
-            session_id: s.id.clone(),
+            session_id: id.to_string(),
             pid: Some(t.pid),
             live: true,
             status: None,
@@ -588,20 +608,43 @@ fn match_tuis(tuis: &[Tui], listed: impl Fn(&str) -> Vec<ListedSession>) -> Vec<
             job_id: None,
             waiting_for: None,
             agent_view: None,
-            name: s.title.clone(),
-            cwd: if s.directory.is_empty() { t.cwd.clone() } else { s.directory.clone() },
+            name: s.and_then(|s| s.title.clone()),
+            cwd: s.map(|s| s.directory.clone()).filter(|d| !d.is_empty()).unwrap_or_else(|| t.cwd.clone()),
             git_branch: None,
             repo: None,
             tmux: None,
             tty: t.tty.clone(),
-            updated_at: s.updated,
+            updated_at: s.map_or(t.started_ms, |s| s.updated),
             focus: crate::claude_sessions::FocusState::NoTerminal,
             summaries: Vec::new(),
             original_name: None,
-        });
+        }
+    };
+    // Pinned TUIs first, so an unpinned one can't take their sessions.
+    for t in tuis.iter().filter(|t| t.session.is_some()) {
+        let id = t.session.as_deref().unwrap_or_default();
+        let sessions = listed(&t.cwd);
+        out.push(session_of(t, id, sessions.iter().find(|s| s.id == id)));
+    }
+    for t in tuis.iter().filter(|t| t.session.is_none()) {
+        if tuis.iter().filter(|o| o.session.is_none() && o.cwd == t.cwd).count() > 1 {
+            continue;
+        }
+        let found = listed(&t.cwd)
+            .into_iter()
+            .filter(|s| normalize_path(&s.directory) == t.cwd && s.updated >= t.started_ms - START_SLACK_MS)
+            .filter(|s| !out.iter().any(|o| o.session_id == s.id))
+            .max_by_key(|s| s.updated);
+        if let Some(s) = found {
+            out.push(session_of(t, &s.id, Some(&s)));
+        }
     }
     out.sort_by_key(|s| std::cmp::Reverse(s.updated_at));
     out
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64)
 }
 
 fn proc_cwd(pid: i64) -> Option<String> {
@@ -629,8 +672,8 @@ fn list_in(dir: &str) -> Vec<ListedSession> {
 /// command runs in), so only the directories of running TUIs are queried; sessions with no
 /// running TUI are not reported.
 fn live_sessions_now() -> Vec<AgentSession> {
-    let Ok(ps) = Command::new("ps").args(["-eo", "pid=,tty=,args="]).output() else { return Vec::new() };
-    let tuis = parse_tuis(&String::from_utf8_lossy(&ps.stdout), proc_argv, proc_cwd, |d| std::path::Path::new(d).is_dir());
+    let Ok(ps) = Command::new("ps").args(["-eo", "pid=,tty=,etime=,args="]).output() else { return Vec::new() };
+    let tuis = parse_tuis(&String::from_utf8_lossy(&ps.stdout), proc_argv, proc_cwd, |d| std::path::Path::new(d).is_dir(), now_ms());
     let cache = std::cell::RefCell::new(std::collections::HashMap::<String, Vec<ListedSession>>::new());
     match_tuis(&tuis, |dir| cache.borrow_mut().entry(dir.to_string()).or_insert_with(|| list_in(dir)).clone())
 }
@@ -982,34 +1025,34 @@ mod tests {
 
     #[test]
     fn running_tuis_are_read_from_ps() {
-        let ps = "  11 pts/3 opencode --session ses_a\n  12 ?     /x/opencode serve --service\n  13 pts/4 opencode sub\n  14 pts/5 bash\n  15 pts/6 opencode ../up\n";
-        let tuis = parse_tuis(ps, |_| None, |pid| Some(format!("/cwd/{pid}")), |d| d == "/cwd/13/sub" || d == "/cwd/up");
+        let ps = "  11 pts/3 01:00 opencode --session ses_a\n  12 ?     00:05 /x/opencode serve --service\n  13 pts/4 00:05 opencode sub\n  14 pts/5 00:05 bash\n  15 pts/6 2-01:00:00 opencode ../up\n";
+        let tuis = parse_tuis(ps, |_| None, |pid| Some(format!("/cwd/{pid}")), |d| d == "/cwd/13/sub" || d == "/cwd/up", 10_000_000);
         assert_eq!(
             tuis,
             vec![
-                Tui { pid: 11, tty: Some("pts/3".into()), cwd: "/cwd/11".into(), session: Some("ses_a".into()) },
-                Tui { pid: 13, tty: Some("pts/4".into()), cwd: "/cwd/13/sub".into(), session: None },
-                Tui { pid: 15, tty: Some("pts/6".into()), cwd: "/cwd/up".into(), session: None },
+                Tui { pid: 11, tty: Some("pts/3".into()), cwd: "/cwd/11".into(), session: Some("ses_a".into()), started_ms: 9_940_000 },
+                Tui { pid: 13, tty: Some("pts/4".into()), cwd: "/cwd/13/sub".into(), session: None, started_ms: 9_995_000 },
+                Tui { pid: 15, tty: Some("pts/6".into()), cwd: "/cwd/up".into(), session: None, started_ms: 10_000_000 - 176_400_000 },
             ]
         );
         // A positional that is not an existing directory is ignored: the TUI runs in its cwd.
-        let tuis = parse_tuis("5 pts/1 opencode nonsense\n", |_| None, |_| Some("/w".into()), |_| false);
+        let tuis = parse_tuis("5 pts/1 00:01 opencode nonsense\n", |_| None, |_| Some("/w".into()), |_| false, 0);
         assert_eq!(tuis[0].cwd, "/w");
     }
 
     #[test]
     fn the_exact_argv_wins_over_the_split_ps_args() {
-        let ps = "21 pts/1 opencode --prompt fix the thing in /x --session ses_nope\n";
+        let ps = "21 pts/1 00:01 opencode --prompt fix the thing in /x --session ses_nope\n";
         let exact = vec!["opencode", "-s", "ses_real", "--prompt", "fix the thing in /x --session ses_nope"];
-        let tuis = parse_tuis(ps, |_| Some(exact.iter().map(|s| s.to_string()).collect()), |_| Some("/w".into()), |_| true);
+        let tuis = parse_tuis(ps, |_| Some(exact.iter().map(|s| s.to_string()).collect()), |_| Some("/w".into()), |_| true, 0);
         assert_eq!(tuis[0].session.as_deref(), Some("ses_real"));
         assert_eq!(tuis[0].cwd, "/w");
     }
 
     #[test]
     fn macos_ps_output_has_padded_columns_and_double_question_mark_ttys() {
-        let ps = "  501 ttys003  opencode --session ses_m\n  502 ??       /opt/homebrew/bin/opencode\n99999 ttys010  /Users/me/.opencode/bin/opencode -m a/b\n";
-        let tuis = parse_tuis(ps, |_| None, |_| Some("/Users/me/app".into()), |_| false);
+        let ps = "  501 ttys003    05:12 opencode --session ses_m\n  502 ??       1-02:03:04 /opt/homebrew/bin/opencode\n99999 ttys010    59:59 /Users/me/.opencode/bin/opencode -m a/b\n";
+        let tuis = parse_tuis(ps, |_| None, |_| Some("/Users/me/app".into()), |_| false, 0);
         assert_eq!(tuis.iter().map(|t| (t.pid, t.tty.as_deref())).collect::<Vec<_>>(), [
             (501, Some("ttys003")),
             (502, None),
@@ -1017,30 +1060,67 @@ mod tests {
         ]);
         assert_eq!(tuis[0].session.as_deref(), Some("ses_m"));
         // A Linux `?` is no terminal either.
-        assert_eq!(parse_tuis("7 ? opencode\n", |_| None, |_| Some("/w".into()), |_| false)[0].tty, None);
+        assert_eq!(parse_tuis("7 ? 00:01 opencode\n", |_| None, |_| Some("/w".into()), |_| false, 0)[0].tty, None);
+    }
+
+    #[test]
+    fn etime_is_read_in_all_its_shapes() {
+        assert_eq!(parse_etime("00:07"), Some(7));
+        assert_eq!(parse_etime("12:34"), Some(754));
+        assert_eq!(parse_etime("1:02:03"), Some(3723));
+        assert_eq!(parse_etime("2-01:00:00"), Some(2 * 86_400 + 3600));
+        assert_eq!(parse_etime("nope"), None);
     }
 
     #[test]
     fn tuis_are_matched_to_their_sessions() {
         let l = parse_session_list(LIST);
-        let tui = |pid, session: Option<&str>| Tui { pid, tty: None, cwd: "/home/me/app".into(), session: session.map(String::from) };
+        let (newest, older) = (l[0].clone(), l[1].clone());
+        let tui = |pid, session: Option<&str>, started_ms| Tui {
+            pid,
+            tty: None,
+            cwd: "/home/me/app".into(),
+            session: session.map(String::from),
+            started_ms,
+        };
         let by_dir = |_: &str| l.clone();
-        // Two unpinned TUIs in one directory take the two newest sessions, one each.
-        let out = match_tuis(&[tui(1, None), tui(2, None)], by_dir);
-        assert_eq!(out.iter().map(|s| (s.pid, s.session_id.as_str())).collect::<Vec<_>>(), [
-            (Some(1), "ses_0b6f11dfdffeyohpKrjiC33cq6"),
-            (Some(2), "ses_0b6e9a9b0ffe3mK7hATDBvpWeX"),
-        ]);
-        // A pinned TUI keeps its session even when an unpinned one comes first.
-        let out = match_tuis(&[tui(1, None), tui(2, Some("ses_0b6f11dfdffeyohpKrjiC33cq6"))], by_dir);
-        let pid_of = |id: &str| out.iter().find(|s| s.session_id == id).and_then(|s| s.pid);
-        assert_eq!(pid_of("ses_0b6f11dfdffeyohpKrjiC33cq6"), Some(2));
-        assert_eq!(pid_of("ses_0b6e9a9b0ffe3mK7hATDBvpWeX"), Some(1));
-        // Unknown pinned session or empty listing: left out.
-        assert!(match_tuis(&[tui(3, Some("ses_nope"))], by_dir).is_empty());
-        assert!(match_tuis(&[tui(4, None)], |_| Vec::new()).is_empty());
-        let s = &match_tuis(&[tui(5, None)], by_dir)[0];
+        // An unpinned TUI started before the newest session was updated takes it.
+        let long_ago = newest.updated - 60_000;
+        let out = match_tuis(&[tui(1, None, long_ago)], by_dir);
+        assert_eq!(out.iter().map(|s| (s.pid, s.session_id.as_str())).collect::<Vec<_>>(), [(Some(1), newest.id.as_str())]);
+        let s = &out[0];
         assert!(s.live && s.harness == "opencode" && s.name.as_deref() == Some("Fix the login redirect"));
-        assert_eq!((s.updated_at, s.cwd.as_str()), (1784615998673, "/home/me/app"));
+        assert_eq!((s.updated_at, s.cwd.as_str()), (newest.updated, "/home/me/app"));
+        // A TUI started after every session was last updated has no session yet (created lazily).
+        assert!(match_tuis(&[tui(2, None, newest.updated + 60_000)], by_dir).is_empty());
+        // Two unpinned TUIs in one directory are ambiguous: neither is guessed.
+        assert!(match_tuis(&[tui(3, None, long_ago), tui(4, None, long_ago)], by_dir).is_empty());
+        // A pinned TUI keeps its session, even an old one, and an unpinned neighbour doesn't steal it.
+        let out = match_tuis(&[tui(5, None, older.updated - 1_000), tui(6, Some(&newest.id), newest.updated + 60_000)], by_dir);
+        let pid_of = |id: &str| out.iter().find(|s| s.session_id == id).and_then(|s| s.pid);
+        assert_eq!(pid_of(&newest.id), Some(6));
+        assert_eq!(pid_of(&older.id), Some(5));
+        // An empty listing leaves an unpinned TUI out.
+        assert!(match_tuis(&[tui(7, None, 0)], |_| Vec::new()).is_empty());
+        // A listed session of another directory (a sibling project) is not an unpinned TUI's.
+        let mut elsewhere = newest.clone();
+        elsewhere.directory = "/home/me/other".into();
+        assert!(match_tuis(&[tui(8, None, 0)], |_| vec![elsewhere.clone()]).is_empty());
+        // `..` in the listed directory is normalized before comparing.
+        let mut dotted = newest.clone();
+        dotted.directory = "/home/me/x/../app/./".into();
+        assert_eq!(match_tuis(&[tui(9, None, 0)], |_| vec![dotted.clone()]).len(), 1);
+    }
+
+    #[test]
+    fn a_pinned_session_is_found_whatever_its_directory_and_kept_when_the_lookup_fails() {
+        let l = parse_session_list(LIST);
+        let t = Tui { pid: 1, tty: None, cwd: "/home/me/app/sub".into(), session: Some(l[0].id.clone()), started_ms: 42 };
+        // The listing of the cwd's project holds a session whose directory is the project root.
+        let out = match_tuis(&[t.clone()], |_| l.clone());
+        assert_eq!((out[0].session_id.as_str(), out[0].cwd.as_str()), (l[0].id.as_str(), "/home/me/app"));
+        // Not listed (lazy creation) or the listing failed: still the pinned id, no title.
+        let out = match_tuis(&[t], |_| Vec::new());
+        assert_eq!((out[0].session_id.as_str(), out[0].name.clone(), out[0].cwd.as_str(), out[0].updated_at), (l[0].id.as_str(), None, "/home/me/app/sub", 42));
     }
 }
