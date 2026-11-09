@@ -405,6 +405,15 @@ const FORBIDDEN_FLAGS: &[(&str, &str)] = &[
     // Feature flags can turn on approval and permission machinery; no harmless subset is known.
     ("--enable", "--enable"),
     ("--disable", "--disable"),
+    // Approval and trust machinery, the working tree, and rule / user-config loading.
+    ("--approve-for-me", "--approve-for-me"),
+    ("--dangerously-bypass-hook-trust", "--dangerously-bypass-hook-trust"),
+    ("--worktree", "--worktree"),
+    ("--ignore-rules", "--ignore-rules"),
+    ("--ignore-user-config", "--ignore-user-config"),
+    // Makes codex write an arbitrary file, outside the sandbox.
+    ("-o", "--output-last-message"),
+    ("--output-last-message", "--output-last-message"),
 ];
 
 /// The only `-c` keys `extra_args` may set: model tuning and display, none of which touch the
@@ -1311,6 +1320,18 @@ mod tests {
             &["--disable=hooks"],
             &["-C", "/"],
             &["--cd=/"],
+            &["--approve-for-me"],
+            &["--approve-for-me=true"],
+            &["--dangerously-bypass-hook-trust"],
+            &["--worktree"],
+            &["--worktree", "x"],
+            &["--worktree=x"],
+            &["-o", "/tmp/x"],
+            &["-o/tmp/x"],
+            &["--output-last-message", "/tmp/x"],
+            &["--output-last-message=/tmp/x"],
+            &["--ignore-rules"],
+            &["--ignore-user-config"],
             &["--cr-allow-full"],
             &["--cr-allow-full=guess"],
             &["--cr-sandbox=danger-full-access"],

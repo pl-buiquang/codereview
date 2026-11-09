@@ -207,7 +207,7 @@ export function AiProfilesSection() {
                   commands with <strong>no sandbox</strong> and only happens when allowed here. Edit mode cannot commit
                   in a linked worktree; its network access is Codex's default and not guaranteed off. The sandbox here can
                   only lower the run's access level, never raise it, and <code>extra_args</code> may not carry sandbox,
-                  approval, profile, feature or <code>--cd</code> flags, and its <code>-c</code> keys are limited to{" "}
+                  approval, trust, profile, feature, worktree, rules, user-config, <code>--cd</code> or output-file flags, and its <code>-c</code> keys are limited to{" "}
                   <code>model</code>, <code>model_reasoning_effort</code>, <code>model_reasoning_summary</code>,{" "}
                   <code>model_verbosity</code>, <code>hide_agent_reasoning</code>, <code>show_raw_agent_reasoning</code> and{" "}
                   <code>personality</code> (saving refuses anything else). <code>--add-dir</code> is allowed and widens the
