@@ -76,8 +76,8 @@ impl MirrorHooks for AppHooks {
         run_finished(&self.app, run_id, loaded, fin);
     }
 
-    fn sync_outbox(&self, run_id: i64, remote_run_id: i64, client: &RemoteClient) {
-        outbox::sync(self, run_id, remote_run_id, client);
+    fn sync_outbox(&self, run_id: i64, remote_run_id: i64, client: &RemoteClient, terminal: bool) -> Vec<String> {
+        outbox::sync(self, run_id, remote_run_id, client, terminal)
     }
 }
 

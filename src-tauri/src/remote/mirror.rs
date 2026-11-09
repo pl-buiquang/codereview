@@ -32,8 +32,11 @@ pub trait MirrorHooks: Send + Sync {
     fn status_changed(&self, _run_id: i64, _status: &str) {}
     /// The run ended and its row is settled.
     fn finished(&self, _run_id: i64, _fin: &Finished) {}
-    /// Apply the run's pending outbox ops locally and acknowledge them (see [`super::outbox`]).
-    fn sync_outbox(&self, _run_id: i64, _remote_run_id: i64, _client: &RemoteClient) {}
+    /// Apply the run's pending outbox ops locally and acknowledge them (see [`super::outbox`]). `terminal`:
+    /// the run is over. Returns the ops that were given up on.
+    fn sync_outbox(&self, _run_id: i64, _remote_run_id: i64, _client: &RemoteClient, _terminal: bool) -> Vec<String> {
+        Vec::new()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -256,7 +259,7 @@ fn step(h: &dyn MirrorHooks, cfg: &MirrorConfig, run_id: i64, run: &MirrorRun, r
     let mut progress = false;
     let mut last_sync = Instant::now() - cfg.outbox_every;
     // Ops left from before a restart or a drop.
-    h.sync_outbox(run_id, remote_id, &client);
+    h.sync_outbox(run_id, remote_id, &client, false);
     loop {
         if stop.load(Ordering::Relaxed) {
             return Step::Retry { why: "stopped".into(), progress };
@@ -277,14 +280,24 @@ fn step(h: &dyn MirrorHooks, cfg: &MirrorConfig, run_id: i64, run: &MirrorRun, r
                 }
                 if last_sync.elapsed() >= cfg.outbox_every {
                     last_sync = Instant::now();
-                    h.sync_outbox(run_id, remote_id, &client);
+                    h.sync_outbox(run_id, remote_id, &client, false);
                 }
             }
             Ok(Some(StreamItem::Status(s))) => {
                 // Ops first, so a `notify` fires before the "finished" notification and a board link
                 // exists when the run is reported done.
-                h.sync_outbox(run_id, remote_id, &client);
-                if is_terminal(&s.status) {
+                let terminal = is_terminal(&s.status);
+                let dropped = h.sync_outbox(run_id, remote_id, &client, terminal);
+                if terminal {
+                    let mut s = s;
+                    if !dropped.is_empty() {
+                        // Never silent: the run's error says which board/focus writes did not make it.
+                        let note = format!("{} op(s) from the remote run could not be applied here: {}", dropped.len(), dropped.join(", "));
+                        s.error = Some(match s.error.take() {
+                            Some(e) if !e.is_empty() => format!("{e}\n{note}"),
+                            _ => note,
+                        });
+                    }
                     if finish_status(h, run_id, &s) {
                         h.status_changed(run_id, static_status(&s.status));
                     }
@@ -314,6 +327,7 @@ mod tests {
         pub events: Mutex<Vec<(i64, i64)>>,
         pub finished: Mutex<Vec<(String, String, Option<String>)>>,
         pub syncs: AtomicUsize,
+        pub dropped: Mutex<Vec<String>>,
     }
 
     impl MirrorHooks for TestHooks {
@@ -329,8 +343,9 @@ mod tests {
         fn finished(&self, _: i64, fin: &Finished) {
             self.finished.lock().unwrap().push((fin.status.to_string(), fin.text.clone(), fin.error.clone()));
         }
-        fn sync_outbox(&self, _: i64, _: i64, _: &RemoteClient) {
+        fn sync_outbox(&self, _: i64, _: i64, _: &RemoteClient, _: bool) -> Vec<String> {
             self.syncs.fetch_add(1, Ordering::Relaxed);
+            self.dropped.lock().unwrap().clone()
         }
     }
 
@@ -362,7 +377,7 @@ mod tests {
         )
         .unwrap();
         let run_id = conn.last_insert_rowid();
-        let hooks = Arc::new(TestHooks { conn: Mutex::new(conn), proxy, events: Mutex::new(Vec::new()), finished: Mutex::new(Vec::new()), syncs: AtomicUsize::new(0) });
+        let hooks = Arc::new(TestHooks { conn: Mutex::new(conn), proxy, events: Mutex::new(Vec::new()), finished: Mutex::new(Vec::new()), syncs: AtomicUsize::new(0), dropped: Mutex::new(Vec::new()) });
         (srv, hooks, run_id, created.id)
     }
 
@@ -471,6 +486,16 @@ mod tests {
         assert_eq!(status, "error");
         assert!(error.unwrap().contains("does not know this run"), "explicit message");
         assert_eq!(h.finished.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn ops_given_up_on_are_reported_in_the_runs_error() {
+        let (_srv, h, run_id, _) = setup(QUICK);
+        *h.dropped.lock().unwrap() = vec!["board_link (1:1)".into()];
+        follow(&*h, &fast(), run_id, &AtomicBool::new(false));
+        let (status, _, error) = status_of(&h, run_id);
+        assert_eq!(status, "ok");
+        assert!(error.unwrap().contains("1 op(s) from the remote run could not be applied here: board_link (1:1)"));
     }
 
     #[test]
