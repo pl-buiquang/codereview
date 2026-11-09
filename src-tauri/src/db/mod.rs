@@ -59,6 +59,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("migrations/0040_routine_run_detach.sql"),
     include_str!("migrations/0041_review_sidebar_open.sql"),
     include_str!("migrations/0042_review_since.sql"),
+    include_str!("migrations/0043_ai_profiles.sql"),
 ];
 
 pub fn open(path: &Path) -> AppResult<Connection> {
@@ -402,6 +403,134 @@ mod tests {
         conn.execute("DELETE FROM review", []).unwrap();
         conn.execute("DELETE FROM board_card WHERE id = 'PR_7'", []).unwrap();
         assert_eq!(q("SELECT COUNT(*) FROM board_meta"), "0", "board_meta still cascades from the rebuilt card");
+    }
+
+    /// A database at 0042 with one routine per permission mode, plus a handler routine.
+    fn db_at_0042() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        for script in &MIGRATIONS[..42] {
+            conn.execute_batch(script).unwrap();
+        }
+        conn.pragma_update(None, "user_version", 42i64).unwrap();
+        let modes = [
+            ("bypass", "bypassPermissions", None),
+            ("edits", "acceptEdits", None),
+            ("plain-default", "default", None),
+            ("plan", "plan", None),
+            ("auto", "auto", None),
+            ("dont-ask", "dontAsk", None),
+            ("focus", "default", Some("focus")),
+            ("review", "acceptEdits", Some("ai_review")),
+        ];
+        for (key, mode, handler) in modes {
+            conn.execute(
+                "INSERT INTO routine (key, name, context_type, prompt_template, system_prompt_mode, permission_mode,
+                   allowed_tools, extra_args, handler, created_at, updated_at)
+                 VALUES (?1, ?1, 'pr', 'p', 'replace', ?2, '[\"Read\",\"Bash(git:*)\"]', '[\"--effort\",\"low\"]', ?3, 'now', 'now')",
+                rusqlite::params![key, mode, handler],
+            )
+            .unwrap();
+        }
+        conn
+    }
+
+    #[test]
+    fn migration_0043_maps_permission_mode_to_access() {
+        let conn = db_at_0042();
+        migrate(&conn).unwrap();
+        let access = |key: &str| -> String {
+            conn.query_row("SELECT access FROM routine WHERE key = ?1", [key], |r| r.get(0)).unwrap()
+        };
+        assert_eq!(access("bypass"), "full");
+        assert_eq!(access("edits"), "edit");
+        assert_eq!(access("review"), "edit");
+        for key in ["plain-default", "plan", "auto", "dont-ask", "focus"] {
+            assert_eq!(access(key), "read_only", "{key}");
+        }
+    }
+
+    #[test]
+    fn migration_0043_backfills_kind_from_handler() {
+        let conn = db_at_0042();
+        migrate(&conn).unwrap();
+        let kind = |key: &str| -> String {
+            conn.query_row("SELECT kind FROM routine WHERE key = ?1", [key], |r| r.get(0)).unwrap()
+        };
+        assert_eq!(kind("focus"), "system");
+        assert_eq!(kind("review"), "system");
+        assert_eq!(kind("bypass"), "plain");
+        assert_eq!(kind("plan"), "plain");
+    }
+
+    #[test]
+    fn migration_0043_moves_claude_fields_into_harness_overrides() {
+        let conn = db_at_0042();
+        migrate(&conn).unwrap();
+        let raw: String =
+            conn.query_row("SELECT harness_overrides FROM routine WHERE key = 'plan'", [], |r| r.get(0)).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(
+            v,
+            serde_json::json!({ "claude": {
+                "permission_mode": "plan",
+                "allowed_tools": ["Read", "Bash(git:*)"],
+                "extra_args": ["--effort", "low"],
+                "system_prompt_mode": "replace",
+            }})
+        );
+        // The old columns are left as they were.
+        let (mode, tools): (String, String) = conn
+            .query_row("SELECT permission_mode, allowed_tools FROM routine WHERE key = 'plan'", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap();
+        assert_eq!(mode, "plan");
+        assert_eq!(tools, "[\"Read\",\"Bash(git:*)\"]");
+    }
+
+    #[test]
+    fn migration_0043_seeds_one_default_claude_profile_and_keeps_existing_rows_unpinned() {
+        let conn = db_at_0042();
+        conn.execute("INSERT INTO repository (local_path, default_branch, added_at) VALUES ('/r', 'main', 'now')", []).unwrap();
+        conn.execute("INSERT INTO target (repo_id, kind, title, base_ref, head_ref, created_at) VALUES (1, 'local', 't', 'a', 'b', 'now')", []).unwrap();
+        conn.execute("INSERT INTO review (target_id, body, status, created_at, updated_at) VALUES (1, '', 'draft', 'now', 'now')", []).unwrap();
+        conn.execute("INSERT INTO chat (review_id, model, created_at, updated_at) VALUES (1, 'opus', 'now', 'now')", []).unwrap();
+        conn.execute("INSERT INTO ai_run (started_at, feature, status) VALUES ('2026-01-01T00:00:00.000Z', 'chat', 'ok')", []).unwrap();
+
+        migrate(&conn).unwrap();
+
+        let (name, harness, default): (String, String, i64) = conn
+            .query_row("SELECT name, harness, is_default FROM ai_profile", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap();
+        assert_eq!((name.as_str(), harness.as_str(), default), ("Claude Code", "claude", 1));
+        let pinned: Option<i64> = conn.query_row("SELECT profile_id FROM chat", [], |r| r.get(0)).unwrap();
+        assert_eq!(pinned, None);
+        let run_harness: String = conn.query_row("SELECT harness FROM ai_run", [], |r| r.get(0)).unwrap();
+        assert_eq!(run_harness, "claude");
+        let routine_profile: Option<i64> = conn.query_row("SELECT profile_id FROM routine WHERE key = 'plan'", [], |r| r.get(0)).unwrap();
+        assert_eq!(routine_profile, None);
+    }
+
+    #[test]
+    fn migration_0043_allows_a_single_default_profile_and_unpins_on_delete() {
+        let conn = open_memory();
+        let second = conn.execute(
+            "INSERT INTO ai_profile (name, is_default, created_at, updated_at) VALUES ('b', 1, 'n', 'n')",
+            [],
+        );
+        assert!(second.is_err(), "a second default profile is rejected");
+        conn.execute("INSERT INTO ai_profile (name, created_at, updated_at) VALUES ('b', 'n', 'n')", []).unwrap();
+        let id = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO routine (key, name, context_type, prompt_template, profile_id, created_at, updated_at)
+             VALUES ('k', 'k', 'pr', 'p', ?1, 'n', 'n')",
+            [id],
+        )
+        .unwrap();
+        conn.execute("DELETE FROM ai_profile WHERE id = ?1", [id]).unwrap();
+        let pinned: Option<i64> = conn.query_row("SELECT profile_id FROM routine WHERE key = 'k'", [], |r| r.get(0)).unwrap();
+        assert_eq!(pinned, None);
     }
 
     #[test]
