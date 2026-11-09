@@ -131,6 +131,16 @@ pub fn save(conn: &Connection, input: HostInput) -> AppResult<Host> {
     };
     let id = match input.id {
         Some(id) => {
+            // A run in flight is followed by its remote id on this host's daemon: moving the host would
+            // make the mirror ask another daemon about it.
+            if let Some(old) = get(conn, id)? {
+                if (old.ssh_target != target || old.remote_endpoint != endpoint) && active_runs(conn, id)? > 0 {
+                    return Err(AppError::Other(format!(
+                        "“{}” still has active runs: wait for them (or stop them) before changing its SSH target or endpoint",
+                        old.name
+                    )));
+                }
+            }
             // The connection facts of a host that changed address are stale.
             let changed = conn
                 .execute(
@@ -158,6 +168,10 @@ pub fn save(conn: &Connection, input: HostInput) -> AppResult<Host> {
         }
     };
     require(conn, id)
+}
+
+fn active_runs(conn: &Connection, host_id: i64) -> AppResult<i64> {
+    Ok(conn.query_row("SELECT COUNT(*) FROM routine_run WHERE host_id = ?1 AND status IN ('queued', 'running')", params![host_id], |r| r.get(0))?)
 }
 
 /// Remove a host. Refused while a profile points at it or a run on it is still going: both would
@@ -275,6 +289,42 @@ mod tests {
         e.id = Some(h.id);
         e.remote_endpoint = "7777".into();
         assert_eq!(save(&conn, e).unwrap().last_protocol, None);
+    }
+
+    #[test]
+    fn a_host_with_active_runs_cannot_be_repointed_but_can_be_renamed() {
+        let conn = open_memory();
+        let h = save(&conn, input("a")).unwrap();
+        conn.execute(
+            "INSERT INTO routine (key, name, context_type, prompt_template, created_at, updated_at) VALUES ('k', 'k', 'pr', 'p', 'n', 'n')",
+            [],
+        )
+        .unwrap();
+        let rid = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO routine_run (routine_id, context_type, context_key, context_json, status, queued_at, host_id)
+             VALUES (?1, 'pr', 'a', '{}', 'running', 'n', ?2)",
+            params![rid, h.id],
+        )
+        .unwrap();
+        let mut moved = input("a");
+        moved.id = Some(h.id);
+        moved.remote_endpoint = "7777".into();
+        assert!(save(&conn, moved).unwrap_err().to_string().contains("still has active runs"));
+        let mut other_target = input("a");
+        other_target.id = Some(h.id);
+        other_target.ssh_target = "elsewhere".into();
+        assert!(save(&conn, other_target).is_err());
+        // a rename or disabling keeps the address and is fine
+        let mut renamed = input("b");
+        renamed.id = Some(h.id);
+        renamed.enabled = false;
+        assert_eq!(save(&conn, renamed).unwrap().name, "b");
+        conn.execute("UPDATE routine_run SET status = 'ok'", []).unwrap();
+        let mut moved = input("b");
+        moved.id = Some(h.id);
+        moved.remote_endpoint = "7777".into();
+        assert_eq!(save(&conn, moved).unwrap().remote_endpoint, "7777");
     }
 
     #[test]
