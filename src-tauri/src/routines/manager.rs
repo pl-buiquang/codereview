@@ -46,6 +46,8 @@ pub struct RoutineManager {
     engine: OnceLock<Arc<RunEngine>>,
     /// The quit confirmation is on screen: a second quit request must not stack another.
     quit_prompt_open: Mutex<bool>,
+    /// Remote runs being driven by this session (see `remote_run`).
+    pub(super) remote: super::remote_run::RemoteRuns,
 }
 
 /// A run as the UI sees it.
@@ -70,6 +72,8 @@ pub struct RoutineRun {
     pub num_turns: i64,
     /// Id of the harness the run is on (`claude` for every run before harnesses existed).
     pub harness: String,
+    /// The remote host that runs it (`None`: this machine).
+    pub host_id: Option<i64>,
     pub queued_at: String,
     pub started_at: Option<String>,
     pub ended_at: Option<String>,
@@ -101,6 +105,7 @@ impl RoutineRun {
             cost_usd: row.get("cost_usd")?,
             num_turns: row.get("num_turns")?,
             harness: row.get("harness")?,
+            host_id: row.get("host_id")?,
             queued_at: row.get("queued_at")?,
             started_at: row.get("started_at")?,
             ended_at: row.get("ended_at")?,
@@ -236,7 +241,7 @@ pub fn set_routine_settings(conn: &Connection, s: &RoutineSettings) -> AppResult
     Ok(())
 }
 
-fn now() -> String {
+pub(super) fn now() -> String {
     chrono::Utc::now().to_rfc3339()
 }
 
@@ -247,14 +252,14 @@ struct RunUpdated {
 }
 
 #[derive(Serialize, Clone)]
-struct RunEventPayload<'a> {
-    run_id: i64,
-    seq: i64,
-    kind: &'a str,
-    json: &'a str,
+pub(super) struct RunEventPayload<'a> {
+    pub run_id: i64,
+    pub seq: i64,
+    pub kind: &'a str,
+    pub json: &'a str,
 }
 
-fn emit_updated(app: &AppHandle, run_id: i64, status: &str) {
+pub(super) fn emit_updated(app: &AppHandle, run_id: i64, status: &str) {
     let _ = app.emit("routine-run-updated", RunUpdated { run_id, status: status.to_string() });
 }
 
@@ -264,10 +269,14 @@ fn emit_updated(app: &AppHandle, run_id: i64, status: &str) {
 /// that left no output file (older runs) is terminated first when it still looks like our `claude -p`.
 pub fn mark_interrupted(conn: &Connection, db_path: &Path) -> AppResult<usize> {
     let root = runs_root(db_path);
-    let mut stmt = conn.prepare("SELECT id, pid, harness FROM routine_run WHERE status = 'running'")?;
+    // Runs on a remote host are not ours to interrupt: `resume_remote` re-attaches to them.
+    let mut stmt = conn.prepare("SELECT id, pid, harness FROM routine_run WHERE status = 'running' AND host_id IS NULL")?;
     let rows: Vec<(i64, Option<i64>, String)> =
         stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect::<rusqlite::Result<_>>()?;
-    let mut n = conn.execute("UPDATE routine_run SET status = 'interrupted', ended_at = ?1 WHERE status = 'queued'", params![now()])?;
+    let mut n = conn.execute(
+        "UPDATE routine_run SET status = 'interrupted', ended_at = ?1 WHERE status = 'queued' AND host_id IS NULL",
+        params![now()],
+    )?;
     for (id, pid, harness) in rows {
         if root.join(id.to_string()).join(STDOUT_FILE).exists() {
             continue;
@@ -348,6 +357,9 @@ impl RoutineManager {
 
     /// Stop a run: a queued one is dropped, a running one is terminated.
     pub fn stop(&self, app: &AppHandle, run_id: i64) -> AppResult<()> {
+        if self.stop_remote(app, run_id)? {
+            return Ok(());
+        }
         self.engine(app).stop(run_id)
     }
 
@@ -409,12 +421,12 @@ impl RunStore for SqliteRunStore {
     }
 
     fn running_count(&self) -> AppResult<i64> {
-        self.with_conn(|c| Ok(c.query_row("SELECT COUNT(*) FROM routine_run WHERE status = 'running'", [], |r| r.get(0))?))
+        self.with_conn(|c| Ok(c.query_row("SELECT COUNT(*) FROM routine_run WHERE status = 'running' AND host_id IS NULL", [], |r| r.get(0))?))
     }
 
     fn next_queued(&self) -> AppResult<Option<i64>> {
         self.with_conn(|c| {
-            Ok(c.query_row("SELECT id FROM routine_run WHERE status = 'queued' ORDER BY id LIMIT 1", [], |r| r.get(0))
+            Ok(c.query_row("SELECT id FROM routine_run WHERE status = 'queued' AND host_id IS NULL ORDER BY id LIMIT 1", [], |r| r.get(0))
                 .optional()?)
         })
     }
@@ -445,7 +457,7 @@ impl RunStore for SqliteRunStore {
     fn active_count(&self) -> AppResult<usize> {
         self.with_conn(|c| {
             let n: i64 = c
-                .query_row("SELECT COUNT(*) FROM routine_run WHERE status IN ('queued', 'running')", [], |r| r.get(0))
+                .query_row("SELECT COUNT(*) FROM routine_run WHERE status IN ('queued', 'running') AND host_id IS NULL", [], |r| r.get(0))
                 .unwrap_or(0);
             Ok(n as usize)
         })
@@ -453,7 +465,7 @@ impl RunStore for SqliteRunStore {
 
     fn kill_queued(&self) -> AppResult<()> {
         self.with_conn(|c| {
-            c.execute("UPDATE routine_run SET status = 'killed', ended_at = ?1 WHERE status = 'queued'", params![now()])?;
+            c.execute("UPDATE routine_run SET status = 'killed', ended_at = ?1 WHERE status = 'queued' AND host_id IS NULL", params![now()])?;
             Ok(())
         })
     }
@@ -461,7 +473,7 @@ impl RunStore for SqliteRunStore {
     fn kill_active(&self) -> AppResult<()> {
         self.with_conn(|c| {
             c.execute(
-                "UPDATE routine_run SET status = 'killed', ended_at = ?1 WHERE status IN ('queued', 'running')",
+                "UPDATE routine_run SET status = 'killed', ended_at = ?1 WHERE status IN ('queued', 'running') AND host_id IS NULL",
                 params![now()],
             )?;
             Ok(())
@@ -515,7 +527,7 @@ impl RunStore for SqliteRunStore {
 
     fn running_runs(&self) -> AppResult<Vec<RunningRun>> {
         self.with_conn(|c| {
-            let mut stmt = c.prepare("SELECT id, pid, session_id, started_at, harness FROM routine_run WHERE status = 'running'")?;
+            let mut stmt = c.prepare("SELECT id, pid, session_id, started_at, harness FROM routine_run WHERE status = 'running' AND host_id IS NULL")?;
             let rows = stmt
                 .query_map([], |r| {
                     Ok(RunningRun {
@@ -679,33 +691,38 @@ impl EventSink for AppSink {
     }
 
     fn finished(&self, id: i64, fin: &Finished) {
-        let app = &self.app;
         let loaded = self.loaded.lock().unwrap().remove(&id);
-        let error = fin.error.as_deref();
-        if !fin.shutting_down {
-            if let Some((run, routine)) = &loaded {
-                handlers::finish(app, routine, run, fin.status, &fin.text, error, &fin.usage);
-            }
-            emit_updated(app, id, fin.status);
-            if let (Some((run, routine)), true) =
-                (&loaded, matches!(fin.status, "ok" | "needs_attention" | "error" | "timeout"))
-            {
-                // The board overview is a refresh button, not a task worth a banner.
-                if !(routine.handler.as_deref() == Some("overview") && fin.status == "ok") {
-                    notify(app, routine, &run.context_label, fin.status, &fin.text, error);
-                }
-            }
-        }
+        run_finished(&self.app, id, loaded, fin);
+    }
+}
+
+/// A run is over and recorded: handlers, the update event, the notification and the usage log. Shared
+/// by the local engine's sink and the mirror of a remote run.
+pub(super) fn run_finished(app: &AppHandle, id: i64, loaded: Option<(RoutineRun, Routine)>, fin: &Finished) {
+    let error = fin.error.as_deref();
+    if !fin.shutting_down {
         if let Some((run, routine)) = &loaded {
-            let harness = {
-                let db = app.state::<Db>();
-                let conn = db.0.lock().unwrap();
-                profiles::resolve_routine(&conn, routine.profile_id).harness.id()
-            };
-            let mut tag = handlers::usage_tag(routine, run, harness);
-            tag.model = if run.model.is_empty() { routine.model.clone() } else { run.model.clone() };
-            ai_usage::record(&tag, &fin.started_at, fin.elapsed.as_millis() as i64, &fin.usage, fin.usage_error.as_deref());
+            handlers::finish(app, routine, run, fin.status, &fin.text, error, &fin.usage);
         }
+        emit_updated(app, id, fin.status);
+        if let (Some((run, routine)), true) =
+            (&loaded, matches!(fin.status, "ok" | "needs_attention" | "error" | "timeout"))
+        {
+            // The board overview is a refresh button, not a task worth a banner.
+            if !(routine.handler.as_deref() == Some("overview") && fin.status == "ok") {
+                notify(app, routine, &run.context_label, fin.status, &fin.text, error);
+            }
+        }
+    }
+    if let Some((run, routine)) = &loaded {
+        let harness = {
+            let db = app.state::<Db>();
+            let conn = db.0.lock().unwrap();
+            profiles::resolve_routine(&conn, routine.profile_id).harness.id()
+        };
+        let mut tag = handlers::usage_tag(routine, run, harness).host(run.host_id);
+        tag.model = if run.model.is_empty() { routine.model.clone() } else { run.model.clone() };
+        ai_usage::record(&tag, &fin.started_at, fin.elapsed.as_millis() as i64, &fin.usage, fin.usage_error.as_deref());
     }
 }
 
@@ -808,6 +825,22 @@ mod tests {
         assert_eq!(mark_interrupted(&conn, Path::new("/nonexistent/db.sqlite")).unwrap(), 2);
         let statuses: Vec<String> = list_runs(&conn, &RunFilter::default()).unwrap().into_iter().map(|r| r.status).collect();
         assert_eq!(statuses, ["ok", "interrupted", "interrupted"]);
+    }
+
+    #[test]
+    fn mark_interrupted_leaves_remote_runs_for_the_mirror_to_resume() {
+        let (conn, rid) = seeded();
+        insert_run(&conn, rid, "local-queued", "queued").unwrap();
+        insert_run(&conn, rid, "remote-queued", "queued").unwrap();
+        insert_run(&conn, rid, "remote-running", "running").unwrap();
+        conn.execute("UPDATE routine_run SET host_id = 1 WHERE context_key LIKE 'remote-%'", []).unwrap();
+        assert_eq!(mark_interrupted(&conn, Path::new("/nonexistent/db.sqlite")).unwrap(), 1);
+        let by_key: Vec<(String, String)> =
+            list_runs(&conn, &RunFilter::default()).unwrap().into_iter().map(|r| (r.context_key, r.status)).collect();
+        assert!(by_key.contains(&("local-queued".into(), "interrupted".into())));
+        assert!(by_key.contains(&("remote-queued".into(), "queued".into())));
+        assert!(by_key.contains(&("remote-running".into(), "running".into())));
+        assert_eq!(list_runs(&conn, &RunFilter::default()).unwrap().iter().filter(|r| r.host_id == Some(1)).count(), 2);
     }
 
     #[test]

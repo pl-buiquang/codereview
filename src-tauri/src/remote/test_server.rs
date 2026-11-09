@@ -161,3 +161,60 @@ impl TestServer {
         RemoteRuntime::new(tunnels, Box::new(move |id| super::host::require(&conn.lock().unwrap(), id)))
     }
 }
+
+/// A TCP proxy in front of a [`TestServer`]'s socket that can drop every open connection (`cut`) and
+/// refuse new ones (`set_down`), to play a flaky tunnel.
+pub struct Proxy {
+    port: u16,
+    down: std::sync::atomic::AtomicBool,
+    conns: Mutex<Vec<std::net::TcpStream>>,
+}
+
+impl Proxy {
+    pub fn start(server: &TestServer) -> Arc<Proxy> {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let proxy = Arc::new(Proxy { port: listener.local_addr().unwrap().port(), down: Default::default(), conns: Mutex::new(Vec::new()) });
+        let Addr::Unix(sock) = server.addr.clone() else { unreachable!() };
+        let p = proxy.clone();
+        std::thread::spawn(move || {
+            for conn in listener.incoming().flatten() {
+                if p.down.load(std::sync::atomic::Ordering::Relaxed) {
+                    drop(conn);
+                    continue;
+                }
+                let Ok(up) = std::os::unix::net::UnixStream::connect(&sock) else { continue };
+                p.conns.lock().unwrap().push(conn.try_clone().unwrap());
+                let (mut c1, mut c2) = (conn.try_clone().unwrap(), conn);
+                let (mut u1, mut u2) = (up.try_clone().unwrap(), up);
+                std::thread::spawn(move || {
+                    let _ = std::io::copy(&mut c1, &mut u1);
+                    let _ = u1.shutdown(std::net::Shutdown::Both);
+                });
+                std::thread::spawn(move || {
+                    let _ = std::io::copy(&mut u2, &mut c2);
+                    let _ = c2.shutdown(std::net::Shutdown::Both);
+                });
+            }
+        });
+        proxy
+    }
+
+    pub fn set_down(&self, down: bool) {
+        self.down.store(down, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Drop every connection that is open now.
+    pub fn cut(&self) {
+        for c in self.conns.lock().unwrap().drain(..) {
+            let _ = c.shutdown(std::net::Shutdown::Both);
+        }
+    }
+
+    /// A client through the proxy; `host_unreachable` while it is down (as a dead tunnel would be).
+    pub fn client(&self) -> Result<super::client::RemoteClient, super::error::RemoteError> {
+        if self.down.load(std::sync::atomic::Ordering::Relaxed) {
+            return Err(super::error::RemoteError::unreachable("the tunnel is down"));
+        }
+        Ok(super::client::RemoteClient::new(Addr::Tcp(self.port)))
+    }
+}

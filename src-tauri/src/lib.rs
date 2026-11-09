@@ -224,6 +224,7 @@ pub fn run() {
             remote::startup::init(app.handle());
             routines::manager::RoutineManager::start_ticker(app.handle().clone());
             routines::manager::RoutineManager::adopt_detached(app.handle());
+            routines::manager::RoutineManager::resume_remote(app.handle());
             app.manage(sync::SyncEngine::start(app.handle().clone()));
 
             let log_dir = db_path

@@ -70,6 +70,24 @@ pub fn launch(
     if routine.is_system() {
         resolved.ensure_local(&format!("“{}” (a system routine)", routine.name))?;
     }
+    if let Some(host_id) = resolved.host_id {
+        // A remote run: connecting (which can take seconds) and the capability checks happen on its
+        // worker, not on this command's thread; a failure there fails the run with its reason.
+        let light = context::light(&db, context)?;
+        if !context::eligible(routine, &light) {
+            return Err(AppError::Other(format!("“{}” can't run on {}", routine.name, light.label)));
+        }
+        return app.state::<RoutineManager>().launch_remote(
+            app,
+            routine,
+            context,
+            &light,
+            note.trim(),
+            model.trim(),
+            host_id,
+            resolved.harness.id(),
+        );
+    }
     let harness = resolved.harness;
     if let Some(reason) = harness.unavailable_reason() {
         return Err(AppError::Other(reason));

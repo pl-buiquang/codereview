@@ -5,6 +5,7 @@
 pub mod context;
 pub mod handlers;
 pub mod manager;
+pub mod remote_run;
 
 use rusqlite::{params, Connection, OptionalExtension, Row};
 use serde::{Deserialize, Serialize};
