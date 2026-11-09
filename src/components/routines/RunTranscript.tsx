@@ -5,14 +5,14 @@ import { buildTranscript } from "../../lib/routines";
 import { Markdown } from "../Markdown";
 
 /** Live transcript of a run, rebuilt from its stored events (the normalized form, or the raw Claude line for older runs). */
-export function RunTranscript({ runId, active }: { runId: number; active: boolean }) {
+export function RunTranscript({ runId, active, harness }: { runId: number; active: boolean; harness?: string }) {
   const events = useQuery({
     queryKey: ["routine-run-events", runId],
     queryFn: () => api.routineRunEvents(runId, 0),
     // Backstop for the push events; they invalidate this query as lines arrive.
     refetchInterval: active ? 5_000 : false,
   });
-  const items = useMemo(() => buildTranscript(events.data ?? []), [events.data]);
+  const items = useMemo(() => buildTranscript(events.data ?? [], harness), [events.data, harness]);
   const endRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (active) endRef.current?.scrollIntoView?.({ block: "end" });

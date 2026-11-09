@@ -199,7 +199,7 @@ export function RoutinesRunsTab() {
             {selected.status === "needs_attention" && selected.result_text && (
               <p className="form-warning">{selected.result_text.split("\n").find((l) => l.trim().startsWith("NEEDS_ATTENTION:"))}</p>
             )}
-            <RunTranscript runId={selected.id} active={isActiveRun(selected.status)} />
+            <RunTranscript runId={selected.id} active={isActiveRun(selected.status)} harness={selected.harness} />
           </>
         )}
       </div>

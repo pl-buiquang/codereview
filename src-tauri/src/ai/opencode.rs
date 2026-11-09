@@ -50,7 +50,9 @@ impl Harness for OpenCode {
             interactive_tui: true,
             reports_cost: true,
             replaces_system_prompt: false,
-            access_levels: vec![Access::Default, Access::ReadOnly, Access::Edit, Access::Full],
+            // No ReadOnly: opencode has no flag that denies bash (its `plan` agent only denies edits),
+            // so a read-only routine can't be enforced and is refused at launch.
+            access_levels: vec![Access::Default, Access::Edit, Access::Full],
             pins_session_id: true,
         }
     }
@@ -291,8 +293,11 @@ fn message(req: &OneShot<'_>) -> AppResult<String> {
     Ok(if system.trim().is_empty() { req.prompt.to_string() } else { format!("{}\n\n---\n\n{}", system.trim_end(), req.prompt) })
 }
 
-/// The `--agent` / `--auto` flags of `access`. An explicit `--agent` in the extra args wins. A run
-/// that asks for no tools at all gets the read-only agent, the closest thing opencode has to that.
+/// The `--agent` / `--auto` flags of `access`. An explicit `--agent` in the extra args (a profile's
+/// `agent` setting included) wins, so a `build` agent lets a run edit whatever the access says.
+/// `plan` only denies edits: bash stays allowed, which is why opencode does not offer read-only
+/// access. It is still used for runs that ask for no tools (summaries, theme), where it is strictly
+/// less capable than the default agent.
 fn access_flags(access: &Access, tools: &ToolPolicy, extra_args: &[String]) -> Vec<&'static str> {
     let named = extra_args.iter().any(|a| a == "--agent" || a.starts_with("--agent="));
     let mut flags = Vec::new();
@@ -344,8 +349,14 @@ fn execute(cmd: &mut Command, message: &str) -> (AppResult<TurnResult>, RunUsage
         Err(e) => return (Err(AppError::Chat(format!("failed to spawn opencode: {e}"))), RunUsage::default()),
     };
     if let Some(mut stdin) = child.stdin.take() {
+        // A process that exited early closes the pipe: its output and stderr say why, so go on and
+        // collect them (this also reaps the child).
         if let Err(e) = stdin.write_all(message.as_bytes()) {
-            return (Err(AppError::Chat(format!("failed to write prompt: {e}"))), RunUsage::default());
+            if e.kind() != std::io::ErrorKind::BrokenPipe {
+                let _ = child.kill();
+                let _ = child.wait();
+                return (Err(AppError::Chat(format!("failed to write prompt: {e}"))), RunUsage::default());
+            }
         }
     }
     let output = match child.wait_with_output() {
@@ -550,7 +561,7 @@ mod tests {
         assert_eq!(&argv(&command(&req, false).unwrap())[5..], &strs(&["--agent", "build"])[..]);
         req.access = Access::Full;
         assert_eq!(&argv(&command(&req, false).unwrap())[5..], &strs(&["--agent", "build", "--auto"])[..]);
-        // no tools at all: the read-only agent
+        // no tools at all: the plan agent
         req.access = Access::Default;
         req.tools = ToolPolicy::None;
         assert_eq!(&argv(&command(&req, false).unwrap())[5..], &strs(&["--agent", "plan"])[..]);
@@ -624,5 +635,17 @@ mod tests {
         let err = check_caps(&OpenCode, "“Babysit”", &needs(true)).unwrap_err().to_string();
         assert!(err.contains("a tool allowlist") && err.contains("opencode"), "{err}");
         assert!(!OpenCode.caps().fork);
+    }
+
+    #[test]
+    fn read_only_routines_are_refused_because_bash_cannot_be_denied() {
+        use crate::ai::{check_caps, Needs};
+        let err = check_caps(&OpenCode, "“Babysit”", &Needs { access: Access::ReadOnly, tools: false, tool_allowlist: false })
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("“Babysit”") && err.contains("read-only") && err.contains("opencode"), "{err}");
+        assert!(err.contains("Edit or Full"), "{err}");
+        assert!(!OpenCode.caps().access_levels.contains(&Access::ReadOnly));
+        check_caps(&OpenCode, "r", &Needs { access: Access::Edit, tools: true, tool_allowlist: false }).unwrap();
     }
 }

@@ -409,7 +409,10 @@ pub fn check_caps(harness: &dyn Harness, what: &str, needs: &Needs) -> AppResult
         && !matches!(needs.access, Access::Native(_))
         && !caps.access_levels.contains(&needs.access)
     {
-        Some(format!("{} access", access_label(&needs.access)))
+        Some(match needs.access {
+            Access::ReadOnly => "read-only access, which it cannot enforce (pick Edit or Full knowingly, or use another profile)".to_string(),
+            _ => format!("{} access", access_label(&needs.access)),
+        })
     } else if needs.tools && !caps.tools {
         Some("tools".to_string())
     } else if needs.tool_allowlist && !caps.tool_allowlist {

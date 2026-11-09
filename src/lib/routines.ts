@@ -136,7 +136,7 @@ function toolResultText(content: unknown): string {
 const toolInput = (input: unknown) => clip(typeof input === "string" ? input : JSON.stringify(input ?? {}, null, 2));
 
 /** Fold the stored events of a run into assistant text, tool calls (with their results) and the final result. */
-export function buildTranscript(events: Pick<RoutineRunEvent, "json" | "norm">[]): TranscriptItem[] {
+export function buildTranscript(events: Pick<RoutineRunEvent, "json" | "norm">[], harness = "claude"): TranscriptItem[] {
   const items: TranscriptItem[] = [];
   const toolById = new Map<string, Extract<TranscriptItem, { kind: "tool" }>>();
   for (const e of events) {
@@ -156,8 +156,8 @@ export function buildTranscript(events: Pick<RoutineRunEvent, "json" | "norm">[]
             tool.isError = !ev.ok;
           }
         } else if (ev.type === "final") {
-          // A harness that streams its answer as text (opencode) ends with a final that carries none: the text item above is the result.
-          if (ev.ok && !ev.text) continue;
+          // A harness that streams its answer as text (opencode, not Claude) ends with a final that carries none: the text item above is the result.
+          if (harness !== "claude" && ev.ok && !ev.text) continue;
           const cost = ev.usage?.cost_usd;
           items.push({ kind: "result", text: ev.text, isError: !ev.ok, cost: typeof cost === "number" && cost > 0 ? cost : null });
         }

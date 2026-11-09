@@ -263,18 +263,17 @@ fn emit_updated(app: &AppHandle, run_id: i64, status: &str) {
 /// that left no output file (older runs) is terminated first when it still looks like our `claude -p`.
 pub fn mark_interrupted(conn: &Connection, db_path: &Path) -> AppResult<usize> {
     let root = runs_root(db_path);
-    let mut stmt = conn.prepare("SELECT id, pid FROM routine_run WHERE status = 'running'")?;
-    let rows: Vec<(i64, Option<i64>)> = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<_>>()?;
+    let mut stmt = conn.prepare("SELECT id, pid, harness FROM routine_run WHERE status = 'running'")?;
+    let rows: Vec<(i64, Option<i64>, String)> =
+        stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect::<rusqlite::Result<_>>()?;
     let mut n = conn.execute("UPDATE routine_run SET status = 'interrupted', ended_at = ?1 WHERE status = 'queued'", params![now()])?;
-    for (id, pid) in rows {
+    for (id, pid, harness) in rows {
         if root.join(id.to_string()).join(STDOUT_FILE).exists() {
             continue;
         }
         if let Some(pid) = pid {
-            // Whichever harness it was, it only dies if it still looks like that harness' own process.
-            for harness in ai::harnesses() {
-                proc::kill_leftover(harness, pid as i32);
-            }
+            // Only if it still looks like its harness' own process (an id we don't know is Claude's, as before).
+            proc::kill_leftover(ai::harness_by_id(&harness).unwrap_or_else(ai::harness_for), pid as i32);
         }
         n += conn.execute(
             "UPDATE routine_run SET status = 'interrupted', ended_at = ?2 WHERE id = ?1",

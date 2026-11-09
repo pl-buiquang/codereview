@@ -91,8 +91,11 @@ describe("buildTranscript", () => {
       norm({ type: "tool_call", id: "t1", name: "read", input: { path: "note.txt" } }, { type: "tool_result", id: "t1", ok: true, text: "hello" }),
       norm({ type: "text", text: "It says hello." }),
       norm({ type: "final", ok: true, text: "", usage }),
-    ]);
+    ], "opencode");
     expect(items.map((i) => i.kind)).toEqual(["text", "tool", "text"]);
+    // Claude runs keep their result item, even an empty one
+    const claude = buildTranscript([norm({ type: "final", ok: true, text: "", usage })]);
+    expect(claude).toEqual([{ kind: "result", text: "", isError: false, cost: 0.001 }]);
     expect(items[1]).toMatchObject({ name: "read", result: "hello" });
     // a failed run still shows its error
     const failed = buildTranscript([norm({ type: "final", ok: false, text: "Model unavailable", usage })]);
