@@ -491,7 +491,7 @@ mod tests {
         let h = harness_for();
         assert_eq!(h.id(), "claude");
         assert!(h.caps().pins_session_id);
-            }
+    }
 
     fn fake_session(harness: &str, id: &str) -> AgentSession {
         AgentSession {
