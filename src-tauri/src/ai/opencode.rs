@@ -21,7 +21,7 @@ use std::process::{Child, Command, Stdio};
 use serde_json::Value;
 
 use super::{
-    Access, Caps, Event, FinalResult, Harness, Interactive, OneShot, RunAcc, SessionMode, StreamRun, SystemPrompt,
+    Access, AgentSession, Caps, Event, FinalResult, Harness, Interactive, OneShot, RunAcc, SessionMode, StreamRun, SystemPrompt,
     ToolPolicy, TurnResult,
 };
 use crate::ai_usage::{self, RunUsage};
@@ -202,6 +202,10 @@ impl Harness for OpenCode {
             }
         }
         Some(argv)
+    }
+
+    fn live_sessions(&self) -> Vec<AgentSession> {
+        live_sessions_now()
     }
 
     fn models(&self) -> AppResult<Vec<String>> {
@@ -394,6 +398,169 @@ pub(crate) fn interpret(stdout: &str, stderr: &str, exit_code: i32) -> (AppResul
         cost_usd: fin.usage.cost_usd,
     };
     (Ok(turn), fin.usage)
+}
+
+// ---- session discovery ---------------------------------------------------------------------
+
+/// One entry of `opencode session list --format json` (fields we use; it lists the top-level
+/// sessions of the project the command runs in, newest first).
+#[derive(Debug, Clone, PartialEq)]
+struct ListedSession {
+    id: String,
+    title: Option<String>,
+    updated: i64,
+    directory: String,
+}
+
+fn parse_session_list(json: &str) -> Vec<ListedSession> {
+    let Ok(Value::Array(items)) = serde_json::from_str::<Value>(json) else { return Vec::new() };
+    items
+        .iter()
+        .filter_map(|v| {
+            Some(ListedSession {
+                id: v.get("id")?.as_str()?.to_string(),
+                title: v.get("title").and_then(Value::as_str).map(str::trim).filter(|t| !t.is_empty()).map(String::from),
+                updated: v.get("updated").and_then(Value::as_i64).unwrap_or(0),
+                directory: v.get("directory").and_then(Value::as_str).unwrap_or("").to_string(),
+            })
+        })
+        .collect()
+}
+
+/// A running opencode TUI process.
+#[derive(Debug, Clone, PartialEq)]
+struct Tui {
+    pid: i64,
+    tty: Option<String>,
+    /// Working directory the TUI was started in (resolved by the caller).
+    cwd: String,
+    /// The `--session` it was started on, when given.
+    session: Option<String>,
+}
+
+const SUBCOMMANDS: &[&str] = &[
+    "upgrade", "update", "uninstall", "acp", "api", "debug", "auth", "mcp", "plugin", "models", "stats", "mini", "run",
+    "session", "service", "reload", "pair", "serve",
+];
+
+/// `(session id, directory argument)` of a `ps` args line when it is an interactive opencode TUI
+/// (no subcommand); `None` for anything else (`opencode run`, `opencode serve`, other programs).
+fn parse_tui_args(args: &str) -> Option<(Option<String>, Option<String>)> {
+    let mut it = args.split_whitespace();
+    let bin = it.next()?;
+    if bin.rsplit('/').next() != Some("opencode") {
+        return None;
+    }
+    let (mut session, mut dir) = (None, None);
+    while let Some(a) = it.next() {
+        match a {
+            "--session" | "-s" => session = it.next().map(String::from),
+            "--server" | "--prompt" => {
+                it.next();
+            }
+            _ if a.starts_with("--session=") => session = a.strip_prefix("--session=").map(String::from),
+            _ if a.starts_with('-') => {}
+            _ if SUBCOMMANDS.contains(&a) && dir.is_none() => return None,
+            _ => dir = Some(a.to_string()),
+        }
+    }
+    Some((session, dir))
+}
+
+/// Parse `ps -eo pid=,tty=,args=` output into the running TUIs; `cwd_of` resolves a pid's working directory.
+fn parse_tuis(ps: &str, cwd_of: impl Fn(i64) -> Option<String>) -> Vec<Tui> {
+    ps.lines()
+        .filter_map(|line| {
+            let mut f = line.split_whitespace();
+            let pid: i64 = f.next()?.parse().ok()?;
+            let tty = f.next()?.to_string();
+            let args = line.trim_start().splitn(3, char::is_whitespace).nth(2)?.trim_start();
+            let args = args.strip_prefix(tty.as_str()).unwrap_or(args).trim_start();
+            let (session, dir) = parse_tui_args(args)?;
+            let base = cwd_of(pid)?;
+            let cwd = match dir {
+                Some(d) if d.starts_with('/') => d,
+                Some(d) => format!("{}/{}", base.trim_end_matches('/'), d.trim_start_matches("./")),
+                None => base,
+            };
+            Some(Tui { pid, tty: (tty != "?").then_some(tty), cwd, session })
+        })
+        .collect()
+}
+
+/// Pair each TUI with its session: the one it was started on (`--session`), else the most
+/// recently updated session of its directory not already taken. A TUI with no match (a brand-new
+/// session not yet created, an unreadable listing) is left out.
+fn match_tuis(tuis: &[Tui], listed: impl Fn(&str) -> Vec<ListedSession>) -> Vec<AgentSession> {
+    let mut taken: Vec<String> = Vec::new();
+    let mut out = Vec::new();
+    // Pinned TUIs first, so an unpinned one in the same directory can't steal their session.
+    let mut order: Vec<&Tui> = tuis.iter().collect();
+    order.sort_by_key(|t| t.session.is_none());
+    for t in order {
+        let sessions = listed(&t.cwd);
+        let found = match &t.session {
+            Some(id) => sessions.iter().find(|s| &s.id == id),
+            None => sessions.iter().find(|s| s.directory == t.cwd && !taken.contains(&s.id)),
+        };
+        let Some(s) = found else { continue };
+        taken.push(s.id.clone());
+        out.push(AgentSession {
+            harness: "opencode".into(),
+            session_id: s.id.clone(),
+            pid: Some(t.pid),
+            live: true,
+            status: None,
+            kind: Some("interactive".into()),
+            attached: false,
+            job_id: None,
+            waiting_for: None,
+            agent_view: None,
+            name: s.title.clone(),
+            cwd: if s.directory.is_empty() { t.cwd.clone() } else { s.directory.clone() },
+            git_branch: None,
+            repo: None,
+            tmux: None,
+            tty: t.tty.clone(),
+            updated_at: s.updated,
+            focus: crate::claude_sessions::FocusState::NoTerminal,
+            summaries: Vec::new(),
+            original_name: None,
+        });
+    }
+    out.sort_by_key(|s| std::cmp::Reverse(s.updated_at));
+    out
+}
+
+fn proc_cwd(pid: i64) -> Option<String> {
+    if let Ok(p) = std::fs::read_link(format!("/proc/{pid}/cwd")) {
+        return Some(p.to_string_lossy().into_owned());
+    }
+    // macOS: no /proc.
+    let out = Command::new("lsof").args(["-a", "-d", "cwd", "-Fn", "-p", &pid.to_string()]).output().ok()?;
+    String::from_utf8_lossy(&out.stdout).lines().find_map(|l| l.strip_prefix('n')).map(String::from)
+}
+
+/// Sessions of the project at `dir`, via `opencode session list` (read-only, no model call).
+fn list_in(dir: &str) -> Vec<ListedSession> {
+    let out = Command::new(crate::tools::opencode_bin())
+        .args(["session", "list", "--format", "json"])
+        .current_dir(dir)
+        .output();
+    match out {
+        Ok(o) if o.status.success() => parse_session_list(&String::from_utf8_lossy(&o.stdout)),
+        _ => Vec::new(),
+    }
+}
+
+/// Live opencode TUIs and their sessions. opencode lists sessions per project (the directory the
+/// command runs in), so only the directories of running TUIs are queried; sessions with no
+/// running TUI are not reported.
+fn live_sessions_now() -> Vec<AgentSession> {
+    let Ok(ps) = Command::new("ps").args(["-eo", "pid=,tty=,args="]).output() else { return Vec::new() };
+    let tuis = parse_tuis(&String::from_utf8_lossy(&ps.stdout), proc_cwd);
+    let cache = std::cell::RefCell::new(std::collections::HashMap::<String, Vec<ListedSession>>::new());
+    match_tuis(&tuis, |dir| cache.borrow_mut().entry(dir.to_string()).or_insert_with(|| list_in(dir)).clone())
 }
 
 #[cfg(test)]
@@ -647,5 +814,65 @@ mod tests {
         assert!(err.contains("Edit or Full"), "{err}");
         assert!(!OpenCode.caps().access_levels.contains(&Access::ReadOnly));
         check_caps(&OpenCode, "r", &Needs { access: Access::Edit, tools: true, tool_allowlist: false }).unwrap();
+    }
+
+    const LIST: &str = include_str!("fixtures/opencode_session_list.json");
+
+    #[test]
+    fn session_list_fixture_parses() {
+        let l = parse_session_list(LIST);
+        assert_eq!(l.len(), 2);
+        assert_eq!(l[0].id, "ses_0b6f11dfdffeyohpKrjiC33cq6");
+        assert_eq!(l[0].title.as_deref(), Some("Fix the login redirect"));
+        assert_eq!((l[0].updated, l[0].directory.as_str()), (1784615998673, "/home/me/app"));
+        assert!(parse_session_list("[]").is_empty());
+        assert!(parse_session_list("not json").is_empty());
+    }
+
+    #[test]
+    fn tui_args_tell_the_tui_from_other_invocations() {
+        assert_eq!(parse_tui_args("opencode"), Some((None, None)));
+        assert_eq!(parse_tui_args("/home/me/.opencode/bin/opencode -s ses_a --prompt hi"), Some((Some("ses_a".into()), None)));
+        assert_eq!(parse_tui_args("opencode --session ses_a /work"), Some((Some("ses_a".into()), Some("/work".into()))));
+        assert_eq!(parse_tui_args("opencode run --format json"), None);
+        assert_eq!(parse_tui_args("/x/opencode serve --service"), None);
+        assert_eq!(parse_tui_args("vim opencode"), None);
+    }
+
+    #[test]
+    fn running_tuis_are_read_from_ps() {
+        let ps = "  11 pts/3 opencode --session ses_a\n  12 ?     /x/opencode serve --service\n  13 pts/4 opencode sub\n  14 pts/5 bash\n";
+        let tuis = parse_tuis(ps, |pid| Some(format!("/cwd/{pid}")));
+        assert_eq!(
+            tuis,
+            vec![
+                Tui { pid: 11, tty: Some("pts/3".into()), cwd: "/cwd/11".into(), session: Some("ses_a".into()) },
+                Tui { pid: 13, tty: Some("pts/4".into()), cwd: "/cwd/13/sub".into(), session: None },
+            ]
+        );
+    }
+
+    #[test]
+    fn tuis_are_matched_to_their_sessions() {
+        let l = parse_session_list(LIST);
+        let tui = |pid, session: Option<&str>| Tui { pid, tty: None, cwd: "/home/me/app".into(), session: session.map(String::from) };
+        let by_dir = |_: &str| l.clone();
+        // Two unpinned TUIs in one directory take the two newest sessions, one each.
+        let out = match_tuis(&[tui(1, None), tui(2, None)], by_dir);
+        assert_eq!(out.iter().map(|s| (s.pid, s.session_id.as_str())).collect::<Vec<_>>(), [
+            (Some(1), "ses_0b6f11dfdffeyohpKrjiC33cq6"),
+            (Some(2), "ses_0b6e9a9b0ffe3mK7hATDBvpWeX"),
+        ]);
+        // A pinned TUI keeps its session even when an unpinned one comes first.
+        let out = match_tuis(&[tui(1, None), tui(2, Some("ses_0b6f11dfdffeyohpKrjiC33cq6"))], by_dir);
+        let pid_of = |id: &str| out.iter().find(|s| s.session_id == id).and_then(|s| s.pid);
+        assert_eq!(pid_of("ses_0b6f11dfdffeyohpKrjiC33cq6"), Some(2));
+        assert_eq!(pid_of("ses_0b6e9a9b0ffe3mK7hATDBvpWeX"), Some(1));
+        // Unknown pinned session or empty listing: left out.
+        assert!(match_tuis(&[tui(3, Some("ses_nope"))], by_dir).is_empty());
+        assert!(match_tuis(&[tui(4, None)], |_| Vec::new()).is_empty());
+        let s = &match_tuis(&[tui(5, None)], by_dir)[0];
+        assert!(s.live && s.harness == "opencode" && s.name.as_deref() == Some("Fix the login redirect"));
+        assert_eq!((s.updated_at, s.cwd.as_str()), (1784615998673, "/home/me/app"));
     }
 }
