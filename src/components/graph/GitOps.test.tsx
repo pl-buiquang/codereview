@@ -134,6 +134,16 @@ describe("branch menu git actions", () => {
     await userEvent.click(await screen.findByRole("menuitem", { name: "New opencode session" }));
     await waitFor(() => expect(api.checkoutOpenClaude).toHaveBeenCalled());
     expect(api.checkoutOpenClaude.mock.calls[0][5]).toBe("opencode");
+    // The picker replaces the default entry rather than duplicating it.
+    expect(screen.getByRole("menuitem", { name: "New Claude Code session" })).toBeEnabled();
+    expect(screen.queryByRole("menuitem", { name: "New Claude session" })).not.toBeInTheDocument();
+  });
+
+  it("labels the single new-session entry after the only interactive harness", async () => {
+    api.aiHarnesses.mockResolvedValue([{ id: "opencode", name: "opencode", available: true, caps: { interactive_tui: true } }]);
+    open(local("feat"));
+    expect(await screen.findByRole("menuitem", { name: "New opencode session" })).toBeEnabled();
+    expect(screen.queryByRole("menuitem", { name: "New Claude session" })).not.toBeInTheDocument();
   });
 
   it("does not offer to focus a live session of another harness", async () => {

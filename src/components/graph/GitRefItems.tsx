@@ -99,17 +99,17 @@ export function GitRefItems({ target, close }: { target: GitTarget; close: () =>
         disabled: !checkedOutPath,
         title: checkedOutPath ? undefined : NOT_CHECKED_OUT,
       })}
-      {item("New Claude session", () => checkedOutPath && ops.openClaude(checkedOutPath), {
-        disabled: !checkedOutPath,
-        title: checkedOutPath ? undefined : NOT_CHECKED_OUT,
-      })}
-      {pickable.length > 1 &&
-        pickable.map((h) =>
-          item(`New ${h.name} session`, () => checkedOutPath && ops.openClaude(checkedOutPath, h.id), {
+      {pickable.length > 1
+        ? pickable.map((h) =>
+            item(`New ${h.name} session`, () => checkedOutPath && ops.openClaude(checkedOutPath, h.id), {
+              disabled: !checkedOutPath,
+              title: checkedOutPath ? `Open a new terminal running ${h.name}` : NOT_CHECKED_OUT,
+            }),
+          )
+        : item(`New ${pickable[0]?.name ?? "Claude"} session`, () => checkedOutPath && ops.openClaude(checkedOutPath), {
             disabled: !checkedOutPath,
-            title: checkedOutPath ? `Open a new terminal running ${h.name} instead of the default` : NOT_CHECKED_OUT,
-          }),
-        )}
+            title: checkedOutPath ? undefined : NOT_CHECKED_OUT,
+          })}
       {live.map((s) =>
         item(
           <>
