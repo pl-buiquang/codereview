@@ -75,6 +75,7 @@ pub fn output(cmd: &mut Command) -> io::Result<Output> {
 mod tests {
     use super::*;
 
+    #[cfg(unix)] // a killed shell does not take its grandchild (and the pipe it holds) with it on Windows
     #[test]
     fn a_hung_child_is_killed_at_the_limit() {
         let started = Instant::now();
