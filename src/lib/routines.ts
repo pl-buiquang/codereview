@@ -156,6 +156,8 @@ export function buildTranscript(events: Pick<RoutineRunEvent, "json" | "norm">[]
             tool.isError = !ev.ok;
           }
         } else if (ev.type === "final") {
+          // A harness that streams its answer as text (opencode) ends with a final that carries none: the text item above is the result.
+          if (ev.ok && !ev.text) continue;
           const cost = ev.usage?.cost_usd;
           items.push({ kind: "result", text: ev.text, isError: !ev.ok, cost: typeof cost === "number" && cost > 0 ? cost : null });
         }

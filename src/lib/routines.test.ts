@@ -83,6 +83,22 @@ describe("buildTranscript", () => {
     expect(fromNorm).toEqual(fromLegacy);
   });
 
+  it("shows an opencode run as its text and tool items, without an empty result item", () => {
+    const usage = { num_turns: 1, input_tokens: 1, output_tokens: 1, cost_usd: 0.001 };
+    const items = buildTranscript([
+      norm({ type: "other", kind: "step_start", raw: {} }),
+      norm({ type: "text", text: "Reading it" }),
+      norm({ type: "tool_call", id: "t1", name: "read", input: { path: "note.txt" } }, { type: "tool_result", id: "t1", ok: true, text: "hello" }),
+      norm({ type: "text", text: "It says hello." }),
+      norm({ type: "final", ok: true, text: "", usage }),
+    ]);
+    expect(items.map((i) => i.kind)).toEqual(["text", "tool", "text"]);
+    expect(items[1]).toMatchObject({ name: "read", result: "hello" });
+    // a failed run still shows its error
+    const failed = buildTranscript([norm({ type: "final", ok: false, text: "Model unavailable", usage })]);
+    expect(failed).toEqual([{ kind: "result", text: "Model unavailable", isError: true, cost: 0.001 }]);
+  });
+
   it("renders a failing tool result and an error final from normalized events", () => {
     const items = buildTranscript([
       norm({ type: "tool_call", id: "t1", name: "Read", input: {} }),

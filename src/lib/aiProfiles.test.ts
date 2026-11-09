@@ -7,7 +7,7 @@ import type { HarnessInfo } from "./types";
 const aiImportLegacyModels = vi.fn();
 vi.mock("./api", () => ({ api: { aiImportLegacyModels: (...a: unknown[]) => aiImportLegacyModels(...a) } }));
 
-import { modelSuggestions, profileEditorFields, profileLabel, useImportLegacyAiModels } from "./aiProfiles";
+import { filterModelGroups, profileEditorFields, profileLabel, useImportLegacyAiModels } from "./aiProfiles";
 import { useSettingsStore } from "./settings";
 
 const info = (id: string): HarnessInfo => ({
@@ -37,9 +37,15 @@ describe("profile editor", () => {
     expect(profileEditorFields(undefined)).toEqual({ model: true, settings: false });
   });
 
-  it("suggests Claude models and nothing for unknown harnesses", () => {
-    expect(modelSuggestions("claude")).toContain("opus");
-    expect(modelSuggestions("zed")).toEqual([]);
+  it("filters model groups by id or provider and drops the empty ones", () => {
+    const groups = [
+      { provider: "openrouter", models: ["openrouter/anthropic/claude-haiku-4.5", "openrouter/google/gemma"] },
+      { provider: "opencode", models: ["opencode/beam-free"] },
+    ];
+    expect(filterModelGroups(groups, "  ")).toBe(groups);
+    expect(filterModelGroups(groups, "HAIKU")).toEqual([{ provider: "openrouter", models: ["openrouter/anthropic/claude-haiku-4.5"] }]);
+    expect(filterModelGroups(groups, "opencode")).toEqual([groups[1]]);
+    expect(filterModelGroups(groups, "zzz")).toEqual([]);
   });
 
   it("labels a profile with its model when it has one", () => {

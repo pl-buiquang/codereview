@@ -8,6 +8,7 @@ const aiProfileList = vi.fn();
 const aiProfileSave = vi.fn();
 const aiProfileDelete = vi.fn();
 const aiHarnesses = vi.fn();
+const aiHarnessModels = vi.fn();
 const aiFeatureProfilesGet = vi.fn();
 const aiFeatureProfilesSet = vi.fn();
 vi.mock("../lib/api", () => ({
@@ -16,6 +17,7 @@ vi.mock("../lib/api", () => ({
     aiProfileSave: (...a: unknown[]) => aiProfileSave(...a),
     aiProfileDelete: (...a: unknown[]) => aiProfileDelete(...a),
     aiHarnesses: (...a: unknown[]) => aiHarnesses(...a),
+    aiHarnessModels: (...a: unknown[]) => aiHarnessModels(...a),
     aiFeatureProfilesGet: (...a: unknown[]) => aiFeatureProfilesGet(...a),
     aiFeatureProfilesSet: (...a: unknown[]) => aiFeatureProfilesSet(...a),
   },
@@ -55,6 +57,15 @@ const claude: HarnessInfo = {
   },
 };
 
+const opencode: HarnessInfo = {
+  ...claude,
+  id: "opencode",
+  name: "opencode",
+  available: false,
+  version: null,
+  caps: { ...claude.caps, fork: false, tool_allowlist: false, replaces_system_prompt: false },
+};
+
 function renderSection() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
@@ -68,7 +79,10 @@ beforeEach(() => {
   aiProfileList.mockReset().mockResolvedValue([profile(), profile({ id: 2, name: "Fast", model: "haiku", is_default: false })]);
   aiProfileSave.mockReset().mockImplementation((p) => Promise.resolve(profile(p)));
   aiProfileDelete.mockReset().mockResolvedValue(undefined);
-  aiHarnesses.mockReset().mockResolvedValue([claude]);
+  aiHarnesses.mockReset().mockResolvedValue([claude, opencode]);
+  aiHarnessModels.mockReset().mockImplementation((harness: string) =>
+    Promise.resolve(harness === "claude" ? [{ provider: "", models: ["sonnet", "opus"] }] : []),
+  );
   aiFeatureProfilesGet.mockReset().mockResolvedValue({ chat: null, summaries: null, theme: null, sessions: null });
   aiFeatureProfilesSet.mockReset().mockResolvedValue(undefined);
 });
@@ -125,5 +139,47 @@ describe("AiProfilesSection", () => {
     expect(aiFeatureProfilesSet.mock.calls[0][0]).toEqual({ chat: 2, summaries: null, theme: 2, sessions: null });
     await user.selectOptions(within(table).getByLabelText("Session summaries"), "Default profile");
     await waitFor(() => expect(aiFeatureProfilesSet).toHaveBeenCalledTimes(2));
+  });
+
+  it("picks an opencode model from a searchable, provider-grouped list", async () => {
+    const user = userEvent.setup();
+    aiHarnessModels.mockImplementation((harness: string) =>
+      Promise.resolve(
+        harness === "opencode"
+          ? [
+              { provider: "openrouter", models: ["openrouter/anthropic/claude-haiku-4.5", "openrouter/google/gemma"] },
+              { provider: "opencode", models: ["opencode/beam-free"] },
+            ]
+          : [],
+      ),
+    );
+    renderSection();
+    await within(await screen.findByTestId("ai-profiles")).findByText("Fast");
+    await user.click(screen.getByRole("button", { name: "Add profile" }));
+    await user.selectOptions(screen.getByLabelText("Harness"), "opencode");
+    await user.type(screen.getByLabelText("Name"), "Router");
+    await user.click(screen.getByLabelText("Model"));
+    const list = await screen.findByRole("listbox", { name: "Models" });
+    expect(within(list).getByText("openrouter")).toBeTruthy();
+    expect(within(list).getByText("opencode")).toBeTruthy();
+    await user.type(screen.getByLabelText("Model"), "haiku");
+    expect(within(list).queryByText("opencode/beam-free")).toBeNull();
+    await user.click(within(list).getByText("openrouter/anthropic/claude-haiku-4.5"));
+    expect((screen.getByLabelText("Model") as HTMLInputElement).value).toBe("openrouter/anthropic/claude-haiku-4.5");
+    await user.click(screen.getByRole("button", { name: "Add" }));
+    await waitFor(() => expect(aiProfileSave).toHaveBeenCalled());
+    expect(aiProfileSave.mock.calls[0][0]).toMatchObject({ harness: "opencode", model: "openrouter/anthropic/claude-haiku-4.5" });
+  });
+
+  it("hints at opencode auth login when opencode lists no model, and refreshes on demand", async () => {
+    const user = userEvent.setup();
+    renderSection();
+    await within(await screen.findByTestId("ai-profiles")).findByText("Fast");
+    await user.click(screen.getByRole("button", { name: "Add profile" }));
+    await user.selectOptions(screen.getByLabelText("Harness"), "opencode");
+    expect(await screen.findByText("opencode auth login")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Copy command" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Refresh models" }));
+    await waitFor(() => expect(aiHarnessModels).toHaveBeenCalledWith("opencode", true));
   });
 });

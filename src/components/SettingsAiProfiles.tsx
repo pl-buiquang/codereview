@@ -3,7 +3,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { toast } from "../lib/toast";
 import { confirmDialog } from "../lib/confirm";
-import { FEATURE_ROWS, modelSuggestions, profileEditorFields } from "../lib/aiProfiles";
+import { FEATURE_ROWS, profileEditorFields } from "../lib/aiProfiles";
+import { ModelPicker } from "./ModelPicker";
 import type { AiProfile, AiProfileInput, FeatureProfiles, HarnessInfo } from "../lib/types";
 
 const BLANK: AiProfileInput = { id: null, name: "", harness: "claude", model: "", settings: {}, host_id: null, is_default: false };
@@ -159,23 +160,7 @@ export function AiProfilesSection() {
                 ))}
               </select>
             </label>
-            {fields.model && (
-              <label>
-                Model
-                <input
-                  className="input"
-                  list={`ai-models-${draft.harness}`}
-                  placeholder="leave empty for the harness' own default"
-                  value={draft.model}
-                  onChange={(e) => setDraft({ ...draft, model: e.target.value })}
-                />
-                <datalist id={`ai-models-${draft.harness}`}>
-                  {modelSuggestions(draft.harness).map((m) => (
-                    <option key={m} value={m} />
-                  ))}
-                </datalist>
-              </label>
-            )}
+            {fields.model && <ModelPicker harness={draft.harness} value={draft.model} onChange={(model) => setDraft({ ...draft, model })} />}
             {fields.settings && (
               <label>
                 Settings <span className="muted">(JSON, no secrets)</span>

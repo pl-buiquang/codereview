@@ -317,6 +317,7 @@ export interface ToolEnv {
   gh: string | null;
   gh_authed: boolean;
   claude: string | null;
+  opencode: string | null;
 }
 
 // --- GitHub PR metadata (review header; read-only, ephemeral) ---
@@ -1250,6 +1251,12 @@ export interface HarnessCaps {
   replaces_system_prompt: boolean;
   access_levels: string[];
   pins_session_id: boolean;
+}
+
+/** The models of one provider (the part of the id before the first `/`; empty for bare names). */
+export interface ModelGroup {
+  provider: string;
+  models: string[];
 }
 
 export interface HarnessInfo {

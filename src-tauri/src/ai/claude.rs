@@ -142,7 +142,7 @@ impl Harness for ClaudeCode {
 
     fn models(&self) -> AppResult<Vec<String>> {
         // The CLI has no model listing: aliases it understands.
-        Ok(["opus", "sonnet", "haiku"].map(String::from).to_vec())
+        Ok(["sonnet", "opus", "fable", "haiku"].map(String::from).to_vec())
     }
 
     #[cfg(unix)]

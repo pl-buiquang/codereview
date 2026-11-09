@@ -48,6 +48,7 @@ import type {
   AiProfileInput,
   FeatureProfiles,
   HarnessInfo,
+  ModelGroup,
   Routine,
   RoutineContextRef,
   RoutineInput,
@@ -168,6 +169,7 @@ export const api = {
   aiImportLegacyModels: (chat: string, overview: string) =>
     invoke<boolean>("ai_import_legacy_models", { chat, overview }),
   aiHarnesses: () => invoke<HarnessInfo[]>("ai_harnesses"),
+  aiHarnessModels: (harness: string, refresh = false) => invoke<ModelGroup[]>("ai_harness_models", { harness, refresh }),
   routineList: () => invoke<Routine[]>("routine_list"),
   routineSave: (routine: RoutineInput) => invoke<Routine>("routine_save", { routine }),
   routineDelete: (id: number) => invoke<void>("routine_delete", { id }),
