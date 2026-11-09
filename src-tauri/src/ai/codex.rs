@@ -304,7 +304,7 @@ impl Harness for Codex {
             .flatten()
             .filter_map(|a| a.as_str().map(String::from))
             .collect();
-        check_extra(&extra)
+        check_extra(&extra, ExtraCheck::Save)
     }
 
     fn settings_args(&self, settings: &Value) -> Vec<String> {
@@ -503,12 +503,146 @@ fn forbidden_extra(args: &[String]) -> Option<String> {
     None
 }
 
-/// Refuses `extra_args` that could change the sandbox or the approvals (at run time and on save).
-fn check_extra(args: &[String]) -> AppResult<()> {
-    match forbidden_extra(args) {
-        Some(flag) => Err(AppError::Other(format!(
+/// Where `extra_args` are checked: on profile save (no run yet, paths need not exist) or for a run
+/// in a working directory (paths must be existing directories).
+#[derive(Clone, Copy)]
+enum ExtraCheck<'a> {
+    Save,
+    Run(&'a Path),
+}
+
+/// Credential and system roots `--add-dir` may not name or sit beneath. Relative to the home dir.
+const HOME_DENY: &[&str] = &[".ssh", ".gnupg", ".aws", ".config", ".codex", ".claude"];
+const SYSTEM_DENY: &[&str] = &["/etc", "/usr", "/bin", "/sbin", "/boot", "/proc", "/sys", "/dev"];
+
+/// `p` with `.` and `..` resolved lexically; `None` when a `..` climbs above the root.
+fn lexical_normalize(p: &Path) -> Option<PathBuf> {
+    use std::path::Component;
+    let mut out = PathBuf::from("/");
+    for c in p.components() {
+        match c {
+            Component::RootDir | Component::CurDir => {}
+            Component::Normal(n) => out.push(n),
+            Component::ParentDir => {
+                if !out.pop() {
+                    return None;
+                }
+            }
+            Component::Prefix(_) => return None,
+        }
+    }
+    Some(out)
+}
+
+/// The canonical form of `p`: its deepest existing ancestor canonicalized (symlinks followed) plus
+/// the missing rest.
+fn canonical_or_normalized(p: &Path) -> PathBuf {
+    let mut rest = Vec::new();
+    let mut cur = p;
+    loop {
+        if let Ok(c) = std::fs::canonicalize(cur) {
+            return rest.iter().rev().fold(c, |acc, n| acc.join(n));
+        }
+        match (cur.parent(), cur.file_name()) {
+            (Some(parent), Some(name)) => {
+                rest.push(name.to_owned());
+                cur = parent;
+            }
+            _ => return p.to_path_buf(),
+        }
+    }
+}
+
+/// Why `--add-dir <raw>` is refused, if it is. A heuristic against widening the writable roots to
+/// the home directory, the working directory's ancestors and well-known credential / system
+/// directories; other sensitive directories pass.
+fn add_dir_problem(raw: &str, check: ExtraCheck<'_>, home: Option<&Path>) -> Option<String> {
+    if raw.is_empty() {
+        return Some("the path is empty".into());
+    }
+    if raw.contains(['\0', '\n', '\r']) {
+        return Some("the path contains a NUL or newline".into());
+    }
+    if raw == "~" || raw.starts_with("~/") {
+        return Some("`~` is not expanded: give an absolute path".into());
+    }
+    let path = Path::new(raw);
+    if !path.is_absolute() {
+        return Some("the path must be absolute".into());
+    }
+    let Some(norm) = lexical_normalize(path) else {
+        return Some("the path climbs above the root with `..`".into());
+    };
+    if let ExtraCheck::Run(_) = check {
+        if !std::fs::metadata(&norm).is_ok_and(|m| m.is_dir()) {
+            return Some("the directory does not exist".into());
+        }
+    }
+    let canon = canonical_or_normalized(&norm);
+    if canon == Path::new("/") {
+        return Some("the file system root".into());
+    }
+    if let Some(home) = home {
+        let home_canon = canonical_or_normalized(home);
+        if home.starts_with(&canon) || home_canon.starts_with(&canon) {
+            return Some("the home directory or one of its ancestors".into());
+        }
+        for d in HOME_DENY {
+            for h in [home, home_canon.as_path()] {
+                let deny = h.join(d);
+                if canon.starts_with(&deny) || norm.starts_with(&deny) {
+                    return Some(format!("it is under ~/{d}"));
+                }
+            }
+        }
+    }
+    for d in SYSTEM_DENY {
+        if canon.starts_with(d) || norm.starts_with(d) {
+            return Some(format!("it is under {d}"));
+        }
+    }
+    if let ExtraCheck::Run(cwd) = check {
+        let cwd_norm = lexical_normalize(&std::path::absolute(cwd).unwrap_or_else(|_| cwd.to_path_buf()));
+        let cwd_canon = canonical_or_normalized(&cwd_norm.clone().unwrap_or_else(|| cwd.to_path_buf()));
+        if cwd_canon.starts_with(&canon) || cwd_norm.is_some_and(|c| c.starts_with(&canon)) {
+            return Some("it is the working directory or one of its ancestors".into());
+        }
+    }
+    None
+}
+
+/// The first `--add-dir` of `extra_args` that is refused, as a message.
+fn add_dir_error(args: &[String], check: ExtraCheck<'_>) -> Option<String> {
+    let home = dirs::home_dir();
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        let value = if a == "--add-dir" {
+            match it.next() {
+                Some(v) => v.as_str(),
+                None => return Some("--add-dir needs a directory".into()),
+            }
+        } else if let Some(v) = a.strip_prefix("--add-dir=") {
+            v
+        } else {
+            continue;
+        };
+        if let Some(why) = add_dir_problem(value, check, home.as_deref()) {
+            return Some(format!("--add-dir {value:?} is refused: {why}"));
+        }
+    }
+    None
+}
+
+/// Refuses `extra_args` that could change the sandbox or the approvals, or that add an unsafe
+/// writable root (at run time and on save).
+fn check_extra(args: &[String], check: ExtraCheck<'_>) -> AppResult<()> {
+    if let Some(flag) = forbidden_extra(args) {
+        return Err(AppError::Other(format!(
             "Codex extra_args may not contain {flag}: the sandbox and approvals come from the run's access level and the profile's \"sandbox\" and \"allow_full\" settings"
-        ))),
+        )));
+    }
+    match add_dir_error(args, check) {
+        Some(msg) => Err(AppError::Other(format!("Codex extra_args: {msg}"))),
         None => Ok(()),
     }
 }
@@ -535,7 +669,7 @@ fn plan(req: &OneShot<'_>) -> AppResult<(&'static str, Vec<String>)> {
             rest.push(a.clone());
         }
     }
-    check_extra(&rest)?;
+    check_extra(&rest, ExtraCheck::Run(req.cwd))?;
     let derived = match &req.access {
         Access::Edit => "workspace-write",
         Access::Full => "danger-full-access",
@@ -1275,6 +1409,85 @@ mod tests {
     }
 
     #[test]
+    fn add_dir_is_validated_on_save_and_at_run_time() {
+        use std::os::unix::fs::symlink;
+        let tmp = tempfile::tempdir().unwrap();
+        let t = tmp.path().canonicalize().unwrap();
+        let repo = t.join("repo");
+        let wt = repo.join(".git/worktrees/x");
+        std::fs::create_dir_all(&wt).unwrap();
+        let plain = t.join("plain");
+        std::fs::create_dir_all(&plain).unwrap();
+        let cwd = repo.join("sub");
+        std::fs::create_dir_all(&cwd).unwrap();
+        let home = dirs::home_dir().expect("home");
+        let home_parent = home.parent().unwrap_or(Path::new("/")).to_path_buf();
+        let link = t.join("homelink");
+        symlink(&home, &link).unwrap();
+        let s = |p: &Path| p.to_string_lossy().to_string();
+
+        let ok = [s(&wt), s(&repo.join(".git")), s(&plain), format!("{}/./plain/../plain", s(&t))];
+        for v in &ok {
+            for args in [vec!["--add-dir".to_string(), v.clone()], vec![format!("--add-dir={v}")]] {
+                assert!(check_extra(&args, ExtraCheck::Save).is_ok(), "save refused {args:?}");
+                assert!(check_extra(&args, ExtraCheck::Run(&cwd)).is_ok(), "run refused {args:?}");
+                for session in [SessionMode::Ephemeral, SessionMode::New("s"), SessionMode::Resume("01a1c0c8-adaa-7f93-b946-36ec1d2c8260")] {
+                    let mut req = request(&cwd);
+                    req.session = session;
+                    req.extra_args = args.clone();
+                    assert!(command(&req).is_ok(), "command refused {args:?}");
+                }
+            }
+        }
+        // A path that does not exist yet passes on save only.
+        let missing = vec!["--add-dir".to_string(), s(&t.join("later"))];
+        assert!(check_extra(&missing, ExtraCheck::Save).is_ok());
+        assert!(check_extra(&missing, ExtraCheck::Run(&cwd)).is_err());
+
+        let bad = [
+            "/".to_string(),
+            s(&home),
+            s(&home_parent),
+            "/etc".to_string(),
+            "/etc/ssh".to_string(),
+            s(&home.join(".ssh")),
+            s(&home.join(".ssh/keys")),
+            "relative/dir".to_string(),
+            "~/x".to_string(),
+            "~".to_string(),
+            "/tmp/../../..".to_string(),
+            String::new(),
+            "/tmp/a\nb".to_string(),
+            s(&link),
+            s(&link.join(".ssh")),
+        ];
+        for v in &bad {
+            for args in [vec!["--add-dir".to_string(), v.clone()], vec![format!("--add-dir={v}")]] {
+                assert!(check_extra(&args, ExtraCheck::Save).is_err(), "save accepted {args:?}");
+                for session in [SessionMode::Ephemeral, SessionMode::Resume("01a1c0c8-adaa-7f93-b946-36ec1d2c8260")] {
+                    let mut req = request(&cwd);
+                    req.session = session;
+                    req.extra_args = args.clone();
+                    assert!(command(&req).is_err(), "command accepted {args:?}");
+                }
+            }
+        }
+        // The working directory and its ancestors are refused at run time only.
+        for v in [&cwd, &repo, &t] {
+            let args = vec!["--add-dir".to_string(), s(v)];
+            assert!(check_extra(&args, ExtraCheck::Save).is_ok(), "save refused {args:?}");
+            assert!(check_extra(&args, ExtraCheck::Run(&cwd)).is_err(), "run accepted {args:?}");
+        }
+        // A missing value is an error.
+        assert!(check_extra(&strs(&["--add-dir"]), ExtraCheck::Save).is_err());
+        // The profile-save path.
+        let good = serde_json::json!({"extra_args": ["--add-dir", s(&wt)]});
+        let evil = serde_json::json!({"extra_args": ["--add-dir=/"]});
+        assert!(Codex.validate_settings(&good).is_ok());
+        assert!(Codex.validate_settings(&evil).is_err());
+    }
+
+    #[test]
     fn extra_args_cannot_change_the_sandbox_or_approvals() {
         let cwd = Path::new("/w");
         let bad: &[&[&str]] = &[
@@ -1349,7 +1562,7 @@ mod tests {
         for ok in [
             &["--color", "never", "-c", "model_verbosity=\"low\""][..],
             &["-c", "\"model\"=\"o3\"", "--config", " model_reasoning_summary = \"auto\"", "-cmodel_reasoning_effort=\"low\""],
-            &["--config=personality=\"friendly\"", "--add-dir", "/x"],
+            &["--config=personality=\"friendly\""],
         ] {
             for session in [SessionMode::Ephemeral, SessionMode::New("s"), SessionMode::Resume("01a1c0c8-adaa-7f93-b946-36ec1d2c8260")] {
                 let mut req = request(cwd);
