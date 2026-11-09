@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { BoardCard as BoardCardT, BoardMeta, BoardMetaKind, ClaudeSession } from "../lib/types";
+import type { BoardCard as BoardCardT, BoardMeta, BoardMetaKind, AgentSession } from "../lib/types";
 import { api, pickFile } from "../lib/api";
 import { toast } from "../lib/toast";
 import { confirmDialog } from "../lib/confirm";
@@ -281,7 +281,7 @@ export interface PrActions {
 
 export interface TerminalAction {
   /** Focusable live sessions of this card, most recently active first. */
-  sessions: ClaudeSession[];
+  sessions: AgentSession[];
   busy: boolean;
   onFocus: (sessionId: string) => void;
   /** Absent for issue cards, which have no worktree to open a shell in. */

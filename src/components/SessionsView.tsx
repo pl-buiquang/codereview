@@ -10,7 +10,7 @@ import { isWaiting, useWaitingSessions } from "../lib/sessionCounts";
 import { STATUS_LABEL, useActiveRoutineRuns, useUnseenRoutineProblems } from "../lib/routines";
 import { useAiDisabledReason, useSettingsStore } from "../lib/settings";
 import { useUIStore, type SessionsTab } from "../store";
-import type { CardSession, ClaudeSession, SessionCost, SessionFocusState } from "../lib/types";
+import type { CardSession, AgentSession, SessionCost, SessionFocusState } from "../lib/types";
 import { Icon } from "./icons";
 import { Markdown } from "./Markdown";
 import { RoutinesConfigTab } from "./routines/RoutinesConfigTab";
@@ -31,18 +31,18 @@ function shellQuote(s: string): string {
   return /^[\w./~@%+=:-]+$/.test(s) ? s : `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
-export function attachCommand(s: Pick<ClaudeSession, "session_id" | "job_id">): string {
+export function attachCommand(s: Pick<AgentSession, "session_id" | "job_id">): string {
   return `claude attach ${s.job_id ?? s.session_id.slice(0, 8)}`;
 }
 
 export { isWaiting };
 
-export function resumeCommand(s: Pick<ClaudeSession, "cwd" | "session_id">): string {
+export function resumeCommand(s: Pick<AgentSession, "cwd" | "session_id">): string {
   return `cd ${shellQuote(s.cwd)}; claude --resume ${s.session_id}`;
 }
 
 /** Every whitespace-separated word of `q` must appear (case-insensitive) in the session's text. */
-export function matchesSessionSearch(s: ClaudeSession, q: string): boolean {
+export function matchesSessionSearch(s: AgentSession, q: string): boolean {
   const words = q.toLowerCase().split(/\s+/).filter(Boolean);
   if (words.length === 0) return true;
   const haystack = [
@@ -86,7 +86,7 @@ function TerminalSessions() {
     onError: (e) => toast.error(`Could not focus terminal:\n${String(e)}`),
   });
   const resume = useMutation({
-    mutationFn: (s: ClaudeSession) =>
+    mutationFn: (s: AgentSession) =>
       api.resumeClaudeSession(s.session_id, s.cwd, s.repo ?? null, defaultTerminal, tmuxTarget, tmuxSessionName),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["claude-sessions"] }),
     onError: (e) => toast.error(`Could not resume session:\n${String(e)}`),
@@ -99,7 +99,7 @@ function TerminalSessions() {
     },
     onError: (e) => toast.error(`Could not stop session:\n${String(e)}`),
   });
-  const confirmStop = async (s: ClaudeSession) => {
+  const confirmStop = async (s: AgentSession) => {
     if (
       await confirmDialog({
         title: "Stop background session",
@@ -255,7 +255,7 @@ function BackgroundOpenButton({
   onFocus,
   onCopy,
 }: {
-  session: ClaudeSession;
+  session: AgentSession;
   busy: boolean;
   onFocus: () => void;
   onCopy: () => void;
@@ -295,7 +295,7 @@ export function costTooltip(c: SessionCost): string {
   return lines.join("\n");
 }
 
-function statusClass(s: ClaudeSession): string {
+function statusClass(s: AgentSession): string {
   if (!s.live) return "ended";
   if (isWaiting(s)) return "waiting";
   return s.status === "busy" ? "busy" : "idle";
@@ -307,7 +307,7 @@ function SessionRow({
   onShowCard,
   action,
 }: {
-  session: ClaudeSession;
+  session: AgentSession;
   cards: CardSession[];
   onShowCard: (cardId: string) => void;
   action: React.ReactNode;

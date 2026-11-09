@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { CardSession, ClaudeSession, SessionsSnapshot } from "../lib/types";
+import type { CardSession, AgentSession, SessionsSnapshot } from "../lib/types";
 
 const listClaudeSessions = vi.fn();
 const focusClaudeSession = vi.fn();
@@ -23,7 +23,8 @@ import { SessionsView, matchesSessionSearch, resumeCommand, tildePath } from "./
 import { useUIStore } from "../store";
 import { useSettingsStore } from "../lib/settings";
 
-const session = (over: Partial<ClaudeSession> = {}): ClaudeSession => ({
+const session = (over: Partial<AgentSession> = {}): AgentSession => ({
+  harness: "claude",
   session_id: "s1",
   pid: 1,
   live: true,
@@ -46,7 +47,7 @@ const session = (over: Partial<ClaudeSession> = {}): ClaudeSession => ({
   ...over,
 });
 
-const snapshot = (sessions: ClaudeSession[], card_sessions: CardSession[] = []): SessionsSnapshot => ({
+const snapshot = (sessions: AgentSession[], card_sessions: CardSession[] = []): SessionsSnapshot => ({
   sessions,
   card_sessions,
 });

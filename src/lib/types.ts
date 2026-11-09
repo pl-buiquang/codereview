@@ -830,7 +830,8 @@ export interface AgentView {
   focus: SessionFocusState;
 }
 
-export interface ClaudeSession {
+export interface AgentSession {
+  harness: string; // id of the AI harness ("claude", ...)
   session_id: string;
   pid: number | null;
   live: boolean;
@@ -880,7 +881,7 @@ export interface CardSession {
 }
 
 export interface SessionsSnapshot {
-  sessions: ClaudeSession[];
+  sessions: AgentSession[];
   card_sessions: CardSession[];
 }
 

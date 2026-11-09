@@ -8,7 +8,7 @@ use std::path::Path;
 
 use crate::ai::profiles::{self, Feature};
 use crate::ai::{self, Access, Harness, OneShot, SessionMode, SystemPrompt, SystemPromptMode, ToolPolicy, TurnResult};
-use crate::claude_sessions::{self, ClaudeSession};
+use crate::claude_sessions::{self, AgentSession};
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
 use crate::session_summaries::{self, SessionSummary};
@@ -16,7 +16,7 @@ use crate::terminal;
 
 #[derive(Debug, Serialize)]
 pub struct SessionsSnapshot {
-    pub sessions: Vec<ClaudeSession>,
+    pub sessions: Vec<AgentSession>,
     pub card_sessions: Vec<CardSession>,
 }
 
@@ -64,13 +64,13 @@ const FORK_MAX_AGE_MS: i64 = 5 * 60 * 1000;
 const EXTRACT_MAX_BYTES: usize = 400_000;
 const EXTRACT_MODEL: &str = "haiku";
 
-fn session_tag(variant: &str, session: &ClaudeSession) -> crate::ai_usage::RunTag {
+fn session_tag(variant: &str, session: &AgentSession) -> crate::ai_usage::RunTag {
     let project = session.cwd.trim_end_matches('/').rsplit('/').next().unwrap_or("");
     let short: String = session.session_id.chars().take(8).collect();
     crate::ai_usage::RunTag::new("session_summary").variant(variant).label(format!("{project} ({short})"))
 }
 
-fn fork_request<'a>(session: &'a ClaudeSession, prompt: &'a str, harness: &'static str) -> OneShot<'a> {
+fn fork_request<'a>(session: &'a AgentSession, prompt: &'a str, harness: &'static str) -> OneShot<'a> {
     OneShot {
         model: "",
         system_prompt: None,
@@ -90,13 +90,13 @@ fn fork_request<'a>(session: &'a ClaudeSession, prompt: &'a str, harness: &'stat
     }
 }
 
-fn run_fork_summary(harness: &dyn Harness, session: &ClaudeSession, instructions: &str) -> AppResult<TurnResult> {
+fn run_fork_summary(harness: &dyn Harness, session: &AgentSession, instructions: &str) -> AppResult<TurnResult> {
     let prompt = format!("{instructions}\n\nSummarize this conversation so far. Do not call any tools.");
     harness.one_shot(&fork_request(session, &prompt, harness.id()))
 }
 
 fn extract_request<'a>(
-    session: &ClaudeSession,
+    session: &AgentSession,
     instructions: &'a str,
     file_tag: &'a str,
     cwd: &'a Path,
@@ -126,7 +126,7 @@ fn extract_request<'a>(
 fn run_extract_summary(
     harness: &dyn Harness,
     settings: &serde_json::Value,
-    session: &ClaudeSession,
+    session: &AgentSession,
     instructions: &str,
     model: &str,
 ) -> AppResult<TurnResult> {
@@ -285,7 +285,7 @@ fn load_session_cards(conn: &Connection) -> AppResult<(Vec<SessionCard>, Session
 fn match_card_sessions(
     cards: &[SessionCard],
     meta: &SessionIdsByCard,
-    sessions: &[ClaudeSession],
+    sessions: &[AgentSession],
 ) -> Vec<CardSession> {
     let mut out = Vec::new();
     for card in cards {
@@ -321,7 +321,7 @@ pub(crate) fn resumable_card_session(conn: &Connection, card_id: &str, live: &Ha
     Ok(ids.into_iter().find(|id| !live.contains(id)))
 }
 
-fn is_focusable(s: &ClaudeSession) -> bool {
+fn is_focusable(s: &AgentSession) -> bool {
     s.focus == claude_sessions::FocusState::Ready
         || s.agent_view.as_ref().is_some_and(|v| v.focus == claude_sessions::FocusState::Ready)
 }
@@ -338,8 +338,8 @@ fn match_review_sessions(
     worktree: Option<&str>,
     card: Option<&SessionCard>,
     meta: &SessionIdsByCard,
-    sessions: Vec<ClaudeSession>,
-) -> Vec<ClaudeSession> {
+    sessions: Vec<AgentSession>,
+) -> Vec<AgentSession> {
     let by_card: HashSet<String> = card
         .map(|c| match_card_sessions(std::slice::from_ref(c), meta, &sessions))
         .unwrap_or_default()
@@ -382,7 +382,7 @@ fn review_session_ctx(conn: &Connection, review_id: i64) -> AppResult<ReviewSess
 }
 
 #[tauri::command]
-pub async fn review_agent_sessions(review_id: i64, db: State<'_, Db>) -> AppResult<Vec<ClaudeSession>> {
+pub async fn review_agent_sessions(review_id: i64, db: State<'_, Db>) -> AppResult<Vec<AgentSession>> {
     let (ctx, meta) = {
         let conn = db.0.lock().unwrap();
         let ctx = review_session_ctx(&conn, review_id)?;
@@ -436,8 +436,9 @@ mod tests {
     use super::*;
     use crate::claude_sessions::FocusState;
 
-    fn session(id: &str, repo: Option<&str>, branch: Option<&str>) -> ClaudeSession {
-        ClaudeSession {
+    fn session(id: &str, repo: Option<&str>, branch: Option<&str>) -> AgentSession {
+        AgentSession {
+            harness: "claude".into(),
             session_id: id.into(),
             pid: Some(1),
             live: true,

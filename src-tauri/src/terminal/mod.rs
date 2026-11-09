@@ -8,7 +8,7 @@ use serde::Deserialize;
 
 pub use tmux::TmuxTarget;
 
-use crate::claude_sessions::{self, ClaudeSession, FocusState};
+use crate::claude_sessions::{self, AgentSession, FocusState};
 use crate::error::{AppError, AppResult};
 
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
@@ -103,7 +103,7 @@ fn focus_tty(tty: &str, cwd_hint: Option<&str>) -> AppResult<()> {
 
 /// Focus the session's own terminal, or — for a background session nobody is attached to — the
 /// agent view it can be opened from.
-pub fn focus_session(session: &ClaudeSession) -> AppResult<()> {
+pub fn focus_session(session: &AgentSession) -> AppResult<()> {
     if session.focus != FocusState::Ready {
         if let Some(view) = session.agent_view.as_ref().filter(|v| v.focus == FocusState::Ready) {
             return focus_target(view.tmux.as_ref(), Some(&view.tty), view.cwd.as_deref());

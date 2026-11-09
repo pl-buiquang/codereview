@@ -1,14 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "./api";
-import type { ClaudeSession } from "./types";
+import type { AgentSession } from "./types";
 
-export function isWaiting(s: Pick<ClaudeSession, "live" | "status" | "waiting_for">): boolean {
+export function isWaiting(s: Pick<AgentSession, "live" | "status" | "waiting_for">): boolean {
   return s.live && (s.status === "waiting" || s.waiting_for != null);
 }
 
 /** Live sessions (no history). Shares its cache entry with the Board's live-session query; polls slowly
  *  because listing spawns `claude agents`, `ps` and `tmux`. */
-export function useLiveSessions(): ClaudeSession[] {
+export function useLiveSessions(): AgentSession[] {
   const query = useQuery({
     queryKey: ["claude-sessions", 0],
     queryFn: () => api.listClaudeSessions(0, ""),
@@ -19,6 +19,6 @@ export function useLiveSessions(): ClaudeSession[] {
 }
 
 /** Live sessions asking for input, for the sidebar badge. */
-export function useWaitingSessions(): ClaudeSession[] {
+export function useWaitingSessions(): AgentSession[] {
   return useLiveSessions().filter(isWaiting);
 }

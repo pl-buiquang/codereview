@@ -9,7 +9,7 @@ use std::process::{Child, Command, Stdio};
 use serde::Deserialize;
 use serde_json::Value;
 
-use super::{
+use super::{AgentSession, 
     Access, Caps, Event, Harness, Interactive, OneShot, SessionMode, StreamRun, SystemPrompt, SystemPromptMode,
     ToolPolicy, TurnResult,
 };
@@ -157,6 +157,10 @@ impl Harness for ClaudeCode {
     #[cfg(not(unix))]
     fn is_own_process(&self, _pid: i32, _session_id: Option<&str>) -> bool {
         false
+    }
+
+    fn live_sessions(&self) -> Vec<AgentSession> {
+        crate::claude_sessions::live_sessions()
     }
 
     fn interactive_argv(&self, opts: &Interactive<'_>) -> Option<Vec<String>> {

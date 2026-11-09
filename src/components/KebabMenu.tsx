@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import type { ClaudeSession } from "../lib/types";
+import type { AgentSession } from "../lib/types";
 import { Icon } from "./icons";
 import { isWaiting } from "./SessionsView";
 
@@ -49,7 +49,7 @@ export function KebabMenu({
   );
 }
 
-function sessionLabel(s: ClaudeSession): string {
+function sessionLabel(s: AgentSession): string {
   const status = isWaiting(s) ? `waiting: ${s.waiting_for ?? "input"}` : s.status;
   return `${s.name ?? s.session_id.slice(0, 8)}${status ? ` · ${status}` : ""}`;
 }
@@ -62,7 +62,7 @@ export function AgentSessionItems({
   onFocus,
   onOpenNew,
 }: {
-  sessions: ClaudeSession[];
+  sessions: AgentSession[];
   busy: boolean;
   disabledReason?: string | null;
   close: () => void;

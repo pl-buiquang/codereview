@@ -10,7 +10,7 @@ import { findRepoByFullName } from "../lib/repoLabel";
 import { useUIStore } from "../store";
 import { useBoardBadgeCards } from "../lib/boardCounts";
 import { useRefetchOnActivate } from "../lib/useRefetchOnActivate";
-import type { BoardCard as BoardCardT, BoardLane, BoardMetaKind, ClaudeSession } from "../lib/types";
+import type { BoardCard as BoardCardT, BoardLane, BoardMetaKind, AgentSession } from "../lib/types";
 import {
   BoardCard,
   canEnableAutoMerge,
@@ -120,7 +120,7 @@ export function BoardView() {
   useRefetchOnActivate(homeActive, liveSessionsQuery.refetch);
   const focusableByCard = useMemo(() => {
     const byId = new Map((liveSessionsQuery.data?.sessions ?? []).map((s) => [s.session_id, s]));
-    const out = new Map<string, ClaudeSession[]>();
+    const out = new Map<string, AgentSession[]>();
     for (const link of liveSessionsQuery.data?.card_sessions ?? []) {
       const s = byId.get(link.session_id);
       if (!s || (s.focus !== "ready" && s.agent_view?.focus !== "ready")) continue;

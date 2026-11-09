@@ -15,6 +15,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
+pub use crate::ai::AgentSession;
 use crate::error::{AppError, AppResult};
 use crate::session_summaries::SessionSummary;
 
@@ -35,38 +36,6 @@ pub enum FocusState {
     Background,
     NoTerminal,
     NotLive,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct ClaudeSession {
-    pub session_id: String,
-    pub pid: Option<i64>,
-    pub live: bool,
-    pub status: Option<String>,
-    pub kind: Option<String>,
-    /// A background session currently viewed through a `claude attach` client.
-    pub attached: bool,
-    /// Background job id taken by `claude attach|stop|logs`.
-    pub job_id: Option<String>,
-    /// What the session is blocked on (e.g. "input needed", "dialog open").
-    pub waiting_for: Option<String>,
-    /// For background sessions nobody is attached to: the `claude agents` view best placed to
-    /// open it.
-    pub agent_view: Option<AgentView>,
-    pub name: Option<String>,
-    pub cwd: String,
-    pub git_branch: Option<String>,
-    /// `owner/name` of the cwd's `origin` remote (live sessions only).
-    pub repo: Option<String>,
-    pub tmux: Option<TmuxLoc>,
-    pub tty: Option<String>,
-    /// Last activity, epoch milliseconds.
-    pub updated_at: i64,
-    pub focus: FocusState,
-    /// Hook-written summaries for this session, newest first (history sessions only).
-    pub summaries: Vec<SessionSummary>,
-    /// The transcript-derived name when a summary title replaced it.
-    pub original_name: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -403,12 +372,12 @@ pub fn pick_agent_view(views: &[AgentView], session_cwd: &str) -> Option<AgentVi
 }
 
 /// All live sessions, most recently active first.
-pub fn live_sessions() -> Vec<ClaudeSession> {
+pub fn live_sessions() -> Vec<AgentSession> {
     live_sessions_from(&agents())
 }
 
 /// Live sessions, plus the ids of stale fork parents that were left out of them.
-pub fn live_sessions_and_hidden(agents: &[AgentEntry]) -> (Vec<ClaudeSession>, HashSet<String>) {
+pub fn live_sessions_and_hidden(agents: &[AgentEntry]) -> (Vec<AgentSession>, HashSet<String>) {
     let Some(dir) = claude_dir() else { return (Vec::new(), HashSet::new()) };
     let by_session: HashMap<&str, &AgentEntry> = agents.iter().map(|a| (a.session_id.as_str(), a)).collect();
     let files = read_session_files(&dir.join("sessions"));
@@ -472,7 +441,8 @@ pub fn live_sessions_and_hidden(agents: &[AgentEntry]) -> (Vec<ClaudeSession>, H
             let focus = focus_state(kind, tmux_loc.as_ref(), tty.as_deref(), &tmux);
             let (git_branch, repo) = git_info(&f.cwd);
             let agent = by_session.get(f.session_id.as_str());
-            ClaudeSession {
+            AgentSession {
+                harness: "claude".into(),
                 updated_at: updated_ms(&f),
                 pid: Some(f.pid),
                 live: true,
@@ -498,7 +468,7 @@ pub fn live_sessions_and_hidden(agents: &[AgentEntry]) -> (Vec<ClaudeSession>, H
     (sessions, stale)
 }
 
-pub fn live_sessions_from(agents: &[AgentEntry]) -> Vec<ClaudeSession> {
+pub fn live_sessions_from(agents: &[AgentEntry]) -> Vec<AgentSession> {
     live_sessions_and_hidden(agents).0
 }
 
@@ -606,7 +576,7 @@ pub(crate) fn transcript_path(session_id: &str) -> Option<PathBuf> {
 
 /// Attach app-generated summaries to sessions the SessionEnd hook wrote none for; a generated
 /// title replaces the session's name.
-pub fn apply_generated_summaries(sessions: &mut [ClaudeSession], generated: &HashMap<String, SessionSummary>) {
+pub fn apply_generated_summaries(sessions: &mut [AgentSession], generated: &HashMap<String, SessionSummary>) {
     for s in sessions.iter_mut().filter(|s| s.summaries.is_empty()) {
         let Some(g) = generated.get(&s.session_id) else { continue };
         if let Some(title) = &g.title {
@@ -622,7 +592,7 @@ pub fn history_sessions(
     days: u32,
     exclude: &HashSet<String>,
     summaries: &mut HashMap<String, Vec<SessionSummary>>,
-) -> Vec<ClaudeSession> {
+) -> Vec<AgentSession> {
     let Some(dir) = claude_dir() else { return Vec::new() };
     let cutoff = SystemTime::now() - Duration::from_secs(u64::from(days) * 86_400);
     let Ok(projects) = fs::read_dir(dir.join("projects")) else { return Vec::new() };
@@ -652,7 +622,8 @@ pub fn history_sessions(
             let summary_title = summaries.iter().find_map(|s| s.title.as_deref());
             let name = info.name(summary_title);
             let original_name = info.name(None).filter(|n| Some(n) != name.as_ref());
-            out.push(ClaudeSession {
+            out.push(AgentSession {
+                harness: "claude".into(),
                 session_id,
                 pid: None,
                 live: false,
@@ -694,7 +665,8 @@ mod tests {
         };
         let mut hooked = SessionSummary { generated: false, ..gen(Some("Hook title")) };
         hooked.body = "hook".into();
-        let session = |id: &str, name: &str, summaries: Vec<SessionSummary>| ClaudeSession {
+        let session = |id: &str, name: &str, summaries: Vec<SessionSummary>| AgentSession {
+            harness: "claude".into(),
             session_id: id.into(),
             pid: None,
             live: false,

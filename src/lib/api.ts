@@ -24,7 +24,7 @@ import type {
   SessionsSnapshot,
   ChatMessage,
   ChatTurnResult,
-  ClaudeSession,
+  AgentSession,
   Comment,
   CommitDetail,
   DeleteGoneOutcome,
@@ -425,7 +425,7 @@ export const api = {
   ) => invoke<void>("board_open_agent", { cardId, basePaths, host, tmuxTarget, tmuxSession }),
   boardOpenIssueAgent: (cardId: string, host: TerminalHost, tmuxTarget: TmuxTarget, tmuxSession: string) =>
     invoke<void>("board_open_issue_agent", { cardId, host, tmuxTarget, tmuxSession }),
-  reviewAgentSessions: (reviewId: number) => invoke<ClaudeSession[]>("review_agent_sessions", { reviewId }),
+  reviewAgentSessions: (reviewId: number) => invoke<AgentSession[]>("review_agent_sessions", { reviewId }),
   reviewOpenAgent: (reviewId: number, host: TerminalHost, tmuxTarget: TmuxTarget, tmuxSession: string) =>
     invoke<void>("review_open_agent", { reviewId, host, tmuxTarget, tmuxSession }),
   listClaudeSessions: (historyDays: number, summaryDir: string) =>

@@ -19,16 +19,17 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::ai_usage::{RunTag, RunUsage};
-use crate::claude_sessions::ClaudeSession;
 use crate::error::{AppError, AppResult};
 
 pub mod claude;
 pub mod models;
 pub mod opencode;
 pub mod profiles;
+pub mod session;
 
 pub use claude::ClaudeCode;
 pub use opencode::OpenCode;
+pub use session::AgentSession;
 
 /// What a harness can do.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -287,8 +288,9 @@ pub trait Harness: Send + Sync {
     fn is_own_process(&self, pid: i32, session_id: Option<&str>) -> bool;
     /// The argv that opens an interactive session, or `None` when the harness can't.
     fn interactive_argv(&self, opts: &Interactive<'_>) -> Option<Vec<String>>;
-    /// Live sessions of this harness. Filled in by the sessions work; empty until then.
-    fn live_sessions(&self) -> Vec<ClaudeSession> {
+    /// Live sessions of this harness, for the Sessions view. Empty when the harness has no
+    /// discovery (or is not installed).
+    fn live_sessions(&self) -> Vec<AgentSession> {
         Vec::new()
     }
     /// Model ids to offer in the profile editor: what the CLI lists, or a short static suggestion
@@ -368,6 +370,15 @@ static OPENCODE: OpenCode = OpenCode;
 /// Every harness the app knows, in display order.
 pub fn harnesses() -> [&'static dyn Harness; 2] {
     [&CLAUDE, &OPENCODE]
+}
+
+/// Live sessions of every available harness, Claude first (the order of [`harnesses`]).
+pub fn live_sessions_all() -> Vec<AgentSession> {
+    live_sessions_of(&harnesses())
+}
+
+fn live_sessions_of(harnesses: &[&dyn Harness]) -> Vec<AgentSession> {
+    harnesses.iter().filter(|h| h.available()).flat_map(|h| h.live_sessions()).collect()
 }
 
 /// The harness with this id (`"claude"`).
@@ -456,7 +467,80 @@ mod tests {
         let h = harness_for();
         assert_eq!(h.id(), "claude");
         assert!(h.caps().pins_session_id);
-        assert!(h.live_sessions().is_empty());
+            }
+
+    fn fake_session(harness: &str, id: &str) -> AgentSession {
+        AgentSession {
+            harness: harness.into(),
+            session_id: id.into(),
+            pid: None,
+            live: true,
+            status: None,
+            kind: None,
+            attached: false,
+            job_id: None,
+            waiting_for: None,
+            agent_view: None,
+            name: None,
+            cwd: "/x".into(),
+            git_branch: None,
+            repo: None,
+            tmux: None,
+            tty: None,
+            updated_at: 0,
+            focus: crate::claude_sessions::FocusState::NotLive,
+            summaries: Vec::new(),
+            original_name: None,
+        }
+    }
+
+    struct Listing {
+        id: &'static str,
+        available: bool,
+    }
+
+    impl Harness for Listing {
+        fn id(&self) -> &'static str {
+            self.id
+        }
+        fn name(&self) -> &'static str {
+            self.id
+        }
+        fn caps(&self) -> Caps {
+            unimplemented!()
+        }
+        fn available(&self) -> bool {
+            self.available
+        }
+        fn one_shot(&self, _: &OneShot<'_>) -> AppResult<TurnResult> {
+            unimplemented!()
+        }
+        fn spawn(&self, _: StreamRun<'_>) -> AppResult<Child> {
+            unimplemented!()
+        }
+        fn parse_line(&self, _: &str) -> (String, Option<Value>) {
+            unimplemented!()
+        }
+        fn normalize(&self, _: &str) -> Vec<Event> {
+            unimplemented!()
+        }
+        fn is_own_process(&self, _: i32, _: Option<&str>) -> bool {
+            false
+        }
+        fn interactive_argv(&self, _: &Interactive<'_>) -> Option<Vec<String>> {
+            None
+        }
+        fn live_sessions(&self) -> Vec<AgentSession> {
+            vec![fake_session(self.id, "s")]
+        }
+    }
+
+    #[test]
+    fn live_sessions_merge_available_harnesses_in_order() {
+        let (a, b, c) = (Listing { id: "a", available: true }, Listing { id: "b", available: false }, Listing { id: "c", available: true });
+        let merged = live_sessions_of(&[&a, &b, &c]);
+        let ids: Vec<_> = merged.iter().map(|s| s.harness.as_str()).collect();
+        assert_eq!(ids, ["a", "c"]);
     }
 
     #[test]
