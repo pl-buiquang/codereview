@@ -9,8 +9,8 @@ use std::process::{Child, Command, Stdio};
 use serde::Deserialize;
 use serde_json::Value;
 
-use super::{AgentSession, 
-    Access, Caps, Event, Harness, Interactive, OneShot, SessionMode, StreamRun, SystemPrompt, SystemPromptMode,
+use super::{
+    Access, AgentSession, Caps, Event, Harness, Interactive, OneShot, SessionMode, StreamRun, SystemPrompt, SystemPromptMode,
     ToolPolicy, TurnResult,
 };
 use crate::ai_usage::{self, ModelTokens, RunTag, RunUsage};
