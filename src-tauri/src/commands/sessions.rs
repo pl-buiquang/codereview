@@ -313,13 +313,14 @@ fn match_card_sessions(
     out
 }
 
+/// The live sessions of every harness (Claude's rich source plus the other harnesses' basics).
+pub(crate) fn all_live_sessions() -> Vec<AgentSession> {
+    claude_sessions::live_sessions().into_iter().chain(ai::live_sessions_except("claude")).collect()
+}
+
 /// Ids of the live sessions of every harness.
 pub(crate) fn live_session_ids() -> HashSet<String> {
-    claude_sessions::live_sessions()
-        .into_iter()
-        .chain(ai::live_sessions_except("claude"))
-        .map(|s| s.session_id)
-        .collect()
+    all_live_sessions().into_iter().map(|s| s.session_id).collect()
 }
 
 /// Most recent session of `harness` recorded on the card (`claude_session` rows are Claude's) that

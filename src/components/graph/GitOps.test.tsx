@@ -13,6 +13,8 @@ const api = vi.hoisted(() => ({
   gitUnstage: vi.fn(),
   listClaudeSessions: vi.fn(),
   focusClaudeSession: vi.fn(),
+  aiHarnesses: vi.fn(),
+  checkoutOpenClaude: vi.fn(),
 }));
 vi.mock("../../lib/api", () => ({ api }));
 
@@ -83,6 +85,7 @@ beforeEach(() => {
   confirmDialog.mockReset();
   toastError.mockReset();
   api.listClaudeSessions.mockResolvedValue({ sessions: [], card_sessions: [] });
+  api.aiHarnesses.mockResolvedValue([]);
 });
 
 describe("refusal parsing", () => {
@@ -123,9 +126,29 @@ describe("branch menu git actions", () => {
     expect(screen.getByRole("menuitem", { name: "New Claude session" })).toBeEnabled();
   });
 
+  it("offers a picker entry per interactive harness and passes the choice on", async () => {
+    const h = (id: string, name: string) => ({ id, name, available: true, caps: { interactive_tui: true } });
+    api.aiHarnesses.mockResolvedValue([h("claude", "Claude Code"), h("opencode", "opencode")]);
+    api.checkoutOpenClaude.mockResolvedValue(undefined);
+    open(local("feat"));
+    await userEvent.click(await screen.findByRole("menuitem", { name: "New opencode session" }));
+    await waitFor(() => expect(api.checkoutOpenClaude).toHaveBeenCalled());
+    expect(api.checkoutOpenClaude.mock.calls[0][5]).toBe("opencode");
+  });
+
+  it("does not offer to focus a live session of another harness", async () => {
+    api.listClaudeSessions.mockResolvedValue({
+      sessions: [{ session_id: "oc1", harness: "opencode", live: true, cwd: "/wt/feat", name: "other" }],
+      card_sessions: [],
+    });
+    open(local("feat"));
+    await waitFor(() => expect(api.listClaudeSessions).toHaveBeenCalled());
+    expect(screen.queryByRole("menuitem", { name: /Focus Claude/ })).not.toBeInTheDocument();
+  });
+
   it("lists live Claude sessions in that worktree to focus", async () => {
     api.listClaudeSessions.mockResolvedValue({
-      sessions: [{ session_id: "abcdef123456", live: true, cwd: "/wt/feat", name: "fixing it" }],
+      sessions: [{ session_id: "abcdef123456", harness: "claude", live: true, cwd: "/wt/feat", name: "fixing it" }],
       card_sessions: [],
     });
     api.focusClaudeSession.mockResolvedValue(undefined);

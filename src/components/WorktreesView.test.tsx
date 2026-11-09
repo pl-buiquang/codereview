@@ -87,7 +87,7 @@ const report: WorktreeGcReport = {
           display_path: "~/wt/busy",
           branch: "pbq/busy",
           review_id: 42,
-          verdict: { kind: "in_use", reason: "live Claude session; uncommitted changes" },
+          verdict: { kind: "in_use", reason: "live agent session; uncommitted changes" },
         }),
       ],
     },
@@ -113,7 +113,8 @@ describe("WorktreesView", () => {
     listRepositories.mockResolvedValue([]);
     listClaudeSessions.mockResolvedValue({
       sessions: [
-        { session_id: "abcdef123456", live: true, name: "fixer", cwd: "/wt/busy/src" },
+        { session_id: "abcdef123456", harness: "claude", live: true, name: "fixer", cwd: "/wt/busy/src" },
+        { session_id: "oc0000000000", harness: "opencode", live: true, name: "other", cwd: "/wt/busy" },
         { session_id: "dead00000000", live: false, name: null, cwd: "/wt/busy" },
       ],
       card_sessions: [],
@@ -203,7 +204,7 @@ describe("WorktreesView", () => {
     renderView();
     expect(await screen.findByText("in use")).toBeInTheDocument();
     expect(screen.getByText("active")).toBeInTheDocument();
-    expect(screen.getByText("live Claude session; uncommitted changes")).toBeInTheDocument();
+    expect(screen.getByText("live agent session; uncommitted changes")).toBeInTheDocument();
   });
 
   it("focuses the live Claude session running in a worktree", async () => {
@@ -214,6 +215,7 @@ describe("WorktreesView", () => {
     await userEvent.click(await within(row).findByTitle("Focus Claude fixer"));
     expect(focusClaudeSession).toHaveBeenCalledWith("abcdef123456");
     expect(within(row).queryByTitle(/Focus Claude dead/)).not.toBeInTheDocument();
+    expect(within(row).queryByTitle(/Focus Claude other/)).not.toBeInTheDocument();
   });
 
   it("links a worktree to its graph and its review", async () => {

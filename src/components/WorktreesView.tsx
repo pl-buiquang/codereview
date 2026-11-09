@@ -156,7 +156,7 @@ export function WorktreesView() {
     staleTime: 5_000,
     refetchInterval: 5_000,
   });
-  const liveSessions = (sessionsQuery.data?.sessions ?? []).filter((s) => s.live);
+  const liveSessions = (sessionsQuery.data?.sessions ?? []).filter((s) => s.live && s.harness === "claude");
   const sessionsIn = (path: string) => liveSessions.filter((s) => s.cwd === path || s.cwd.startsWith(`${path}/`));
 
   const defaultTerminal = useSettingsStore((s) => s.defaultTerminal);

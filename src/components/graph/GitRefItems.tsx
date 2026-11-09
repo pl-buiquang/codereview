@@ -24,6 +24,12 @@ export function GitRefItems({ target, close }: { target: GitTarget; close: () =>
     enabled: checkedOutPath != null,
     staleTime: 5_000,
   });
+  const harnesses = useQuery({
+    queryKey: ["ai-harnesses"],
+    queryFn: () => api.aiHarnesses(),
+    enabled: checkedOutPath != null,
+    staleTime: 60_000,
+  });
   if (!ops) return null;
 
   const item = (label: React.ReactNode, run: () => void, opts?: { disabled?: boolean; title?: string }) => (
@@ -75,7 +81,8 @@ export function GitRefItems({ target, close }: { target: GitTarget; close: () =>
     );
   }
 
-  const live = (sessionsQuery.data?.sessions ?? []).filter((s) => s.live && s.cwd === checkedOutPath);
+  const live = (sessionsQuery.data?.sessions ?? []).filter((s) => s.live && s.harness === "claude" && s.cwd === checkedOutPath);
+  const pickable = (harnesses.data ?? []).filter((h) => h.available && h.caps.interactive_tui);
   return (
     <>
       <div className="rs-menu-sep" role="separator" />
@@ -96,6 +103,13 @@ export function GitRefItems({ target, close }: { target: GitTarget; close: () =>
         disabled: !checkedOutPath,
         title: checkedOutPath ? undefined : NOT_CHECKED_OUT,
       })}
+      {pickable.length > 1 &&
+        pickable.map((h) =>
+          item(`New ${h.name} session`, () => checkedOutPath && ops.openClaude(checkedOutPath, h.id), {
+            disabled: !checkedOutPath,
+            title: checkedOutPath ? `Open a new terminal running ${h.name} instead of the default` : NOT_CHECKED_OUT,
+          }),
+        )}
       {live.map((s) =>
         item(
           <>

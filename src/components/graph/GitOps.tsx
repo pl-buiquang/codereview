@@ -71,7 +71,8 @@ export interface GitOps {
   stashPop: (index: number) => void;
   stashDrop: (index: number) => void;
   openTerminal: (path: string) => void;
-  openClaude: (path: string) => void;
+  /** `harness` is set when the user picked one; otherwise the `sessions` profile decides. */
+  openClaude: (path: string, harness?: string) => void;
 }
 
 const GitOpsContext = createContext<GitOps | null>(null);
@@ -320,9 +321,9 @@ export function GitOpsProvider({
         void attempt("Open terminal", () =>
           api.worktreeOpenTerminal(id, path, defaultTerminal, tmuxTarget, tmuxSessionName),
         ),
-      openClaude: (path) =>
-        void attempt("Open Claude", () =>
-          api.checkoutOpenClaude(id, path, defaultTerminal, tmuxTarget, tmuxSessionName),
+      openClaude: (path, harness) =>
+        void attempt("Open session", () =>
+          api.checkoutOpenClaude(id, path, defaultTerminal, tmuxTarget, tmuxSessionName, harness ?? null),
         ),
     };
   }, [

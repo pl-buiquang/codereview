@@ -42,8 +42,9 @@ export function harnessIds(sessions: Pick<AgentSession, "harness">[]): string[] 
   return [...new Set(sessions.map((s) => s.harness))].sort();
 }
 
-export function resumeCommand(s: Pick<AgentSession, "cwd" | "session_id">): string {
-  return `cd ${shellQuote(s.cwd)}; claude --resume ${s.session_id}`;
+export function resumeCommand(s: Pick<AgentSession, "cwd" | "session_id"> & { harness?: string }): string {
+  const resume = s.harness === "opencode" ? `opencode --session ${s.session_id}` : `claude --resume ${s.session_id}`;
+  return `cd ${shellQuote(s.cwd)}; ${resume}`;
 }
 
 /** Every whitespace-separated word of `q` must appear (case-insensitive) in the session's text. */
@@ -185,35 +186,35 @@ function TerminalSessions() {
                 action={
                   // Focus, attach and stop are only known for Claude sessions.
                   s.harness !== "claude" ? null : (
-                  <>
-                    {s.kind === "bg" && s.job_id && (
-                      <button
-                        className="btn btn-sm btn-ghost"
-                        disabled={stop.isPending}
-                        title={`claude stop ${s.job_id}`}
-                        onClick={() => confirmStop(s)}
-                      >
-                        Stop
-                      </button>
-                    )}
-                    {s.focus === "background" ? (
-                      <BackgroundOpenButton
-                        session={s}
-                        busy={focus.isPending}
-                        onFocus={() => focus.mutate(s.session_id)}
-                        onCopy={() => copyCommand(attachCommand(s), "Attach")}
-                      />
-                    ) : (
-                      <button
-                        className="btn btn-sm"
-                        disabled={s.focus !== "ready" || focus.isPending}
-                        title={s.focus === "ready" ? "Focus this session's terminal" : FOCUS_DISABLED_REASON[s.focus]}
-                        onClick={() => focus.mutate(s.session_id)}
-                      >
-                        <Icon name="terminal" size={13} /> Focus
-                      </button>
-                    )}
-                  </>
+                    <>
+                      {s.kind === "bg" && s.job_id && (
+                        <button
+                          className="btn btn-sm btn-ghost"
+                          disabled={stop.isPending}
+                          title={`claude stop ${s.job_id}`}
+                          onClick={() => confirmStop(s)}
+                        >
+                          Stop
+                        </button>
+                      )}
+                      {s.focus === "background" ? (
+                        <BackgroundOpenButton
+                          session={s}
+                          busy={focus.isPending}
+                          onFocus={() => focus.mutate(s.session_id)}
+                          onCopy={() => copyCommand(attachCommand(s), "Attach")}
+                        />
+                      ) : (
+                        <button
+                          className="btn btn-sm"
+                          disabled={s.focus !== "ready" || focus.isPending}
+                          title={s.focus === "ready" ? "Focus this session's terminal" : FOCUS_DISABLED_REASON[s.focus]}
+                          onClick={() => focus.mutate(s.session_id)}
+                        >
+                          <Icon name="terminal" size={13} /> Focus
+                        </button>
+                      )}
+                    </>
                   )
                 }
               />

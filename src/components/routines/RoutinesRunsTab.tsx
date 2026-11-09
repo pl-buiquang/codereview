@@ -53,8 +53,8 @@ export function RoutinesRunsTab() {
   const tmuxTarget = useSettingsStore((s) => s.tmuxTarget);
   const tmuxSessionName = useSettingsStore((s) => s.tmuxSessionName);
   const resume = useMutation({
-    mutationFn: (r: { session_id: string; cwd: string }) =>
-      api.resumeClaudeSession(r.session_id, r.cwd, null, defaultTerminal, tmuxTarget, tmuxSessionName),
+    mutationFn: (r: { session_id: string; cwd: string; harness: string }) =>
+      api.resumeClaudeSession(r.session_id, r.cwd, null, defaultTerminal, tmuxTarget, tmuxSessionName, r.harness),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["claude-sessions"] }),
     onError: (e) => toast.error(`Could not resume session:\n${String(e)}`),
   });
@@ -175,17 +175,17 @@ export function RoutinesRunsTab() {
                       type="button"
                       className="btn btn-sm"
                       disabled={resume.isPending}
-                      title={`Open a new terminal running: ${resumeCommand({ cwd: selected.cwd, session_id: selected.session_id })}`}
-                      onClick={() => resume.mutate({ session_id: selected.session_id!, cwd: selected.cwd! })}
+                      title={`Open a new terminal running: ${resumeCommand({ cwd: selected.cwd, session_id: selected.session_id, harness: selected.harness })}`}
+                      onClick={() => resume.mutate({ session_id: selected.session_id!, cwd: selected.cwd!, harness: selected.harness })}
                     >
                       <Icon name="terminal" size={13} /> Resume
                     </button>
                     <button
                       type="button"
                       className="btn btn-sm"
-                      title={`Copy: ${resumeCommand({ cwd: selected.cwd, session_id: selected.session_id })}`}
+                      title={`Copy: ${resumeCommand({ cwd: selected.cwd, session_id: selected.session_id, harness: selected.harness })}`}
                       aria-label="Copy resume command"
-                      onClick={() => copyCommand(resumeCommand({ cwd: selected.cwd!, session_id: selected.session_id! }))}
+                      onClick={() => copyCommand(resumeCommand({ cwd: selected.cwd!, session_id: selected.session_id!, harness: selected.harness }))}
                     >
                       <Icon name="copy" size={12} />
                     </button>

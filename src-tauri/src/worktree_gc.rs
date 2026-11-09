@@ -420,7 +420,7 @@ pub fn is_dirty(repo_id: i64, watch_epoch: Option<u64>) -> bool {
     with_dirty(|d| d.is_dirty(repo_id, watch_epoch))
 }
 
-/// Paths something is actively using: live Claude sessions, tmux panes, and
+/// Paths something is actively using: live agent sessions (every harness), tmux panes, and
 /// review chats on local (non-PR) targets.
 #[derive(Default)]
 pub struct InUse {
@@ -435,7 +435,7 @@ fn canon(p: &Path) -> PathBuf {
 
 impl InUse {
     pub fn collect(chat_paths: Vec<String>) -> Self {
-        let sessions = crate::claude_sessions::live_sessions()
+        let sessions = crate::commands::sessions::all_live_sessions()
             .into_iter()
             .map(|s| canon(Path::new(&s.cwd)))
             .collect();
@@ -459,7 +459,7 @@ impl InUse {
     fn reason_for(&self, wt: &Path) -> Option<String> {
         let wt = canon(wt);
         if self.sessions.iter().any(|p| p.starts_with(&wt)) {
-            Some("live Claude session".into())
+            Some("live agent session".into())
         } else if self.panes.iter().any(|p| p.starts_with(&wt)) {
             Some("open tmux pane".into())
         } else if self.chats.iter().any(|p| p == &wt) {
@@ -787,11 +787,18 @@ mod tests {
     }
 
     #[test]
+    fn a_live_session_of_any_harness_protects_its_worktree() {
+        let in_use = InUse { sessions: vec![PathBuf::from("/wt/a/src")], ..InUse::default() };
+        assert_eq!(in_use.reason_for(Path::new("/wt/a")).as_deref(), Some("live agent session"));
+        assert_eq!(in_use.reason_for(Path::new("/wt/b")), None);
+    }
+
+    #[test]
     fn main_is_kept_locked_and_in_use_are_in_use() {
         assert_eq!(kind(&classify(&Facts { is_main: true, pr: pr("MERGED", "aaa"), ..base() })), "keep");
         assert_eq!(kind(&classify(&Facts { is_locked: true, pr: pr("MERGED", "aaa"), ..base() })), "in_use");
-        let f = Facts { in_use: Some("live Claude session".into()), pr: pr("MERGED", "aaa"), ..base() };
-        assert_eq!(classify(&f), Verdict::InUse { reason: "live Claude session".into() });
+        let f = Facts { in_use: Some("live agent session".into()), pr: pr("MERGED", "aaa"), ..base() };
+        assert_eq!(classify(&f), Verdict::InUse { reason: "live agent session".into() });
     }
 
     #[test]

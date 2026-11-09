@@ -11,20 +11,20 @@ Built with **Tauri v2** (Rust) + **React/TypeScript**.
 ### Session features per harness
 
 Interactive launches (board, review, checkout) use the harness of the `sessions` profile; the
-"New &lt;harness&gt; session" menu entries override it per launch. Session monitoring is richest for
+"New <harness> session" menu entries override it per launch. Session monitoring is richest for
 Claude Code; any other harness reports its sessions through `Harness::live_sessions` and gets the
 basics.
 
 | Feature | Claude Code | Other harnesses |
 |---|---|---|
-| Listed in Sessions (live) | yes | yes, once the harness reports sessions (id, cwd, last activity, title) |
+| Listed in Sessions (live) | yes | opencode: yes, TUIs running now (id, cwd, last activity, title); Codex: not yet |
 | Session history, hook summaries, generated summaries | yes | no |
 | Focus the terminal, attach, stop, background jobs | yes | no |
 | Harness badge and filter in Sessions | yes | yes |
 | Open a new interactive session | yes | yes (`interactive_argv`) |
-| Resume from History | yes | yes, if the harness can resume |
+| Resume from History | yes | no (history is Claude-only); a routine run resumes on its own harness from the Runs tab |
 | Card linking (session shown on the board card) | yes (pinned id, `claude_session`) | only if the harness pins a session id (`ai_session`); otherwise nothing is recorded |
-| Context file for issue sessions | appended to the system prompt | what the harness maps it to |
+| Context file for issue sessions | appended to the system prompt | opencode: passed as the opening prompt of a new session; a harness that can't take it skips it with a note |
 
 ---
 
