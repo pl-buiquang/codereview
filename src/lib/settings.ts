@@ -192,7 +192,7 @@ const DEFAULTS: PersistedSettings = {
   defaultTerminal: "iterm2",
   tmuxTarget: "current",
   tmuxSessionName: "codereview",
-  sessionHistoryDays: 3,
+  sessionHistoryDays: 30,
   sessionSummaryDir: "",
   sessionSummaryFork: false,
 };
@@ -426,7 +426,7 @@ export const useSettingsStore = create<SettingsState>()(
     }),
     {
       name: "codereview-settings",
-      version: 11,
+      version: 12,
       storage: createJSONStorage(() => mirroredStorage),
       partialize: (s) => pickPersisted(s),
       // Adding a key needs no version bump: the merge fills it from DEFAULTS.
@@ -447,6 +447,7 @@ export const useSettingsStore = create<SettingsState>()(
           out.mode = oldMode === "dark" || oldMode === "light" ? oldMode : "system";
         }
         if (version < 11 && p.diffFontSize === 12.5) out.diffFontSize = 12;
+        if (version < 12 && p.sessionHistoryDays === 3) out.sessionHistoryDays = 30;
         return out;
       },
     },

@@ -566,11 +566,11 @@ function GeneralSection() {
             type="number"
             className="input"
             min={0}
-            max={30}
+            max={365}
             value={sessionHistoryDays}
             onChange={(e) => {
               const n = Number(e.target.value);
-              if (Number.isFinite(n)) setSessionHistoryDays(Math.max(0, Math.min(30, Math.round(n))));
+              if (Number.isFinite(n)) setSessionHistoryDays(Math.max(0, Math.min(365, Math.round(n))));
             }}
           />
         </label>

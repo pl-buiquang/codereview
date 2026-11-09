@@ -233,6 +233,14 @@ describe("settings migration to v2", () => {
   });
 });
 
+describe("settings migration to v12", () => {
+  it("moves the old 3-day session history default to 30 but keeps custom values", () => {
+    expect((migrate({ sessionHistoryDays: 3 }, 11) as Record<string, unknown>).sessionHistoryDays).toBe(30);
+    expect((migrate({ sessionHistoryDays: 7 }, 11) as Record<string, unknown>).sessionHistoryDays).toBe(7);
+    expect((migrate({ sessionHistoryDays: 3 }, 12) as Record<string, unknown>).sessionHistoryDays).toBe(3);
+  });
+});
+
 describe("settings migration from v2+", () => {
   it("keeps every valid persisted value, including direction and newer keys", () => {
     const out = migrate(
