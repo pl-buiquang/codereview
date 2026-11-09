@@ -86,6 +86,19 @@ other), written by `Harness::normalize`. The engine takes a run's status, text a
 parser for rows without one. A new harness implements `normalize` and ships fixtures; unknown
 lines map to `Other`, never fail.
 
+**`cr serve`** (`src-tauri/src/serve/`, ADR 0007) is a daemon of the `cr` binary that exposes the local
+harnesses over `/v1` HTTP+SSE (axum, behind the default `serve` cargo feature; the store, wire types,
+workspace resolver, outbox and systemd helpers are plain Rust). It is a plain executor: it gets rendered
+prompts and neutral options, runs them on the shared run engine (one `RunEngine` per harness, a
+`ServeStore` per engine over the daemon's own SQLite, `ServeSink` as the sink) and listens on a unix socket
+or loopback only (SSH tunnel; no token). Workspaces come from the repo registry of the app DB
+(`unknown_repo` otherwise; no auto-clone). Inside a remote run (`CODEREVIEW_REMOTE_RUN` set) `cr` writes
+board/focus/notify as outbox ops and answers reads from `context.json`; see `serve/remote.rs` for the op
+list. The serve DB has its own append-only migration list in `serve/store.rs`. Keep the wire types
+(`serve/request.rs`) and the endpoint list backward compatible within a `PROTOCOL`; bump it otherwise.
+The run types the engine and harnesses share (`RunTag`, `RunUsage`, `now_stamp`) live in `run_usage.rs`,
+not in the Tauri-bound `ai_usage.rs`.
+
 **Comment anchoring contract** (the subtle cross-layer piece): a comment is identified by
 `(file_path, side, line)` where `side ∈ {LEFT, RIGHT}`. This same triple is the bridge across three
 places and must stay consistent:

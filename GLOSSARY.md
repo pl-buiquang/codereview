@@ -51,8 +51,13 @@ Glossary of domain terms used in this app.
   enabled flag are editable.
 - **Run engine** — the Tauri-free queue / process / event machinery behind routine runs
   (`run_engine/`). The host supplies a `RunStore` (where runs and events live) and an `EventSink`
-  (what happens on events and when a run finishes); the app and, later, `cr serve` each plug in
-  their own.
+  (what happens on events and when a run finishes); the app and `cr serve` each plug in their own.
+- **Remote agent daemon (`cr serve`)** — a long-lived process that exposes the local harnesses of its
+  machine over `/v1` HTTP+SSE on a unix socket or loopback port (reached through an SSH tunnel). A plain
+  executor with its own run store; it never sees routine definitions or prompt templates (ADR 0007).
+- **Outbox** — the structured, idempotent ops (`board_meta_add`, `focus_set`, `notify`, ...) that `cr`
+  records inside a remote run instead of writing to a database; the client applies them when it
+  mirrors the run and acknowledges them. Reads inside a remote run come from the run's context snapshot.
 
 ## Reviews
 

@@ -131,6 +131,36 @@ See [`skills/board/SKILL.md`](../../skills/board/SKILL.md) for the agent workflo
 | `cr focus show <id>` | Status, level, model, stale marker, summary, tier counts, AI notes |
 | `cr focus clear <id>` | Delete the focus |
 
+## Remote agent daemon (`cr serve`)
+
+`cr serve` runs the harnesses of this machine behind a versioned HTTP+SSE API (`/v1`), so another
+instance of the app can launch runs and one-shot calls here. It listens on a **unix socket** (default
+`$XDG_RUNTIME_DIR/codereview/serve.sock`) or a **loopback** port only; reach it from the other machine with an SSH
+tunnel (`ssh -L 7777:127.0.0.1:7777 host`, or forward the socket). It stores no token. Design:
+[ADR 0007](../adr/0007-remote-agent-daemon.md).
+
+| Command | Description |
+|---|---|
+| `cr serve [--listen <path\|host:port>] [--serve-db <file>] [--max-concurrency <n>] [--log-level <l>]` | Run the daemon in the foreground. `--db` (global) is the codereview DB it reads the repo registry from; `--serve-db` (or `CODEREVIEW_SERVE_DB`) is its own database of runs, events and the outbox |
+| `cr serve --install [flags]` | Write a systemd user unit (`cr-serve.service`, `KillMode=process`) running that command, and enable it |
+| `cr serve --uninstall` | Stop and remove the unit |
+| `cr serve --status` | The unit's state and the daemon's `/v1/info`, if it answers |
+
+The remote must already know the repos: register them there with `cr repo add <path>`. A request that
+names an unknown repo fails with `unknown_repo`; nothing is cloned. Stopping the daemon (or the unit)
+leaves running harness processes alone, and the next start re-adopts them; a client that reconnects
+replays events from the last `seq` it saw.
+
+Inside a remote run `cr` does not touch a database. `cr board meta add|rm`, `cr board link|track`,
+`cr focus set|clear` and `cr notify <message>` append ops to the run's outbox (the app applies them
+when it mirrors the run); `cr board list|show`, `cr board meta list` and `cr focus show` print
+JSON from the context snapshot that came with the run request. Every other command fails with
+"not available in a remote run". `cr notify` exists only for this case.
+
+macOS has no systemd: run `cr serve` from a launchd agent (`~/Library/LaunchAgents/*.plist` with
+`ProgramArguments` = `cr serve --listen ...` and `KeepAlive`), and set `AbandonProcessGroup` so a
+restart does not kill live runs.
+
 ## Opening the app
 
 `cr open ...` builds a `codereview://` URL and hands it to the OS, which launches or focuses the app.
