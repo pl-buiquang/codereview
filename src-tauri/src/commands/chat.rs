@@ -1,6 +1,4 @@
-use std::io::Write as _;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use chrono::Utc;
@@ -8,7 +6,8 @@ use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
-use crate::ai_usage::{self, ModelTokens, RunTag, RunUsage};
+use crate::ai::{self, Access, OneShot, SessionMode, SystemPrompt, SystemPromptMode, ToolPolicy, TurnResult};
+use crate::ai_usage::{ModelTokens, RunTag, RunUsage};
 use crate::db::models::{Chat, ChatMessage, Target};
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
@@ -105,14 +104,6 @@ impl ClaudeEnvelope {
     }
 }
 
-#[derive(Debug)]
-pub(crate) struct TurnResult {
-    pub text: String,
-    pub input_tokens: i64,
-    pub output_tokens: i64,
-    pub cost_usd: f64,
-}
-
 /// Response returned to the frontend after a chat turn.
 #[derive(Serialize)]
 pub struct ChatTurnResult {
@@ -120,28 +111,6 @@ pub struct ChatTurnResult {
     pub input_tokens: i64,
     pub output_tokens: i64,
     pub cost_usd: f64,
-}
-
-/// Options for one non-interactive `claude -p` run.
-pub(crate) struct ClaudeRun<'a> {
-    pub model: &'a str,
-    pub allowed_tools: &'a [&'a str],
-    pub permission_mode: &'a str,
-    pub system_prompt: Option<&'a str>,
-    /// Name for the temp system-prompt file; must be unique per concurrent run.
-    pub prompt_file_tag: &'a str,
-    pub cwd: &'a Path,
-    /// Directories beyond `cwd` the tools may access.
-    pub extra_dirs: &'a [&'a Path],
-    /// `(session_id, is_first_turn)`; None runs without session persistence.
-    pub session: Option<(&'a str, bool)>,
-    pub env: Vec<(String, std::ffi::OsString)>,
-    pub extra_args: &'a [&'a str],
-    /// Replace Claude Code's default system prompt instead of appending to it.
-    pub replace_system_prompt: bool,
-    pub prompt: &'a str,
-    /// What this run is for; recorded in the usage log.
-    pub tag: RunTag,
 }
 
 /// Call `claude -p` for one conversation turn. On the first turn (no session)
@@ -157,11 +126,12 @@ fn call_claude_turn(
     text: &str,
 ) -> AppResult<TurnResult> {
     let file_tag = format!("chat_{session_id}");
-    run_claude(turn_run(review_id, session_id, &file_tag, is_first_turn, model, system_prompt, worktree_path, text))
+    let req = turn_request(review_id, session_id, &file_tag, is_first_turn, model, system_prompt, worktree_path, text);
+    ai::harness_for().one_shot(&req)
 }
 
 #[allow(clippy::too_many_arguments)]
-fn turn_run<'a>(
+fn turn_request<'a>(
     review_id: i64,
     session_id: &'a str,
     file_tag: &'a str,
@@ -170,23 +140,25 @@ fn turn_run<'a>(
     system_prompt: Option<&'a str>,
     worktree_path: &'a Path,
     text: &'a str,
-) -> ClaudeRun<'a> {
-    ClaudeRun {
+) -> OneShot<'a> {
+    OneShot {
         model,
-        allowed_tools: &["Bash", "Read", "Glob", "Grep", "Edit", "Write"],
-        // Explicit, so the user's own `~/.claude/settings.json` (e.g. a
-        // `defaultMode: plan`) never leaks into this non-interactive session.
-        permission_mode: "acceptEdits",
-        system_prompt: if is_first_turn { system_prompt } else { None },
-        prompt_file_tag: file_tag,
-        cwd: worktree_path,
-        extra_dirs: &[],
-        session: Some((session_id, is_first_turn)),
-        env: Vec::new(),
-        extra_args: &[],
-        replace_system_prompt: false,
+        system_prompt: if is_first_turn { system_prompt.map(SystemPrompt::Text) } else { None },
+        system_prompt_mode: SystemPromptMode::Append,
+        file_tag,
         prompt: text,
-        tag: RunTag::new("chat").review(review_id),
+        cwd: worktree_path,
+        extra_dirs: Vec::new(),
+        tools: ToolPolicy::Allowlist(["Bash", "Read", "Glob", "Grep", "Edit", "Write"].map(String::from).to_vec()),
+        // Explicit, so the user's own `~/.claude/settings.json` (e.g. a `defaultMode: plan`)
+        // never leaks into this non-interactive session.
+        access: Access::Edit,
+        session: if is_first_turn { SessionMode::New(session_id) } else { SessionMode::Resume(session_id) },
+        max_turns: None,
+        effort: None,
+        env: Vec::new(),
+        extra_args: Vec::new(),
+        usage_tag: RunTag::new("chat").review(review_id),
     }
 }
 
@@ -201,182 +173,6 @@ pub(crate) fn resolve_model(model: Option<String>) -> String {
         .or_else(|| std::env::var("CODEREVIEW_CHAT_MODEL").ok())
         .or_else(|| std::env::var("ANTHROPIC_DEFAULT_OPUS_MODEL").ok())
         .unwrap_or_default()
-}
-
-/// The `claude -p` command of `run`, with the system prompt read from `prompt_path`.
-pub(crate) fn claude_command(run: &ClaudeRun, prompt_path: Option<&Path>) -> Command {
-    let mut cmd = Command::new(crate::tools::claude_bin());
-    // Run from the reviewed project so CLAUDE.md, git context, etc. come from
-    // it, not the Tauri app's directory.
-    cmd.current_dir(run.cwd);
-    cmd.arg("-p")
-        .arg("--output-format")
-        .arg("json")
-        // --strict-mcp-config: don't load MCP servers (they add latency/noise).
-        // Note: we deliberately omit --setting-sources "" so claude can read its
-        // own auth and Bedrock configuration from ~/.claude/.
-        .arg("--strict-mcp-config")
-        .arg("--permission-mode")
-        .arg(run.permission_mode)
-        .arg("--add-dir")
-        .arg(run.cwd)
-        .args(run.extra_dirs.iter().flat_map(|d| [std::ffi::OsStr::new("--add-dir"), d.as_os_str()]));
-    if !run.allowed_tools.is_empty() {
-        cmd.arg("--allowedTools").args(run.allowed_tools);
-    }
-    for (k, v) in &run.env {
-        cmd.env(k, v);
-    }
-
-    if !run.model.is_empty() {
-        cmd.arg("--model").arg(run.model);
-    }
-    cmd.args(run.extra_args);
-
-    match run.session {
-        Some((id, true)) => {
-            cmd.arg("--session-id").arg(id);
-        }
-        Some((id, false)) => {
-            cmd.arg("--resume").arg(id);
-        }
-        None => {
-            cmd.arg("--no-session-persistence");
-        }
-    }
-    if let Some(path) = prompt_path {
-        let flag = if run.replace_system_prompt { "--system-prompt-file" } else { "--append-system-prompt-file" };
-        cmd.arg(flag).arg(path);
-    }
-    cmd
-}
-
-pub(crate) fn run_claude(run: ClaudeRun) -> AppResult<TurnResult> {
-    // The file name is deterministic per tag to avoid leaking temp files on crash.
-    let system_prompt_path = match run.system_prompt {
-        Some(sys) => {
-            let path = std::env::temp_dir().join(format!("codereview_{}.txt", run.prompt_file_tag));
-            std::fs::write(&path, sys)
-                .map_err(|e| AppError::Chat(format!("failed to write system prompt: {e}")))?;
-            Some(path)
-        }
-        None => None,
-    };
-    let cmd = claude_command(&run, system_prompt_path.as_deref());
-    let tag = run.prompt_file_tag;
-    log::info!(
-        target: "claude",
-        "{tag}: starting claude -p (model {:?}, cwd {})",
-        run.model,
-        run.cwd.display()
-    );
-    let started = std::time::Instant::now();
-    let mut usage_tag = run.tag.clone();
-    usage_tag.model = run.model.to_string();
-    let result = run_command(cmd, run.prompt, &usage_tag);
-    if let Some(p) = system_prompt_path {
-        let _ = std::fs::remove_file(p);
-    }
-    let secs = started.elapsed().as_secs();
-    match &result {
-        Ok(t) => {
-            log::info!(target: "claude", "{tag}: finished in {secs}s");
-            log::debug!(
-                target: "claude",
-                "{tag}: {} in / {} out tokens, ${:.2}",
-                t.input_tokens,
-                t.output_tokens,
-                t.cost_usd
-            );
-        }
-        Err(e) => log::warn!(target: "claude", "{tag}: failed after {secs}s: {e}"),
-    }
-    result
-}
-
-/// Spawn a prepared `claude -p --output-format json` command, feed it `text` on stdin, and parse
-/// the JSON envelope. Every run, failed ones included, lands in the usage log under `tag`.
-pub(crate) fn run_command(cmd: Command, text: &str, tag: &RunTag) -> AppResult<TurnResult> {
-    let started_at = ai_usage::now_stamp();
-    let started = std::time::Instant::now();
-    let (result, usage) = execute(cmd, text);
-    let error = result.as_ref().err().map(|e| e.to_string());
-    ai_usage::record(tag, &started_at, started.elapsed().as_millis() as i64, &usage, error.as_deref());
-    result
-}
-
-fn execute(mut cmd: Command, text: &str) -> (AppResult<TurnResult>, RunUsage) {
-    let mut child = match cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn() {
-        Ok(child) => child,
-        Err(e) => return (Err(AppError::Chat(format!("failed to spawn claude: {e}"))), RunUsage::default()),
-    };
-
-    if let Some(mut stdin) = child.stdin.take() {
-        if let Err(e) = stdin.write_all(text.as_bytes()) {
-            return (Err(AppError::Chat(format!("failed to write prompt: {e}"))), RunUsage::default());
-        }
-    }
-
-    let output = match child.wait_with_output() {
-        Ok(output) => output,
-        Err(e) => return (Err(AppError::Chat(format!("claude process error: {e}"))), RunUsage::default()),
-    };
-    interpret(
-        &output.stdout,
-        &String::from_utf8_lossy(&output.stderr),
-        output.status.success(),
-        output.status.code().unwrap_or(-1),
-    )
-}
-
-/// Turn a finished process' output into the run result plus whatever usage it reported.
-fn interpret(stdout: &[u8], stderr: &str, success: bool, exit_code: i32) -> (AppResult<TurnResult>, RunUsage) {
-    // Even on non-zero exit, claude may have written a JSON envelope with a
-    // human-readable `result` — parse it first for a clean error message.
-    let raw = String::from_utf8_lossy(stdout);
-    let parsed = serde_json::from_str::<ClaudeEnvelope>(&raw);
-    let usage = parsed.as_ref().map(ClaudeEnvelope::run_usage).unwrap_or_default();
-
-    if let Ok(envelope) = &parsed {
-        if envelope.is_error {
-            let detail = envelope
-                .result
-                .clone()
-                .map(|v| match v {
-                    serde_json::Value::String(s) => s,
-                    other => other.to_string(),
-                })
-                .unwrap_or_else(|| "unknown error".to_string());
-            return (Err(AppError::Chat(detail)), usage);
-        }
-    }
-
-    if !success || stdout.is_empty() {
-        let stderr = stderr.trim();
-        let message = if stderr.is_empty() { format!("claude exited {exit_code}") } else { stderr.to_string() };
-        return (Err(AppError::Chat(message)), usage);
-    }
-
-    let envelope = match parsed {
-        Ok(envelope) => envelope,
-        Err(e) => return (Err(AppError::Chat(format!("failed to parse claude response: {e}"))), usage),
-    };
-
-    let text_out = envelope
-        .result
-        .map(|v| match v {
-            serde_json::Value::String(s) => s,
-            other => other.to_string(),
-        })
-        .unwrap_or_default();
-
-    let turn = TurnResult {
-        text: text_out,
-        input_tokens: usage.input_tokens,
-        output_tokens: usage.output_tokens,
-        cost_usd: usage.cost_usd,
-    };
-    (Ok(turn), usage)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -816,97 +612,56 @@ pub fn set_chat_collapsed(review_id: i64, collapsed: bool, db: State<Db>) -> App
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ai::claude;
+    use crate::test_support::{argv, envs, strs};
 
-    const OK: &str = r#"{"type":"result","is_error":false,"result":"hi","num_turns":2,"session_id":"s1",
-        "total_cost_usd":1.5,
-        "usage":{"input_tokens":3,"output_tokens":4,"cache_read_input_tokens":5,"cache_creation_input_tokens":6},
-        "modelUsage":{"opus":{"inputTokens":2,"outputTokens":3,"cacheReadInputTokens":5,"cacheCreationInputTokens":6,"costUSD":1.4},
-                      "haiku":{"inputTokens":1,"outputTokens":1,"costUSD":0.1}}}"#;
+    const WORKTREE: &str = "/w/tree";
 
     #[test]
-    fn success_reports_text_and_per_model_usage() {
-        let (result, usage) = interpret(OK.as_bytes(), "", true, 0);
-        let turn = result.unwrap();
-        assert_eq!((turn.text.as_str(), turn.input_tokens, turn.output_tokens, turn.cost_usd), ("hi", 3, 4, 1.5));
-        assert_eq!((usage.num_turns, usage.cache_read_tokens, usage.cache_creation_tokens), (2, 5, 6));
-        assert_eq!(usage.session_id.as_deref(), Some("s1"));
-        let models: Vec<_> = usage.models.iter().map(|m| (m.model.as_str(), m.cost_usd)).collect();
-        assert_eq!(models, vec![("haiku", 0.1), ("opus", 1.4)]);
+    fn first_turn_pins_the_session_and_appends_the_system_prompt() {
+        let wt = Path::new(WORKTREE);
+        let req = turn_request(7, "sid", "chat_sid", true, "opus", Some("sys"), wt, "hello");
+        let prompt = Path::new("/tmp/codereview_chat_sid.txt");
+        let cmd = claude::command(&req, false, Some(prompt));
+        assert_eq!(
+            argv(&cmd),
+            strs(&[
+                "-p", "--output-format", "json", "--strict-mcp-config", "--permission-mode", "acceptEdits",
+                "--add-dir", WORKTREE, "--allowedTools", "Bash", "Read", "Glob", "Grep", "Edit", "Write",
+                "--model", "opus", "--session-id", "sid", "--append-system-prompt-file",
+                "/tmp/codereview_chat_sid.txt",
+            ])
+        );
+        assert!(envs(&cmd).is_empty());
+        assert_eq!(cmd.get_current_dir(), Some(wt));
     }
 
     #[test]
-    fn error_envelope_still_reports_usage() {
-        let raw = r#"{"is_error":true,"result":"rate limited","total_cost_usd":0.25,"usage":{"input_tokens":9}}"#;
-        let (result, usage) = interpret(raw.as_bytes(), "", false, 1);
-        assert_eq!(result.unwrap_err().to_string(), AppError::Chat("rate limited".into()).to_string());
-        assert_eq!((usage.cost_usd, usage.input_tokens), (0.25, 9));
+    fn next_turn_resumes_and_sends_no_system_prompt() {
+        let wt = Path::new(WORKTREE);
+        let req = turn_request(7, "sid", "chat_sid", false, "", Some("sys"), wt, "again");
+        assert!(req.system_prompt.is_none());
+        let cmd = claude::command(&req, false, None);
+        assert_eq!(
+            argv(&cmd),
+            strs(&[
+                "-p", "--output-format", "json", "--strict-mcp-config", "--permission-mode", "acceptEdits",
+                "--add-dir", WORKTREE, "--allowedTools", "Bash", "Read", "Glob", "Grep", "Edit", "Write",
+                "--resume", "sid",
+            ])
+        );
+        assert!(envs(&cmd).is_empty());
     }
 
     #[test]
-    fn crash_and_garbage_have_no_usage() {
-        let (result, usage) = interpret(b"", "boom\n", false, 2);
-        assert_eq!(result.unwrap_err().to_string(), AppError::Chat("boom".into()).to_string());
-        assert_eq!(usage.cost_usd, 0.0);
-
-        let (result, usage) = interpret(b"not json", "", true, 0);
-        assert!(result.is_err());
-        assert!(usage.models.is_empty());
-    }
-
-    mod argv_snapshots {
-        use super::*;
-        use crate::test_support::{argv, envs, strs};
-
-        const WORKTREE: &str = "/w/tree";
-
-        #[test]
-        fn first_turn_pins_the_session_and_appends_the_system_prompt() {
-            let wt = Path::new(WORKTREE);
-            let run = turn_run(7, "sid", "chat_sid", true, "opus", Some("sys"), wt, "hello");
-            let prompt = Path::new("/tmp/codereview_chat_sid.txt");
-            let cmd = claude_command(&run, Some(prompt));
-            assert_eq!(
-                argv(&cmd),
-                strs(&[
-                    "-p", "--output-format", "json", "--strict-mcp-config", "--permission-mode", "acceptEdits",
-                    "--add-dir", WORKTREE, "--allowedTools", "Bash", "Read", "Glob", "Grep", "Edit", "Write",
-                    "--model", "opus", "--session-id", "sid", "--append-system-prompt-file",
-                    "/tmp/codereview_chat_sid.txt",
-                ])
-            );
-            assert!(envs(&cmd).is_empty());
-            assert_eq!(cmd.get_current_dir(), Some(wt));
-        }
-
-        #[test]
-        fn next_turn_resumes_and_sends_no_system_prompt() {
-            let wt = Path::new(WORKTREE);
-            let run = turn_run(7, "sid", "chat_sid", false, "", Some("sys"), wt, "again");
-            assert!(run.system_prompt.is_none());
-            let cmd = claude_command(&run, None);
-            assert_eq!(
-                argv(&cmd),
-                strs(&[
-                    "-p", "--output-format", "json", "--strict-mcp-config", "--permission-mode", "acceptEdits",
-                    "--add-dir", WORKTREE, "--allowedTools", "Bash", "Read", "Glob", "Grep", "Edit", "Write",
-                    "--resume", "sid",
-                ])
-            );
-            assert!(envs(&cmd).is_empty());
-        }
-
-        #[test]
-        fn extra_dirs_and_replace_mode_are_honoured() {
-            let wt = Path::new(WORKTREE);
-            let extra = Path::new("/other");
-            let mut run = turn_run(1, "s", "t", true, "m", Some("x"), wt, "p");
-            let dirs = [extra];
-            run.extra_dirs = &dirs;
-            run.replace_system_prompt = true;
-            let cmd = claude_command(&run, Some(Path::new("/p.txt")));
-            let a = argv(&cmd);
-            assert_eq!(&a[6..10], &strs(&["--add-dir", WORKTREE, "--add-dir", "/other"])[..]);
-            assert_eq!(&a[a.len() - 2..], &strs(&["--system-prompt-file", "/p.txt"])[..]);
-        }
+    fn extra_dirs_and_replace_mode_are_honoured() {
+        let wt = Path::new(WORKTREE);
+        let mut req = turn_request(1, "s", "t", true, "m", Some("x"), wt, "p");
+        req.extra_dirs = vec![Path::new("/other")];
+        req.system_prompt_mode = SystemPromptMode::Replace;
+        let cmd = claude::command(&req, false, Some(Path::new("/p.txt")));
+        let a = argv(&cmd);
+        assert_eq!(&a[6..10], &strs(&["--add-dir", WORKTREE, "--add-dir", "/other"])[..]);
+        assert_eq!(&a[a.len() - 2..], &strs(&["--system-prompt-file", "/p.txt"])[..]);
     }
 }

@@ -4,6 +4,9 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
 use tauri::State;
 
+use std::path::Path;
+
+use crate::ai::{self, Access, OneShot, SessionMode, SystemPrompt, SystemPromptMode, ToolPolicy, TurnResult};
 use crate::claude_sessions::{self, ClaudeSession};
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
@@ -66,49 +69,58 @@ fn session_tag(variant: &str, session: &ClaudeSession) -> crate::ai_usage::RunTa
     crate::ai_usage::RunTag::new("session_summary").variant(variant).label(format!("{project} ({short})"))
 }
 
-fn fork_command(session: &ClaudeSession) -> std::process::Command {
-    let mut cmd = std::process::Command::new(crate::tools::claude_bin());
-    cmd.current_dir(&session.cwd)
-        .args(["-p", "--output-format", "json", "--resume", &session.session_id])
-        .args(["--fork-session", "--no-session-persistence", "--max-turns", "1"])
-        .env("CLAUDE_SUMMARY_RUNNING", "1");
-    cmd
-}
-
-fn run_fork_summary(session: &ClaudeSession, instructions: &str) -> AppResult<crate::commands::chat::TurnResult> {
-    let cmd = fork_command(session);
-    let prompt = format!("{instructions}\n\nSummarize this conversation so far. Do not call any tools.");
-    crate::commands::chat::run_command(cmd, &prompt, &session_tag("fork", session))
-}
-
-fn extract_run<'a>(
-    session: &ClaudeSession,
-    instructions: &'a str,
-    file_tag: &'a str,
-    cwd: &'a std::path::Path,
-    prompt: &'a str,
-) -> crate::commands::chat::ClaudeRun<'a> {
-    crate::commands::chat::ClaudeRun {
-        model: EXTRACT_MODEL,
-        allowed_tools: &[],
-        permission_mode: "default",
-        system_prompt: Some(instructions),
-        prompt_file_tag: file_tag,
-        cwd,
-        extra_dirs: &[],
-        session: None,
-        env: vec![("CLAUDE_SUMMARY_RUNNING".into(), "1".into())],
-        extra_args: &["--tools", "", "--effort", "low"],
-        replace_system_prompt: true,
+fn fork_request<'a>(session: &'a ClaudeSession, prompt: &'a str) -> OneShot<'a> {
+    OneShot {
+        model: "",
+        system_prompt: None,
+        system_prompt_mode: SystemPromptMode::Append,
+        file_tag: "fork_summary",
         prompt,
-        tag: session_tag("extract", session),
+        cwd: Path::new(&session.cwd),
+        extra_dirs: Vec::new(),
+        tools: ToolPolicy::Allowlist(Vec::new()),
+        access: Access::Default,
+        session: SessionMode::Fork(&session.session_id),
+        max_turns: Some(1),
+        effort: None,
+        env: vec![("CLAUDE_SUMMARY_RUNNING".into(), "1".into())],
+        extra_args: Vec::new(),
+        usage_tag: session_tag("fork", session),
     }
 }
 
-fn run_extract_summary(
+fn run_fork_summary(session: &ClaudeSession, instructions: &str) -> AppResult<TurnResult> {
+    let prompt = format!("{instructions}\n\nSummarize this conversation so far. Do not call any tools.");
+    ai::harness_for().one_shot(&fork_request(session, &prompt))
+}
+
+fn extract_request<'a>(
     session: &ClaudeSession,
-    instructions: &str,
-) -> AppResult<crate::commands::chat::TurnResult> {
+    instructions: &'a str,
+    file_tag: &'a str,
+    cwd: &'a Path,
+    prompt: &'a str,
+) -> OneShot<'a> {
+    OneShot {
+        model: EXTRACT_MODEL,
+        system_prompt: Some(SystemPrompt::Text(instructions)),
+        system_prompt_mode: SystemPromptMode::Replace,
+        file_tag,
+        prompt,
+        cwd,
+        extra_dirs: Vec::new(),
+        tools: ToolPolicy::None,
+        access: Access::Default,
+        session: SessionMode::Ephemeral,
+        max_turns: None,
+        effort: Some("low"),
+        env: vec![("CLAUDE_SUMMARY_RUNNING".into(), "1".into())],
+        extra_args: Vec::new(),
+        usage_tag: session_tag("extract", session),
+    }
+}
+
+fn run_extract_summary(session: &ClaudeSession, instructions: &str) -> AppResult<TurnResult> {
     let transcript = claude_sessions::transcript_path(&session.session_id)
         .and_then(|p| session_summaries::transcript_extract(&p, EXTRACT_MAX_BYTES))
         .ok_or_else(|| AppError::Other("no conversation to summarize yet".into()))?;
@@ -116,7 +128,7 @@ fn run_extract_summary(
     std::fs::create_dir_all(&cwd)?;
     let prompt = format!("<transcript>\n{transcript}</transcript>\nSummarize the transcript above.");
     let file_tag = format!("live_summary_{}", session.session_id);
-    crate::commands::chat::run_claude(extract_run(session, instructions, &file_tag, &cwd, &prompt))
+    ai::harness_for().one_shot(&extract_request(session, instructions, &file_tag, &cwd, &prompt))
 }
 
 /// Summarize a running session and store it apart from the hook-written summaries. By default a
@@ -130,7 +142,7 @@ pub async fn generate_live_session_summary(
     db: State<'_, Db>,
 ) -> AppResult<SessionSummary> {
     crate::ai_gate::ensure_enabled()?;
-    if crate::tools::claude_path().is_none() {
+    if !ai::harness_for().available() {
         return Err(AppError::Other("the `claude` CLI was not found on PATH".into()));
     }
     let instructions = {
@@ -520,8 +532,8 @@ mod tests {
         use crate::test_support::{argv, envs, strs};
         let sess = session("abcdef123456", None, None);
         let cwd = std::path::Path::new("/tmp/codereview_live_summary");
-        let run = extract_run(&sess, "instr", "live_summary_abcdef123456", cwd, "p");
-        let cmd = crate::commands::chat::claude_command(&run, Some(std::path::Path::new("/tmp/codereview_live_summary_abcdef123456.txt")));
+        let req = extract_request(&sess, "instr", "live_summary_abcdef123456", cwd, "p");
+        let cmd = crate::ai::claude::command(&req, false, Some(std::path::Path::new("/tmp/codereview_live_summary_abcdef123456.txt")));
         assert_eq!(
             argv(&cmd),
             strs(&[
@@ -538,7 +550,8 @@ mod tests {
     fn fork_summary_argv_and_env() {
         use crate::test_support::{argv, envs, strs};
         let sess = session("sid-1", None, None);
-        let cmd = fork_command(&sess);
+        let req = fork_request(&sess, "p");
+        let cmd = crate::ai::claude::command(&req, false, None);
         assert_eq!(
             argv(&cmd),
             strs(&["-p", "--output-format", "json", "--resume", "sid-1", "--fork-session", "--no-session-persistence", "--max-turns", "1"])

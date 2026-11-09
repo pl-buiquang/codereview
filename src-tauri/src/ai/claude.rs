@@ -421,3 +421,44 @@ impl ClaudeEnvelope {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const OK: &str = r#"{"type":"result","is_error":false,"result":"hi","num_turns":2,"session_id":"s1",
+        "total_cost_usd":1.5,
+        "usage":{"input_tokens":3,"output_tokens":4,"cache_read_input_tokens":5,"cache_creation_input_tokens":6},
+        "modelUsage":{"opus":{"inputTokens":2,"outputTokens":3,"cacheReadInputTokens":5,"cacheCreationInputTokens":6,"costUSD":1.4},
+                      "haiku":{"inputTokens":1,"outputTokens":1,"costUSD":0.1}}}"#;
+
+    #[test]
+    fn success_reports_text_and_per_model_usage() {
+        let (result, usage) = interpret(OK.as_bytes(), "", true, 0);
+        let turn = result.unwrap();
+        assert_eq!((turn.text.as_str(), turn.input_tokens, turn.output_tokens, turn.cost_usd), ("hi", 3, 4, 1.5));
+        assert_eq!((usage.num_turns, usage.cache_read_tokens, usage.cache_creation_tokens), (2, 5, 6));
+        assert_eq!(usage.session_id.as_deref(), Some("s1"));
+        let models: Vec<_> = usage.models.iter().map(|m| (m.model.as_str(), m.cost_usd)).collect();
+        assert_eq!(models, vec![("haiku", 0.1), ("opus", 1.4)]);
+    }
+
+    #[test]
+    fn error_envelope_still_reports_usage() {
+        let raw = r#"{"is_error":true,"result":"rate limited","total_cost_usd":0.25,"usage":{"input_tokens":9}}"#;
+        let (result, usage) = interpret(raw.as_bytes(), "", false, 1);
+        assert_eq!(result.unwrap_err().to_string(), AppError::Chat("rate limited".into()).to_string());
+        assert_eq!((usage.cost_usd, usage.input_tokens), (0.25, 9));
+    }
+
+    #[test]
+    fn crash_and_garbage_have_no_usage() {
+        let (result, usage) = interpret(b"", "boom\n", false, 2);
+        assert_eq!(result.unwrap_err().to_string(), AppError::Chat("boom".into()).to_string());
+        assert_eq!(usage.cost_usd, 0.0);
+
+        let (result, usage) = interpret(b"not json", "", true, 0);
+        assert!(result.is_err());
+        assert!(usage.models.is_empty());
+    }
+}
