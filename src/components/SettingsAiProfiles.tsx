@@ -211,7 +211,7 @@ export function AiProfilesSection() {
                   <code>model</code>, <code>model_reasoning_effort</code>, <code>model_reasoning_summary</code>,{" "}
                   <code>model_verbosity</code>, <code>hide_agent_reasoning</code>, <code>show_raw_agent_reasoning</code> and{" "}
                   <code>personality</code> (saving refuses anything else). <code>--add-dir</code> is allowed and widens the
-                  writable roots in edit mode; it must be an absolute path (no <code>~</code>), and the filesystem root,
+                  writable roots in edit mode; it must be an absolute path (no <code>~</code>, no <code>..</code> components), and the filesystem root,
                   your home directory or its parents, the run's directory or its parents, and credential or system
                   directories (<code>~/.ssh</code>, <code>~/.config</code>, <code>/etc</code>, ...) are refused. Other
                   sensitive directories are not checked.

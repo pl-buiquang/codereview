@@ -513,7 +513,7 @@ enum ExtraCheck<'a> {
 
 /// Credential and system roots `--add-dir` may not name or sit beneath. Relative to the home dir.
 const HOME_DENY: &[&str] = &[".ssh", ".gnupg", ".aws", ".config", ".codex", ".claude"];
-const SYSTEM_DENY: &[&str] = &["/etc", "/usr", "/bin", "/sbin", "/boot", "/proc", "/sys", "/dev"];
+const SYSTEM_DENY: &[&str] = &["/etc", "/usr", "/bin", "/sbin", "/boot", "/proc", "/sys", "/dev", "/private/etc", "/private/var/db"];
 
 /// `p` with `.` and `..` resolved lexically; `None` when a `..` climbs above the root.
 fn lexical_normalize(p: &Path) -> Option<PathBuf> {
@@ -570,8 +570,13 @@ fn add_dir_problem(raw: &str, check: ExtraCheck<'_>, home: Option<&Path>) -> Opt
     if !path.is_absolute() {
         return Some("the path must be absolute".into());
     }
+    // The kernel resolves `..` through symlinks (`<link>/..` is the link target's parent), so a
+    // lexical collapse would check a different directory than the one Codex gets.
+    if path.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+        return Some(format!("parent-directory components (`..`) are not allowed: give the absolute path ({raw})"));
+    }
     let Some(norm) = lexical_normalize(path) else {
-        return Some("the path climbs above the root with `..`".into());
+        return Some("the path is not a plain absolute path".into());
     };
     if let ExtraCheck::Run(_) = check {
         if !std::fs::metadata(&norm).is_ok_and(|m| m.is_dir()) {
@@ -1426,7 +1431,7 @@ mod tests {
         symlink(&home, &link).unwrap();
         let s = |p: &Path| p.to_string_lossy().to_string();
 
-        let ok = [s(&wt), s(&repo.join(".git")), s(&plain), format!("{}/./plain/../plain", s(&t))];
+        let ok = [s(&wt), s(&repo.join(".git")), s(&plain), format!("{}/./plain", s(&t))];
         for v in &ok {
             for args in [vec!["--add-dir".to_string(), v.clone()], vec![format!("--add-dir={v}")]] {
                 assert!(check_extra(&args, ExtraCheck::Save).is_ok(), "save refused {args:?}");
@@ -1460,6 +1465,12 @@ mod tests {
             "/tmp/a\nb".to_string(),
             s(&link),
             s(&link.join(".ssh")),
+            format!("{}/..", s(&link)),
+            format!("{}/a/b/../c", s(&t)),
+            "/x/..".to_string(),
+            format!("{}/plain/..", s(&t)),
+            "/private/etc".to_string(),
+            "/private/var/db/x".to_string(),
         ];
         for v in &bad {
             for args in [vec!["--add-dir".to_string(), v.clone()], vec![format!("--add-dir={v}")]] {
@@ -1485,6 +1496,36 @@ mod tests {
         let evil = serde_json::json!({"extra_args": ["--add-dir=/"]});
         assert!(Codex.validate_settings(&good).is_ok());
         assert!(Codex.validate_settings(&evil).is_err());
+    }
+
+    #[test]
+    fn add_dir_refuses_dotdot_through_a_symlink_to_a_sensitive_dir() {
+        use std::os::unix::fs::symlink;
+        let tmp = tempfile::tempdir().unwrap();
+        let t = tmp.path().canonicalize().unwrap();
+        // `fake_home` stands in for $HOME; `l` points into its .ssh, so `l/..` is the home dir.
+        let fake_home = t.join("home");
+        std::fs::create_dir_all(fake_home.join(".ssh")).unwrap();
+        let x = t.join("x");
+        std::fs::create_dir_all(&x).unwrap();
+        let link = x.join("l");
+        symlink(fake_home.join(".ssh"), &link).unwrap();
+        let raw = format!("{}/..", link.display());
+        for check in [ExtraCheck::Save, ExtraCheck::Run(&x)] {
+            let why = add_dir_problem(&raw, check, Some(&fake_home)).expect("refused");
+            assert!(why.contains(".."), "{why}");
+        }
+        // Without `..` the same physical target is still caught by the home check.
+        let phys = fake_home.display().to_string();
+        assert!(add_dir_problem(&phys, ExtraCheck::Save, Some(&fake_home)).is_some());
+        // Mid-path and `/x/..` forms.
+        for raw in [format!("{}/a/b/../c", t.display()), "/x/..".to_string(), "/..".to_string()] {
+            assert!(add_dir_problem(&raw, ExtraCheck::Save, Some(&fake_home)).is_some(), "{raw}");
+        }
+        // A linked worktree's git dir still passes.
+        let wt = t.join("repo/.git/worktrees/x");
+        std::fs::create_dir_all(&wt).unwrap();
+        assert!(add_dir_problem(&wt.display().to_string(), ExtraCheck::Save, Some(&fake_home)).is_none());
     }
 
     #[test]
