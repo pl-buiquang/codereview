@@ -55,6 +55,15 @@ merge-base — GitHub PR semantics); the `three_dot` flag toggles to plain two-d
 **All git/GitHub access shells out to the `git` and `gh` CLIs** from Rust (`git.rs`, `gh.rs`) —
 there is no git library and **no token is ever stored**; auth is entirely delegated to `gh`.
 
+**All AI calls go through `ai::Harness`** (`src-tauri/src/ai/`) — chat, theme suggestions, session
+summaries, routine runs and interactive-session argv. It is an object-safe, synchronous trait like
+`provider.rs`; `ai::harness_for()` resolves it (always Claude Code for now, profiles are planned) and
+`ai/claude.rs` is the only place that builds a `claude` command line or parses Claude's output.
+Requests are neutral (`OneShot`, `ToolPolicy`, `Access`, `SessionMode`, `SystemPromptMode`) and
+each harness translates them; `Caps` says what a harness supports. Never shell out to `claude` from
+a feature: add a field to the request type instead. Auth stays in the CLI, no token is stored. See
+`docs/adr/0006-ai-harness-and-profiles.md`.
+
 **Comment anchoring contract** (the subtle cross-layer piece): a comment is identified by
 `(file_path, side, line)` where `side ∈ {LEFT, RIGHT}`. This same triple is the bridge across three
 places and must stay consistent:

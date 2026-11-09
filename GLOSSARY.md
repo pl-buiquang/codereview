@@ -20,6 +20,21 @@ Glossary of domain terms used in this app.
   attached one, a shared named session, or one session per repository. The terminal host only
   attaches tmux when nothing shows that session yet.
 
+## AI harness
+
+- **Harness** — a way of running an AI agent or model (Claude Code today; opencode, Codex or a
+  remote wrapper later). Implements the `Harness` trait; every AI feature of the app calls it
+  instead of a CLI.
+- **Capabilities (Caps)** — what a harness supports (sessions, resume, fork, tools, streaming,
+  cost reporting, access levels). Lets callers refuse an unsupported combination up front.
+- **One-shot** — a blocking, non-interactive run that returns a result and records its usage
+  (chat turns, theme suggestions, session summaries).
+- **Streaming run** — a detached run of a routine whose output goes to files and is tailed; it
+  can outlive the app and be re-adopted.
+- **Access** — the neutral permission level of a run: default, read-only, edit, full.
+- **Profile** — planned: a named configuration of a harness (harness, model, settings) that
+  features and routines select.
+
 ## Reviews
 
 - **Target** — the thing being reviewed: a GitHub PR, or a pair of local branches (a virtual
