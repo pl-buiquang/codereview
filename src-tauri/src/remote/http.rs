@@ -203,16 +203,52 @@ pub struct Response {
     pub body: Vec<u8>,
 }
 
+/// The largest answer body `request` accepts (a run's text is the biggest thing a daemon sends).
+pub const MAX_BODY: usize = 64 * 1024 * 1024;
+
+/// Bounds on one request beyond the per-read timeout.
+#[derive(Debug, Clone, Copy)]
+pub struct Limits {
+    /// A longer body is a protocol error, not memory.
+    pub max_body: usize,
+    /// The whole body must arrive within this; a host dripping bytes fails instead of holding on.
+    pub total: Option<Duration>,
+}
+
+impl Default for Limits {
+    fn default() -> Self {
+        Self { max_body: MAX_BODY, total: None }
+    }
+}
+
 /// One request, the whole answer read. `timeout` bounds connecting, sending and every read.
 pub fn request(addr: &Addr, method: &str, path: &str, body: Option<&[u8]>, timeout: Duration) -> RemoteResult<Response> {
+    request_limited(addr, method, path, body, timeout, Limits::default())
+}
+
+/// [`request`] with a cap on the answer's size and on the total time spent reading it.
+pub fn request_limited(addr: &Addr, method: &str, path: &str, body: Option<&[u8]>, timeout: Duration, limits: Limits) -> RemoteResult<Response> {
+    let started = std::time::Instant::now();
     let mut conn = connect(addr, timeout.min(Duration::from_secs(10)), timeout)?;
     send(&mut conn, addr, method, path, body)?;
     let mut reader = BufReader::new(conn);
     let head = read_head(&mut reader)?;
+    let mut body = Body::new(reader, head.framing);
     let mut out = Vec::new();
-    Body::new(reader, head.framing)
-        .read_to_end(&mut out)
-        .map_err(|e| RemoteError::unreachable(format!("connection lost while reading the answer: {e}")))?;
+    let mut buf = [0u8; 8192];
+    loop {
+        if limits.total.is_some_and(|t| started.elapsed() > t) {
+            return Err(RemoteError::unreachable("timed out reading the answer"));
+        }
+        let n = body.read(&mut buf).map_err(|e| RemoteError::unreachable(format!("connection lost while reading the answer: {e}")))?;
+        if n == 0 {
+            break;
+        }
+        if out.len() + n > limits.max_body {
+            return Err(RemoteError::protocol(format!("the answer is larger than {} bytes", limits.max_body)));
+        }
+        out.extend_from_slice(&buf[..n]);
+    }
     Ok(Response { status: head.status, body: out })
 }
 
@@ -293,6 +329,50 @@ mod tests {
         let mut out = String::new();
         Body::new(Cursor::new(raw.as_bytes().to_vec()), framing).read_to_string(&mut out).unwrap();
         out
+    }
+
+    /// A one-connection server on a loopback port: sends `head`, then `body` chunks with `pause` between.
+    fn serve_once(head: &'static str, chunks: Vec<Vec<u8>>, pause: Duration) -> Addr {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            use std::io::Write;
+            let Ok((mut c, _)) = listener.accept() else { return };
+            let mut buf = [0u8; 1024];
+            let _ = c.read(&mut buf);
+            let _ = c.write_all(head.as_bytes());
+            for chunk in chunks {
+                if c.write_all(&chunk).is_err() {
+                    return;
+                }
+                let _ = c.flush();
+                std::thread::sleep(pause);
+            }
+        });
+        Addr::Tcp(port)
+    }
+
+    #[test]
+    fn an_oversized_body_is_a_protocol_error_not_memory() {
+        let addr = serve_once("HTTP/1.1 200 OK\r\nContent-Length: 100000\r\n\r\n", vec![vec![b'x'; 100_000]], Duration::ZERO);
+        let limits = Limits { max_body: 4096, total: None };
+        let err = request_limited(&addr, "GET", "/v1/sessions", None, Duration::from_secs(5), limits).unwrap_err();
+        assert_eq!(err.code, "bad_response", "{err}");
+        // within the cap it is read whole
+        let addr = serve_once("HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\n", vec![b"hello".to_vec()], Duration::ZERO);
+        let ok = request_limited(&addr, "GET", "/", None, Duration::from_secs(5), limits).unwrap();
+        assert_eq!(ok.body, b"hello");
+    }
+
+    #[test]
+    fn a_slow_drip_host_hits_the_total_deadline() {
+        let chunks = (0..40).map(|_| vec![b'x']).collect();
+        let addr = serve_once("HTTP/1.1 200 OK\r\nContent-Length: 40\r\n\r\n", chunks, Duration::from_millis(50));
+        let limits = Limits { max_body: 1024, total: Some(Duration::from_millis(300)) };
+        let started = std::time::Instant::now();
+        let err = request_limited(&addr, "GET", "/", None, Duration::from_secs(5), limits).unwrap_err();
+        assert!(err.is_connection() && err.message.contains("timed out"), "{err}");
+        assert!(started.elapsed() < Duration::from_secs(2));
     }
 
     #[test]

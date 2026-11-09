@@ -103,7 +103,7 @@ pub async fn list_remote_sessions(db: State<'_, Db>) -> AppResult<Vec<HostSessio
     if hosts.iter().all(|h| !h.enabled) {
         return Ok(Vec::new());
     }
-    tauri::async_runtime::spawn_blocking(move || sessions::collect_all(&rt, hosts))
+    tauri::async_runtime::spawn_blocking(move || sessions::collect_all(rt, hosts))
         .await
         .map_err(|e| AppError::Other(format!("remote session lookup failed: {e}")))
 }

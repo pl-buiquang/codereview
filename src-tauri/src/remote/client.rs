@@ -195,11 +195,16 @@ impl RemoteClient {
     }
 
     fn get<T: DeserializeOwned>(&self, path: &str) -> RemoteResult<T> {
-        self.get_within(path, QUICK)
+        self.call::<T>("GET", path, None::<&()>, QUICK)
     }
 
-    pub(super) fn get_within<T: DeserializeOwned>(&self, path: &str, timeout: Duration) -> RemoteResult<T> {
-        self.call::<T>("GET", path, None::<&()>, timeout)
+    /// A GET whose answer is capped in size and total time (for hosts that are not trusted to behave).
+    pub(super) fn get_limited<T: DeserializeOwned>(&self, path: &str, timeout: Duration, limits: http::Limits) -> RemoteResult<T> {
+        let resp = http::request_limited(&self.addr, "GET", path, None, timeout, limits)?;
+        if !(200..300).contains(&resp.status) {
+            return Err(api_error(resp.status, &resp.body));
+        }
+        serde_json::from_slice(&resp.body).map_err(|e| RemoteError::protocol(format!("bad answer from {path}: {e}")))
     }
 
     pub fn info(&self) -> RemoteResult<Info> {
