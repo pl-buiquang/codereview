@@ -335,7 +335,7 @@ impl RunEngine {
         let started = Instant::now();
         let started_at = run_usage::now_stamp();
         let id = run.id;
-        let Some(timeout) = self.sink.adopt(id) else { return self.settle_lost(id) };
+        let Some(timeout) = self.sink.adopt(id) else { return self.settle_lost_and_pump(id) };
         let dir = self.run_dir(id);
         let out = dir.join(STDOUT_FILE);
         let pid = run.pid;
@@ -343,7 +343,7 @@ impl RunEngine {
         let alive = pid > 0 && harness.is_own_process(pid, run.session_id.as_deref());
         // Gone without a result: it died with the app, or was killed meanwhile.
         if !alive && !file_has_result(harness, &out) {
-            return self.settle_lost(id);
+            return self.settle_lost_and_pump(id);
         }
         log::info!(target: "routines", "run {id}: adopted (process {})", if alive { "alive" } else { "finished" });
         if alive {
@@ -362,6 +362,12 @@ impl RunEngine {
         let Tail::Done(result) = tail else { return };
         let outcome = outcome_from(harness, result, read_stderr(&dir), Ok("an unknown status".into()));
         self.settle(id, &outcome, started, &started_at);
+    }
+
+    /// A lost run frees a slot: start the next queued run (runs that waited through a restart).
+    fn settle_lost_and_pump(self: &Arc<Self>, run_id: i64) {
+        self.settle_lost(run_id);
+        self.pump();
     }
 
     /// A run that can't be picked up again: it ended with the app.
