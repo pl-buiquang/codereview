@@ -22,6 +22,7 @@ use crate::error::AppResult;
 
 pub mod outcome;
 pub mod proc;
+pub mod tail;
 
 /// Everything the engine needs to start a run's process, owned. Built by [`EventSink::prepare`].
 pub struct Prepared {
