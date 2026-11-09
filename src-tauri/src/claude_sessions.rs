@@ -15,6 +15,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
+use crate::error::{AppError, AppResult};
 use crate::session_summaries::SessionSummary;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -107,6 +108,20 @@ pub fn agents() -> Vec<AgentEntry> {
         .filter(|o| o.status.success())
         .and_then(|o| serde_json::from_slice(&o.stdout).ok())
         .unwrap_or_default()
+}
+
+/// `claude stop <job id>`: stops a background session, keeping its conversation.
+pub fn stop_job(job_id: &str) -> AppResult<()> {
+    let out = Command::new(crate::tools::claude_bin())
+        .args(["stop", job_id])
+        .output()
+        .map_err(|e| AppError::Other(format!("failed to run claude stop: {e}")))?;
+    if !out.status.success() {
+        let msg = String::from_utf8_lossy(&out.stderr);
+        let msg = if msg.trim().is_empty() { String::from_utf8_lossy(&out.stdout) } else { msg };
+        return Err(AppError::Other(format!("claude stop: {}", msg.trim())));
+    }
+    Ok(())
 }
 
 fn claude_dir() -> Option<PathBuf> {

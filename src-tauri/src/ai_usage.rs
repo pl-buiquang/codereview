@@ -1,5 +1,5 @@
-//! Usage log of app-spawned `claude -p` runs. The shared runner (`commands::chat::run_command`)
-//! records one `ai_run` row per run, successful or not; the Settings "Usage" section reads it.
+//! Usage log of app-spawned AI runs. The harnesses (`ai::Harness`) record one `ai_run` row per run via `record`,
+//! successful or not; the Settings "Usage" section reads it.
 //! Codex runs launched by `/local-review --codex` are billed separately and are not tracked.
 
 use std::collections::{BTreeMap, HashMap};

@@ -653,7 +653,7 @@ fn stream_request<'a>(
 ) -> OneShot<'a> {
     let mut env: Vec<(String, std::ffi::OsString)> = vec![("CODEREVIEW_DB".into(), db_path.into())];
     if let Some(path) = child_path() {
-        env.push(("PATH".into(), path.into()));
+        env.push(("PATH".into(), path));
     }
     OneShot {
         model,

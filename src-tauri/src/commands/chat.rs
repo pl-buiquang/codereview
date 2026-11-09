@@ -3,11 +3,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use chrono::Utc;
 use rusqlite::{params, OptionalExtension};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use tauri::State;
 
 use crate::ai::{self, Access, OneShot, SessionMode, SystemPrompt, SystemPromptMode, ToolPolicy, TurnResult};
-use crate::ai_usage::{ModelTokens, RunTag, RunUsage};
+use crate::ai_usage::RunTag;
 use crate::db::models::{Chat, ChatMessage, Target};
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
@@ -34,74 +34,6 @@ pub(crate) fn new_session_id() -> String {
     let d = 0x8000u16 | ((pid ^ counter) as u16 & 0x3fff); // variant 10
     let e = (counter ^ (pid << 16)) & 0x0000_ffff_ffff_ffff;
     format!("{a:08x}-{b:04x}-{c:04x}-{d:04x}-{e:012x}")
-}
-
-/// JSON envelope returned by `claude -p --output-format json`.
-#[derive(Deserialize)]
-pub(crate) struct ClaudeEnvelope {
-    pub(crate) result: Option<serde_json::Value>,
-    #[serde(default)]
-    pub(crate) is_error: bool,
-    #[serde(default)]
-    total_cost_usd: f64,
-    usage: Option<ClaudeUsage>,
-    #[serde(default)]
-    num_turns: i64,
-    session_id: Option<String>,
-    #[serde(default, rename = "modelUsage")]
-    model_usage: std::collections::HashMap<String, ClaudeModelUsage>,
-}
-
-#[derive(Deserialize, Default)]
-struct ClaudeUsage {
-    #[serde(default)]
-    input_tokens: i64,
-    #[serde(default)]
-    output_tokens: i64,
-    #[serde(default)]
-    cache_read_input_tokens: i64,
-    #[serde(default)]
-    cache_creation_input_tokens: i64,
-}
-
-#[derive(Deserialize, Default)]
-#[serde(rename_all = "camelCase", default)]
-struct ClaudeModelUsage {
-    input_tokens: i64,
-    output_tokens: i64,
-    cache_read_input_tokens: i64,
-    cache_creation_input_tokens: i64,
-    #[serde(rename = "costUSD")]
-    cost_usd: f64,
-}
-
-impl ClaudeEnvelope {
-    pub(crate) fn run_usage(&self) -> RunUsage {
-        let usage = self.usage.as_ref();
-        let mut models: Vec<ModelTokens> = self
-            .model_usage
-            .iter()
-            .map(|(model, m)| ModelTokens {
-                model: model.clone(),
-                input_tokens: m.input_tokens,
-                output_tokens: m.output_tokens,
-                cache_read_tokens: m.cache_read_input_tokens,
-                cache_creation_tokens: m.cache_creation_input_tokens,
-                cost_usd: m.cost_usd,
-            })
-            .collect();
-        models.sort_by(|a, b| a.model.cmp(&b.model));
-        RunUsage {
-            num_turns: self.num_turns,
-            input_tokens: usage.map_or(0, |u| u.input_tokens),
-            output_tokens: usage.map_or(0, |u| u.output_tokens),
-            cache_read_tokens: usage.map_or(0, |u| u.cache_read_input_tokens),
-            cache_creation_tokens: usage.map_or(0, |u| u.cache_creation_input_tokens),
-            cost_usd: self.total_cost_usd,
-            session_id: self.session_id.clone(),
-            models,
-        }
-    }
 }
 
 /// Response returned to the frontend after a chat turn.

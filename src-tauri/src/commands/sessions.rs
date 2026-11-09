@@ -222,16 +222,7 @@ pub async fn stop_claude_session(session_id: String) -> AppResult<()> {
         .find(|s| s.session_id == session_id)
         .and_then(|s| s.job_id)
         .ok_or_else(|| AppError::Other("not a running background session".into()))?;
-    let out = std::process::Command::new(crate::tools::claude_bin())
-        .args(["stop", &job_id])
-        .output()
-        .map_err(|e| AppError::Other(format!("failed to run claude stop: {e}")))?;
-    if !out.status.success() {
-        let msg = String::from_utf8_lossy(&out.stderr);
-        let msg = if msg.trim().is_empty() { String::from_utf8_lossy(&out.stdout) } else { msg };
-        return Err(AppError::Other(format!("claude stop: {}", msg.trim())));
-    }
-    Ok(())
+    claude_sessions::stop_job(&job_id)
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -413,10 +404,11 @@ pub async fn review_open_agent(
         Some(n) => format!("#{n}"),
         None => target.head_ref.clone(),
     };
-    let mut argv = vec!["claude".to_string()];
-    if let Some(id) = resume {
-        argv.extend(["--resume".to_string(), id]);
-    }
+    let argv = ai::interactive_argv(&ai::Interactive {
+        session: resume.as_deref().map_or(SessionMode::Ephemeral, SessionMode::Resume),
+        system_prompt_file: None,
+        system_prompt_mode: SystemPromptMode::Append,
+    })?;
     terminal::open_session(host, tmux_target, &tmux_session, &repo, &window_name, &worktree_path, &argv)
 }
 
