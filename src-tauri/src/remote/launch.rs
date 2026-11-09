@@ -6,7 +6,7 @@ use serde_json::Value;
 
 use crate::ai::Access;
 use crate::routines::{access_for_permission_mode, Routine};
-use crate::serve::request::{AccessWire, RunRequest, ToolsWire, WorkspaceSpec};
+use crate::worker::request::{AccessWire, RunRequest, ToolsWire, WorkspaceSpec};
 
 pub struct LaunchInput<'a> {
     pub routine: &'a Routine,
@@ -77,7 +77,7 @@ pub fn dropped_settings(routine: &Routine, harness_id: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::serve::request::WorkspaceKind;
+    use crate::worker::request::WorkspaceKind;
     use serde_json::json;
 
     fn routine(overrides: Value, access: &str) -> Routine {

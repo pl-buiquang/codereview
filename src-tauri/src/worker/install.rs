@@ -1,4 +1,4 @@
-//! `cr serve --install / --uninstall / --status`: a systemd user unit for the daemon.
+//! `cr worker --install / --uninstall / --status`: a systemd user unit for the daemon.
 //!
 //! The unit uses `KillMode=process` so that stopping or restarting the service leaves the harness
 //! processes of live runs alone; the next daemon re-adopts them. macOS (launchd) is documented in the
@@ -11,7 +11,7 @@ use std::process::Command;
 use super::Listen;
 use crate::error::{AppError, AppResult};
 
-pub const UNIT_NAME: &str = "cr-serve.service";
+pub const UNIT_NAME: &str = "cr-worker.service";
 
 /// What the installed unit runs.
 #[derive(Debug, Clone)]
@@ -19,7 +19,7 @@ pub struct UnitSpec {
     pub exe: PathBuf,
     pub listen: Listen,
     pub app_db: Option<PathBuf>,
-    pub serve_db: Option<PathBuf>,
+    pub worker_db: Option<PathBuf>,
     pub max_concurrency: Option<i64>,
     pub log_level: Option<String>,
 }
@@ -40,11 +40,11 @@ pub fn unit_text(spec: &UnitSpec) -> String {
         args.push("--db".into());
         args.push(db.display().to_string());
     }
-    args.push("serve".into());
+    args.push("worker".into());
     args.push("--listen".into());
     args.push(spec.listen.to_string());
-    if let Some(db) = &spec.serve_db {
-        args.push("--serve-db".into());
+    if let Some(db) = &spec.worker_db {
+        args.push("--worker-db".into());
         args.push(db.display().to_string());
     }
     if let Some(n) = spec.max_concurrency {
@@ -57,7 +57,7 @@ pub fn unit_text(spec: &UnitSpec) -> String {
     }
     let exec: Vec<String> = std::iter::once(spec.exe.display().to_string()).chain(args).map(|a| quote(&a)).collect();
     format!(
-        "[Unit]\nDescription=CodeReview agent daemon (cr serve)\nAfter=network.target\n\n\
+        "[Unit]\nDescription=CodeReview agent daemon (cr worker)\nAfter=network.target\n\n\
          [Service]\nType=simple\nExecStart={}\nRestart=on-failure\nRestartSec=3\n\
          # Stopping the daemon must not kill the runs it started: the next daemon re-adopts them.\n\
          KillMode=process\n\n\
@@ -167,9 +167,9 @@ mod tests {
     fn spec() -> UnitSpec {
         UnitSpec {
             exe: "/home/u/.local/bin/cr".into(),
-            listen: Listen::Unix("/run/user/1000/codereview/serve.sock".into()),
+            listen: Listen::Unix("/run/user/1000/codereview/worker.sock".into()),
             app_db: None,
-            serve_db: None,
+            worker_db: None,
             max_concurrency: None,
             log_level: None,
         }
@@ -178,7 +178,7 @@ mod tests {
     #[test]
     fn unit_keeps_runs_alive_across_a_restart() {
         let t = unit_text(&spec());
-        assert!(t.contains("ExecStart=/home/u/.local/bin/cr serve --listen unix:/run/user/1000/codereview/serve.sock\n"), "{t}");
+        assert!(t.contains("ExecStart=/home/u/.local/bin/cr worker --listen unix:/run/user/1000/codereview/worker.sock\n"), "{t}");
         assert!(t.contains("KillMode=process"));
         assert!(t.contains("WantedBy=default.target"));
         assert!(t.contains("Restart=on-failure"));
@@ -188,7 +188,7 @@ mod tests {
     fn unit_bakes_in_the_flags_and_quotes_spaces() {
         let s = UnitSpec {
             app_db: Some("/data/my dir/app.db".into()),
-            serve_db: Some("/data/serve.db".into()),
+            worker_db: Some("/data/worker.db".into()),
             max_concurrency: Some(2),
             log_level: Some("debug".into()),
             ..spec()
@@ -197,7 +197,7 @@ mod tests {
         let line = t.lines().find(|l| l.starts_with("ExecStart=")).unwrap();
         assert_eq!(
             line,
-            "ExecStart=/home/u/.local/bin/cr --db \"/data/my dir/app.db\" serve --listen unix:/run/user/1000/codereview/serve.sock --serve-db /data/serve.db --max-concurrency 2 --log-level debug"
+            "ExecStart=/home/u/.local/bin/cr --db \"/data/my dir/app.db\" worker --listen unix:/run/user/1000/codereview/worker.sock --worker-db /data/worker.db --max-concurrency 2 --log-level debug"
         );
     }
 }

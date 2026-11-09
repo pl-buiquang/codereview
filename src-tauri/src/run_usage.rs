@@ -1,6 +1,6 @@
 //! The plain data of an AI run: what it is for ([`RunTag`]), what it consumed ([`RunUsage`]) and the
 //! timestamp format of the usage log. Kept free of Tauri so the run engine, the harnesses and
-//! `cr serve` can use it without the app's usage log (`ai_usage`).
+//! `cr worker` can use it without the app's usage log (`ai_usage`).
 
 use chrono::{DateTime, SecondsFormat, Utc};
 

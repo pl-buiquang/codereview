@@ -1,4 +1,4 @@
-#[cfg(feature = "serve")]
+#[cfg(feature = "worker")]
 use std::path::PathBuf;
 use std::process;
 use std::sync::Mutex;
@@ -12,7 +12,7 @@ use codereview_lib::db_path::resolve_db_path;
 use codereview_lib::error::{AppError, AppResult};
 use codereview_lib::gh::{self, GhRepo};
 use codereview_lib::provider::provider_for;
-use codereview_lib::serve::remote::{self, RemoteRun};
+use codereview_lib::worker::remote::{self, RemoteRun};
 use codereview_lib::sync::{self, Mode, Scope, SyncReport, SyncRequest};
 use codereview_lib::tools;
 
@@ -45,8 +45,8 @@ enum Cmd {
     },
     /// Run the agent daemon: expose this machine's harnesses over HTTP+SSE on a unix socket or a
     /// loopback port (reach it through an SSH tunnel). See docs/adr/0007.
-    #[cfg(feature = "serve")]
-    Serve(ServeArgs),
+    #[cfg(feature = "worker")]
+    Worker(WorkerArgs),
     /// Send a notification to the app (only inside a remote run, where it is recorded in the outbox)
     Notify {
         message: String,
@@ -147,16 +147,16 @@ enum Cmd {
     },
 }
 
-#[cfg(feature = "serve")]
+#[cfg(feature = "worker")]
 #[derive(clap::Args)]
-struct ServeArgs {
+struct WorkerArgs {
     /// Where to listen: a unix socket path (or unix:PATH) or a loopback host:port
-    /// [default: $XDG_RUNTIME_DIR/codereview/serve.sock]
+    /// [default: $XDG_RUNTIME_DIR/codereview/worker.sock]
     #[arg(long)]
     listen: Option<String>,
     /// The daemon's own database (runs, events, outbox)
-    #[arg(long, env = "CODEREVIEW_SERVE_DB")]
-    serve_db: Option<String>,
+    #[arg(long, env = "CODEREVIEW_WORKER_DB")]
+    worker_db: Option<String>,
     /// How many runs of one harness execute at once
     #[arg(long)]
     max_concurrency: Option<i64>,
@@ -618,9 +618,9 @@ fn main() {
         }
         return;
     }
-    #[cfg(feature = "serve")]
-    if let Cmd::Serve(args) = cli.cmd {
-        if let Err(e) = run_serve(args, cli.db.as_deref()) {
+    #[cfg(feature = "worker")]
+    if let Cmd::Worker(args) = cli.cmd {
+        if let Err(e) = run_worker(args, cli.db.as_deref()) {
             eprintln!("error: {e}");
             process::exit(1);
         }
@@ -646,12 +646,12 @@ fn main() {
     }
 }
 
-#[cfg(feature = "serve")]
-fn run_serve(args: ServeArgs, app_db: Option<&str>) -> AppResult<()> {
-    use codereview_lib::serve::{self, daemon, install};
+#[cfg(feature = "worker")]
+fn run_worker(args: WorkerArgs, app_db: Option<&str>) -> AppResult<()> {
+    use codereview_lib::worker::{self, daemon, install};
     let listen = match &args.listen {
-        Some(l) => serve::parse_listen(l)?,
-        None => serve::Listen::Unix(serve::default_socket()),
+        Some(l) => worker::parse_listen(l)?,
+        None => worker::Listen::Unix(worker::default_socket()),
     };
     if args.status {
         print!("{}", install::status(&listen)?);
@@ -662,7 +662,7 @@ fn run_serve(args: ServeArgs, app_db: Option<&str>) -> AppResult<()> {
         println!("Removed {}", install::unit_path()?.display());
         return Ok(());
     }
-    let serve_db = serve::resolve_serve_db(args.serve_db.as_deref());
+    let worker_db = worker::resolve_worker_db(args.worker_db.as_deref());
     let app_db_path = resolve_db_path(app_db);
     if args.install {
         let exe = std::env::current_exe()?;
@@ -672,18 +672,18 @@ fn run_serve(args: ServeArgs, app_db: Option<&str>) -> AppResult<()> {
             exe,
             listen,
             app_db: app_db.map(PathBuf::from).or_else(|| std::env::var_os("CODEREVIEW_DB").map(PathBuf::from)).map(abs),
-            serve_db: args.serve_db.as_deref().map(PathBuf::from).or_else(|| std::env::var_os(serve::SERVE_DB_ENV).map(PathBuf::from)).map(abs),
+            worker_db: args.worker_db.as_deref().map(PathBuf::from).or_else(|| std::env::var_os(worker::WORKER_DB_ENV).map(PathBuf::from)).map(abs),
             max_concurrency: args.max_concurrency,
             log_level: args.log_level.clone(),
         };
         let path = install::install(&spec)?;
-        println!("Installed and started {} (check with `cr serve --status`)", path.display());
+        println!("Installed and started {} (check with `cr worker --status`)", path.display());
         return Ok(());
     }
     daemon::run(daemon::Config {
         listen,
         app_db: app_db_path,
-        serve_db,
+        worker_db,
         max_concurrency: args.max_concurrency.unwrap_or(codereview_lib::run_engine::engine::DEFAULT_CONCURRENCY),
         log_level: args.log_level,
     })
@@ -758,10 +758,10 @@ fn run_remote(remote: &RemoteRun, name: &str, cmd: Cmd, json: bool) -> AppResult
 
 fn run(cmd: Cmd, json: bool, db: &Db) -> AppResult<()> {
     match cmd {
-        #[cfg(feature = "serve")]
-        Cmd::Serve(_) => unreachable!("handled before the database is opened"),
+        #[cfg(feature = "worker")]
+        Cmd::Worker(_) => unreachable!("handled before the database is opened"),
         Cmd::Notify { .. } => {
-            return Err(AppError::Other("`cr notify` is only available in a remote run (see `cr serve`)".into()));
+            return Err(AppError::Other("`cr notify` is only available in a remote run (see `cr worker`)".into()));
         }
         Cmd::List { repo: repo_id } => {
             let conn = db.0.lock().unwrap();

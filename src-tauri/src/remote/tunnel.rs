@@ -1,4 +1,4 @@
-//! The SSH tunnel to a host's `cr serve` daemon and its connection state.
+//! The SSH tunnel to a host's `cr worker` daemon and its connection state.
 //!
 //! The app opens the tunnel with the system `ssh -N -L ...` (no embedded SSH, no stored credential:
 //! `BatchMode` keeps it from ever prompting), on demand, and keeps it alive while a host is in use:
@@ -22,7 +22,7 @@ use serde::Serialize;
 use super::error::{RemoteError, RemoteResult};
 use super::host::{Host, RemoteEndpoint};
 use crate::error::AppResult;
-use crate::serve::PROTOCOL;
+use crate::worker::PROTOCOL;
 
 /// Where the local end of a tunnel listens.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -556,9 +556,9 @@ mod tests {
 
     #[test]
     fn a_remote_socket_is_forwarded_to_a_local_socket() {
-        let args = ssh_args(&spec(RemoteEndpoint::Socket("/run/user/1000/codereview/serve.sock".into())), &Addr::Unix("/tmp/t/h1.sock".into()));
+        let args = ssh_args(&spec(RemoteEndpoint::Socket("/run/user/1000/codereview/worker.sock".into())), &Addr::Unix("/tmp/t/h1.sock".into()));
         let l = args.iter().position(|a| a == "-L").unwrap();
-        assert_eq!(args[l + 1], "/tmp/t/h1.sock:/run/user/1000/codereview/serve.sock");
+        assert_eq!(args[l + 1], "/tmp/t/h1.sock:/run/user/1000/codereview/worker.sock");
         // the target is last, after `--`, so it can never be read as an option
         assert_eq!(&args[args.len() - 2..], ["--", "koza"]);
         assert_eq!(&args[..2], ["-N", "-T"]);
@@ -666,14 +666,14 @@ mod tests {
     #[test]
     fn ensure_connects_once_and_reuses_the_tunnel() {
         let r = rig();
-        let s = spec(RemoteEndpoint::Socket("/r/serve.sock".into()));
+        let s = spec(RemoteEndpoint::Socket("/r/worker.sock".into()));
         let a = r.mgr.ensure(&s).unwrap();
         let b = r.mgr.ensure(&s).unwrap();
         assert_eq!(a, b);
         r.started(1);
         assert!(matches!(a, Addr::Unix(_)));
         assert_eq!(r.log().lines().count(), 1, "ssh is started once");
-        assert!(r.log().contains("-L") && r.log().contains(":/r/serve.sock"));
+        assert!(r.log().contains("-L") && r.log().contains(":/r/worker.sock"));
         assert_eq!(*r.states.lock().unwrap(), vec![ConnState::Connecting, connected()]);
         assert_eq!(r.mgr.state(1), connected());
         r.mgr.shutdown();

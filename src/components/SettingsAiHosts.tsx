@@ -3,12 +3,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { toast } from "../lib/toast";
 import { confirmDialog } from "../lib/confirm";
-import { connDetail, connLabel, hostsQuery, readableRemoteError, SERVE_INSTALL_HINT, useHostStates } from "../lib/hosts";
+import { connDetail, connLabel, hostsQuery, readableRemoteError, WORKER_INSTALL_HINT, useHostStates } from "../lib/hosts";
 import type { Host, HostInput, HostTest } from "../lib/types";
 
 const BLANK: HostInput = { id: null, name: "", ssh_target: "", remote_endpoint: "", enabled: true };
 
-/** Settings → AI → Hosts: the machines running `cr serve` that profiles can point at. */
+/** Settings → AI → Hosts: the machines running `cr worker` that profiles can point at. */
 export function AiHostsSection() {
   const queryClient = useQueryClient();
   const hosts = useQuery(hostsQuery());
@@ -43,7 +43,7 @@ export function AiHostsSection() {
       remove.mutate(h.id);
   };
   const copyInstall = () =>
-    navigator.clipboard.writeText(SERVE_INSTALL_HINT).then(
+    navigator.clipboard.writeText(WORKER_INSTALL_HINT).then(
       () => toast.info("Command copied to clipboard"),
       (e) => toast.error(`Could not copy: ${String(e)}`),
     );
@@ -52,9 +52,9 @@ export function AiHostsSection() {
     <section className="settings-group" data-testid="ai-hosts">
       <h3>Hosts</h3>
       <span className="settings-hint muted">
-        A host is another machine running the <code>cr serve</code> daemon, reached through an SSH tunnel with your
+        A host is another machine running the <code>cr worker</code> daemon, reached through an SSH tunnel with your
         <code> ~/.ssh/config</code>. Profiles pointing at a host run plain routines and one-shot features there. Nothing
-        secret is stored. On the host, run <code>{SERVE_INSTALL_HINT}</code>{" "}
+        secret is stored. On the host, run <code>{WORKER_INSTALL_HINT}</code>{" "}
         <button type="button" className="btn btn-sm" onClick={copyInstall}>
           Copy
         </button>
@@ -134,14 +134,14 @@ export function AiHostsSection() {
             Daemon socket or port on the host
             <input
               className="input mono"
-              placeholder="/run/user/1000/codereview/serve.sock"
+              placeholder="/run/user/1000/codereview/worker.sock"
               value={draft.remote_endpoint}
               required
               onChange={(e) => setDraft({ ...draft, remote_endpoint: e.target.value })}
             />
           </label>
           <span className="settings-hint muted">
-            Absolute path of the socket (run <code>echo $XDG_RUNTIME_DIR/codereview/serve.sock</code> on the host; ssh
+            Absolute path of the socket (run <code>echo $XDG_RUNTIME_DIR/codereview/worker.sock</code> on the host; ssh
             expands neither <code>~</code> nor variables), or a loopback port.
           </span>
           <label className="settings-check">

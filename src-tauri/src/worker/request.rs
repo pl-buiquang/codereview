@@ -107,7 +107,7 @@ pub struct RunRequest {
     /// Written to a per-run scratch dir that is handed to the harness as an extra directory.
     #[serde(default)]
     pub attachments: Vec<Attachment>,
-    /// Snapshot answering `cr` reads inside the run (see `serve::remote`).
+    /// Snapshot answering `cr` reads inside the run (see `worker::remote`).
     #[serde(default)]
     pub context: Value,
 }

@@ -1,6 +1,6 @@
 //! [`RemoteHarness`]: a harness of a remote host, seen through the [`Harness`] trait. It wraps the
 //! local implementation of the same harness id (for its static name and line parsing) and talks to the
-//! host's `cr serve` instead of starting a process.
+//! host's `cr worker` instead of starting a process.
 //!
 //! What it supports on protocol 1: one-shot calls without a session (`POST /v1/oneshot`). Routine
 //! runs do not go through `spawn`: the routine launcher posts them and a mirror follows them
@@ -20,7 +20,7 @@ use crate::ai::{
 };
 use crate::error::{AppError, AppResult};
 use crate::run_usage::{now_stamp, RunUsage};
-use crate::serve::request::{AccessWire, OneShotRequest, ToolsWire};
+use crate::worker::request::{AccessWire, OneShotRequest, ToolsWire};
 
 pub struct RemoteHarness {
     host_id: i64,
@@ -312,7 +312,7 @@ mod tests {
     }
 }
 
-#[cfg(all(test, feature = "serve", unix))]
+#[cfg(all(test, feature = "worker", unix))]
 mod server_tests {
     use super::*;
     use crate::remote::test_server::{TestServer, Fake};

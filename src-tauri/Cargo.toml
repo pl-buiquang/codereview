@@ -19,9 +19,9 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [features]
-# `cr serve`: the HTTP+SSE daemon (ADR 0007). On by default; `--no-default-features` builds without the HTTP stack.
-default = ["serve"]
-serve = ["dep:axum", "dep:tokio", "dep:tokio-stream"]
+# `cr worker`: the HTTP+SSE daemon (ADR 0007). On by default; `--no-default-features` builds without the HTTP stack.
+default = ["worker"]
+worker = ["dep:axum", "dep:tokio", "dep:tokio-stream"]
 
 [dev-dependencies]
 tempfile = "3"

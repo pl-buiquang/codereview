@@ -1,7 +1,7 @@
 //! `cr` inside a remote run (ADR 0007).
 //!
 //! The daemon sets three variables in a run's environment: [`ENV_RUN`] (the run id), [`ENV_DB`]
-//! (the serve DB) and [`ENV_DIR`] (the run directory). When `cr` sees [`ENV_RUN`] it does not touch
+//! (the worker DB) and [`ENV_DIR`] (the run directory). When `cr` sees [`ENV_RUN`] it does not touch
 //! a codereview DB: writes append structured ops to the run's outbox, reads are answered from the
 //! context snapshot (`context.json` in the run directory) that came with the run request.
 //!
@@ -33,10 +33,10 @@ pub const ENV_DIR: &str = "CODEREVIEW_REMOTE_DIR";
 pub const SNAPSHOT_FILE: &str = "context.json";
 
 /// The environment the daemon gives a run's process.
-pub fn run_env(run_id: i64, serve_db: &Path, run_dir: &Path) -> Vec<(String, OsString)> {
+pub fn run_env(run_id: i64, worker_db: &Path, run_dir: &Path) -> Vec<(String, OsString)> {
     vec![
         (ENV_RUN.into(), run_id.to_string().into()),
-        (ENV_DB.into(), serve_db.into()),
+        (ENV_DB.into(), worker_db.into()),
         (ENV_DIR.into(), run_dir.into()),
     ]
 }
@@ -126,9 +126,9 @@ mod tests {
 
     #[test]
     fn env_round_trips() {
-        let env = run_env(7, Path::new("/d/serve.db"), Path::new("/d/runs/7"));
+        let env = run_env(7, Path::new("/d/worker.db"), Path::new("/d/runs/7"));
         let r = RemoteRun::from_vars(|k| env.iter().find(|(n, _)| n == k).map(|(_, v)| v.clone())).unwrap();
-        assert_eq!((r.run_id, r.db, r.dir), (7, "/d/serve.db".into(), "/d/runs/7".into()));
+        assert_eq!((r.run_id, r.db, r.dir), (7, "/d/worker.db".into(), "/d/runs/7".into()));
         assert!(RemoteRun::from_vars(|_| None).is_none());
         assert!(RemoteRun::from_vars(|k| (k == ENV_RUN).then(|| "x".into())).is_none());
     }
@@ -136,8 +136,8 @@ mod tests {
     #[test]
     fn writes_are_recorded_in_the_outbox_in_order() {
         let dir = tempfile::tempdir().unwrap();
-        let db = dir.path().join("serve.db");
-        let sdb = store::ServeDb::open(&db).unwrap();
+        let db = dir.path().join("worker.db");
+        let sdb = store::WorkerDb::open(&db).unwrap();
         let (id, _) = sdb.insert_run("k", "claude", "", "{}", dir.path(), 60).unwrap();
         let r = remote(dir.path(), id, &db);
         let a = r.append("board_link", json!({"issue_id": "i", "pr_reference": "a/b#1"})).unwrap();

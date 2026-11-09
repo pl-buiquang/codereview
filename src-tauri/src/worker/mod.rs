@@ -1,8 +1,8 @@
-//! `cr serve`: a long-lived daemon that exposes the local harnesses of its machine over a versioned
+//! `cr worker`: a long-lived daemon that exposes the local harnesses of its machine over a versioned
 //! HTTP+SSE API (ADR 0007). It is a plain executor: it receives rendered prompts and neutral options,
 //! runs them with the shared [`run_engine`](crate::run_engine) and keeps its own run store.
 //!
-//! Everything except the HTTP layer ([`http`], [`daemon`], behind the `serve` cargo feature) is plain
+//! Everything except the HTTP layer ([`http`], [`daemon`], behind the `worker` cargo feature) is plain
 //! Rust: the store, the wire types, the workspace resolver, the outbox that `cr` writes to inside a
 //! remote run, and the systemd helpers.
 
@@ -13,9 +13,9 @@ use serde::Serialize;
 
 use crate::error::{AppError, AppResult};
 
-#[cfg(all(feature = "serve", unix))]
+#[cfg(all(feature = "worker", unix))]
 pub mod daemon;
-#[cfg(all(feature = "serve", unix))]
+#[cfg(all(feature = "worker", unix))]
 pub mod http;
 pub mod install;
 pub mod remote;
@@ -27,8 +27,8 @@ pub mod workspace;
 /// Integer protocol version of `/v1`; a client with another number must not use the host.
 pub const PROTOCOL: u32 = 1;
 
-/// Environment variable naming the serve DB; also the `--serve-db` flag's env.
-pub const SERVE_DB_ENV: &str = "CODEREVIEW_SERVE_DB";
+/// Environment variable naming the worker DB; also the `--worker-db` flag's env.
+pub const WORKER_DB_ENV: &str = "CODEREVIEW_WORKER_DB";
 
 /// Stable machine codes of an API error.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -142,7 +142,7 @@ pub fn parse_listen(s: &str) -> AppResult<Listen> {
     if s.starts_with('/') {
         return Ok(Listen::Unix(PathBuf::from(s)));
     }
-    let refuse = || AppError::Other(format!("`{s}`: cr serve listens on a unix socket or a loopback port only (use an SSH tunnel to reach it)"));
+    let refuse = || AppError::Other(format!("`{s}`: cr worker listens on a unix socket or a loopback port only (use an SSH tunnel to reach it)"));
     let addr_text = if let Some(port) = s.strip_prefix(':') { format!("127.0.0.1:{port}") } else { s.replacen("localhost", "127.0.0.1", 1) };
     let addr: SocketAddr = addr_text.parse().map_err(|_| AppError::Other(format!("`{s}` is not a socket path or a loopback host:port")))?;
     match addr.ip() {
@@ -152,23 +152,23 @@ pub fn parse_listen(s: &str) -> AppResult<Listen> {
     }
 }
 
-/// Default socket: `$XDG_RUNTIME_DIR/codereview/serve.sock`, else next to the app data.
+/// Default socket: `$XDG_RUNTIME_DIR/codereview/worker.sock`, else next to the app data.
 pub fn default_socket() -> PathBuf {
     match std::env::var_os("XDG_RUNTIME_DIR") {
-        Some(dir) if !dir.is_empty() => PathBuf::from(dir).join("codereview").join("serve.sock"),
-        _ => crate::db_path::app_data_dir().join("serve.sock"),
+        Some(dir) if !dir.is_empty() => PathBuf::from(dir).join("codereview").join("worker.sock"),
+        _ => crate::db_path::app_data_dir().join("worker.sock"),
     }
 }
 
-/// The serve DB: the flag, else `CODEREVIEW_SERVE_DB`, else a file of its own in the app data dir.
-pub fn resolve_serve_db(cli_override: Option<&str>) -> PathBuf {
+/// The worker DB: the flag, else `CODEREVIEW_WORKER_DB`, else a file of its own in the app data dir.
+pub fn resolve_worker_db(cli_override: Option<&str>) -> PathBuf {
     if let Some(p) = cli_override {
         return PathBuf::from(p);
     }
-    if let Some(p) = std::env::var_os(SERVE_DB_ENV) {
+    if let Some(p) = std::env::var_os(WORKER_DB_ENV) {
         return PathBuf::from(p);
     }
-    crate::db_path::app_data_dir().join(if cfg!(debug_assertions) { "codereview-serve-dev.db" } else { "codereview-serve.db" })
+    crate::db_path::app_data_dir().join(if cfg!(debug_assertions) { "codereview-worker-dev.db" } else { "codereview-worker.db" })
 }
 
 #[cfg(test)]

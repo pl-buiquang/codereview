@@ -313,11 +313,11 @@ fn step(h: &dyn MirrorHooks, cfg: &MirrorConfig, run_id: i64, run: &MirrorRun, r
     }
 }
 
-#[cfg(all(test, feature = "serve", unix))]
+#[cfg(all(test, feature = "worker", unix))]
 mod tests {
     use super::*;
     use crate::remote::test_server::{Proxy, TestServer};
-    use crate::serve::request::RunRequest;
+    use crate::worker::request::RunRequest;
     use std::sync::atomic::AtomicUsize;
     use std::sync::{Arc, Mutex};
 
@@ -479,8 +479,8 @@ mod tests {
     fn a_run_the_host_never_heard_of_becomes_an_explicit_error() {
         let (srv, h, run_id, remote_id) = setup("sleep 30");
         // the host pruned it (or its data was wiped)
-        let conn = crate::serve::store::open(&srv.state.serve_db_path).unwrap();
-        conn.execute("DELETE FROM serve_run WHERE id = ?1", params![remote_id]).unwrap();
+        let conn = crate::worker::store::open(&srv.state.worker_db_path).unwrap();
+        conn.execute("DELETE FROM worker_run WHERE id = ?1", params![remote_id]).unwrap();
         assert_eq!(follow(&*h, &fast(), run_id, &AtomicBool::new(false)), Followed::Settled);
         let (status, _, error) = status_of(&h, run_id);
         assert_eq!(status, "error");

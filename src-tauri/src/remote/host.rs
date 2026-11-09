@@ -1,4 +1,4 @@
-//! Hosts: the machines running `cr serve` that profiles can point at. A host is an SSH alias plus
+//! Hosts: the machines running `cr worker` that profiles can point at. A host is an SSH alias plus
 //! the daemon's endpoint on that machine; nothing secret is stored.
 
 use rusqlite::{params, Connection, OptionalExtension, Row};
@@ -77,7 +77,7 @@ pub fn parse_endpoint(s: &str) -> AppResult<RemoteEndpoint> {
     }
     if !s.starts_with('/') {
         return Err(AppError::Other(format!(
-            "`{s}`: the remote socket path must be absolute (ssh does not expand `~` or `$XDG_RUNTIME_DIR`); run `echo $XDG_RUNTIME_DIR/codereview/serve.sock` on the host"
+            "`{s}`: the remote socket path must be absolute (ssh does not expand `~` or `$XDG_RUNTIME_DIR`); run `echo $XDG_RUNTIME_DIR/codereview/worker.sock` on the host"
         )));
     }
     // `:` separates the fields of an ssh forward spec, so it cannot appear in a path.
@@ -225,7 +225,7 @@ mod tests {
     use crate::db::open_memory;
 
     fn input(name: &str) -> HostInput {
-        HostInput { id: None, name: name.into(), ssh_target: "koza".into(), remote_endpoint: "/run/user/1000/codereview/serve.sock".into(), enabled: true }
+        HostInput { id: None, name: name.into(), ssh_target: "koza".into(), remote_endpoint: "/run/user/1000/codereview/worker.sock".into(), enabled: true }
     }
 
     #[test]
@@ -257,7 +257,7 @@ mod tests {
         spaced.ssh_target = "a b".into();
         assert!(save(&conn, spaced).is_err());
         let mut rel = input("x");
-        rel.remote_endpoint = "~/serve.sock".into();
+        rel.remote_endpoint = "~/worker.sock".into();
         assert!(save(&conn, rel).unwrap_err().to_string().contains("absolute"));
         let mut missing = input("x");
         missing.id = Some(99);

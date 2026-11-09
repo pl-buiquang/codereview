@@ -153,7 +153,7 @@ pub trait EventSink: Send + Sync {
 
 #[cfg(test)]
 mod tests {
-    /// The engine must stay usable from `cr serve`: no Tauri anywhere in this module.
+    /// The engine must stay usable from `cr worker`: no Tauri anywhere in this module.
     #[test]
     fn engine_has_no_tauri_dependency() {
         let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");

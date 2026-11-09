@@ -22,8 +22,8 @@ use tokio::sync::{broadcast, mpsc};
 use tokio_stream::wrappers::ReceiverStream;
 
 use super::request::{OneShotRequest, OneShotResponse, OneShotUsage, RunRequest, ToolsWire};
-use super::sink::{Changes, ServeSink};
-use super::store::{is_terminal, ServeDb, ServeStore, PREPARING_TTL};
+use super::sink::{Changes, WorkerSink};
+use super::store::{is_terminal, WorkerDb, WorkerStore, PREPARING_TTL};
 use super::{workspace, ApiError, ErrorCode, PROTOCOL};
 use crate::ai::{check_caps, Harness, Needs, OneShot, SessionMode, SystemPrompt, SystemPromptMode};
 use crate::error::{AppError, AppResult};
@@ -42,10 +42,10 @@ pub const WORKSPACE_CMD_TIMEOUT: Duration = Duration::from_secs(60);
 pub const MAX_QUEUE: i64 = 100;
 
 pub struct Shared {
-    pub db: Arc<ServeDb>,
+    pub db: Arc<WorkerDb>,
     /// The interactive app DB, read for the repo registry.
     pub app_db: PathBuf,
-    pub serve_db_path: PathBuf,
+    pub worker_db_path: PathBuf,
     pub harnesses: Vec<&'static dyn Harness>,
     /// The one run engine; each run names its own harness.
     pub engine: Arc<RunEngine>,
@@ -63,7 +63,7 @@ pub struct Shared {
     pub workspace_lock: std::sync::Mutex<()>,
     /// Limit for each `git` / `gh` call made while resolving a workspace.
     pub workspace_cmd_timeout: Duration,
-    /// `<data_dir>/serve_runs`: the run directories (`<id>`) and the attachment scratch dirs (`scratch/<id>`).
+    /// `<data_dir>/worker_runs`: the run directories (`<id>`) and the attachment scratch dirs (`scratch/<id>`).
     pub runs_base: PathBuf,
 }
 
@@ -71,8 +71,8 @@ pub type SharedState = Arc<Shared>;
 
 pub struct Settings {
     pub app_db: PathBuf,
-    pub serve_db_path: PathBuf,
-    /// Runs, scratch dirs and the like live under `<data_dir>/serve_runs`.
+    pub worker_db_path: PathBuf,
+    /// Runs, scratch dirs and the like live under `<data_dir>/worker_runs`.
     pub data_dir: PathBuf,
     pub max_concurrency: i64,
     pub oneshot_timeout: Duration,
@@ -80,12 +80,12 @@ pub struct Settings {
     pub pr_head: PrHeadFn,
 }
 
-/// Build the shared state: the single run engine (each run names its harness) over the serve store.
+/// Build the shared state: the single run engine (each run names its harness) over the worker store.
 pub fn build(settings: Settings, harnesses: Vec<&'static dyn Harness>) -> AppResult<SharedState> {
     // Runs hold prompts, answers and attachments: owner-only, whatever the umask.
-    let runs_base = settings.data_dir.join("serve_runs");
+    let runs_base = settings.data_dir.join("worker_runs");
     super::store::restrict_dir(&runs_base)?;
-    let db = ServeDb::open(&settings.serve_db_path)?;
+    let db = WorkerDb::open(&settings.worker_db_path)?;
     let cap = Arc::new(AtomicI64::new(settings.max_concurrency.max(1)));
     let (tx, _) = broadcast::channel(256);
     let changes = Changes::default();
@@ -96,18 +96,18 @@ pub fn build(settings: Settings, harnesses: Vec<&'static dyn Harness>) -> AppRes
         });
     }
     let default = *harnesses.first().ok_or_else(|| AppError::Other("no harness".into()))?;
-    let store = ServeStore::new(db.clone(), cap.clone(), runs_base.clone());
-    let sink = Arc::new(ServeSink {
+    let store = WorkerStore::new(db.clone(), cap.clone(), runs_base.clone());
+    let sink = Arc::new(WorkerSink {
         store: store.clone(),
         changes: changes.clone(),
-        db_path: settings.serve_db_path.clone(),
+        db_path: settings.worker_db_path.clone(),
         harnesses: harnesses.clone(),
     });
     let engine = RunEngine::new(store, sink, default);
     Ok(Arc::new(Shared {
         db,
         app_db: settings.app_db,
-        serve_db_path: settings.serve_db_path,
+        worker_db_path: settings.worker_db_path,
         harnesses,
         engine,
         changes: tx,
@@ -717,7 +717,7 @@ mod tests {
         let state = build(
             Settings {
                 app_db,
-                serve_db_path: dir.path().join("serve.db"),
+                worker_db_path: dir.path().join("worker.db"),
                 data_dir: dir.path().to_path_buf(),
                 max_concurrency,
                 oneshot_timeout,
@@ -728,7 +728,7 @@ mod tests {
         )
         .unwrap();
         super::super::daemon::start_engine(&state);
-        let bound = super::super::daemon::Bound::bind(&crate::serve::Listen::Tcp("127.0.0.1:0".parse().unwrap())).await.unwrap();
+        let bound = super::super::daemon::Bound::bind(&crate::worker::Listen::Tcp("127.0.0.1:0".parse().unwrap())).await.unwrap();
         let addr = bound.local_addr().unwrap();
         tokio::spawn(super::super::daemon::serve(state.clone(), bound, std::future::pending()));
         Server { addr, state, repo, _dir: dir }
@@ -1075,14 +1075,14 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn the_runs_dir_and_the_serve_db_are_owner_only() {
+    async fn the_runs_dir_and_the_worker_db_are_owner_only() {
         use std::os::unix::fs::PermissionsExt;
         let srv = server(1).await;
         let id = create(&srv, "k-perm", OK_RUN).await;
         wait_done(&srv, id).await;
         let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode(&srv.state.runs_base), 0o700);
-        assert_eq!(mode(&srv.state.serve_db_path), 0o600);
+        assert_eq!(mode(&srv.state.worker_db_path), 0o600);
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -1119,7 +1119,7 @@ mod tests {
     async fn the_unix_socket_skips_the_host_check_but_not_the_origin_one() {
         let srv = server(1).await;
         let sock = srv._dir.path().join("g.sock");
-        let bound = super::super::daemon::Bound::bind(&crate::serve::Listen::Unix(sock.clone())).await.unwrap();
+        let bound = super::super::daemon::Bound::bind(&crate::worker::Listen::Unix(sock.clone())).await.unwrap();
         tokio::spawn(super::super::daemon::serve(srv.state.clone(), bound, std::future::pending()));
         let text = |host: &str, extra: &str| format!("GET /v1/info HTTP/1.1\r\nHost: {host}\r\n{extra}Connection: close\r\nContent-Length: 0\r\n\r\n");
         for (req_text, want) in [(text("anything", ""), "200"), (text("anything", "Origin: https://x\r\n"), "403")] {
@@ -1149,7 +1149,7 @@ mod tests {
         let state = build(
             Settings {
                 app_db: srv.state.app_db.clone(),
-                serve_db_path: srv.state.serve_db_path.clone(),
+                worker_db_path: srv.state.worker_db_path.clone(),
                 data_dir: srv.state.runs_base.parent().unwrap().to_path_buf(),
                 max_concurrency: 1,
                 oneshot_timeout: ONESHOT_TIMEOUT,
@@ -1215,7 +1215,7 @@ mod tests {
         std::fs::create_dir_all(srv.state.scratch(stale)).unwrap();
         std::fs::write(srv.state.scratch(stale).join("x"), "x").unwrap();
         let old = crate::run_usage::stamp(chrono::Utc::now() - chrono::Duration::minutes(10));
-        srv.state.db.0.lock().unwrap().execute("UPDATE serve_run SET updated_at = ?1 WHERE id = ?2", rusqlite::params![old, stale]).unwrap();
+        srv.state.db.0.lock().unwrap().execute("UPDATE worker_run SET updated_at = ?1 WHERE id = ?2", rusqlite::params![old, stale]).unwrap();
         // it does not count against the queue
         assert_eq!(srv.state.engine.active_count(), 0);
         // a fresh one does
@@ -1302,7 +1302,7 @@ mod tests {
         let srv = server(1).await;
         let id = create(&srv, "k-out", OK_RUN).await;
         wait_done(&srv, id).await;
-        let remote = crate::serve::remote::RemoteRun { run_id: id, db: srv.state.serve_db_path.clone(), dir: PathBuf::new() };
+        let remote = crate::worker::remote::RemoteRun { run_id: id, db: srv.state.worker_db_path.clone(), dir: PathBuf::new() };
         remote.append("board_link", json!({"issue_id": "i1", "pr_reference": "acme/widgets#2"})).unwrap();
         remote.append("notify", json!({"message": "m"})).unwrap();
         let (_, v) = req(&srv, "GET", &format!("/v1/runs/{id}/outbox"), None).await;
@@ -1329,19 +1329,19 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn the_api_is_reachable_over_a_unix_socket() {
         let srv = server(1).await;
-        let sock = srv._dir.path().join("run").join("serve.sock");
-        let bound = super::super::daemon::Bound::bind(&crate::serve::Listen::Unix(sock.clone())).await.unwrap();
+        let sock = srv._dir.path().join("run").join("worker.sock");
+        let bound = super::super::daemon::Bound::bind(&crate::worker::Listen::Unix(sock.clone())).await.unwrap();
         use std::os::unix::fs::PermissionsExt;
         assert_eq!(std::fs::metadata(&sock).unwrap().permissions().mode() & 0o777, 0o600);
         tokio::spawn(super::super::daemon::serve(srv.state.clone(), bound, std::future::pending()));
         let (status, body) = call(tokio::net::UnixStream::connect(&sock).await.unwrap(), "GET", "/v1/info", None).await;
         assert_eq!(status, 200);
         assert_eq!(serde_json::from_str::<Value>(&body).unwrap()["protocol"], PROTOCOL);
-        // the blocking probe used by `cr serve --status` sees the same
-        let listen = crate::serve::Listen::Unix(sock.clone());
+        // the blocking probe used by `cr worker --status` sees the same
+        let listen = crate::worker::Listen::Unix(sock.clone());
         let info = tokio::task::spawn_blocking(move || super::super::install::probe_info(&listen)).await.unwrap().unwrap();
         assert_eq!(info["protocol"], PROTOCOL);
         // a second daemon on a live socket is refused
-        assert!(super::super::daemon::Bound::bind(&crate::serve::Listen::Unix(sock)).await.is_err());
+        assert!(super::super::daemon::Bound::bind(&crate::worker::Listen::Unix(sock)).await.is_err());
     }
 }

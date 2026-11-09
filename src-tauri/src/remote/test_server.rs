@@ -1,4 +1,4 @@
-//! An in-process `cr serve` on a unix socket for the client tests: a fake harness (`sh -c <model>`
+//! An in-process `cr worker` on a unix socket for the client tests: a fake harness (`sh -c <model>`
 //! for runs, an echo for one-shots) and a registered `acme/widgets` repo. No network, no real remote.
 
 use std::path::{Path, PathBuf};
@@ -14,7 +14,7 @@ use super::runtime::RemoteRuntime;
 use super::tunnel::{Addr, SshConfig, TunnelManager};
 use crate::ai::{Access, Caps, Event as AiEvent, Harness, Interactive, OneShot, StreamRun, TurnResult};
 use crate::error::{AppError, AppResult};
-use crate::serve::http::{build, SharedState, Settings, ONESHOT_TIMEOUT};
+use crate::worker::http::{build, SharedState, Settings, ONESHOT_TIMEOUT};
 
 pub struct Fake;
 
@@ -116,7 +116,7 @@ impl TestServer {
         let state = build(
             Settings {
                 app_db,
-                serve_db_path: dir.path().join("serve.db"),
+                worker_db_path: dir.path().join("worker.db"),
                 data_dir: dir.path().to_path_buf(),
                 max_concurrency,
                 oneshot_timeout: ONESHOT_TIMEOUT,
@@ -128,11 +128,11 @@ impl TestServer {
         .unwrap();
         let sock = dir.path().join("s.sock");
         let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap();
-        let bound = rt.block_on(crate::serve::daemon::Bound::bind(&crate::serve::Listen::Unix(sock.clone()))).unwrap();
-        crate::serve::daemon::start_engine(&state);
+        let bound = rt.block_on(crate::worker::daemon::Bound::bind(&crate::worker::Listen::Unix(sock.clone()))).unwrap();
+        crate::worker::daemon::start_engine(&state);
         let st = state.clone();
         std::thread::spawn(move || {
-            rt.block_on(crate::serve::daemon::serve(st, bound, std::future::pending::<()>())).ok();
+            rt.block_on(crate::worker::daemon::serve(st, bound, std::future::pending::<()>())).ok();
         });
         std::thread::sleep(Duration::from_millis(50));
         TestServer { addr: Addr::Unix(sock), state, repo, _dir: dir }

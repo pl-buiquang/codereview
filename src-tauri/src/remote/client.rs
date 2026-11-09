@@ -1,5 +1,5 @@
-//! A typed, blocking client of the `cr serve` `/v1` API (see the API reference in the docs). Wire types
-//! shared with the daemon (`serve::request`) are reused so the two cannot drift apart; the response
+//! A typed, blocking client of the `cr worker` `/v1` API (see the API reference in the docs). Wire types
+//! shared with the daemon (`worker::request`) are reused so the two cannot drift apart; the response
 //! types are lenient about fields the client does not use.
 
 use std::time::Duration;
@@ -12,7 +12,7 @@ use super::error::{RemoteError, RemoteResult};
 use super::http::{self, SseReader};
 use super::tunnel::{Addr, Health, HealthInfo};
 use crate::ai::Caps;
-use crate::serve::request::{OneShotRequest, OneShotResponse, RunRequest};
+use crate::worker::request::{OneShotRequest, OneShotResponse, RunRequest};
 
 /// Calls that only read or write a row.
 const QUICK: Duration = Duration::from_secs(30);
@@ -281,11 +281,11 @@ impl Health for InfoHealth {
     }
 }
 
-#[cfg(all(test, feature = "serve", unix))]
+#[cfg(all(test, feature = "worker", unix))]
 mod tests {
     use super::*;
     use crate::remote::test_server::TestServer;
-    use crate::serve::PROTOCOL;
+    use crate::worker::PROTOCOL;
 
     fn client(srv: &TestServer) -> RemoteClient {
         RemoteClient::new(srv.addr.clone())
@@ -389,10 +389,10 @@ mod tests {
         }
         // ops written by `cr` inside the run
         let sdb = srv.state.db.clone();
-        let conn = crate::serve::store::open(&srv.state.serve_db_path).unwrap();
+        let conn = crate::worker::store::open(&srv.state.worker_db_path).unwrap();
         conn.busy_timeout(Duration::from_secs(5)).unwrap();
-        crate::serve::store::append_outbox(&conn, created.id, "notify", &serde_json::json!({"message": "m"})).unwrap();
-        crate::serve::store::append_outbox(&conn, created.id, "board_track", &serde_json::json!({"reference": "a/b#1"})).unwrap();
+        crate::worker::store::append_outbox(&conn, created.id, "notify", &serde_json::json!({"message": "m"})).unwrap();
+        crate::worker::store::append_outbox(&conn, created.id, "board_track", &serde_json::json!({"reference": "a/b#1"})).unwrap();
         drop(sdb);
         let ops = c.outbox(created.id, 0).unwrap();
         assert_eq!(ops.iter().map(|o| (o.seq, o.op_type.as_str())).collect::<Vec<_>>(), [(1, "notify"), (2, "board_track")]);
@@ -407,7 +407,7 @@ mod tests {
 
     #[test]
     fn a_dead_tunnel_is_host_unreachable() {
-        let c = RemoteClient::new(Addr::Unix("/nonexistent/dir/serve.sock".into()));
+        let c = RemoteClient::new(Addr::Unix("/nonexistent/dir/worker.sock".into()));
         let err = c.info().unwrap_err();
         assert!(err.is_connection(), "{err}");
     }

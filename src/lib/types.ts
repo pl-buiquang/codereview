@@ -1298,7 +1298,7 @@ export interface FeatureProfiles {
   sessions: number | null;
 }
 
-/** A machine running `cr serve`, reached over an SSH tunnel. */
+/** A machine running `cr worker`, reached over an SSH tunnel. */
 export interface Host {
   id: number;
   name: string;

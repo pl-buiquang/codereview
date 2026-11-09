@@ -21,7 +21,7 @@ describe("hosts helpers", () => {
     const mismatch = connDetail({ state: "protocol_mismatch", remote_protocol: 2, remote_version: "0.9.0", local_protocol: 1 });
     expect(mismatch).toContain("cr 0.9.0 (protocol 2)");
     expect(mismatch).toContain("protocol 1");
-    expect(mismatch).toContain("cr serve --install");
+    expect(mismatch).toContain("cr worker --install");
   });
 
   it("treats only a protocol mismatch as unusable", () => {

@@ -157,10 +157,10 @@ impl Args<'_> {
     }
 }
 
-#[cfg(all(test, feature = "serve", unix))]
+#[cfg(all(test, feature = "worker", unix))]
 mod tests {
     use super::*;
-    use crate::serve::store::append_outbox;
+    use crate::worker::store::append_outbox;
     use std::cell::RefCell;
     use std::sync::Mutex;
 
@@ -220,7 +220,7 @@ mod tests {
         .create_run(&req)
         .unwrap()
         .id;
-        let conn = crate::serve::store::open(&srv.state.serve_db_path).unwrap();
+        let conn = crate::worker::store::open(&srv.state.worker_db_path).unwrap();
         conn.busy_timeout(std::time::Duration::from_secs(5)).unwrap();
         for (t, a) in ops {
             append_outbox(&conn, id, t, a).unwrap();

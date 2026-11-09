@@ -13,7 +13,7 @@
 //! below would always see `/usr/local/bin` and skip it anyway). Instead we
 //! prepend well-known per-user bin dirs (`~/.local/bin`, …) when they exist,
 //! which is where `claude` (`~/.local/bin`) and `opencode` (`~/.opencode/bin`) are typically installed. This
-//! matters most for `cr serve` under systemd or over a non-interactive ssh, whose PATH never includes
+//! matters most for `cr worker` under systemd or over a non-interactive ssh, whose PATH never includes
 //! what a login/interactive shell adds.
 
 pub fn ensure_login_path() {

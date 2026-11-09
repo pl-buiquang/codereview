@@ -1,5 +1,5 @@
 //! An opt-in time limit for the `git` / `gh` children of the current thread. The app never sets
-//! one (its calls behave as before); `cr serve` wraps workspace resolution in [`with_timeout`] so a
+//! one (its calls behave as before); `cr worker` wraps workspace resolution in [`with_timeout`] so a
 //! hung `gh` or `git` cannot hold a daemon lock forever.
 
 use std::cell::Cell;

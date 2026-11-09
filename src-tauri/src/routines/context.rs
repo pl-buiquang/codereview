@@ -11,7 +11,7 @@ use super::{manager, Routine};
 use crate::commands::{board, chat, review};
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
-use crate::serve::request::{WorkspaceKind, WorkspaceSpec};
+use crate::worker::request::{WorkspaceKind, WorkspaceSpec};
 
 /// What a menu launches a routine on. `id` is the board card's node id for `pr`/`issue`, the review
 /// id for `review`, and empty for `board`. `base_paths` is only needed to create the review for a

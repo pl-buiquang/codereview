@@ -236,7 +236,7 @@ describe("AiProfilesSection", () => {
   });
 
   describe("remote hosts", () => {
-    const koza = { id: 5, name: "koza", type: "ssh", ssh_target: "koza", remote_endpoint: "/run/user/1000/codereview/serve.sock", enabled: true, last_seen: null, last_protocol: null, last_version: null };
+    const koza = { id: 5, name: "koza", type: "ssh", ssh_target: "koza", remote_endpoint: "/run/user/1000/codereview/worker.sock", enabled: true, last_seen: null, last_protocol: null, last_version: null };
 
     it("lists hosts with their state and tests a connection", async () => {
       const user = userEvent.setup();
@@ -262,7 +262,7 @@ describe("AiProfilesSection", () => {
       const text = (await within(panel).findByText(/The host runs cr 0\.9\.0/)).textContent;
       expect(text).toContain("protocol 2");
       expect(text).toContain("protocol 1");
-      expect(text).toContain("cr serve --install");
+      expect(text).toContain("cr worker --install");
     });
 
     it("adds a host", async () => {

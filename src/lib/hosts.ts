@@ -6,8 +6,8 @@ import type { ConnState, Host, HostState } from "./types";
 
 export const HOST_STATE_EVENT = "host-state";
 
-/** Where `cr serve` should be installed on a host; shown next to the connection test. */
-export const SERVE_INSTALL_HINT = "cr serve --install";
+/** Where `cr worker` should be installed on a host; shown next to the connection test. */
+export const WORKER_INSTALL_HINT = "cr worker --install";
 
 const DISCONNECTED: ConnState = { state: "disconnected" };
 
@@ -64,7 +64,7 @@ export function connDetail(s: ConnState | undefined): string | null {
   if (s.state === "connected") return `cr ${s.version} · protocol ${s.protocol}`;
   if (s.state === "unreachable") return s.error;
   if (s.state === "protocol_mismatch") {
-    return `The host runs cr ${s.remote_version} (protocol ${s.remote_protocol}); this app speaks protocol ${s.local_protocol}. Update cr on the host to the app's version, restart its daemon (${SERVE_INSTALL_HINT}), then test the connection.`;
+    return `The host runs cr ${s.remote_version} (protocol ${s.remote_protocol}); this app speaks protocol ${s.local_protocol}. Update cr on the host to the app's version, restart its daemon (${WORKER_INSTALL_HINT}), then test the connection.`;
   }
   return null;
 }

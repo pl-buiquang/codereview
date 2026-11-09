@@ -10,7 +10,7 @@ pub use changes::Changes;
 
 use super::remote;
 use super::request::RunRequest;
-use super::store::ServeStore;
+use super::store::WorkerStore;
 use crate::ai::{Harness, SystemPromptMode};
 use crate::commands::chat::new_session_id;
 use crate::commands::focus::child_path;
@@ -40,23 +40,23 @@ pub mod changes {
     }
 }
 
-pub struct ServeSink {
-    pub store: Arc<ServeStore>,
+pub struct WorkerSink {
+    pub store: Arc<WorkerStore>,
     pub changes: Changes,
-    /// The serve DB file, handed to `cr` inside the run so it can append to the outbox.
+    /// The worker DB file, handed to `cr` inside the run so it can append to the outbox.
     pub db_path: PathBuf,
     /// The harnesses a run may name (the registry plus whatever a test plugs in).
     pub harnesses: Vec<&'static dyn Harness>,
 }
 
-impl ServeSink {
+impl WorkerSink {
     fn request(&self, id: i64) -> Result<RunRequest, String> {
         let raw = self.store.db.request_json(id).map_err(|e| e.to_string())?.ok_or("the run no longer exists")?;
         serde_json::from_str(&raw).map_err(|e| format!("unreadable stored request: {e}"))
     }
 }
 
-impl EventSink for ServeSink {
+impl EventSink for WorkerSink {
     fn queued(&self, id: i64) {
         self.changes.notify(id);
     }

@@ -4,19 +4,19 @@
 use std::path::Path;
 use std::process::{Command, Output};
 
-use codereview_lib::serve::remote::{write_snapshot, ENV_DB, ENV_DIR, ENV_RUN};
-use codereview_lib::serve::store::ServeDb;
+use codereview_lib::worker::remote::{write_snapshot, ENV_DB, ENV_DIR, ENV_RUN};
+use codereview_lib::worker::store::WorkerDb;
 use serde_json::{json, Value};
 
 struct Setup {
     dir: tempfile::TempDir,
-    db: std::sync::Arc<ServeDb>,
+    db: std::sync::Arc<WorkerDb>,
     run: i64,
 }
 
 fn setup() -> Setup {
     let dir = tempfile::tempdir().unwrap();
-    let db = ServeDb::open(&dir.path().join("serve.db")).unwrap();
+    let db = WorkerDb::open(&dir.path().join("worker.db")).unwrap();
     let (run, _) = db.insert_run("k", "claude", "", "{}", dir.path(), 60).unwrap();
     let ctx = json!({
         "cards": [{"card": {"repo": "acme/widgets", "number": 3, "title": "Fix it"}, "lane": "in_progress",
@@ -33,7 +33,7 @@ fn cr(s: &Setup, args: &[&str]) -> Output {
         // a database path that must never be created: remote mode does not open one
         .env("CODEREVIEW_DB", s.dir.path().join("must-not-exist.db"))
         .env(ENV_RUN, s.run.to_string())
-        .env(ENV_DB, s.dir.path().join("serve.db"))
+        .env(ENV_DB, s.dir.path().join("worker.db"))
         .env(ENV_DIR, s.dir.path().join("run"))
         .current_dir(s.dir.path())
         .output()

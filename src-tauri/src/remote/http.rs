@@ -1,4 +1,4 @@
-//! A small blocking HTTP/1.1 client for the `cr serve` API: JSON requests and Server-Sent Events,
+//! A small blocking HTTP/1.1 client for the `cr worker` API: JSON requests and Server-Sent Events,
 //! over the local end of a tunnel (a unix socket or a loopback port). One connection per request
 //! (`Connection: close`), which keeps it free of pooling and half-open-connection problems.
 //!
