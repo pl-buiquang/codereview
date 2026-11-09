@@ -53,7 +53,7 @@ Sessions running on a [remote host](remote-hosts.md#remote-sessions) appear in t
 They are asked for separately from the local scan (every 5 seconds while Home is visible), so a slow
 host never delays the local rows, and the counts elsewhere (sidebar badge, board cards, Worktrees)
 stay local. Rows carry a host badge, the header gets a host filter ("This machine" or one host), and
-the only action is **Copy ssh**, which copies a command to paste in a terminal.
+the only action is **Copy ssh** (**Resume (new client)** for a session without a known tmux pane), which copies a command to paste in a terminal.
 
 ### Rows
 

@@ -94,17 +94,23 @@ local list uses), so a session started in a terminal on the host is listed wheth
 started anything there. Each row shows the host badge, the harness, status, working directory, repository,
 branch, and last activity; the header gets a host filter.
 
-- **Copy ssh** is the only action. It copies `ssh -t <alias> '$SHELL -lc "..."'`, run through the host's
-  login shell because harness binaries are often on its PATH only. A session in a tmux pane gets
+- **Copy ssh** is the only action. It copies `ssh -t -- <alias> '$SHELL -lc "..."'`, run through the host's
+  login shell because harness binaries are often on its PATH only (a fish or csh login shell on the host is best effort: the
+  quoting is POSIX). A session in a tmux pane gets
   `tmux attach` selecting that pane (Claude reports the pane; opencode and Codex do not, so they
-  get a resume command: `cd <cwd>; opencode --session <id>` or `codex resume <id>`, best effort, and it starts a second
-  client on the session rather than attaching to the running one). A background Claude job gets `claude attach <job>`.
+  get a resume command: `cd -- <cwd> && opencode --session <id>` or `codex resume <id>`; the button then reads **Resume (new client)**
+  because it starts a second client on the session rather than attaching to the running one; best effort). A background Claude job gets `claude attach <job>`.
 - **No local actions**: focus, resume in a local terminal, stop, summaries and board-card links are not
   offered for a remote row. Only metadata crosses the wire: no transcripts and no summaries.
-- **A host that cannot be asked** shows a muted row (*unreachable*, *protocol mismatch*, *connecting...*,
-  *disabled*, or the error) instead of failing the list. Looking at Sessions opens the tunnel to
-  every enabled host on demand, like a launch does; a host the tunnel monitor is already retrying is not
-  dialled again by the poll. Disabled hosts are skipped.
+- **A host that cannot be asked** shows a muted row (*unreachable* with the reason, *protocol mismatch*, *disabled*, or the
+  error) instead of failing the list. **Opening Sessions starts an ssh connection to every enabled host** and keeps those tunnels
+  in use (the monitor then keeps them alive and retries them with a backoff, like for a launch); a host the monitor is already
+  retrying is not dialled again by the poll. Disable a host in Settings to stop that. Disabled hosts are skipped.
+- **A bad host cannot hold the list up**: a lookup is cut off after 12 s in total (the host becomes *timed out*), an answer is
+  limited to 4 MB and 500 sessions, and a host whose previous lookup is still running is not asked again meanwhile.
+- **Remote values are untrusted.** Control characters are stripped and long values truncated. A session whose id, folder,
+  tmux location or host alias still contains something that could run on paste (a leading `-`, an unexpected tmux id) gets no
+  ssh command; its button is disabled and says why.
 - History is not available for remote sessions (the API lists live sessions only), and the
   counts in the sidebar and on board cards stay local.
 
