@@ -19,13 +19,15 @@ use super::context::{self, ContextRef, Light};
 use super::manager::{emit_updated, get_run, now, run_finished, RoutineManager, RoutineRun, RunEventPayload};
 use super::{get as get_routine, launch_needs, Routine};
 use crate::ai::profiles;
+use crate::commands::{board, focus};
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
 use crate::prompts;
-use crate::remote::client::RemoteClient;
+use crate::remote::client::{OutboxOp, RemoteClient};
 use crate::remote::error::{readable, RemoteError};
 use crate::remote::launch::{dropped_settings, run_request, LaunchInput};
 use crate::remote::mirror::{self, finish_local, MirrorConfig, MirrorHooks};
+use crate::remote::outbox::{self, Args, OpApplier};
 use crate::remote::runtime;
 use crate::run_engine::Finished;
 use crate::run_usage::RunUsage;
@@ -73,6 +75,56 @@ impl MirrorHooks for AppHooks {
         };
         run_finished(&self.app, run_id, loaded, fin);
     }
+
+    fn sync_outbox(&self, run_id: i64, remote_run_id: i64, client: &RemoteClient) {
+        outbox::sync(self, run_id, remote_run_id, client);
+    }
+}
+
+impl OpApplier for AppHooks {
+    fn conn(&self) -> MutexGuard<'_, Connection> {
+        MirrorHooks::db(self)
+    }
+
+    fn apply(&self, run_id: i64, op: &OutboxOp) -> AppResult<()> {
+        apply_op(&self.app, run_id, op)
+    }
+}
+
+/// Apply one outbox op of a remote run to the app, through the same functions `cr` uses locally.
+fn apply_op(app: &AppHandle, run_id: i64, op: &OutboxOp) -> AppResult<()> {
+    let db = app.state::<Db>();
+    let a = Args(&op.args);
+    match op.op_type.as_str() {
+        "board_meta_add" => {
+            let card_id = board::resolve_or_track_card_id(&db, a.str("reference")?, a.flag("track"))?;
+            let conn = db.0.lock().unwrap();
+            board::board_meta_add_impl(&conn, &card_id, a.str("kind")?, a.str("value")?, a.opt_str("tag"), a.opt_str("label"), a.opt_str("cwd"))?;
+        }
+        "board_meta_rm" => board::board_meta_delete_impl(&db.0.lock().unwrap(), a.int("id")?)?,
+        "board_link" => board::board_link_pr_impl(&db, a.str("issue_id")?, a.str("pr_reference")?)?,
+        "board_track" => {
+            board::board_track_impl(&db, a.str("reference")?)?;
+        }
+        "focus_set" => {
+            let review_id = a.int("review_id")?;
+            let plan: focus::Plan = serde_json::from_value(op.args.get("plan").cloned().unwrap_or_default())?;
+            focus::set_focus_plan_impl(&db.0.lock().unwrap(), review_id, plan, a.opt_str("level"))?;
+            let _ = app.emit("focus-updated", serde_json::json!({ "review_id": review_id }));
+        }
+        "focus_clear" => {
+            let review_id = a.int("review_id")?;
+            focus::clear_focus_impl(&db.0.lock().unwrap(), review_id)?;
+            let _ = app.emit("focus-updated", serde_json::json!({ "review_id": review_id }));
+        }
+        "notify" => {
+            use tauri_plugin_notification::NotificationExt;
+            let title = a.opt_str("title").unwrap_or("CodeReview agent").to_string();
+            app.notification().builder().title(title).body(a.str("message")?.to_string()).show().map_err(|e| AppError::Other(e.to_string()))?;
+        }
+        other => return Err(AppError::Other(format!("unknown outbox op `{other}` (run {run_id}); update the app?"))),
+    }
+    Ok(())
 }
 
 impl RoutineManager {

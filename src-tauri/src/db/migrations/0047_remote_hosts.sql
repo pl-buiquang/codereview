@@ -25,10 +25,14 @@ CREATE INDEX idx_routine_run_host ON routine_run(host_id) WHERE host_id IS NOT N
 
 ALTER TABLE ai_run ADD COLUMN host_id INTEGER;
 
--- Outbox ops already applied locally (op ids are `<remote run id>:<n>`): applying twice is a no-op.
+-- Outbox ops already handled locally (op ids are `<remote run id>:<n>`): applying twice is a no-op.
+-- A failed op keeps its error and attempt count; after a few attempts it is given up on (and acknowledged)
+-- so one bad op cannot keep a run's outbox open for ever.
 CREATE TABLE remote_applied_op (
     run_id     INTEGER NOT NULL REFERENCES routine_run(id) ON DELETE CASCADE,
     op_id      TEXT NOT NULL,
     applied_at TEXT NOT NULL,
+    error      TEXT,                          -- NULL: applied
+    attempts   INTEGER NOT NULL DEFAULT 1,
     PRIMARY KEY (run_id, op_id)
 );

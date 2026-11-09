@@ -16,4 +16,5 @@ pub mod harness;
 pub mod runtime;
 pub mod startup;
 pub mod mirror;
+pub mod outbox;
 pub mod launch;

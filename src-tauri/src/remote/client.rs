@@ -390,6 +390,7 @@ mod tests {
         // ops written by `cr` inside the run
         let sdb = srv.state.db.clone();
         let conn = crate::serve::store::open(&srv.state.serve_db_path).unwrap();
+        conn.busy_timeout(Duration::from_secs(5)).unwrap();
         crate::serve::store::append_outbox(&conn, created.id, "notify", &serde_json::json!({"message": "m"})).unwrap();
         crate::serve::store::append_outbox(&conn, created.id, "board_track", &serde_json::json!({"reference": "a/b#1"})).unwrap();
         drop(sdb);
