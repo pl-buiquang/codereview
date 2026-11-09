@@ -1,3 +1,5 @@
+#[cfg(feature = "serve")]
+use std::path::PathBuf;
 use std::process;
 use std::sync::Mutex;
 
@@ -10,6 +12,7 @@ use codereview_lib::db_path::resolve_db_path;
 use codereview_lib::error::{AppError, AppResult};
 use codereview_lib::gh::{self, GhRepo};
 use codereview_lib::provider::provider_for;
+use codereview_lib::serve::remote::{self, RemoteRun};
 use codereview_lib::sync::{self, Mode, Scope, SyncReport, SyncRequest};
 use codereview_lib::tools;
 
@@ -39,6 +42,16 @@ enum Cmd {
         /// Filter to a specific repository ID
         #[arg(long)]
         repo: Option<i64>,
+    },
+    /// Run the agent daemon: expose this machine's harnesses over HTTP+SSE on a unix socket or a
+    /// loopback port (reach it through an SSH tunnel). See docs/adr/0007.
+    #[cfg(feature = "serve")]
+    Serve(ServeArgs),
+    /// Send a notification to the app (only inside a remote run, where it is recorded in the outbox)
+    Notify {
+        message: String,
+        #[arg(long)]
+        title: Option<String>,
     },
     /// Show a review's detail
     Show {
@@ -132,6 +145,33 @@ enum Cmd {
         #[arg(long)]
         light: bool,
     },
+}
+
+#[cfg(feature = "serve")]
+#[derive(clap::Args)]
+struct ServeArgs {
+    /// Where to listen: a unix socket path (or unix:PATH) or a loopback host:port
+    /// [default: $XDG_RUNTIME_DIR/codereview/serve.sock]
+    #[arg(long)]
+    listen: Option<String>,
+    /// The daemon's own database (runs, events, outbox)
+    #[arg(long, env = "CODEREVIEW_SERVE_DB")]
+    serve_db: Option<String>,
+    /// How many runs of one harness execute at once
+    #[arg(long)]
+    max_concurrency: Option<i64>,
+    /// error, warn, info, debug or trace
+    #[arg(long)]
+    log_level: Option<String>,
+    /// Write a systemd user unit running this command and enable it
+    #[arg(long, conflicts_with_all = ["uninstall", "status"])]
+    install: bool,
+    /// Stop and remove the systemd user unit
+    #[arg(long, conflicts_with = "status")]
+    uninstall: bool,
+    /// Show the unit and whether the daemon answers
+    #[arg(long)]
+    status: bool,
 }
 
 #[derive(Subcommand)]
@@ -568,6 +608,25 @@ fn main() {
     let cli = Cli::parse();
     tools::init();
 
+    // Inside a remote run `cr` never touches a database: writes go to the run's outbox and reads
+    // come from its context snapshot (ADR 0007).
+    if let Some(remote) = RemoteRun::from_env() {
+        let name = <Cli as clap::CommandFactory>::command().get_matches().subcommand_name().unwrap_or("").to_string();
+        if let Err(e) = run_remote(&remote, &name, cli.cmd, cli.json) {
+            eprintln!("error: {e}");
+            process::exit(1);
+        }
+        return;
+    }
+    #[cfg(feature = "serve")]
+    if let Cmd::Serve(args) = cli.cmd {
+        if let Err(e) = run_serve(args, cli.db.as_deref()) {
+            eprintln!("error: {e}");
+            process::exit(1);
+        }
+        return;
+    }
+
     let db_path = resolve_db_path(cli.db.as_deref());
     if let Some(parent) = db_path.parent() {
         let _ = std::fs::create_dir_all(parent);
@@ -587,8 +646,123 @@ fn main() {
     }
 }
 
+#[cfg(feature = "serve")]
+fn run_serve(args: ServeArgs, app_db: Option<&str>) -> AppResult<()> {
+    use codereview_lib::serve::{self, daemon, install};
+    let listen = match &args.listen {
+        Some(l) => serve::parse_listen(l)?,
+        None => serve::Listen::Unix(serve::default_socket()),
+    };
+    if args.status {
+        print!("{}", install::status(&listen)?);
+        return Ok(());
+    }
+    if args.uninstall {
+        install::uninstall()?;
+        println!("Removed {}", install::unit_path()?.display());
+        return Ok(());
+    }
+    let serve_db = serve::resolve_serve_db(args.serve_db.as_deref());
+    let app_db_path = resolve_db_path(app_db);
+    if args.install {
+        let exe = std::env::current_exe()?;
+        let abs = |p: PathBuf| install::absolute(&p);
+        // flags given explicitly (or via env) are baked into the unit; defaults stay defaults
+        let spec = install::UnitSpec {
+            exe,
+            listen,
+            app_db: app_db.map(PathBuf::from).or_else(|| std::env::var_os("CODEREVIEW_DB").map(PathBuf::from)).map(abs),
+            serve_db: args.serve_db.as_deref().map(PathBuf::from).or_else(|| std::env::var_os(serve::SERVE_DB_ENV).map(PathBuf::from)).map(abs),
+            max_concurrency: args.max_concurrency,
+            log_level: args.log_level.clone(),
+        };
+        let path = install::install(&spec)?;
+        println!("Installed and started {} (check with `cr serve --status`)", path.display());
+        return Ok(());
+    }
+    daemon::run(daemon::Config {
+        listen,
+        app_db: app_db_path,
+        serve_db,
+        max_concurrency: args.max_concurrency.unwrap_or(codereview_lib::run_engine::engine::DEFAULT_CONCURRENCY),
+        log_level: args.log_level,
+    })
+}
+
+/// The `cr` commands that work inside a remote run: board and focus writes become outbox ops,
+/// board and focus reads are answered from the context snapshot, `notify` is an outbox op.
+fn run_remote(remote: &RemoteRun, name: &str, cmd: Cmd, json: bool) -> AppResult<()> {
+    let queued = |op: &str, args: serde_json::Value| -> AppResult<()> {
+        let id = remote.append(op, args)?;
+        if json {
+            println!("{}", serde_json::json!({ "opId": id }));
+        } else {
+            println!("Recorded {op} for the app (op {id}, remote run {})", remote.run_id);
+        }
+        Ok(())
+    };
+    let show = |v: &serde_json::Value| -> AppResult<()> {
+        println!("{}", serde_json::to_string_pretty(v)?);
+        Ok(())
+    };
+    match cmd {
+        Cmd::Notify { message, title } => queued("notify", serde_json::json!({ "message": message, "title": title })),
+        Cmd::Board { action } => match action {
+            BoardAction::List { lane } => {
+                let mut cards = remote.cards()?;
+                if let Some(lane) = lane {
+                    cards.retain(|c| c["lane"].as_str() == Some(lane.as_str()));
+                }
+                show(&serde_json::Value::Array(cards))
+            }
+            BoardAction::Show { reference, here } => {
+                let (owner, name, number) = board::parse_ref(&resolve_reference(reference, here)?)?;
+                show(&remote.card(&owner, &name, number)?)
+            }
+            BoardAction::Track { reference } => queued("board_track", serde_json::json!({ "reference": reference })),
+            BoardAction::Link { issue_id, pr_reference } => {
+                queued("board_link", serde_json::json!({ "issue_id": issue_id, "pr_reference": pr_reference }))
+            }
+            BoardAction::Meta { action } => match action {
+                BoardMetaAction::Add { reference, here, kind, value, tag, label, cwd, track } => {
+                    let reference = resolve_reference(reference, here)?;
+                    queued(
+                        "board_meta_add",
+                        serde_json::json!({
+                            "reference": reference, "kind": kind, "value": value, "tag": tag, "label": label, "cwd": cwd, "track": track
+                        }),
+                    )
+                }
+                BoardMetaAction::Rm { id } => queued("board_meta_rm", serde_json::json!({ "id": id })),
+                BoardMetaAction::List { reference, here } => {
+                    let (owner, name, number) = board::parse_ref(&resolve_reference(reference, here)?)?;
+                    show(&remote.card(&owner, &name, number)?["meta"])
+                }
+            },
+            BoardAction::Sync => Err(remote::unsupported("board sync")),
+        },
+        Cmd::Focus { action } => match action {
+            FocusAction::Set { review_id, file, level } => {
+                let raw = if file == "-" { std::io::read_to_string(std::io::stdin())? } else { std::fs::read_to_string(&file)? };
+                let plan: serde_json::Value = serde_json::from_str(&raw)?;
+                queued("focus_set", serde_json::json!({ "review_id": review_id, "plan": plan, "level": level }))
+            }
+            FocusAction::Clear { review_id } => queued("focus_clear", serde_json::json!({ "review_id": review_id })),
+            FocusAction::Show { review_id } => show(&remote.focus(review_id)?),
+            FocusAction::Hunks { .. } => Err(remote::unsupported("focus hunks")),
+            FocusAction::Hunk { .. } => Err(remote::unsupported("focus hunk")),
+        },
+        _ => Err(remote::unsupported(name)),
+    }
+}
+
 fn run(cmd: Cmd, json: bool, db: &Db) -> AppResult<()> {
     match cmd {
+        #[cfg(feature = "serve")]
+        Cmd::Serve(_) => unreachable!("handled before the database is opened"),
+        Cmd::Notify { .. } => {
+            return Err(AppError::Other("`cr notify` is only available in a remote run (see `cr serve`)".into()));
+        }
         Cmd::List { repo: repo_id } => {
             let conn = db.0.lock().unwrap();
             let reviews = review::list_reviews_impl(&conn, repo_id)?;
