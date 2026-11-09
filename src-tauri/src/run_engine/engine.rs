@@ -929,6 +929,21 @@ mod tests {
     }
 
     #[test]
+    fn a_lost_adoption_frees_its_slot_for_a_queued_run() {
+        let store = FakeStore::new("adopt_lost_pump", 1);
+        let sink = FakeSink::new(Duration::from_secs(60));
+        store.add(1, "running");
+        leave_files(&store, 1, "{\"type\":\"assistant\"}\n");
+        store.add(2, "queued");
+        sink.script(2, RESULT_OK);
+        let e = engine(&store, &sink, false);
+        // nothing pumps but the adoption itself
+        e.adopt_detached();
+        wait_for("lost run settled and the queued one done", || store.status(1) == "interrupted" && store.status(2) == "ok");
+        assert_eq!(store.row(2).text, "done");
+    }
+
+    #[test]
     fn adopting_an_alive_process_keeps_tailing_it() {
         let store = FakeStore::new("adopt_alive", 1);
         let sink = FakeSink::new(Duration::from_secs(60));
