@@ -439,12 +439,9 @@ impl RunStore for ServeStore {
         Ok(self.count(&["preparing", "queued", "running"])? as usize)
     }
 
+    /// The engine calls this when it detaches (a restart, a stop of the service). Unlike the app, the
+    /// daemon keeps its queue: the runs stay `queued` and the next start picks them up.
     fn kill_queued(&self) -> AppResult<()> {
-        let now = now_stamp();
-        self.exec(
-            "UPDATE serve_run SET status = 'killed', finished_at = ?1, updated_at = ?1 WHERE status = 'queued'",
-            params![now],
-        )?;
         Ok(())
     }
 
@@ -572,6 +569,17 @@ mod tests {
         std::fs::set_permissions(&shared, std::fs::Permissions::from_mode(0o755)).unwrap();
         restrict_dir(&shared).unwrap();
         assert_eq!(mode(&shared), 0o700);
+    }
+
+    #[test]
+    fn a_detach_keeps_the_queue() {
+        let (d, db) = temp_db("detach");
+        let (id, _) = db.insert_run("k", "claude", "", "{}", Path::new("/tmp"), 60).unwrap();
+        db.mark_queued(id);
+        let store = ServeStore::new(db.clone(), Arc::new(AtomicI64::new(1)), d.path().join("runs"));
+        store.kill_queued().unwrap();
+        assert_eq!(db.status(id).as_deref(), Some("queued"));
+        assert_eq!(store.next_queued().unwrap(), Some(id));
     }
 
     #[test]

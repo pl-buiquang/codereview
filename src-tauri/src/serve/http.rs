@@ -1121,6 +1121,44 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    async fn queued_runs_survive_a_restart_of_the_daemon() {
+        let srv = server(1).await;
+        let running = create(&srv, "k-r", "sleep 3").await;
+        let queued = create(&srv, "k-q", OK_RUN).await;
+        for _ in 0..100 {
+            if srv.state.db.status(running).as_deref() == Some("running") {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(30)).await;
+        }
+        assert_eq!(srv.state.db.status(queued).as_deref(), Some("queued"));
+        // systemctl restart: the old daemon detaches, a new one starts over the same files
+        super::super::daemon::detach(&srv.state);
+        assert_eq!(srv.state.db.status(queued).as_deref(), Some("queued"), "a queued run is not killed by a restart");
+        let state = build(
+            Settings {
+                app_db: srv.state.app_db.clone(),
+                serve_db_path: srv.state.serve_db_path.clone(),
+                data_dir: srv.state.runs_base.parent().unwrap().to_path_buf(),
+                max_concurrency: 1,
+                oneshot_timeout: ONESHOT_TIMEOUT,
+                worktree_base: srv.state.worktree_base.clone(),
+                pr_head: Box::new(|_, _| Err(crate::error::AppError::Other("no gh".into()))),
+            },
+            srv.state.harnesses.clone(),
+        )
+        .unwrap();
+        super::super::daemon::start_engines(&state);
+        for _ in 0..200 {
+            if state.db.status(queued).as_deref() == Some("ok") {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        assert_eq!(state.db.status(queued).as_deref(), Some("ok"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
     async fn stop_kills_a_running_run_and_a_queued_one() {
         let srv = server(1).await;
         let running = create(&srv, "k-run", "sleep 30").await;
