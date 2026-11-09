@@ -27,6 +27,7 @@ pub mod provider;
 pub mod prompts;
 pub mod repo_sync;
 pub mod routines;
+pub mod run_engine;
 pub mod stack_rebase;
 pub mod session_summaries;
 pub mod sync;
