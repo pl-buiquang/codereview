@@ -22,6 +22,7 @@
 //! Auth stays in Codex (`codex login`); the app stores nothing.
 
 use std::collections::HashMap;
+use std::sync::Mutex;
 use std::io::{BufRead as _, Read as _, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -42,10 +43,33 @@ use crate::error::{AppError, AppResult};
 pub struct Codex;
 
 /// Marker `settings_args` puts in the extra args for `allow_full`; [`command`] consumes it.
-const MARK_FULL: &str = "--cr-allow-full";
+const MARK_FULL: &str = "--cr-allow-full=";
 /// Marker prefix for the profile's `sandbox` setting; [`command`] consumes it.
 const MARK_SANDBOX: &str = "--cr-sandbox=";
+/// Weakest to strongest: a profile `sandbox` may only move down this list from the access-derived mode.
 const SANDBOXES: [&str; 3] = ["read-only", "workspace-write", "danger-full-access"];
+
+/// A per-process secret that goes after the markers, so a marker written by hand in `extra_args`
+/// (`--cr-allow-full`) is not taken for the one `settings_args` made: `allow_full` only comes from
+/// the settings key.
+fn nonce() -> &'static str {
+    static N: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    N.get_or_init(|| {
+        use std::hash::{BuildHasher, Hasher};
+        let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+        h.write_u128(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0));
+        h.write_u32(std::process::id());
+        format!("{:016x}", h.finish())
+    })
+}
+
+fn mark_full() -> String {
+    format!("{MARK_FULL}{}", nonce())
+}
+
+fn mark_sandbox(mode: &str) -> String {
+    format!("{MARK_SANDBOX}{}:{mode}", nonce())
+}
 
 impl Harness for Codex {
     fn id(&self) -> &'static str {
@@ -91,7 +115,14 @@ impl Harness for Codex {
         let mut cmd = command(req)?;
         // The usage a resumed thread reports includes its earlier turns: take them off.
         let before = match req.session {
-            SessionMode::Resume(id) => thread_usage(id),
+            SessionMode::Resume(id) => {
+                let (usage, note) = thread_usage(id);
+                if let Some(note) = note {
+                    // The turn's usage will then include the earlier turns.
+                    log::warn!(target: "ai", "codex {id}: {note}");
+                }
+                usage
+            }
             _ => RunUsage::default(),
         };
         let started_at = run_usage::now_stamp();
@@ -268,10 +299,10 @@ impl Harness for Codex {
     fn settings_args(&self, settings: &Value) -> Vec<String> {
         let mut args = Vec::new();
         if let Some(mode) = settings.get("sandbox").and_then(Value::as_str).map(str::trim).filter(|m| SANDBOXES.contains(m)) {
-            args.push(format!("{MARK_SANDBOX}{mode}"));
+            args.push(mark_sandbox(mode));
         }
         if settings.get("allow_full").and_then(Value::as_bool) == Some(true) {
-            args.push(MARK_FULL.to_string());
+            args.push(mark_full());
         }
         for a in settings.get("extra_args").and_then(Value::as_array).into_iter().flatten() {
             if let Some(a) = a.as_str() {
@@ -345,28 +376,94 @@ fn minus(mut a: RunUsage, b: &RunUsage) -> RunUsage {
     a
 }
 
-/// The sandbox mode of a request and its extra args with the markers taken out. A profile's
-/// `sandbox` setting wins over the access level; `danger-full-access` (from either) needs the
-/// profile's `allow_full`.
+/// The sandbox flags and config keys `extra_args` may not carry: the access level and the profile's
+/// `sandbox` / `allow_full` settings decide the sandbox, nothing else.
+const FORBIDDEN_FLAGS: &[(&str, &str)] = &[
+    ("--dangerously-bypass-approvals-and-sandbox", "--dangerously-bypass-approvals-and-sandbox"),
+    ("--yolo", "--yolo"),
+    ("--full-auto", "--full-auto"),
+    ("-s", "--sandbox"),
+    ("--sandbox", "--sandbox"),
+    ("-a", "--ask-for-approval"),
+    ("--ask-for-approval", "--ask-for-approval"),
+    ("-p", "--profile"),
+    ("--profile", "--profile"),
+];
+
+/// Config keys (`-c key=value`) that change the sandbox or approvals.
+fn forbidden_config(kv: &str) -> bool {
+    let key = kv.split('=').next().unwrap_or("").trim();
+    key == "sandbox_mode" || key == "approval_policy" || key == "profile" || key.starts_with("sandbox_workspace_write")
+}
+
+/// The first flag of `extra_args` that could change the sandbox or the approvals, if any.
+fn forbidden_extra(args: &[String]) -> Option<String> {
+    let mut it = args.iter().map(String::as_str);
+    while let Some(a) = it.next() {
+        if a.starts_with("--cr-") {
+            return Some(a.split('=').next().unwrap_or(a).to_string());
+        }
+        let (flag, attached) = match a.split_once('=') {
+            Some((f, v)) if f.starts_with("--") => (f, Some(v)),
+            _ => (a, None),
+        };
+        if let Some((_, name)) = FORBIDDEN_FLAGS.iter().find(|(f, _)| *f == flag) {
+            return Some(name.to_string());
+        }
+        // `-sread-only`, `-awhatever`: a short flag with its value attached.
+        if !a.starts_with("--") {
+            if let Some((_, name)) = FORBIDDEN_FLAGS.iter().find(|(f, _)| f.len() == 2 && a.len() > 2 && a.starts_with(f)) {
+                return Some(name.to_string());
+            }
+        }
+        if flag == "-c" || flag == "--config" || (!a.starts_with("--") && a.starts_with("-c") && a.len() > 2) {
+            let kv = match (attached, a.strip_prefix("-c").filter(|r| !r.is_empty() && !a.starts_with("--"))) {
+                (Some(v), _) => Some(v),
+                (None, Some(r)) => Some(r.trim_start_matches('=')),
+                _ => it.next(),
+            };
+            if kv.is_some_and(forbidden_config) {
+                return Some(format!("{flag} {}", kv.unwrap_or_default().split('=').next().unwrap_or("").trim()));
+            }
+        }
+    }
+    None
+}
+
+fn rank(mode: &str) -> usize {
+    SANDBOXES.iter().position(|m| *m == mode).unwrap_or(0)
+}
+
+/// The sandbox mode of a request and its extra args with the markers taken out. The access level
+/// sets the mode; a profile's `sandbox` setting can only lower it (read-only < workspace-write <
+/// danger-full-access), never raise it. `danger-full-access` needs the profile's `allow_full`, and
+/// `extra_args` may not carry any flag that changes the sandbox or the approvals.
 fn plan(req: &OneShot<'_>) -> AppResult<(&'static str, Vec<String>)> {
+    let (full, sandbox) = (mark_full(), format!("{MARK_SANDBOX}{}:", nonce()));
     let mut allow_full = false;
     let mut chosen: Option<&'static str> = None;
     let mut rest = Vec::new();
     for a in &req.extra_args {
-        if a == MARK_FULL {
+        if *a == full {
             allow_full = true;
-        } else if let Some(m) = a.strip_prefix(MARK_SANDBOX) {
+        } else if let Some(m) = a.strip_prefix(&sandbox) {
             chosen = SANDBOXES.iter().copied().find(|s| *s == m);
         } else {
             rest.push(a.clone());
         }
     }
-    let mode = chosen.unwrap_or(match &req.access {
+    if let Some(flag) = forbidden_extra(&rest) {
+        return Err(AppError::Other(format!(
+            "Codex extra_args may not contain {flag}: the sandbox and approvals come from the run's access level and the profile's \"sandbox\" and \"allow_full\" settings"
+        )));
+    }
+    let derived = match &req.access {
         Access::Edit => "workspace-write",
         Access::Full => "danger-full-access",
-        // The default is the strictest: nothing is written unless the request or profile says so.
+        // The default is the strictest: nothing is written unless the request says so.
         Access::Default | Access::ReadOnly | Access::Native(_) => "read-only",
-    });
+    };
+    let mode = chosen.filter(|c| rank(c) < rank(derived)).unwrap_or(derived);
     if mode == "danger-full-access" && !allow_full {
         return Err(AppError::Other(
             "this Codex profile does not allow full access (no sandbox): set \"allow_full\": true in its settings, or use a lower access level".into(),
@@ -548,15 +645,27 @@ fn read_rollout(path: &Path) -> Option<Rollout> {
     parse_rollout_meta(&line).map(|r| Rollout { updated: mtime, ..r })
 }
 
-/// The `YYYY/MM/DD` directories under `sessions/`, newest first.
-fn day_dirs(sessions: &Path) -> Vec<PathBuf> {
+/// The newest `limit` `YYYY/MM/DD` directories under `sessions/`, newest first. Walks years, then
+/// months, then days lazily, so an old archive is never listed past the cap.
+fn day_dirs(sessions: &Path, limit: usize) -> Vec<PathBuf> {
     let sub = |p: &Path| -> Vec<PathBuf> {
         let mut v: Vec<PathBuf> = std::fs::read_dir(p).into_iter().flatten().flatten().map(|e| e.path()).filter(|p| p.is_dir()).collect();
         v.sort();
         v.reverse();
         v
     };
-    sub(sessions).iter().flat_map(|y| sub(y)).flat_map(|m| sub(&m)).collect()
+    let mut out = Vec::new();
+    'years: for y in sub(sessions) {
+        for m in sub(&y) {
+            for d in sub(&m) {
+                out.push(d);
+                if out.len() >= limit {
+                    break 'years;
+                }
+            }
+        }
+    }
+    out
 }
 
 /// How many day directories (newest first) a search for recently written logs looks at.
@@ -564,9 +673,8 @@ const RECENT_DAYS: usize = 7;
 
 /// Logs under `sessions` written at or after `since_ms` (looking at the last [`RECENT_DAYS`] days).
 fn recent_rollouts(sessions: &Path, since_ms: i64) -> Vec<Rollout> {
-    day_dirs(sessions)
+    day_dirs(sessions, RECENT_DAYS)
         .into_iter()
-        .take(RECENT_DAYS)
         .flat_map(|d| std::fs::read_dir(d).into_iter().flatten().flatten().map(|e| e.path()))
         .filter(|p| p.extension().is_some_and(|e| e == "jsonl"))
         .filter_map(|p| read_rollout(&p))
@@ -574,22 +682,63 @@ fn recent_rollouts(sessions: &Path, since_ms: i64) -> Vec<Rollout> {
         .collect()
 }
 
-/// The path of the log of session `id`, wherever it is dated.
+/// How many day directories a search for one session's log walks (newest first).
+const MAX_DAY_DIRS: usize = 400;
+
+/// The path of the log of session `id`, looking at the newest [`MAX_DAY_DIRS`] day directories.
 fn find_rollout_path(sessions: &Path, id: &str) -> Option<PathBuf> {
     let suffix = format!("-{id}.jsonl");
-    day_dirs(sessions).into_iter().find_map(|d| {
+    day_dirs(sessions, MAX_DAY_DIRS).into_iter().find_map(|d| {
         std::fs::read_dir(d).ok()?.flatten().map(|e| e.path()).find(|p| p.file_name().is_some_and(|n| n.to_string_lossy().ends_with(&suffix)))
     })
 }
 
-/// What the session `id` has used so far, from the last `token_count` of its log; zero when it has none.
-fn thread_usage(id: &str) -> RunUsage {
-    let Some(path) = codex_home().and_then(|h| find_rollout_path(&h.join("sessions"), id)) else { return RunUsage::default() };
-    std::fs::read_to_string(path).map(|t| last_total_usage(&t)).unwrap_or_default()
+/// Rollout paths found so far, by session id, for the life of the process.
+fn rollout_cache() -> &'static Mutex<HashMap<String, PathBuf>> {
+    static C: std::sync::OnceLock<Mutex<HashMap<String, PathBuf>>> = std::sync::OnceLock::new();
+    C.get_or_init(Default::default)
+}
+
+fn cached_rollout_path(sessions: &Path, id: &str) -> Option<PathBuf> {
+    if let Some(p) = rollout_cache().lock().unwrap().get(id).filter(|p| p.is_file()) {
+        return Some(p.clone());
+    }
+    let found = find_rollout_path(sessions, id)?;
+    rollout_cache().lock().unwrap().insert(id.to_string(), found.clone());
+    Some(found)
+}
+
+/// How much of the end of a log is read to find its last `token_count`.
+const TAIL_BYTES: u64 = 1 << 20;
+
+/// The last [`TAIL_BYTES`] of the file at `path`, read lossily (a cut multi-byte char is harmless).
+fn read_tail(path: &Path) -> std::io::Result<String> {
+    use std::io::{Seek, SeekFrom};
+    let mut f = std::fs::File::open(path)?;
+    let len = f.metadata()?.len();
+    f.seek(SeekFrom::Start(len.saturating_sub(TAIL_BYTES)))?;
+    let mut buf = Vec::new();
+    f.read_to_end(&mut buf)?;
+    Ok(String::from_utf8_lossy(&buf).into_owned())
+}
+
+/// What the session `id` has used so far, from the last `token_count` of its log, and a note when
+/// that could not be told (no log, unreadable, no `token_count`): zero usage would otherwise look real.
+fn thread_usage(id: &str) -> (RunUsage, Option<String>) {
+    let Some(path) = codex_home().and_then(|h| cached_rollout_path(&h.join("sessions"), id)) else {
+        return (RunUsage::default(), Some("usage before this turn unknown: the session log was not found".into()));
+    };
+    match read_tail(&path) {
+        Ok(t) => match last_total_usage(&t) {
+            Some(u) => (u, None),
+            None => (RunUsage::default(), Some("usage before this turn unknown: no token count in the session log".into())),
+        },
+        Err(e) => (RunUsage::default(), Some(format!("usage before this turn unknown: the session log is unreadable ({e})"))),
+    }
 }
 
 /// The `total_token_usage` of the last `token_count` event of a log.
-fn last_total_usage(log: &str) -> RunUsage {
+fn last_total_usage(log: &str) -> Option<RunUsage> {
     log.lines()
         .rev()
         .filter(|l| l.contains("total_token_usage"))
@@ -598,7 +747,6 @@ fn last_total_usage(log: &str) -> RunUsage {
             let total = v.pointer("/payload/info/total_token_usage")?;
             Some(usage_of(Some(total)))
         })
-        .unwrap_or_default()
 }
 
 /// Titles by session id from `session_index.jsonl` (`{"id","thread_name"}` lines, the last one wins).
@@ -657,24 +805,31 @@ fn parse_tui_args(argv: &[String]) -> Option<(Option<String>, Option<String>)> {
         return None;
     }
     let (mut session, mut dir) = (None, None);
-    let mut it = argv[1..].iter().map(String::as_str);
+    let mut it = argv[1..].iter().map(String::as_str).peekable();
     let mut resume = false;
+    // Past the opening prompt only `-C` / `--cd` (and the flags' values) are read.
+    let mut prompted = false;
     while let Some(a) = it.next() {
         match a {
             "-C" | "--cd" => dir = it.next().map(String::from),
+            // `-i` takes several files; with `resume` a uuid after them is still the session.
+            "-i" | "--image" => {
+                while it.next_if(|v| !(v.starts_with('-') || resume && looks_like_uuid(v))).is_some() {}
+            }
             _ if VALUE_FLAGS.contains(&a) => {
                 it.next();
             }
             _ if a.starts_with("--cd=") => dir = a.strip_prefix("--cd=").map(String::from),
             _ if a.starts_with('-') => {}
+            _ if prompted => {}
             "resume" if !resume => resume = true,
-            "fork" if !resume => break,
+            "fork" if !resume => prompted = true,
             _ if !resume && SUBCOMMANDS.contains(&a) => return None,
             _ => {
                 if resume && looks_like_uuid(a) {
                     session = Some(a.to_string());
                 }
-                break;
+                prompted = true;
             }
         }
     }
@@ -952,7 +1107,7 @@ mod tests {
 
     #[test]
     fn a_resumed_turn_is_charged_only_what_it_added() {
-        let before = last_total_usage(&TOKENS.lines().take(2).collect::<Vec<_>>().join("\n"));
+        let before = last_total_usage(&TOKENS.lines().take(2).collect::<Vec<_>>().join("\n")).unwrap();
         assert_eq!(before.input_tokens + before.cache_read_tokens, 41790);
         let (res, usage) = interpret(RESUME, "", 0, &before);
         assert!(res.is_ok());
@@ -961,9 +1116,9 @@ mod tests {
 
     #[test]
     fn the_last_token_count_of_a_log_is_the_thread_total() {
-        let u = last_total_usage(TOKENS);
+        let u = last_total_usage(TOKENS).unwrap();
         assert_eq!(u.input_tokens + u.cache_read_tokens, 151200);
-        assert_eq!(last_total_usage("{}\n").input_tokens, 0);
+        assert!(last_total_usage("{}\n").is_none());
     }
 
     #[test]
@@ -1015,28 +1170,82 @@ mod tests {
     #[test]
     fn the_access_level_picks_the_sandbox() {
         let cwd = Path::new("/w");
-        let sandbox = |access: Access, extra: &[&str]| {
+        let sandbox = |access: Access, extra: &[String]| {
             let mut req = request(cwd);
             req.access = access;
-            req.extra_args = strs(extra);
+            req.extra_args = extra.to_vec();
             command(&req).map(|c| {
                 let a = argv(&c);
                 a[a.iter().position(|x| x == "--sandbox").unwrap() + 1].clone()
             })
         };
+        let (full, sb) = (|| vec![mark_full()], |m: &str| vec![mark_sandbox(m)]);
         assert_eq!(sandbox(Access::Default, &[]).unwrap(), "read-only");
         assert_eq!(sandbox(Access::ReadOnly, &[]).unwrap(), "read-only");
         assert_eq!(sandbox(Access::Edit, &[]).unwrap(), "workspace-write");
-        // the profile's sandbox wins over the access level
-        assert_eq!(sandbox(Access::ReadOnly, &["--cr-sandbox=workspace-write"]).unwrap(), "workspace-write");
+        // the profile's sandbox can lower the access-derived mode ...
+        assert_eq!(sandbox(Access::Edit, &sb("read-only")).unwrap(), "read-only");
+        assert_eq!(sandbox(Access::Full, &[full(), sb("workspace-write")].concat()).unwrap(), "workspace-write");
+        // ... and never raise it
+        assert_eq!(sandbox(Access::ReadOnly, &sb("workspace-write")).unwrap(), "read-only");
+        assert_eq!(sandbox(Access::Edit, &[full(), sb("danger-full-access")].concat()).unwrap(), "workspace-write");
         // full access means no sandbox: only when the profile says so
         let err = sandbox(Access::Full, &[]).unwrap_err().to_string();
         assert!(err.contains("allow_full"), "{err}");
-        assert!(sandbox(Access::Full, &["--cr-sandbox=danger-full-access"]).is_err());
-        assert_eq!(sandbox(Access::Full, &["--cr-allow-full"]).unwrap(), "danger-full-access");
-        assert_eq!(sandbox(Access::Edit, &["--cr-allow-full", "--cr-sandbox=danger-full-access"]).unwrap(), "danger-full-access");
-        // a profile cannot widen a lower access to danger without allowing it
-        assert!(sandbox(Access::Edit, &["--cr-sandbox=danger-full-access"]).is_err());
+        assert_eq!(sandbox(Access::Full, &full()).unwrap(), "danger-full-access");
+    }
+
+    #[test]
+    fn extra_args_cannot_change_the_sandbox_or_approvals() {
+        let cwd = Path::new("/w");
+        let bad: &[&[&str]] = &[
+            &["--dangerously-bypass-approvals-and-sandbox"],
+            &["--yolo"],
+            &["--full-auto"],
+            &["-s", "danger-full-access"],
+            &["-sdanger-full-access"],
+            &["--sandbox", "danger-full-access"],
+            &["--sandbox=danger-full-access"],
+            &["-a", "never"],
+            &["--ask-for-approval=never"],
+            &["-p", "yolo"],
+            &["--profile", "yolo"],
+            &["--profile=yolo"],
+            &["-c", "sandbox_mode=\"danger-full-access\""],
+            &["--config", "sandbox_mode=\"danger-full-access\""],
+            &["--config=approval_policy=\"never\""],
+            &["-c", "approval_policy=\"on-request\""],
+            &["-c", "sandbox_workspace_write.network_access=true"],
+            &["-csandbox_mode=\"danger-full-access\""],
+            &["--cr-allow-full"],
+            &["--cr-allow-full=guess"],
+            &["--cr-sandbox=danger-full-access"],
+        ];
+        for session in [SessionMode::Ephemeral, SessionMode::Resume("01a1c0c8-adaa-7f93-b946-36ec1d2c8260")] {
+            for args in bad {
+                let mut req = request(cwd);
+                req.session = session;
+                req.extra_args = strs(args);
+                let err = command(&req).err().unwrap_or_else(|| panic!("{args:?} was accepted")).to_string();
+                assert!(err.contains("extra_args may not contain"), "{args:?}: {err}");
+            }
+        }
+        // harmless flags and other config keys still pass
+        let mut req = request(cwd);
+        req.extra_args = strs(&["--color", "never", "-c", "model_verbosity=\"low\"", "-c", "shell_environment_policy.inherit=all"]);
+        assert!(command(&req).is_ok());
+    }
+
+    #[test]
+    fn allow_full_comes_only_from_the_settings_key() {
+        let cwd = Path::new("/w");
+        let mut req = request(cwd);
+        req.access = Access::Full;
+        // typed by hand in extra_args: refused, not honoured
+        req.extra_args = Codex.settings_args(&serde_json::json!({ "extra_args": ["--cr-allow-full"] }));
+        assert!(command(&req).is_err());
+        req.extra_args = Codex.settings_args(&serde_json::json!({ "allow_full": true }));
+        assert!(command(&req).is_ok());
     }
 
     #[test]
@@ -1050,7 +1259,7 @@ mod tests {
         req.extra_dirs = vec![a, b];
         // Codex picks the id itself: the one named is not passed.
         req.session = SessionMode::New("app-uuid");
-        req.extra_args = strs(&["--cr-allow-full", "--color", "never"]);
+        req.extra_args = vec![mark_full(), "--color".into(), "never".into()];
         let args = argv(&command(&req).unwrap());
         assert_eq!(
             args,
@@ -1113,6 +1322,8 @@ mod tests {
         let caps = Codex.caps();
         assert!(caps.sessions && caps.resume && caps.streaming && caps.interactive_tui);
         assert!(!caps.fork && !caps.tool_allowlist && !caps.reports_cost && !caps.pins_session_id);
+        // the run engine therefore puts the system prompt in front of a streamed run's prompt
+        assert!(!caps.replaces_system_prompt && !crate::ai::opencode::OpenCode.caps().replaces_system_prompt);
         let needs = |access, tools, tool_allowlist| Needs { access, tools, tool_allowlist };
         check_caps(&Codex, "r", &needs(Access::ReadOnly, true, false)).unwrap();
         check_caps(&Codex, "r", &needs(Access::Full, true, false)).unwrap();
@@ -1126,7 +1337,7 @@ mod tests {
         assert!(h.settings_args(&serde_json::json!({})).is_empty());
         assert_eq!(
             h.settings_args(&serde_json::json!({ "sandbox": " workspace-write ", "allow_full": true, "extra_args": ["--color", "never", 3] })),
-            strs(&["--cr-sandbox=workspace-write", "--cr-allow-full", "--color", "never"])
+            vec![mark_sandbox("workspace-write"), mark_full(), "--color".into(), "never".into()]
         );
         // unknown sandboxes and a false allow_full are ignored
         assert!(h.settings_args(&serde_json::json!({ "sandbox": "yolo", "allow_full": false })).is_empty());
@@ -1212,6 +1423,30 @@ mod tests {
         assert_eq!(some(&["codex", "-m", "exec", "exec"]), None);
         assert_eq!(some(&["node", "codex"]), None);
         assert_eq!(some(&["codex-code-mode-host"]), None);
+    }
+
+    #[test]
+    fn images_and_a_trailing_cd_do_not_hide_the_session_or_directory() {
+        let some = |s: &[&str]| parse_tui_args(&a(s));
+        let id = "01a1c0cb-03cb-76a1-8d70-dfea848b0904";
+        assert_eq!(some(&["codex", "resume", "-i", "a.png", "b.png", id]), Some((Some(id.into()), None)));
+        assert_eq!(some(&["codex", "resume", "--image", "a.png", id, "-C", "/x"]), Some((Some(id.into()), Some("/x".into()))));
+        assert_eq!(some(&["codex", "-i", "a.png", "-C", "/x"]), Some((None, Some("/x".into()))));
+        assert_eq!(some(&["codex", "do it", "-C", "/x"]), Some((None, Some("/x".into()))));
+        assert_eq!(some(&["codex", "resume", id, "go on", "--cd=/y"]), Some((Some(id.into()), Some("/y".into()))));
+        assert_eq!(some(&["codex", "do it", "exec"]), Some((None, None)));
+    }
+
+    #[test]
+    fn the_log_tail_is_bounded_and_tolerates_bad_utf8() {
+        let path = std::env::temp_dir().join(format!("cr-codex-tail-{}.jsonl", std::process::id()));
+        let mut data = vec![b'a'; (TAIL_BYTES as usize) * 2];
+        data.extend_from_slice(b"\n\xff\xfe{\"last\":1}\n");
+        std::fs::write(&path, &data).unwrap();
+        let t = read_tail(&path).unwrap();
+        assert!(t.len() as u64 <= TAIL_BYTES * 3 && t.ends_with("{\"last\":1}\n"));
+        assert!(read_tail(&path.with_extension("missing")).is_err());
+        std::fs::remove_file(path).ok();
     }
 
     #[test]
@@ -1305,6 +1540,9 @@ mod tests {
         assert_eq!((r.id.as_str(), r.cwd.as_str()), (id, "/work/repo"));
         assert!(r.updated > 0);
         assert!(find_rollout_path(&root, "nope").is_none());
+        // the cache remembers where a session's log is
+        assert_eq!(cached_rollout_path(&root, id), Some(path.clone()));
+        assert_eq!(rollout_cache().lock().unwrap().get(id), Some(&path));
         let recent = recent_rollouts(&root, 0);
         assert_eq!(recent.len(), 1);
         assert!(recent_rollouts(&root, i64::MAX).is_empty());

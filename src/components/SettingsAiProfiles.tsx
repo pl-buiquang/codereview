@@ -188,7 +188,7 @@ export function AiProfilesSection() {
                   >
                     {CODEX_SANDBOXES.map((m) => (
                       <option key={m} value={m}>
-                        {m === "" ? "From the run's access level" : m}
+                        {m === "" ? "From the run's access level" : `${m} (only if lower)`}
                       </option>
                     ))}
                   </select>
@@ -205,7 +205,9 @@ export function AiProfilesSection() {
                 <span className="settings-hint muted">
                   Codex asks for no approvals when run by the app. Read only and edit use its OS sandbox; full access runs
                   commands with <strong>no sandbox</strong> and only happens when allowed here. Edit mode cannot commit
-                  in a linked worktree and has no network.
+                  in a linked worktree; its network access is Codex's default and not guaranteed off. The sandbox here can
+                  only lower the run's access level, never raise it, and <code>extra_args</code> may not carry sandbox or
+                  approval flags.
                 </span>
               </div>
             )}
