@@ -15,8 +15,11 @@
 //!
 //! Auth stays in opencode (`opencode auth login`); the app stores nothing.
 
+use std::collections::HashMap;
 use std::io::Write as _;
 use std::process::{Child, Command, Stdio};
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
@@ -647,35 +650,97 @@ fn now_ms() -> i64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64)
 }
 
+/// Longest a discovery subprocess (`ps`, `lsof`, `opencode session list`) may run.
+const PROBE_TIMEOUT: Duration = Duration::from_secs(3);
+/// How long a directory's session listing is reused.
+const LIST_TTL: Duration = Duration::from_secs(8);
+
+/// Run `cmd` and collect its stdout, killing it after `timeout`. `None` on a spawn failure, a
+/// non-zero exit or a timeout.
+fn run_with_timeout(cmd: &mut Command, timeout: Duration) -> Option<String> {
+    use std::io::Read as _;
+    let mut child = cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().ok()?;
+    let mut stdout = child.stdout.take()?;
+    // Read on a thread so a chatty child can't fill the pipe while we wait for it.
+    let reader = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        let _ = stdout.read_to_end(&mut buf);
+        buf
+    });
+    let deadline = Instant::now() + timeout;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(st)) => break Some(st),
+            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(10)),
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                break None;
+            }
+        }
+    };
+    let buf = reader.join().ok()?;
+    status.filter(|st| st.success()).map(|_| String::from_utf8_lossy(&buf).into_owned())
+}
+
 fn proc_cwd(pid: i64) -> Option<String> {
     if let Ok(p) = std::fs::read_link(format!("/proc/{pid}/cwd")) {
         return Some(p.to_string_lossy().into_owned());
     }
     // macOS: no /proc.
-    let out = Command::new("lsof").args(["-a", "-d", "cwd", "-Fn", "-p", &pid.to_string()]).output().ok()?;
-    String::from_utf8_lossy(&out.stdout).lines().find_map(|l| l.strip_prefix('n')).map(String::from)
+    let out = run_with_timeout(Command::new("lsof").args(["-a", "-d", "cwd", "-Fn", "-p", &pid.to_string()]), PROBE_TIMEOUT)?;
+    out.lines().find_map(|l| l.strip_prefix('n')).map(String::from)
 }
 
 /// Sessions of the project at `dir`, via `opencode session list` (read-only, no model call).
 fn list_in(dir: &str) -> Vec<ListedSession> {
-    let out = Command::new(crate::tools::opencode_bin())
-        .args(["session", "list", "--format", "json"])
-        .current_dir(dir)
-        .output();
-    match out {
-        Ok(o) if o.status.success() => parse_session_list(&String::from_utf8_lossy(&o.stdout)),
-        _ => Vec::new(),
+    let mut cmd = Command::new(crate::tools::opencode_bin());
+    cmd.args(["session", "list", "--format", "json"]).current_dir(dir);
+    run_with_timeout(&mut cmd, PROBE_TIMEOUT).map(|o| parse_session_list(&o)).unwrap_or_default()
+}
+
+type ListCache = Mutex<HashMap<String, (Instant, Vec<ListedSession>)>>;
+static LIST_CACHE: OnceLock<ListCache> = OnceLock::new();
+
+/// [`list_in`] reused for [`LIST_TTL`]: the Sessions view and the worktree GC both poll.
+fn list_cached(dir: &str) -> Vec<ListedSession> {
+    let cache = LIST_CACHE.get_or_init(Default::default);
+    if let Some((at, sessions)) = cache.lock().ok().and_then(|c| c.get(dir).cloned()) {
+        if at.elapsed() < LIST_TTL {
+            return sessions;
+        }
     }
+    let sessions = list_in(dir);
+    if let Ok(mut c) = cache.lock() {
+        c.retain(|_, (at, _)| at.elapsed() < LIST_TTL);
+        c.insert(dir.to_string(), (Instant::now(), sessions.clone()));
+    }
+    sessions
+}
+
+/// The running opencode TUIs (one `ps` call, plus a cwd lookup per TUI).
+fn live_tuis() -> Vec<Tui> {
+    let mut ps = Command::new("ps");
+    ps.args(["-eo", "pid=,tty=,etime=,args="]);
+    let Some(out) = run_with_timeout(&mut ps, PROBE_TIMEOUT) else { return Vec::new() };
+    parse_tuis(&out, proc_argv, proc_cwd, |d| std::path::Path::new(d).is_dir(), now_ms())
+}
+
+/// The working directories of the running opencode TUIs, with no session lookup: what the worktree
+/// GC needs to keep a worktree alive, which must not depend on `opencode session list` answering.
+pub(crate) fn live_tui_cwds() -> Vec<String> {
+    live_tuis().into_iter().map(|t| t.cwd).collect()
 }
 
 /// Live opencode TUIs and their sessions. opencode lists sessions per project (the directory the
-/// command runs in), so only the directories of running TUIs are queried; sessions with no
-/// running TUI are not reported.
+/// command runs in), so only the directories of running TUIs are queried (none when there is no
+/// TUI); sessions with no running TUI are not reported.
 fn live_sessions_now() -> Vec<AgentSession> {
-    let Ok(ps) = Command::new("ps").args(["-eo", "pid=,tty=,etime=,args="]).output() else { return Vec::new() };
-    let tuis = parse_tuis(&String::from_utf8_lossy(&ps.stdout), proc_argv, proc_cwd, |d| std::path::Path::new(d).is_dir(), now_ms());
-    let cache = std::cell::RefCell::new(std::collections::HashMap::<String, Vec<ListedSession>>::new());
-    match_tuis(&tuis, |dir| cache.borrow_mut().entry(dir.to_string()).or_insert_with(|| list_in(dir)).clone())
+    let tuis = live_tuis();
+    if tuis.is_empty() {
+        return Vec::new();
+    }
+    match_tuis(&tuis, list_cached)
 }
 
 #[cfg(test)]
@@ -1061,6 +1126,16 @@ mod tests {
         assert_eq!(tuis[0].session.as_deref(), Some("ses_m"));
         // A Linux `?` is no terminal either.
         assert_eq!(parse_tuis("7 ? 00:01 opencode\n", |_| None, |_| Some("/w".into()), |_| false, 0)[0].tty, None);
+    }
+
+    #[test]
+    fn a_probe_that_hangs_is_killed_at_the_timeout() {
+        let t = Instant::now();
+        assert_eq!(run_with_timeout(&mut Command::new("sleep").arg("30"), Duration::from_millis(200)), None);
+        assert!(t.elapsed() < Duration::from_secs(5));
+        assert_eq!(run_with_timeout(Command::new("echo").arg("hi"), Duration::from_secs(5)).as_deref(), Some("hi\n"));
+        assert_eq!(run_with_timeout(&mut Command::new("false"), Duration::from_secs(5)), None);
+        assert_eq!(run_with_timeout(&mut Command::new("/nonexistent/probe"), Duration::from_secs(5)), None);
     }
 
     #[test]
