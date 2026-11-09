@@ -9,7 +9,6 @@
 //!
 //! Processes are launched only through the [`Harness`](crate::ai::Harness) trait. Runs write to
 //! files, not pipes, so they can outlive the process that started them.
-#![allow(dead_code)]
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};

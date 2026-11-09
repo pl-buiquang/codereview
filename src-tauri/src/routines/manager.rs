@@ -1,74 +1,49 @@
-//! Owns the `claude -p` processes of routine runs: FIFO queue under a concurrency cap, streaming of
-//! the `stream-json` transcript into `routine_run_event`, stop / timeout, and either killing
-//! everything when the app exits or leaving the runs behind (detaching) for the next launch to
-//! re-adopt. Each run's process leads its own process group, so one signal reaches the tools it
-//! spawned. Its stdout / stderr go to files in a per-run directory and the transcript is tailed from
-//! there, so a run does not depend on the app that started it staying alive.
+//! Routine runs as the app sees them: the `routine_run` rows, their queries and settings, and the
+//! adapter that plugs the app into the Tauri-free run engine (`crate::run_engine`).
+//!
+//! The engine owns the queue, the concurrency cap, the processes, the transcript tailing and
+//! stop / timeout / detach / re-adopt. This module supplies what is specific to the app: a SQLite
+//! [`RunStore`], a Tauri [`EventSink`] (events, notifications, handlers, usage log), and the
+//! preparation of a run (context, handlers, prompt rendering) before its process starts.
 
 use std::collections::HashMap;
-use std::fs::File;
-use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::Duration;
 
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
-use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_notification::NotificationExt;
 
 use super::context::{self, ContextRef, Light};
 use super::handlers;
 use super::{get as get_routine, Routine};
-use crate::ai::{self, Access, FinalResult, OneShot, SessionMode, StreamRun, SystemPrompt, SystemPromptMode, ToolPolicy};
-use crate::ai_usage::{self, RunTag, RunUsage};
+use crate::ai::{self, Access, SystemPromptMode, ToolPolicy};
+use crate::ai_usage::{self, RunTag};
 use crate::commands::chat::new_session_id;
 use crate::commands::focus::child_path;
 use crate::db::{Db, DbPath};
 use crate::error::{AppError, AppResult};
 use crate::prompts;
+use crate::run_engine::engine::RunEngine;
+use crate::run_engine::outcome::STDOUT_FILE;
+use crate::run_engine::{proc, EventSink, Finished, Prepared, RunStore, RunningRun};
 
-pub const DEFAULT_CONCURRENCY: i64 = 4;
+pub use crate::run_engine::engine::DEFAULT_CONCURRENCY;
 const CONCURRENCY_KEY: &str = "routine_max_concurrency";
-const MAX_EVENT_BYTES: usize = 100_000;
-const KEEP_RUNS: i64 = 200;
-const STOP_GRACE: Duration = Duration::from_secs(5);
-const TAIL_POLL: Duration = Duration::from_millis(200);
-const PROMPT_FILE: &str = "system.txt";
-const STDOUT_FILE: &str = "stdout.jsonl";
-const STDERR_FILE: &str = "stderr.log";
-const STDERR_MAX_BYTES: usize = 16_384;
 
 /// `<db dir>/routine_runs`: one subdirectory per live run (prompt, stdout, stderr).
 fn runs_root(db_path: &Path) -> PathBuf {
     db_path.parent().unwrap_or(Path::new(".")).join("routine_runs")
 }
 
-fn run_dir(app: &AppHandle, run_id: i64) -> PathBuf {
-    runs_root(&app.state::<DbPath>().0).join(run_id.to_string())
-}
-
+/// Owns the run engine of the app. The engine is built on first use (it needs the app handle).
 #[derive(Default)]
 pub struct RoutineManager {
-    inner: Mutex<Inner>,
-}
-
-#[derive(Default)]
-struct Inner {
-    live: HashMap<i64, Live>,
-    /// Stop requests (`killed` / `timeout`), consumed when the run finishes.
-    stops: HashMap<i64, &'static str>,
-    shutting_down: bool,
-    /// Exiting with the runs left alive: workers stop tailing without finalizing and nothing is killed.
-    detaching: bool,
+    engine: OnceLock<Arc<RunEngine>>,
     /// The quit confirmation is on screen: a second quit request must not stack another.
-    quit_prompt_open: bool,
-}
-
-struct Live {
-    pgid: i32,
-    deadline: Instant,
+    quit_prompt_open: Mutex<bool>,
 }
 
 /// A run as the UI sees it.
@@ -290,7 +265,7 @@ pub fn mark_interrupted(conn: &Connection, db_path: &Path) -> AppResult<usize> {
             continue;
         }
         if let Some(pid) = pid {
-            kill_leftover(pid as i32);
+            proc::kill_leftover(ai::harness_for(), pid as i32);
         }
         n += conn.execute(
             "UPDATE routine_run SET status = 'interrupted', ended_at = ?2 WHERE id = ?1",
@@ -300,62 +275,17 @@ pub fn mark_interrupted(conn: &Connection, db_path: &Path) -> AppResult<usize> {
     Ok(n)
 }
 
-#[cfg(unix)]
-fn process_alive(pid: i32) -> bool {
-    // SAFETY: signal 0 only probes for existence.
-    unsafe { libc::kill(pid, 0) == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM) }
-}
-
-#[cfg(not(unix))]
-fn process_alive(_pid: i32) -> bool {
-    false
-}
-
-fn kill_leftover(pid: i32) {
-    if ai::harness_for().is_own_process(pid, None) {
-        signal_group(pid, SIGTERM);
-    }
-}
-
-#[cfg(unix)]
-fn signal_group(pgid: i32, sig: i32) {
-    // SAFETY: plain syscall; a stale pgid at worst yields ESRCH.
-    unsafe {
-        libc::kill(-pgid, sig);
-    }
-}
-
-#[cfg(not(unix))]
-fn signal_group(_pgid: i32, _sig: i32) {}
-
-#[cfg(unix)]
-const SIGTERM: i32 = libc::SIGTERM;
-#[cfg(unix)]
-const SIGKILL: i32 = libc::SIGKILL;
-#[cfg(not(unix))]
-const SIGTERM: i32 = 15;
-#[cfg(not(unix))]
-const SIGKILL: i32 = 9;
-
 impl RoutineManager {
+    fn engine(&self, app: &AppHandle) -> &Arc<RunEngine> {
+        self.engine.get_or_init(|| {
+            let sink = Arc::new(AppSink { app: app.clone(), loaded: Mutex::default() });
+            RunEngine::new(Arc::new(SqliteRunStore { app: app.clone() }), sink, ai::harness_for())
+        })
+    }
+
     /// Spawn the timeout watcher. Call once, after the manager is managed.
     pub fn start_ticker(app: AppHandle) {
-        std::thread::spawn(move || loop {
-            std::thread::sleep(Duration::from_secs(5));
-            let manager = app.state::<RoutineManager>();
-            let expired: Vec<i64> = {
-                let inner = manager.inner.lock().unwrap();
-                inner
-                    .live
-                    .iter()
-                    .filter(|(id, l)| Instant::now() > l.deadline && !inner.stops.contains_key(*id))
-                    .map(|(id, _)| *id)
-                    .collect()
-            };
-            for id in expired {
-                manager.request_stop(id, "timeout");
-            }
-        });
+        app.state::<RoutineManager>().engine(&app).start_ticker();
     }
 
     /// Queue a run of `routine` on `ctx`. Fails when that routine already has an active run there.
@@ -397,651 +327,396 @@ impl RoutineManager {
                 Err(e) => return Err(e.into()),
             }
         };
-        emit_updated(app, id, "queued");
-        self.pump(app);
+        self.engine(app).submit(id);
         let run = get_run(&db.0.lock().unwrap(), id);
         run
     }
 
     /// Start queued runs while below the concurrency cap.
     pub fn pump(&self, app: &AppHandle) {
-        let inner = self.inner.lock().unwrap();
-        // Queued runs wait while AI is off; `set_ai_enabled(true)` pumps again.
-        if inner.shutting_down || !crate::ai_gate::is_enabled() {
-            return;
-        }
-        let db = app.state::<Db>();
-        loop {
-            let next: AppResult<Option<i64>> = (|| {
-                let conn = db.0.lock().unwrap();
-                let running: i64 =
-                    conn.query_row("SELECT COUNT(*) FROM routine_run WHERE status = 'running'", [], |r| r.get(0))?;
-                if running >= max_concurrency(&conn) {
-                    return Ok(None);
-                }
-                let Some(id) = conn
-                    .query_row("SELECT id FROM routine_run WHERE status = 'queued' ORDER BY id LIMIT 1", [], |r| {
-                        r.get::<_, i64>(0)
-                    })
-                    .optional()?
-                else {
-                    return Ok(None);
-                };
-                conn.execute(
-                    "UPDATE routine_run SET status = 'running', started_at = ?2 WHERE id = ?1",
-                    params![id, now()],
-                )?;
-                Ok(Some(id))
-            })();
-            match next {
-                Ok(Some(id)) => {
-                    emit_updated(app, id, "running");
-                    let app = app.clone();
-                    std::thread::spawn(move || execute(app, id));
-                }
-                Ok(None) => break,
-                Err(e) => {
-                    log::warn!(target: "routines", "pump failed: {e}");
-                    break;
-                }
-            }
-        }
+        self.engine(app).pump();
     }
 
     /// Stop a run: a queued one is dropped, a running one is terminated.
     pub fn stop(&self, app: &AppHandle, run_id: i64) -> AppResult<()> {
-        let db = app.state::<Db>();
-        let dropped = db.0.lock().unwrap().execute(
-            "UPDATE routine_run SET status = 'killed', ended_at = ?2 WHERE id = ?1 AND status = 'queued'",
-            params![run_id, now()],
-        )?;
-        if dropped > 0 {
-            emit_updated(app, run_id, "killed");
-            handlers::finish_dropped(app, run_id);
-            return Ok(());
-        }
-        let running: bool = db
-            .0
-            .lock()
-            .unwrap()
-            .query_row("SELECT status = 'running' FROM routine_run WHERE id = ?1", params![run_id], |r| r.get(0))
-            .unwrap_or(false);
-        if !running {
-            return Err(AppError::Other("this run is not active".into()));
-        }
-        self.request_stop(run_id, "killed");
-        Ok(())
-    }
-
-    fn request_stop(&self, run_id: i64, reason: &'static str) {
-        let pgid = {
-            let mut inner = self.inner.lock().unwrap();
-            inner.stops.entry(run_id).or_insert(reason);
-            inner.live.get(&run_id).map(|l| l.pgid)
-        };
-        if let Some(pgid) = pgid {
-            terminate(pgid);
-        }
+        self.engine(app).stop(run_id)
     }
 
     /// Runs a quit would interrupt: started ones plus those still queued.
     pub fn active_count(&self, app: &AppHandle) -> usize {
-        let Some(db) = app.try_state::<Db>() else { return self.inner.lock().unwrap().live.len() };
-        let n: i64 = db
-            .0
-            .lock()
-            .unwrap()
-            .query_row("SELECT COUNT(*) FROM routine_run WHERE status IN ('queued', 'running')", [], |r| r.get(0))
-            .unwrap_or(0);
-        n as usize
+        self.engine(app).active_count()
     }
 
     /// Claim the quit prompt; false when one is already open.
     pub fn begin_quit_prompt(&self) -> bool {
-        !std::mem::replace(&mut self.inner.lock().unwrap().quit_prompt_open, true)
+        !std::mem::replace(&mut *self.quit_prompt_open.lock().unwrap(), true)
     }
 
     pub fn end_quit_prompt(&self) {
-        self.inner.lock().unwrap().quit_prompt_open = false;
+        *self.quit_prompt_open.lock().unwrap() = false;
     }
 
     /// App is exiting but the runs go on: workers stop tailing (leaving their rows `running` for the
     /// next launch to adopt) and nothing is signalled. Runs that never started are dropped.
     pub fn detach_all(&self, app: &AppHandle) {
-        {
-            let mut inner = self.inner.lock().unwrap();
-            inner.shutting_down = true;
-            inner.detaching = true;
-        }
-        if let Some(db) = app.try_state::<Db>() {
-            let _ = db.0.lock().unwrap().execute(
-                "UPDATE routine_run SET status = 'killed', ended_at = ?1 WHERE status = 'queued'",
-                params![now()],
-            );
-        }
-        let deadline = Instant::now() + Duration::from_secs(2);
-        while Instant::now() < deadline && !self.inner.lock().unwrap().live.is_empty() {
-            std::thread::sleep(Duration::from_millis(50));
-        }
+        self.engine(app).detach_all();
     }
 
     /// Startup: pick up the runs a previous session left alive (`mark_interrupted` spared them) and
     /// sweep the files of every other run.
     pub fn adopt_detached(app: &AppHandle) {
-        let db = app.state::<Db>();
-        let running: Vec<i64> = {
-            let conn = db.0.lock().unwrap();
-            let Ok(mut stmt) = conn.prepare("SELECT id FROM routine_run WHERE status = 'running'") else { return };
-            let ids = stmt.query_map([], |r| r.get(0)).map(|rows| rows.flatten().collect()).unwrap_or_default();
-            ids
-        };
-        if let Ok(entries) = std::fs::read_dir(runs_root(&app.state::<DbPath>().0)) {
-            for entry in entries.flatten() {
-                let Some(id) = entry.file_name().to_str().and_then(|n| n.parse::<i64>().ok()) else { continue };
-                if !running.contains(&id) {
-                    discard_run_files(app, id);
+        app.state::<RoutineManager>().engine(app).adopt_detached();
+    }
+
+    /// App is exiting: terminate every process group and settle the rows ourselves.
+    pub fn kill_all(&self, app: &AppHandle) {
+        self.engine(app).kill_all();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The run store: the app's SQLite
+// ---------------------------------------------------------------------------
+
+struct SqliteRunStore {
+    app: AppHandle,
+}
+
+impl SqliteRunStore {
+    fn with_conn<T>(&self, f: impl FnOnce(&Connection) -> AppResult<T>) -> AppResult<T> {
+        let db = self.app.try_state::<Db>().ok_or_else(|| AppError::Other("the database is not ready".into()))?;
+        let conn = db.0.lock().unwrap();
+        f(&conn)
+    }
+}
+
+impl RunStore for SqliteRunStore {
+    fn ai_enabled(&self) -> bool {
+        crate::ai_gate::is_enabled()
+    }
+
+    fn max_concurrency(&self) -> i64 {
+        self.with_conn(|c| Ok(max_concurrency(c))).unwrap_or(DEFAULT_CONCURRENCY)
+    }
+
+    fn running_count(&self) -> AppResult<i64> {
+        self.with_conn(|c| Ok(c.query_row("SELECT COUNT(*) FROM routine_run WHERE status = 'running'", [], |r| r.get(0))?))
+    }
+
+    fn next_queued(&self) -> AppResult<Option<i64>> {
+        self.with_conn(|c| {
+            Ok(c.query_row("SELECT id FROM routine_run WHERE status = 'queued' ORDER BY id LIMIT 1", [], |r| r.get(0))
+                .optional()?)
+        })
+    }
+
+    fn mark_running(&self, id: i64) -> AppResult<bool> {
+        self.with_conn(|c| {
+            Ok(c.execute(
+                "UPDATE routine_run SET status = 'running', started_at = ?2 WHERE id = ?1 AND status = 'queued'",
+                params![id, now()],
+            )? > 0)
+        })
+    }
+
+    fn is_running(&self, id: i64) -> bool {
+        self.with_conn(|c| Ok(c.query_row("SELECT status = 'running' FROM routine_run WHERE id = ?1", params![id], |r| r.get(0))?))
+            .unwrap_or(false)
+    }
+
+    fn drop_queued(&self, id: i64) -> AppResult<bool> {
+        self.with_conn(|c| {
+            Ok(c.execute(
+                "UPDATE routine_run SET status = 'killed', ended_at = ?2 WHERE id = ?1 AND status = 'queued'",
+                params![id, now()],
+            )? > 0)
+        })
+    }
+
+    fn active_count(&self) -> AppResult<usize> {
+        self.with_conn(|c| {
+            let n: i64 = c
+                .query_row("SELECT COUNT(*) FROM routine_run WHERE status IN ('queued', 'running')", [], |r| r.get(0))
+                .unwrap_or(0);
+            Ok(n as usize)
+        })
+    }
+
+    fn kill_queued(&self) -> AppResult<()> {
+        self.with_conn(|c| {
+            c.execute("UPDATE routine_run SET status = 'killed', ended_at = ?1 WHERE status = 'queued'", params![now()])?;
+            Ok(())
+        })
+    }
+
+    fn kill_active(&self) -> AppResult<()> {
+        self.with_conn(|c| {
+            c.execute(
+                "UPDATE routine_run SET status = 'killed', ended_at = ?1 WHERE status IN ('queued', 'running')",
+                params![now()],
+            )?;
+            Ok(())
+        })
+    }
+
+    fn set_process(&self, id: i64, pid: u32, cwd: &Path, session_id: &str) {
+        let _ = self.with_conn(|c| {
+            c.execute(
+                "UPDATE routine_run SET pid = ?2, cwd = ?3, session_id = ?4 WHERE id = ?1",
+                params![id, pid, cwd.to_string_lossy(), session_id],
+            )?;
+            Ok(())
+        });
+    }
+
+    fn set_cleanup(&self, id: i64, dirs: &[PathBuf]) {
+        let _ = self.with_conn(|c| {
+            c.execute(
+                "UPDATE routine_run SET cleanup_json = ?2 WHERE id = ?1",
+                params![id, serde_json::to_string(dirs).unwrap_or_default()],
+            )?;
+            Ok(())
+        });
+    }
+
+    fn cleanup_dirs(&self, id: i64) -> Vec<PathBuf> {
+        let json: Option<String> = self
+            .with_conn(|c| Ok(c.query_row("SELECT cleanup_json FROM routine_run WHERE id = ?1", params![id], |r| r.get(0))?))
+            .ok()
+            .flatten();
+        json.and_then(|j| serde_json::from_str(&j).ok()).unwrap_or_default()
+    }
+
+    fn append_event(&self, id: i64, seq: i64, kind: &str, json: &str) {
+        let _ = self.with_conn(|c| {
+            c.execute(
+                "INSERT OR REPLACE INTO routine_run_event (run_id, seq, ts, kind, json) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![id, seq, now(), kind, json],
+            )?;
+            Ok(())
+        });
+    }
+
+    fn last_seq(&self, id: i64) -> i64 {
+        self.with_conn(|c| {
+            Ok(c.query_row("SELECT COALESCE(MAX(seq), 0) FROM routine_run_event WHERE run_id = ?1", params![id], |r| r.get(0))?)
+        })
+        .unwrap_or(0)
+    }
+
+    fn running_runs(&self) -> AppResult<Vec<RunningRun>> {
+        self.with_conn(|c| {
+            let mut stmt = c.prepare("SELECT id, pid, session_id, started_at FROM routine_run WHERE status = 'running'")?;
+            let rows = stmt
+                .query_map([], |r| {
+                    Ok(RunningRun {
+                        id: r.get(0)?,
+                        pid: r.get::<_, Option<i64>>(1)?.unwrap_or(0) as i32,
+                        session_id: r.get(2)?,
+                        started_at: r.get(3)?,
+                    })
+                })?
+                .collect::<rusqlite::Result<_>>()?;
+            Ok(rows)
+        })
+    }
+
+    fn finish(&self, id: i64, fin: &Finished) {
+        let _ = self.with_conn(|c| {
+            // Guarded: on exit `kill_all` already settled the row.
+            c.execute(
+                "UPDATE routine_run SET status = ?2, ended_at = ?3, result_text = ?4, error = ?5, cost_usd = ?6,
+                        num_turns = ?7, session_id = COALESCE(?8, session_id)
+                 WHERE id = ?1 AND status = 'running'",
+                params![
+                    id,
+                    fin.status,
+                    now(),
+                    (!fin.text.is_empty()).then_some(fin.text.as_str()),
+                    fin.error,
+                    fin.usage.cost_usd,
+                    fin.usage.num_turns,
+                    fin.usage.session_id
+                ],
+            )?;
+            Ok(())
+        });
+    }
+
+    fn prune(&self, keep: i64) {
+        let _ = self.with_conn(|c| {
+            c.execute(
+                "DELETE FROM routine_run WHERE status NOT IN ('queued', 'running')
+                   AND id NOT IN (SELECT id FROM routine_run ORDER BY id DESC LIMIT ?1)",
+                params![keep],
+            )?;
+            Ok(())
+        });
+    }
+
+    fn mark_lost(&self, id: i64) {
+        let _ = self.with_conn(|c| {
+            c.execute(
+                "UPDATE routine_run SET status = 'interrupted', ended_at = ?2 WHERE id = ?1 AND status = 'running'",
+                params![id, now()],
+            )?;
+            Ok(())
+        });
+    }
+
+    fn runs_root(&self) -> PathBuf {
+        runs_root(&self.app.state::<DbPath>().0)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The sink: Tauri events, handlers, notifications, usage log
+// ---------------------------------------------------------------------------
+
+struct AppSink {
+    app: AppHandle,
+    /// The run and routine of every run in flight, for the handlers and the notification.
+    loaded: Mutex<HashMap<i64, (RoutineRun, Routine)>>,
+}
+
+impl AppSink {
+    fn load(&self, id: i64) -> AppResult<(RoutineRun, Routine)> {
+        let db = self.app.state::<Db>();
+        let conn = db.0.lock().unwrap();
+        let loaded = get_run(&conn, id).and_then(|run| get_routine(&conn, run.routine_id).map(|r| (run, r)))?;
+        self.loaded.lock().unwrap().insert(id, loaded.clone());
+        Ok(loaded)
+    }
+}
+
+impl EventSink for AppSink {
+    fn queued(&self, id: i64) {
+        emit_updated(&self.app, id, "queued");
+    }
+
+    fn started(&self, id: i64) {
+        emit_updated(&self.app, id, "running");
+    }
+
+    fn status_changed(&self, id: i64, status: &str) {
+        emit_updated(&self.app, id, status);
+    }
+
+    fn event(&self, id: i64, seq: i64, kind: &str, json: &str) {
+        let _ = self.app.emit("routine-run-event", RunEventPayload { run_id: id, seq, kind, json });
+    }
+
+    fn dropped(&self, id: i64) {
+        handlers::finish_dropped(&self.app, id);
+    }
+
+    fn prepare(&self, id: i64, stopped: &dyn Fn() -> bool) -> Result<Option<Prepared>, String> {
+        let app = &self.app;
+        let (run, routine) = self.load(id).map_err(|e| e.to_string())?;
+        let resolved = context::resolve(app, &routine, &run.context).map_err(|e| e.to_string())?;
+        if stopped() {
+            return Ok(None);
+        }
+        let prep = handlers::prepare(app, &routine, &run).map_err(|e| e.to_string())?;
+        let cwd = prep.cwd.clone().unwrap_or_else(|| resolved.cwd.clone());
+        let vars: Vec<(&str, &str)> =
+            resolved.vars.iter().chain(&prep.vars).map(|(k, v)| (k.as_str(), v.as_str())).collect();
+        let prompt = prompts::render(&routine.prompt_template, &vars);
+        let mut system = prep.system.clone().unwrap_or_else(|| prompts::render(&routine.system_prompt, &vars));
+        system.push_str(&prep.system_suffix);
+        // Handler routines feed app features and keep exactly the prompt they always had.
+        if routine.handler.is_none() {
+            if !system.is_empty() {
+                system.push_str("\n\n");
+            }
+            system.push_str(&resolved.block);
+        }
+        if !run.note.trim().is_empty() {
+            system.push_str(&format!("\n\n## Extra instructions for this run\n{}", run.note.trim()));
+        }
+        let model = handlers::effective_model(&run, &routine);
+        log::info!(target: "routines", "run {}: starting {} on {}", run.id, routine.key, run.context_label);
+        Ok(Some(build_prepared(
+            &routine,
+            &prep,
+            cwd,
+            model,
+            new_session_id(),
+            system,
+            prompt,
+            &app.state::<DbPath>().0,
+            handlers::usage_tag(&routine, &run),
+        )))
+    }
+
+    fn adopt(&self, id: i64) -> Option<Duration> {
+        let (_, routine) = self.load(id).ok()?;
+        Some(Duration::from_secs(routine.timeout_min.max(1) as u64 * 60))
+    }
+
+    fn finished(&self, id: i64, fin: &Finished) {
+        let app = &self.app;
+        let loaded = self.loaded.lock().unwrap().remove(&id);
+        let error = fin.error.as_deref();
+        if !fin.shutting_down {
+            if let Some((run, routine)) = &loaded {
+                handlers::finish(app, routine, run, fin.status, &fin.text, error, &fin.usage);
+            }
+            emit_updated(app, id, fin.status);
+            if let (Some((run, routine)), true) =
+                (&loaded, matches!(fin.status, "ok" | "needs_attention" | "error" | "timeout"))
+            {
+                // The board overview is a refresh button, not a task worth a banner.
+                if !(routine.handler.as_deref() == Some("overview") && fin.status == "ok") {
+                    notify(app, routine, &run.context_label, fin.status, &fin.text, error);
                 }
             }
         }
-        for id in running {
-            let app = app.clone();
-            std::thread::spawn(move || adopt(app, id));
-        }
-    }
-
-    /// App is exiting: terminate every process group and settle the rows ourselves (the worker
-    /// threads won't get to).
-    pub fn kill_all(&self, app: &AppHandle) {
-        let pgids: Vec<i32> = {
-            let mut inner = self.inner.lock().unwrap();
-            inner.shutting_down = true;
-            if inner.detaching {
-                return;
-            }
-            inner.live.values().map(|l| l.pgid).collect()
-        };
-        if let Some(db) = app.try_state::<Db>() {
-            let _ = db.0.lock().unwrap().execute(
-                "UPDATE routine_run SET status = 'killed', ended_at = ?1 WHERE status IN ('queued', 'running')",
-                params![now()],
-            );
-        }
-        for pgid in &pgids {
-            signal_group(*pgid, SIGTERM);
-        }
-        let deadline = Instant::now() + Duration::from_secs(3);
-        while Instant::now() < deadline && !self.inner.lock().unwrap().live.is_empty() {
-            std::thread::sleep(Duration::from_millis(100));
-        }
-        for pgid in pgids {
-            signal_group(pgid, SIGKILL);
+        if let Some((run, routine)) = &loaded {
+            let mut tag = handlers::usage_tag(routine, run);
+            tag.model = if run.model.is_empty() { routine.model.clone() } else { run.model.clone() };
+            ai_usage::record(&tag, &fin.started_at, fin.elapsed.as_millis() as i64, &fin.usage, fin.usage_error.as_deref());
         }
     }
 }
 
-/// SIGTERM the group (claude ends its bash children and exits 143), SIGKILL it if it lingers.
-fn terminate(pgid: i32) {
-    signal_group(pgid, SIGTERM);
-    std::thread::spawn(move || {
-        std::thread::sleep(STOP_GRACE);
-        signal_group(pgid, SIGKILL);
-    });
-}
-
-// ---------------------------------------------------------------------------
-// One run
-// ---------------------------------------------------------------------------
-
-#[derive(Default)]
-struct Outcome {
-    result: Option<Value>,
-    usage: RunUsage,
-    /// Why there is no usable result: spawn failure, context resolution failure, exit status…
-    failure: Option<String>,
-    /// The app is quitting with this run left alive: nothing to settle, the next launch adopts it.
-    detached: bool,
-}
-
-fn execute(app: AppHandle, run_id: i64) {
-    let started = Instant::now();
-    let started_at = ai_usage::now_stamp();
-    let db = app.state::<Db>();
-    let loaded = {
-        let conn = db.0.lock().unwrap();
-        get_run(&conn, run_id).and_then(|run| get_routine(&conn, run.routine_id).map(|r| (run, r)))
-    };
-    let (run, routine) = match loaded {
-        Ok(x) => x,
-        Err(e) => {
-            finalize(&app, run_id, None, None, &Outcome { failure: Some(e.to_string()), ..Outcome::default() });
-            return;
-        }
-    };
-    let outcome = run_process(&app, &run, &routine);
-    if outcome.detached {
-        return;
-    }
-    settle(&app, &run, &routine, &outcome, started, &started_at);
-}
-
-/// Finalize a finished run, record its usage and start the next queued one.
-fn settle(app: &AppHandle, run: &RoutineRun, routine: &Routine, outcome: &Outcome, started: Instant, started_at: &str) {
-    let status = finalize(app, run.id, Some(routine), Some(run), outcome);
-    let usage_error = match status.as_str() {
-        "ok" | "needs_attention" => None,
-        "error" => Some(outcome.failure.clone().unwrap_or_else(|| "error".into())),
-        other => Some(other.to_string()),
-    };
-    let mut tag = handlers::usage_tag(routine, run);
-    tag.model = if run.model.is_empty() { routine.model.clone() } else { run.model.clone() };
-    ai_usage::record(&tag, started_at, started.elapsed().as_millis() as i64, &outcome.usage, usage_error.as_deref());
-    app.state::<RoutineManager>().pump(app);
-}
-
-/// The streaming request of a run.
+/// The process request of a run.
 #[allow(clippy::too_many_arguments)]
-fn stream_request<'a>(
-    routine: &'a Routine,
-    prep: &'a handlers::Prep,
-    cwd: &'a Path,
-    model: &'a str,
-    session_id: &'a str,
-    prompt_path: &'a Path,
-    prompt: &'a str,
+fn build_prepared(
+    routine: &Routine,
+    prep: &handlers::Prep,
+    cwd: PathBuf,
+    model: String,
+    session_id: String,
+    system_prompt: String,
+    prompt: String,
     db_path: &Path,
     usage_tag: RunTag,
-) -> OneShot<'a> {
+) -> Prepared {
     let mut env: Vec<(String, std::ffi::OsString)> = vec![("CODEREVIEW_DB".into(), db_path.into())];
     if let Some(path) = child_path() {
         env.push(("PATH".into(), path));
     }
-    OneShot {
+    Prepared {
         model,
-        system_prompt: Some(SystemPrompt::File(prompt_path)),
+        system_prompt,
         system_prompt_mode: if routine.system_prompt_mode == "replace" {
             SystemPromptMode::Replace
         } else {
             SystemPromptMode::Append
         },
-        file_tag: "",
         prompt,
         cwd,
-        extra_dirs: prep.extra_dirs.iter().map(PathBuf::as_path).collect(),
+        extra_dirs: prep.extra_dirs.clone(),
         tools: ToolPolicy::Allowlist(routine.allowed_tools.iter().chain(&prep.extra_tools).cloned().collect()),
         access: Access::Native(routine.permission_mode.clone()),
-        session: SessionMode::New(session_id),
-        max_turns: None,
-        effort: None,
+        session_id,
         env,
         extra_args: routine.extra_args.clone(),
         usage_tag,
+        timeout: Duration::from_secs(routine.timeout_min.max(1) as u64 * 60),
+        cleanup: prep.cleanup.clone(),
     }
-}
-
-fn run_process(app: &AppHandle, run: &RoutineRun, routine: &Routine) -> Outcome {
-    let manager = app.state::<RoutineManager>();
-    let fail = |msg: String| Outcome { failure: Some(msg), ..Outcome::default() };
-
-    let resolved = match context::resolve(app, routine, &run.context) {
-        Ok(r) => r,
-        Err(e) => return fail(e.to_string()),
-    };
-    if manager.inner.lock().unwrap().stops.contains_key(&run.id) {
-        return Outcome::default();
-    }
-
-    let prep = match handlers::prepare(app, routine, run) {
-        Ok(p) => p,
-        Err(e) => return fail(e.to_string()),
-    };
-    if !prep.cleanup.is_empty() {
-        let _ = app.state::<Db>().0.lock().unwrap().execute(
-            "UPDATE routine_run SET cleanup_json = ?2 WHERE id = ?1",
-            params![run.id, serde_json::to_string(&prep.cleanup).unwrap_or_default()],
-        );
-    }
-    let cleanup = || prep.cleanup.iter().for_each(|d| drop(std::fs::remove_dir_all(d)));
-    let cwd = prep.cwd.clone().unwrap_or_else(|| resolved.cwd.clone());
-    let vars: Vec<(&str, &str)> =
-        resolved.vars.iter().chain(&prep.vars).map(|(k, v)| (k.as_str(), v.as_str())).collect();
-    let prompt = prompts::render(&routine.prompt_template, &vars);
-    let mut system = prep.system.clone().unwrap_or_else(|| prompts::render(&routine.system_prompt, &vars));
-    system.push_str(&prep.system_suffix);
-    // Handler routines feed app features and keep exactly the prompt they always had.
-    if routine.handler.is_none() {
-        if !system.is_empty() {
-            system.push_str("\n\n");
-        }
-        system.push_str(&resolved.block);
-    }
-    if !run.note.trim().is_empty() {
-        system.push_str(&format!("\n\n## Extra instructions for this run\n{}", run.note.trim()));
-    }
-    let dir = run_dir(app, run.id);
-    let prompt_path = dir.join(PROMPT_FILE);
-    let files = std::fs::create_dir_all(&dir)
-        .and_then(|_| std::fs::write(&prompt_path, &system))
-        .and_then(|_| Ok((File::create(dir.join(STDOUT_FILE))?, File::create(dir.join(STDERR_FILE))?)));
-    let (stdout_file, stderr_file) = match files {
-        Ok(f) => f,
-        Err(e) => {
-            cleanup();
-            return fail(format!("failed to prepare the run directory: {e}"));
-        }
-    };
-
-    let session_id = new_session_id();
-    let model = handlers::effective_model(run, routine);
-    log::info!(target: "routines", "run {}: starting {} on {}", run.id, routine.key, run.context_label);
-    let req = stream_request(
-        routine,
-        &prep,
-        &cwd,
-        &model,
-        &session_id,
-        &prompt_path,
-        &prompt,
-        &app.state::<DbPath>().0,
-        handlers::usage_tag(routine, run),
-    );
-    let timeout = Duration::from_secs(routine.timeout_min.max(1) as u64 * 60);
-    let spawned = ai::harness_for().spawn(StreamRun { req, stdout: stdout_file, stderr: stderr_file, timeout });
-    let mut child = match spawned {
-        Ok(c) => c,
-        Err(e) => {
-            let _ = std::fs::remove_file(&prompt_path);
-            cleanup();
-            return fail(e.to_string());
-        }
-    };
-    let pid = child.id();
-    {
-        let deadline = Instant::now() + Duration::from_secs(routine.timeout_min.max(1) as u64 * 60);
-        let mut inner = manager.inner.lock().unwrap();
-        inner.live.insert(run.id, Live { pgid: pid as i32, deadline });
-        if inner.stops.contains_key(&run.id) {
-            drop(inner);
-            terminate(pid as i32);
-        }
-    }
-    {
-        let db = app.state::<Db>();
-        let conn = db.0.lock().unwrap();
-        let _ = conn.execute(
-            "UPDATE routine_run SET pid = ?2, cwd = ?3, session_id = ?4 WHERE id = ?1",
-            params![run.id, pid, cwd.to_string_lossy(), session_id],
-        );
-    }
-
-    if let Some(mut stdin) = child.stdin.take() {
-        let _ = stdin.write_all(prompt.as_bytes());
-    }
-    let tail = tail_events(app, run.id, &dir.join(STDOUT_FILE), 0, &mut || matches!(child.try_wait(), Ok(None)));
-    let result = match tail {
-        Tail::Detached => {
-            // Dropping `child` neither kills nor reaps it; the next launch adopts the run.
-            manager.inner.lock().unwrap().live.remove(&run.id);
-            return Outcome { detached: true, ..Outcome::default() };
-        }
-        Tail::Done(result) => result,
-    };
-    let status = child.wait().map(|s| s.to_string()).map_err(|e| e.to_string());
-    manager.inner.lock().unwrap().live.remove(&run.id);
-    let _ = std::fs::remove_file(&prompt_path);
-    cleanup();
-    outcome_from(result, read_stderr(&dir), status)
-}
-
-/// Usage and failure reason of a run that produced `result` (if it did) and then ended with `exit`.
-fn outcome_from(result: Option<Value>, stderr: String, exit: Result<String, String>) -> Outcome {
-    let usage = result.as_ref().map(|v| ai::harness_for().final_result(v).usage).unwrap_or_default();
-    let failure = match (&result, exit) {
-        (Some(_), _) => None,
-        (None, Ok(s)) => Some(format!("claude exited with {s} without a result. {}", stderr.trim())),
-        (None, Err(e)) => Some(format!("claude process error: {e}")),
-    };
-    Outcome { result, usage, failure, detached: false }
-}
-
-fn read_stderr(dir: &Path) -> String {
-    let mut buf = Vec::new();
-    if let Ok(f) = File::open(dir.join(STDERR_FILE)) {
-        let _ = f.take(STDERR_MAX_BYTES as u64).read_to_end(&mut buf);
-    }
-    String::from_utf8_lossy(&buf).into_owned()
-}
-
-enum Tail {
-    /// The process ended and the file is drained: the `result` line, if there was one.
-    Done(Option<Value>),
-    /// The app is quitting with the run left alive.
-    Detached,
-}
-
-/// Follow the run's stdout file into `routine_run_event` until `alive` turns false. The first `skip`
-/// lines were recorded by an earlier session (the `seq` numbering is continuous across adoption).
-fn tail_events(app: &AppHandle, run_id: i64, path: &Path, skip: i64, alive: &mut dyn FnMut() -> bool) -> Tail {
-    let manager = app.state::<RoutineManager>();
-    let Ok(file) = File::open(path) else { return Tail::Done(None) };
-    let mut reader = BufReader::new(file);
-    let mut result: Option<Value> = None;
-    let mut seq = 0i64;
-    let mut pending = String::new();
-    let mut handle = |line: &str, result: &mut Option<Value>| {
-        if line.trim().is_empty() {
-            return;
-        }
-        let (kind, value) = ai::harness_for().parse_line(line);
-        seq += 1;
-        if seq > skip {
-            record_event(app, run_id, seq, &kind, line);
-        }
-        if kind == "result" {
-            *result = value;
-        }
-    };
-    loop {
-        // Sampled before reading, so output written just before the exit is still drained.
-        let dead = !alive();
-        loop {
-            match reader.read_line(&mut pending) {
-                Ok(0) | Err(_) => break,
-                Ok(_) if pending.ends_with('\n') => {
-                    handle(&pending, &mut result);
-                    pending.clear();
-                }
-                Ok(_) => {}
-            }
-        }
-        if dead {
-            handle(&pending, &mut result);
-            return Tail::Done(result);
-        }
-        if manager.inner.lock().unwrap().detaching {
-            return Tail::Detached;
-        }
-        std::thread::sleep(TAIL_POLL);
-    }
-}
-
-/// Take over a run a previous session left alive: keep tailing it, then settle it like any other.
-fn adopt(app: AppHandle, run_id: i64) {
-    let started = Instant::now();
-    let started_at = ai_usage::now_stamp();
-    let db = app.state::<Db>();
-    let loaded = {
-        let conn = db.0.lock().unwrap();
-        get_run(&conn, run_id).and_then(|run| get_routine(&conn, run.routine_id).map(|r| (run, r)))
-    };
-    let Ok((run, routine)) = loaded else { return settle_lost(&app, run_id) };
-    let pid = db
-        .0
-        .lock()
-        .unwrap()
-        .query_row("SELECT pid FROM routine_run WHERE id = ?1", params![run_id], |r| r.get::<_, Option<i64>>(0))
-        .ok()
-        .flatten()
-        .unwrap_or(0) as i32;
-    let dir = run_dir(&app, run_id);
-    let out = dir.join(STDOUT_FILE);
-    let alive = pid > 0 && ai::harness_for().is_own_process(pid, run.session_id.as_deref());
-    // Gone without a result: it died with the app, or was killed meanwhile.
-    if !alive && !file_has_result(&out) {
-        return settle_lost(&app, run_id);
-    }
-    log::info!(target: "routines", "run {run_id}: adopted (process {})", if alive { "alive" } else { "finished" });
-    let manager = app.state::<RoutineManager>();
-    if alive {
-        let spent = run
-            .started_at
-            .as_deref()
-            .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
-            .and_then(|t| (chrono::Utc::now() - t.with_timezone(&chrono::Utc)).to_std().ok())
-            .unwrap_or_default();
-        let left = Duration::from_secs(routine.timeout_min.max(1) as u64 * 60).saturating_sub(spent);
-        manager.inner.lock().unwrap().live.insert(run_id, Live { pgid: pid, deadline: Instant::now() + left });
-    }
-    let skip: i64 = db
-        .0
-        .lock()
-        .unwrap()
-        .query_row("SELECT COALESCE(MAX(seq), 0) FROM routine_run_event WHERE run_id = ?1", params![run_id], |r| r.get(0))
-        .unwrap_or(0);
-    let tail = tail_events(&app, run_id, &out, skip, &mut || alive && process_alive(pid));
-    manager.inner.lock().unwrap().live.remove(&run_id);
-    let Tail::Done(result) = tail else { return };
-    let outcome = outcome_from(result, read_stderr(&dir), Ok("an unknown status".into()));
-    settle(&app, &run, &routine, &outcome, started, &started_at);
-}
-
-fn file_has_result(path: &Path) -> bool {
-    std::fs::read_to_string(path)
-        .map(|text| text.lines().rev().any(|l| ai::harness_for().parse_line(l).0 == "result"))
-        .unwrap_or(false)
-}
-
-/// A run that can't be picked up again: it ended with the app.
-fn settle_lost(app: &AppHandle, run_id: i64) {
-    let _ = app.state::<Db>().0.lock().unwrap().execute(
-        "UPDATE routine_run SET status = 'interrupted', ended_at = ?2 WHERE id = ?1 AND status = 'running'",
-        params![run_id, now()],
-    );
-    discard_run_files(app, run_id);
-    emit_updated(app, run_id, "interrupted");
-}
-
-/// Remove a run's directory and the scratch dirs it created.
-fn discard_run_files(app: &AppHandle, run_id: i64) {
-    let json: Option<String> = app
-        .state::<Db>()
-        .0
-        .lock()
-        .unwrap()
-        .query_row("SELECT cleanup_json FROM routine_run WHERE id = ?1", params![run_id], |r| r.get(0))
-        .ok()
-        .flatten();
-    if let Some(dirs) = json.and_then(|j| serde_json::from_str::<Vec<PathBuf>>(&j).ok()) {
-        for d in dirs {
-            let _ = std::fs::remove_dir_all(d);
-        }
-    }
-    let _ = std::fs::remove_dir_all(run_dir(app, run_id));
-}
-
-fn record_event(app: &AppHandle, run_id: i64, seq: i64, kind: &str, line: &str) {
-    let json = if line.len() > MAX_EVENT_BYTES {
-        serde_json::json!({ "type": kind, "truncated": true, "bytes": line.len() }).to_string()
-    } else {
-        line.to_string()
-    };
-    {
-        let db = app.state::<Db>();
-        let conn = db.0.lock().unwrap();
-        let _ = conn.execute(
-            "INSERT OR REPLACE INTO routine_run_event (run_id, seq, ts, kind, json) VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![run_id, seq, now(), kind, json],
-        );
-    }
-    let _ = app.emit("routine-run-event", RunEventPayload { run_id, seq, kind, json: &json });
-}
-
-/// A `NEEDS_ATTENTION:` line anywhere in the final message.
-fn needs_attention(text: &str) -> bool {
-    text.lines().any(|l| l.trim_start().starts_with("NEEDS_ATTENTION:"))
-}
-
-/// The status a finished run settles on. A stop request wins over whatever the process reported.
-fn final_status(stop: Option<&'static str>, result: Option<&FinalResult>, text: &str) -> &'static str {
-    if let Some(reason) = stop {
-        return reason;
-    }
-    match result {
-        None => "error",
-        Some(r) if r.is_error => "error",
-        Some(_) if needs_attention(text) => "needs_attention",
-        Some(_) => "ok",
-    }
-}
-
-/// Write the final state, notify, prune old runs. Returns the status it settled on.
-fn finalize(app: &AppHandle, run_id: i64, routine: Option<&Routine>, run: Option<&RoutineRun>, outcome: &Outcome) -> String {
-    let manager = app.state::<RoutineManager>();
-    let (stop, shutting_down) = {
-        let mut inner = manager.inner.lock().unwrap();
-        (inner.stops.remove(&run_id), inner.shutting_down)
-    };
-    discard_run_files(app, run_id);
-    let result = outcome.result.as_ref().map(|v| ai::harness_for().final_result(v));
-    let text = result.as_ref().and_then(|r| r.text.clone()).unwrap_or_default();
-    let status = final_status(stop, result.as_ref(), &text);
-    let error = match status {
-        "error" => Some(outcome.failure.clone().unwrap_or_else(|| {
-            if text.is_empty() { "the run reported an error".to_string() } else { text.clone() }
-        })),
-        _ => None,
-    };
-    {
-        let db = app.state::<Db>();
-        let conn = db.0.lock().unwrap();
-        // Guarded: on exit `kill_all` already settled the row.
-        let _ = conn.execute(
-            "UPDATE routine_run SET status = ?2, ended_at = ?3, result_text = ?4, error = ?5, cost_usd = ?6,
-                    num_turns = ?7, session_id = COALESCE(?8, session_id)
-             WHERE id = ?1 AND status = 'running'",
-            params![
-                run_id,
-                status,
-                now(),
-                (!text.is_empty()).then_some(text.as_str()),
-                error,
-                outcome.usage.cost_usd,
-                outcome.usage.num_turns,
-                outcome.usage.session_id
-            ],
-        );
-        let _ = conn.execute(
-            "DELETE FROM routine_run WHERE status NOT IN ('queued', 'running')
-               AND id NOT IN (SELECT id FROM routine_run ORDER BY id DESC LIMIT ?1)",
-            params![KEEP_RUNS],
-        );
-    }
-    log::info!(target: "routines", "run {run_id}: {status}");
-    if !shutting_down {
-        if let (Some(routine), Some(run)) = (routine, run) {
-            handlers::finish(app, routine, run, status, &text, error.as_deref(), &outcome.usage);
-        }
-        emit_updated(app, run_id, status);
-        if let (Some(routine), Some(run), true) =
-            (routine, run, matches!(status, "ok" | "needs_attention" | "error" | "timeout"))
-        {
-            // The board overview is a refresh button, not a task worth a banner.
-            if routine.handler.as_deref() == Some("overview") && status == "ok" {
-                return status.to_string();
-            }
-            notify(app, routine, &run.context_label, status, &text, error.as_deref());
-        }
-    }
-    status.to_string()
 }
 
 fn notify(app: &AppHandle, routine: &Routine, label: &str, status: &str, text: &str, error: Option<&str>) {
@@ -1065,8 +740,7 @@ fn notify(app: &AppHandle, routine: &Routine, label: &str, status: &str, text: &
 mod tests {
     use super::*;
     use crate::db::open_memory;
-    use serde_json::json;
-
+    
     fn insert_run(conn: &Connection, routine_id: i64, key: &str, status: &str) -> rusqlite::Result<usize> {
         conn.execute(
             "INSERT INTO routine_run (routine_id, context_type, context_key, context_json, status, queued_at)
@@ -1080,26 +754,6 @@ mod tests {
         super::super::seed(&conn).unwrap();
         let id = super::super::list(&conn).unwrap()[0].id;
         (conn, id)
-    }
-
-    #[test]
-    fn needs_attention_is_a_line_prefix() {
-        assert!(needs_attention("done\nNEEDS_ATTENTION: lint config is broken"));
-        assert!(needs_attention("  NEEDS_ATTENTION: x"));
-        assert!(!needs_attention("I will report NEEDS_ATTENTION: later"));
-    }
-
-    #[test]
-    fn final_status_precedence() {
-        let result = |v: Value| ai::harness_for().final_result(&v);
-        let ok = result(json!({ "type": "result", "is_error": false, "result": "fine" }));
-        let err = result(json!({ "type": "result", "is_error": true, "result": "boom" }));
-        assert_eq!(final_status(None, Some(&ok), "fine"), "ok");
-        assert_eq!(final_status(None, Some(&ok), "x\nNEEDS_ATTENTION: y"), "needs_attention");
-        assert_eq!(final_status(None, Some(&err), "boom"), "error");
-        assert_eq!(final_status(None, None, ""), "error");
-        assert_eq!(final_status(Some("timeout"), Some(&ok), "fine"), "timeout");
-        assert_eq!(final_status(Some("killed"), None, ""), "killed");
     }
 
     #[test]
@@ -1141,26 +795,6 @@ mod tests {
         assert!(by_key.contains(&("a".into(), "running".into())));
         assert!(by_key.contains(&("b".into(), "interrupted".into())));
         let _ = std::fs::remove_dir_all(&tmp);
-    }
-
-    #[test]
-    fn file_has_result_looks_for_a_result_line() {
-        let path = std::env::temp_dir().join(format!("cr_result_test_{}.jsonl", std::process::id()));
-        std::fs::write(&path, "{\"type\":\"assistant\"}\n").unwrap();
-        assert!(!file_has_result(&path));
-        std::fs::write(&path, "{\"type\":\"assistant\"}\n{\"type\":\"result\",\"result\":\"x\"}\n").unwrap();
-        assert!(file_has_result(&path));
-        let _ = std::fs::remove_file(&path);
-        assert!(!file_has_result(&path));
-    }
-
-    #[test]
-    fn outcome_without_a_result_reports_the_exit() {
-        let o = outcome_from(None, " boom \n".into(), Ok("exit status: 1".into()));
-        assert_eq!(o.failure.as_deref(), Some("claude exited with exit status: 1 without a result. boom"));
-        assert!(!o.detached);
-        let ok = outcome_from(Some(serde_json::json!({"type": "result"})), String::new(), Ok("0".into()));
-        assert!(ok.failure.is_none());
     }
 
     #[test]
@@ -1236,8 +870,8 @@ mod tests {
         let db = Path::new("/data/cr.db");
         for (mode, flag) in [("append", "--append-system-prompt-file"), ("replace", "--system-prompt-file")] {
             let routine = test_routine(mode);
-            let req = stream_request(&routine, &prep, cwd, "opus", "sid", prompt, "p", db, RunTag::new("t"));
-            let cmd = crate::ai::claude::command(&req, true, Some(prompt));
+            let p = build_prepared(&routine, &prep, cwd.into(), "opus".into(), "sid".into(), String::new(), "p".into(), db, RunTag::new("t"));
+            let cmd = crate::ai::claude::command(&p.request(prompt), true, Some(prompt));
             assert_eq!(
                 argv(&cmd),
                 strs(&[
@@ -1265,8 +899,8 @@ mod tests {
         routine.allowed_tools.clear();
         routine.extra_args.clear();
         let prep = handlers::Prep::default();
-        let req = stream_request(&routine, &prep, Path::new("/r"), "", "s", Path::new("/p"), "p", Path::new("/d"), RunTag::new("t"));
-        let cmd = crate::ai::claude::command(&req, true, Some(Path::new("/p")));
+        let p = build_prepared(&routine, &prep, "/r".into(), String::new(), "s".into(), String::new(), "p".into(), Path::new("/d"), RunTag::new("t"));
+        let cmd = crate::ai::claude::command(&p.request(Path::new("/p")), true, Some(Path::new("/p")));
         assert_eq!(
             argv(&cmd),
             strs(&[
@@ -1276,32 +910,4 @@ mod tests {
         );
     }
 
-    #[test]
-    fn stream_fixture_kinds_and_final_status() {
-        let h = ai::harness_for();
-        let lines = [
-            (r#"{"type":"system","subtype":"init"}"#, "system"),
-            (r#"{"type":"assistant","message":{}}"#, "assistant"),
-            (r#"{"type":"user"}"#, "user"),
-            (r#"{"x":1}"#, "unknown"),
-            ("garbage", "raw"),
-        ];
-        for (line, kind) in lines {
-            assert_eq!(h.parse_line(line).0, kind);
-        }
-        let ok = r#"{"type":"result","is_error":false,"result":"all good","num_turns":3,"session_id":"s","total_cost_usd":0.5,"usage":{"input_tokens":1,"output_tokens":2}}"#;
-        let attention = r#"{"type":"result","is_error":false,"result":"x\nNEEDS_ATTENTION: look"}"#;
-        let error = r#"{"type":"result","is_error":true,"result":"boom"}"#;
-        let status = |line: &str| {
-            let (kind, v) = h.parse_line(line);
-            assert_eq!(kind, "result");
-            let r = h.final_result(&v.unwrap());
-            final_status(None, Some(&r), &r.text.clone().unwrap_or_default())
-        };
-        assert_eq!(status(ok), "ok");
-        assert_eq!(status(attention), "needs_attention");
-        assert_eq!(status(error), "error");
-        let o = outcome_from(h.parse_line(ok).1, String::new(), Ok("0".into()));
-        assert_eq!((o.usage.num_turns, o.usage.input_tokens, o.usage.output_tokens, o.usage.cost_usd), (3, 1, 2, 0.5));
-    }
 }
