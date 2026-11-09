@@ -195,7 +195,11 @@ impl RemoteClient {
     }
 
     fn get<T: DeserializeOwned>(&self, path: &str) -> RemoteResult<T> {
-        self.call::<T>("GET", path, None::<&()>, QUICK)
+        self.get_within(path, QUICK)
+    }
+
+    pub(super) fn get_within<T: DeserializeOwned>(&self, path: &str, timeout: Duration) -> RemoteResult<T> {
+        self.call::<T>("GET", path, None::<&()>, timeout)
     }
 
     pub fn info(&self) -> RemoteResult<Info> {

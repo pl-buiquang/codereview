@@ -8,6 +8,7 @@ use crate::error::{AppError, AppResult};
 use crate::remote::client::HarnessInfo;
 use crate::remote::host::{self, Host, HostInput};
 use crate::remote::runtime::{self, RemoteRuntime};
+use crate::remote::sessions::{self, HostSessions};
 use crate::remote::tunnel::ConnState;
 
 fn runtime() -> AppResult<std::sync::Arc<RemoteRuntime>> {
@@ -89,4 +90,20 @@ pub async fn host_test(id: i64) -> AppResult<HostTest> {
 /// The harnesses of a host with their capabilities (for the profile editor of a remote profile).
 pub fn remote_harness_infos(host_id: i64) -> AppResult<Vec<HarnessInfo>> {
     Ok(runtime()?.info(host_id)?.harnesses)
+}
+
+/// The live sessions of every enabled host, read-only, for the Sessions view (S10). One entry per
+/// host; a host that is down is an entry with its status, never an error. Kept apart from
+/// `list_claude_sessions` so that a slow host cannot delay the local list and the local counts
+/// (sidebar, board cards) stay local.
+#[tauri::command]
+pub async fn list_remote_sessions(db: State<'_, Db>) -> AppResult<Vec<HostSessions>> {
+    let hosts = host::list(&db.0.lock().unwrap())?;
+    let Some(rt) = runtime::global() else { return Ok(Vec::new()) };
+    if hosts.iter().all(|h| !h.enabled) {
+        return Ok(Vec::new());
+    }
+    tauri::async_runtime::spawn_blocking(move || sessions::collect_all(&rt, hosts))
+        .await
+        .map_err(|e| AppError::Other(format!("remote session lookup failed: {e}")))
 }

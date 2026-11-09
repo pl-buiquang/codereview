@@ -292,6 +292,7 @@ pub fn run() {
             commands::hosts::host_delete,
             commands::hosts::host_states,
             commands::hosts::host_test,
+            commands::hosts::list_remote_sessions,
             commands::ai_profiles::ai_profile_save,
             commands::ai_profiles::ai_profile_delete,
             commands::ai_profiles::ai_feature_profiles_get,

@@ -18,3 +18,4 @@ pub mod startup;
 pub mod mirror;
 pub mod outbox;
 pub mod launch;
+pub mod sessions;

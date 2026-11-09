@@ -81,6 +81,30 @@ impl Harness for Fake {
     fn interactive_argv(&self, _: &Interactive<'_>) -> Option<Vec<String>> {
         None
     }
+    fn live_sessions(&self) -> Vec<crate::ai::AgentSession> {
+        vec![crate::ai::AgentSession {
+            harness: "fake".into(),
+            session_id: "fake-1".into(),
+            pid: Some(1),
+            live: true,
+            status: Some("busy".into()),
+            kind: Some("interactive".into()),
+            attached: false,
+            job_id: None,
+            waiting_for: None,
+            agent_view: None,
+            name: Some("a fake session".into()),
+            cwd: "/home/x/widgets".into(),
+            git_branch: Some("main".into()),
+            repo: Some("acme/widgets".into()),
+            tmux: Some(crate::claude_sessions::TmuxLoc { session: "0".into(), window: "@2".into(), pane: "%7".into(), label: Some("0:2".into()) }),
+            tty: None,
+            updated_at: 1,
+            focus: crate::claude_sessions::FocusState::Ready,
+            summaries: Vec::new(),
+            original_name: None,
+        }]
+    }
 }
 
 fn git(dir: &Path, args: &[&str]) {

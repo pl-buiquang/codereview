@@ -885,6 +885,24 @@ export interface CardSession {
   session_id: string;
 }
 
+/** A session of a remote host (read-only): the local shape, with fields needing local access inert. */
+export interface RemoteSession extends AgentSession {
+  host_id: number;
+  host_name: string;
+  host_ssh_target: string;
+}
+
+export type HostSessionsStatus = "ok" | "connecting" | "unreachable" | "protocol_mismatch" | "disabled" | "error";
+
+/** One host's answer to the sessions lookup; a host that is down has a status and no sessions. */
+export interface HostSessions {
+  host_id: number;
+  host_name: string;
+  status: HostSessionsStatus;
+  error: string | null;
+  sessions: RemoteSession[];
+}
+
 export interface SessionsSnapshot {
   sessions: AgentSession[];
   card_sessions: CardSession[];
