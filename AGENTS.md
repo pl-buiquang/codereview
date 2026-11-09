@@ -89,8 +89,8 @@ lines map to `Other`, never fail.
 **`cr serve`** (`src-tauri/src/serve/`, ADR 0007) is a daemon of the `cr` binary that exposes the local
 harnesses over `/v1` HTTP+SSE (axum, behind the default `serve` cargo feature; the store, wire types,
 workspace resolver, outbox and systemd helpers are plain Rust). It is a plain executor: it gets rendered
-prompts and neutral options, runs them on the shared run engine (one `RunEngine` per harness, a
-`ServeStore` per engine over the daemon's own SQLite, `ServeSink` as the sink) and listens on a unix socket
+prompts and neutral options, runs them on the shared run engine (one `RunEngine` for all harnesses, each run naming its own, a
+`ServeStore` over the daemon's own SQLite, `ServeSink` as the sink) and listens on a unix socket
 or loopback only (SSH tunnel; no token). Workspaces come from the repo registry of the app DB
 (`unknown_repo` otherwise; no auto-clone). Inside a remote run (`CODEREVIEW_REMOTE_RUN` set) `cr` writes
 board/focus/notify as outbox ops and answers reads from `context.json`; see `serve/remote.rs` for the op
