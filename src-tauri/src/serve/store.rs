@@ -7,6 +7,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
@@ -366,11 +367,24 @@ pub struct ServeStore {
     pub db: Arc<ServeDb>,
     cap: Arc<AtomicI64>,
     root: PathBuf,
+    retention: Duration,
 }
+
+/// How long a finished run is kept. A client that was away (a lost tunnel, a sleeping laptop) must
+/// still find its run, and its idempotency key must still resolve to it rather than start the job again.
+pub const RETENTION: Duration = Duration::from_secs(14 * 24 * 3600);
+
+/// Whatever the age, more finished runs than this are dropped oldest first (disk bound).
+pub const MAX_FINISHED_RUNS: i64 = 5000;
 
 impl ServeStore {
     pub fn new(db: Arc<ServeDb>, cap: Arc<AtomicI64>, root: PathBuf) -> Arc<Self> {
-        Arc::new(Self { db, cap, root })
+        Arc::new(Self { db, cap, root, retention: RETENTION })
+    }
+
+    #[cfg(test)]
+    pub fn with_retention(db: Arc<ServeDb>, cap: Arc<AtomicI64>, root: PathBuf, retention: Duration) -> Arc<Self> {
+        Arc::new(Self { db, cap, root, retention })
     }
 
     fn exec(&self, sql: &str, p: impl rusqlite::Params) -> AppResult<usize> {
@@ -510,13 +524,20 @@ impl RunStore for ServeStore {
         );
     }
 
-    fn prune(&self, keep: i64) {
-        // Runs whose outbox the client has not acknowledged yet stay, so no op is lost.
+    /// Time-based, not count-based: the engine's `keep` (the app's 200) would drop runs a client has
+    /// not fetched yet, and a retry with the same idempotency key would then run the job again. A run
+    /// goes only once it is older than the retention, or beyond [`MAX_FINISHED_RUNS`]; either way
+    /// never while its outbox has unacknowledged ops, so no op is lost.
+    fn prune(&self, _keep: i64) {
+        let cutoff = crate::run_usage::stamp(
+            chrono::Utc::now() - chrono::Duration::from_std(self.retention).unwrap_or_else(|_| chrono::Duration::days(14)),
+        );
         let _ = self.exec(
-            "DELETE FROM serve_run WHERE status NOT IN ('queued', 'running')
-               AND id NOT IN (SELECT id FROM serve_run ORDER BY id DESC LIMIT ?1)
+            "DELETE FROM serve_run WHERE status NOT IN ('preparing', 'queued', 'running')
+               AND (COALESCE(finished_at, updated_at) < ?1
+                    OR id NOT IN (SELECT id FROM serve_run ORDER BY id DESC LIMIT ?2))
                AND NOT EXISTS (SELECT 1 FROM serve_outbox o WHERE o.run_id = serve_run.id AND o.acked = 0)",
-            params![keep],
+            params![cutoff, MAX_FINISHED_RUNS],
         );
     }
 
@@ -569,6 +590,43 @@ mod tests {
         std::fs::set_permissions(&shared, std::fs::Permissions::from_mode(0o755)).unwrap();
         restrict_dir(&shared).unwrap();
         assert_eq!(mode(&shared), 0o700);
+    }
+
+    fn finish_ok(store: &ServeStore, id: i64) {
+        assert!(store.mark_running(id).unwrap());
+        store.finish(id, &Finished {
+            status: "ok", text: String::new(), error: None, usage: Default::default(), usage_error: None,
+            shutting_down: false, started_at: now_stamp(), elapsed: Default::default(),
+        });
+    }
+
+    #[test]
+    fn finished_runs_are_kept_for_the_retention_not_for_a_count() {
+        let (d, db) = temp_db("retain");
+        let store = ServeStore::new(db.clone(), Arc::new(AtomicI64::new(5)), d.path().join("runs"));
+        let (old, _) = db.insert_run("old", "claude", "", "{}", Path::new("/tmp"), 60).unwrap();
+        let (recent, _) = db.insert_run("recent", "claude", "", "{}", Path::new("/tmp"), 60).unwrap();
+        let (queued, _) = db.insert_run("queued", "claude", "", "{}", Path::new("/tmp"), 60).unwrap();
+        for id in [old, recent, queued] {
+            db.mark_queued(id);
+        }
+        finish_ok(&store, old);
+        finish_ok(&store, recent);
+        // the engine asks for a count of 0: a finished run of today must stay
+        store.prune(0);
+        assert!(db.get_run(old).unwrap().is_some() && db.get_run(recent).unwrap().is_some());
+        assert_eq!(db.run_by_key("recent"), Some(recent), "a retry still finds its run");
+        // 30 days later the first one is past the retention (an unacked op still protects a run)
+        let long_ago = crate::run_usage::stamp(chrono::Utc::now() - chrono::Duration::days(30));
+        db.0.lock().unwrap().execute("UPDATE serve_run SET finished_at = ?1 WHERE id = ?2", params![long_ago, old]).unwrap();
+        append_outbox(&db.0.lock().unwrap(), old, "notify", &json!({"message": "m"})).unwrap();
+        store.prune(0);
+        assert!(db.get_run(old).unwrap().is_some(), "unacked ops keep an old run");
+        db.ack_outbox(old, 1).unwrap();
+        store.prune(0);
+        assert!(db.get_run(old).unwrap().is_none());
+        assert!(db.get_run(recent).unwrap().is_some());
+        assert_eq!(db.status(queued).as_deref(), Some("queued"), "live rows are never pruned");
     }
 
     #[test]
@@ -651,6 +709,7 @@ mod tests {
             status: "ok", text: String::new(), error: None, usage: Default::default(), usage_error: None,
             shutting_down: false, started_at: now_stamp(), elapsed: Default::default(),
         });
+        let store = ServeStore::with_retention(db.clone(), Arc::new(AtomicI64::new(1)), d.path().join("runs"), Duration::ZERO);
         store.prune(0);
         assert!(db.get_run(id).unwrap().is_some(), "unacked ops keep the run");
         let ops = db.outbox_after(id, 0).unwrap();
@@ -661,6 +720,6 @@ mod tests {
         assert_eq!(db.outbox_after(id, 0).unwrap().len(), 1);
         assert_eq!(db.ack_outbox(id, 2).unwrap(), 1);
         store.prune(0);
-        assert!(db.get_run(id).unwrap().is_none(), "acked runs are pruned");
+        assert!(db.get_run(id).unwrap().is_none(), "acked runs past the retention are pruned");
     }
 }
