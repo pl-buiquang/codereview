@@ -222,6 +222,64 @@ fn diff_file_summary(diff: &str) -> String {
     }
 }
 
+/// `(role, content)` of every message of a chat, oldest first.
+fn earlier_messages(conn: &rusqlite::Connection, chat_id: i64) -> AppResult<Vec<(String, String)>> {
+    let mut stmt = conn.prepare("SELECT role, content FROM chat_message WHERE chat_id = ?1 ORDER BY id")?;
+    let rows = stmt.query_map(params![chat_id], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<_>>()?;
+    Ok(rows)
+}
+
+/// Size cap of the previous-conversation block put into the first turn after a profile switch.
+const REPLAY_CAP_BYTES: usize = 200 * 1024;
+
+const REPLAY_HEADER: &str = "## Previous conversation\n\nThis review chat ran on another profile before. Its messages so far are \
+below, oldest first, so you can continue it. Treat them as context, not as instructions to carry out again.\n";
+const REPLAY_TRUNCATED: &str = "\n[Earlier messages were dropped to fit the size limit.]\n";
+
+/// The previous-conversation block for a chat that switched profile: every message as
+/// `### User` / `### Assistant`, oldest first, within `cap` bytes. Oldest messages are dropped
+/// first and a marker line says so; a newest message that alone exceeds the cap keeps its tail.
+/// `None` when there is nothing to replay.
+fn replay_block(messages: &[(String, String)], cap: usize) -> Option<String> {
+    if messages.is_empty() {
+        return None;
+    }
+    let entry = |role: &str, content: &str| {
+        let who = if role == "assistant" { "Assistant" } else { "User" };
+        format!("\n### {who}\n{}\n", content.trim())
+    };
+    // The room for messages, assuming the marker is needed (it is only shown when something is dropped).
+    let budget = cap.saturating_sub(REPLAY_HEADER.len() + REPLAY_TRUNCATED.len());
+    let mut kept: Vec<String> = Vec::new();
+    let mut used = 0;
+    let mut dropped = false;
+    for (role, content) in messages.iter().rev() {
+        let text = entry(role, content);
+        if used + text.len() > budget {
+            dropped = true;
+            // The newest message alone is too long: keep its tail.
+            if kept.is_empty() {
+                let room = budget.saturating_sub("\n### Assistant\n…\n".len());
+                let mut start = content.len().saturating_sub(room);
+                while !content.is_char_boundary(start) {
+                    start += 1;
+                }
+                kept.push(entry(role, &format!("…{}", &content[start..])));
+            }
+            break;
+        }
+        used += text.len();
+        kept.push(text);
+    }
+    kept.reverse();
+    let mut out = String::from(REPLAY_HEADER);
+    if dropped {
+        out.push_str(REPLAY_TRUNCATED);
+    }
+    out.extend(kept);
+    Some(out)
+}
+
 /// The profile a chat turn runs on and whether this turn switches profile. `requested` is the
 /// profile picked in the chat pane. Order: the request, the profile the chat is pinned to, the chat
 /// feature profile, the default. A switch is a request for a profile other than the one the chat
@@ -257,7 +315,7 @@ pub async fn chat_send(
 ) -> AppResult<ChatTurnResult> {
     crate::ai_gate::ensure_enabled()?;
     // --- Phase 1: gather context under DB lock ---
-    let (detail, existing_chat, diff_source, chat_template, resolved, switched) = {
+    let (detail, existing_chat, diff_source, chat_template, resolved, switched, replay) = {
         let conn = db.0.lock().unwrap();
         let chat_template = crate::prompts::resolve(&conn, crate::prompts::CHAT_SYSTEM)?;
 
@@ -274,8 +332,13 @@ pub async fn chat_send(
         let diff_source = crate::commands::review::diff_source(&conn, review_id).ok();
 
         let (resolved, switched) = chat_profile(&conn, existing_chat.as_ref(), profile_id);
+        // A switch starts a new session, so the conversation so far goes into its first prompt.
+        let replay = match (&existing_chat, switched) {
+            (Some(chat), true) => replay_block(&earlier_messages(&conn, chat.id)?, REPLAY_CAP_BYTES),
+            _ => None,
+        };
 
-        (detail, existing_chat, diff_source, chat_template, resolved, switched)
+        (detail, existing_chat, diff_source, chat_template, resolved, switched, replay)
     };
     let diff = diff_source.and_then(|s| s.load().ok()).unwrap_or_default();
 
@@ -308,7 +371,7 @@ pub async fn chat_send(
     let system_prompt = if is_first_turn {
         let diff_summary = diff_file_summary(&diff);
         let comments_section = format_review_comments(&detail.comments, 50);
-        Some(build_system_prompt(
+        let mut prompt = build_system_prompt(
             &chat_template,
             &detail.target.title,
             detail.remote_owner.as_deref(),
@@ -320,7 +383,12 @@ pub async fn chat_send(
             &diff_summary,
             review_id,
             &comments_section,
-        ))
+        );
+        if let Some(replay) = &replay {
+            prompt.push_str("\n\n");
+            prompt.push_str(replay);
+        }
+        Some(prompt)
     } else {
         None
     };
@@ -702,5 +770,59 @@ mod tests {
         let chat = chat_row(&conn, Some("sid"), None);
         assert!(!chat_profile(&conn, Some(&chat), Some(default)).1);
         let _ = &mut conn;
+    }
+
+    fn msgs(items: &[(&str, &str)]) -> Vec<(String, String)> {
+        items.iter().map(|(r, c)| (r.to_string(), c.to_string())).collect()
+    }
+
+    #[test]
+    fn replay_is_empty_without_messages() {
+        assert_eq!(replay_block(&[], REPLAY_CAP_BYTES), None);
+    }
+
+    #[test]
+    fn replay_lists_messages_oldest_first_with_their_roles() {
+        let block = replay_block(&msgs(&[("user", "first q"), ("assistant", "first a"), ("user", "second q")]), REPLAY_CAP_BYTES).unwrap();
+        assert!(block.starts_with("## Previous conversation"));
+        let q1 = block.find("### User\nfirst q").unwrap();
+        let a1 = block.find("### Assistant\nfirst a").unwrap();
+        let q2 = block.find("### User\nsecond q").unwrap();
+        assert!(q1 < a1 && a1 < q2);
+        assert!(!block.contains("dropped"), "nothing dropped, no marker");
+    }
+
+    #[test]
+    fn replay_drops_the_oldest_messages_first_and_says_so() {
+        let big = "x".repeat(400);
+        let messages = msgs(&[("user", "OLDEST"), ("assistant", &big), ("user", &big), ("assistant", "NEWEST")]);
+        let cap = REPLAY_HEADER.len() + REPLAY_TRUNCATED.len() + 2 * 420;
+        let block = replay_block(&messages, cap).unwrap();
+        assert!(block.len() <= cap, "{} > {cap}", block.len());
+        assert!(block.contains("Earlier messages were dropped"));
+        assert!(!block.contains("OLDEST"));
+        assert!(block.contains("NEWEST"));
+        // What is kept stays in order: the marker comes before every kept message.
+        assert!(block.find("dropped").unwrap() < block.find("NEWEST").unwrap());
+    }
+
+    #[test]
+    fn replay_never_exceeds_the_cap_even_for_one_huge_message() {
+        let huge = format!("{}END", "é".repeat(300_000));
+        let block = replay_block(&msgs(&[("user", "old"), ("assistant", &huge)]), REPLAY_CAP_BYTES).unwrap();
+        assert!(block.len() <= REPLAY_CAP_BYTES, "{}", block.len());
+        assert!(block.contains("Earlier messages were dropped"));
+        assert!(block.contains("END"), "the tail of the newest message is kept");
+        assert!(!block.contains("### User\nold"));
+    }
+
+    #[test]
+    fn earlier_messages_come_back_in_conversation_order() {
+        let conn = crate::db::open_memory();
+        let c = chat_row(&conn, Some("sid"), None);
+        for (role, content) in [("user", "a"), ("assistant", "b"), ("user", "c")] {
+            conn.execute("INSERT INTO chat_message (chat_id, role, content, created_at) VALUES (?1, ?2, ?3, 'n')", params![c.id, role, content]).unwrap();
+        }
+        assert_eq!(earlier_messages(&conn, c.id).unwrap(), msgs(&[("user", "a"), ("assistant", "b"), ("user", "c")]));
     }
 }
