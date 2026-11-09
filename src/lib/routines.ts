@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { listen } from "@tauri-apps/api/event";
 import { api } from "./api";
-import type { BoardCard, ClaudeOverrides, HarnessOverrides, RoutineRun, RoutineRunStatus } from "./types";
+import type { BoardCard, ClaudeOverrides, HarnessOverrides, NormEvent, RoutineRun, RoutineRunEvent, RoutineRunStatus } from "./types";
 
 export const ROUTINE_RUN_UPDATED_EVENT = "routine-run-updated";
 export const ROUTINE_RUN_EVENT = "routine-run-event";
@@ -133,47 +133,87 @@ function toolResultText(content: unknown): string {
   return content == null ? "" : JSON.stringify(content);
 }
 
-/** Fold raw stream-json lines into assistant text, tool calls (with their results) and the final result. */
-export function buildTranscript(lines: string[]): TranscriptItem[] {
+const toolInput = (input: unknown) => clip(typeof input === "string" ? input : JSON.stringify(input ?? {}, null, 2));
+
+/** Fold the stored events of a run into assistant text, tool calls (with their results) and the final result. */
+export function buildTranscript(events: Pick<RoutineRunEvent, "json" | "norm">[]): TranscriptItem[] {
   const items: TranscriptItem[] = [];
   const toolById = new Map<string, Extract<TranscriptItem, { kind: "tool" }>>();
-  for (const line of lines) {
-    let v: Record<string, any>;
-    try {
-      v = JSON.parse(line);
-    } catch {
-      continue;
-    }
-    if (v.type === "assistant") {
-      for (const block of v.message?.content ?? []) {
-        if (block.type === "text" && block.text?.trim()) items.push({ kind: "text", text: block.text });
-        else if (block.type === "tool_use") {
-          const tool = { kind: "tool" as const, id: block.id, name: block.name, input: clip(JSON.stringify(block.input ?? {}, null, 2)) };
-          toolById.set(block.id, tool);
+  for (const e of events) {
+    const norm = parseNorm(e.norm);
+    if (norm) {
+      for (const ev of norm) {
+        if (ev.type === "text") {
+          if (ev.text.trim()) items.push({ kind: "text", text: ev.text });
+        } else if (ev.type === "tool_call") {
+          const tool = { kind: "tool" as const, id: ev.id, name: ev.name, input: toolInput(ev.input) };
+          if (ev.id) toolById.set(ev.id, tool);
           items.push(tool);
+        } else if (ev.type === "tool_result") {
+          const tool = toolById.get(ev.id);
+          if (tool) {
+            tool.result = clip(ev.text);
+            tool.isError = !ev.ok;
+          }
+        } else if (ev.type === "final") {
+          const cost = ev.usage?.cost_usd;
+          items.push({ kind: "result", text: ev.text, isError: !ev.ok, cost: typeof cost === "number" && cost > 0 ? cost : null });
         }
       }
-    } else if (v.type === "user") {
-      const content = v.message?.content;
-      if (!Array.isArray(content)) continue;
-      for (const block of content) {
-        if (block.type !== "tool_result") continue;
-        const tool = toolById.get(block.tool_use_id);
-        if (tool) {
-          tool.result = clip(toolResultText(block.content));
-          tool.isError = !!block.is_error;
-        }
-      }
-    } else if (v.type === "result") {
-      items.push({
-        kind: "result",
-        text: typeof v.result === "string" ? v.result : "",
-        isError: !!v.is_error,
-        cost: typeof v.total_cost_usd === "number" ? v.total_cost_usd : null,
-      });
+    } else {
+      addLegacyLine(e.json, items, toolById);
     }
   }
   return items;
+}
+
+/** The events of a `norm` value, or null when absent, unparseable or of a version this build does not know. */
+function parseNorm(norm: string | null | undefined): NormEvent[] | null {
+  if (!norm) return null;
+  try {
+    const v = JSON.parse(norm);
+    return v?.v === 1 && Array.isArray(v.events) ? (v.events as NormEvent[]) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Rows recorded before normalization: read the raw Claude stream-json line. */
+function addLegacyLine(line: string, items: TranscriptItem[], toolById: Map<string, Extract<TranscriptItem, { kind: "tool" }>>) {
+  let v: Record<string, any>;
+  try {
+    v = JSON.parse(line);
+  } catch {
+    return;
+  }
+  if (v.type === "assistant") {
+    for (const block of v.message?.content ?? []) {
+      if (block.type === "text" && block.text?.trim()) items.push({ kind: "text", text: block.text });
+      else if (block.type === "tool_use") {
+        const tool = { kind: "tool" as const, id: block.id, name: block.name, input: clip(JSON.stringify(block.input ?? {}, null, 2)) };
+        toolById.set(block.id, tool);
+        items.push(tool);
+      }
+    }
+  } else if (v.type === "user") {
+    const content = v.message?.content;
+    if (!Array.isArray(content)) return;
+    for (const block of content) {
+      if (block.type !== "tool_result") continue;
+      const tool = toolById.get(block.tool_use_id);
+      if (tool) {
+        tool.result = clip(toolResultText(block.content));
+        tool.isError = !!block.is_error;
+      }
+    }
+  } else if (v.type === "result") {
+    items.push({
+      kind: "result",
+      text: typeof v.result === "string" ? v.result : "",
+      isError: !!v.is_error,
+      cost: typeof v.total_cost_usd === "number" ? v.total_cost_usd : null,
+    });
+  }
 }
 
 /** The Claude Code options of a routine, with defaults for what is missing. */

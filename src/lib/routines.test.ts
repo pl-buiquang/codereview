@@ -21,11 +21,13 @@ describe("formatDuration", () => {
 
 describe("buildTranscript", () => {
   const line = (o: unknown) => JSON.stringify(o);
+  const legacy = (o: unknown) => ({ json: line(o), norm: null });
+  const norm = (...events: unknown[]) => ({ json: "{}", norm: line({ v: 1, events }) });
 
-  it("pairs tool calls with their results and ends with the result", () => {
+  it("pairs tool calls with their results and ends with the result (legacy rows)", () => {
     const items = buildTranscript([
-      line({ type: "system", subtype: "init" }),
-      line({
+      legacy({ type: "system", subtype: "init" }),
+      legacy({
         type: "assistant",
         message: {
           content: [
@@ -34,11 +36,11 @@ describe("buildTranscript", () => {
           ],
         },
       }),
-      line({
+      legacy({
         type: "user",
         message: { content: [{ type: "tool_result", tool_use_id: "t1", content: "all green", is_error: false }] },
       }),
-      line({ type: "result", is_error: false, result: "Done", total_cost_usd: 0.12 }),
+      legacy({ type: "result", is_error: false, result: "Done", total_cost_usd: 0.12 }),
     ]);
     expect(items).toHaveLength(3);
     expect(items[0]).toEqual({ kind: "text", text: "Checking CI" });
@@ -48,10 +50,57 @@ describe("buildTranscript", () => {
 
   it("skips unparseable lines and empty text blocks", () => {
     const items = buildTranscript([
-      "not json",
-      line({ type: "assistant", message: { content: [{ type: "text", text: "  " }] } }),
+      { json: "not json", norm: null },
+      legacy({ type: "assistant", message: { content: [{ type: "text", text: "  " }] } }),
     ]);
     expect(items).toEqual([]);
+  });
+
+  it("builds the same transcript from normalized events as from the legacy lines", () => {
+    const fromNorm = buildTranscript([
+      norm({ type: "other", kind: "system", raw: {} }),
+      norm(
+        { type: "text", text: "Checking CI" },
+        { type: "tool_call", id: "t1", name: "Bash", input: { command: "gh pr checks 1" } },
+      ),
+      norm({ type: "tool_result", id: "t1", ok: true, text: "all green" }),
+      norm({ type: "final", ok: true, text: "Done", usage: { num_turns: 1, input_tokens: 1, output_tokens: 1, cost_usd: 0.12 } }),
+    ]);
+    const fromLegacy = buildTranscript([
+      legacy({ type: "system" }),
+      legacy({
+        type: "assistant",
+        message: {
+          content: [
+            { type: "text", text: "Checking CI" },
+            { type: "tool_use", id: "t1", name: "Bash", input: { command: "gh pr checks 1" } },
+          ],
+        },
+      }),
+      legacy({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "t1", content: "all green" }] } }),
+      legacy({ type: "result", is_error: false, result: "Done", total_cost_usd: 0.12 }),
+    ]);
+    expect(fromNorm).toEqual(fromLegacy);
+  });
+
+  it("renders a failing tool result and an error final from normalized events", () => {
+    const items = buildTranscript([
+      norm({ type: "tool_call", id: "t1", name: "Read", input: {} }),
+      norm({ type: "tool_result", id: "t1", ok: false, text: "nope" }),
+      norm({ type: "final", ok: false, text: "boom", usage: { num_turns: 0, input_tokens: 0, output_tokens: 0, cost_usd: 0 } }),
+    ]);
+    expect(items[0]).toMatchObject({ kind: "tool", result: "nope", isError: true });
+    expect(items[1]).toEqual({ kind: "result", text: "boom", isError: true, cost: null });
+  });
+
+  it("mixes legacy and normalized rows in one run and ignores a norm of an unknown version", () => {
+    const items = buildTranscript([
+      legacy({ type: "assistant", message: { content: [{ type: "text", text: "old" }] } }),
+      norm({ type: "text", text: "new" }),
+      { json: line({ type: "assistant", message: { content: [{ type: "text", text: "fallback" }] } }), norm: line({ v: 2, events: [] }) },
+      { json: "{}", norm: "{broken" },
+    ]);
+    expect(items.map((i) => (i.kind === "text" ? i.text : i.kind))).toEqual(["old", "new", "fallback"]);
   });
 });
 

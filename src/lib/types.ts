@@ -1166,6 +1166,8 @@ export interface RoutineRun {
   error: string | null;
   cost_usd: number;
   num_turns: number;
+  /** Id of the harness the run is on. */
+  harness: string;
   queued_at: string;
   started_at: string | null;
   ended_at: string | null;
@@ -1189,13 +1191,27 @@ export interface RoutineRunFilter {
   limit?: number;
 }
 
-/** One stream-json line of a run; `json` is the raw line. */
+/** One stream line of a run; `json` is the raw line, `norm` its harness-neutral form (null for runs recorded before it existed). */
 export interface RoutineRunEvent {
   seq: number;
   ts: string;
   kind: string;
   json: string;
+  norm: string | null;
 }
+
+/** The harness-neutral events of one raw line (`norm` of a {@link RoutineRunEvent}, version 1). */
+export type NormEvent =
+  | { type: "text"; text: string }
+  | { type: "tool_call"; id: string; name: string; input: unknown }
+  | { type: "tool_result"; id: string; ok: boolean; text: string }
+  | {
+      type: "final";
+      ok: boolean;
+      text: string;
+      usage: { num_turns: number; input_tokens: number; output_tokens: number; cost_usd: number };
+    }
+  | { type: "other"; kind: string; raw: unknown };
 
 export interface RoutineRunUpdated {
   run_id: number;

@@ -58,6 +58,7 @@ const run = (over: Partial<RoutineRun> = {}): RoutineRun => ({
   error: null,
   cost_usd: 0,
   num_turns: 0,
+  harness: "claude",
   queued_at: new Date().toISOString(),
   started_at: new Date().toISOString(),
   ended_at: null,

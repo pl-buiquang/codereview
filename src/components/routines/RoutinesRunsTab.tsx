@@ -43,6 +43,8 @@ export function RoutinesRunsTab() {
     refetchInterval: 10_000,
   });
   const routines = useQuery({ queryKey: ["routines"], queryFn: api.routineList });
+  const harnesses = useQuery({ queryKey: ["ai-harnesses"], queryFn: api.aiHarnesses, staleTime: 60_000 });
+  const harnessNames = new Map((harnesses.data ?? []).map((h) => [h.id, h.name]));
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["routine-runs"] });
   const stop = useMutation({ mutationFn: api.routineRunStop, onSuccess: invalidate, onError: (e) => toast.error(String(e)) });
@@ -144,6 +146,7 @@ export function RoutinesRunsTab() {
                   {formatDuration(selected.started_at, selected.ended_at)}
                   {selected.cost_usd > 0 && ` · $${selected.cost_usd.toFixed(2)}`}
                   {selected.num_turns > 0 && ` · ${selected.num_turns} turns`}
+                  {` · ${harnessNames.get(selected.harness) ?? selected.harness}`}
                 </p>
               </div>
               <div className="routine-run-actions">

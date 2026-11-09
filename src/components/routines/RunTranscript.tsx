@@ -4,7 +4,7 @@ import { api } from "../../lib/api";
 import { buildTranscript } from "../../lib/routines";
 import { Markdown } from "../Markdown";
 
-/** Live transcript of a run, rebuilt from its stored stream-json lines. */
+/** Live transcript of a run, rebuilt from its stored events (the normalized form, or the raw Claude line for older runs). */
 export function RunTranscript({ runId, active }: { runId: number; active: boolean }) {
   const events = useQuery({
     queryKey: ["routine-run-events", runId],
@@ -12,7 +12,7 @@ export function RunTranscript({ runId, active }: { runId: number; active: boolea
     // Backstop for the push events; they invalidate this query as lines arrive.
     refetchInterval: active ? 5_000 : false,
   });
-  const items = useMemo(() => buildTranscript((events.data ?? []).map((e) => e.json)), [events.data]);
+  const items = useMemo(() => buildTranscript(events.data ?? []), [events.data]);
   const endRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (active) endRef.current?.scrollIntoView?.({ block: "end" });
