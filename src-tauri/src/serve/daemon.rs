@@ -30,19 +30,27 @@ impl Bound {
         match listen {
             Listen::Tcp(addr) => Ok(Bound::Tcp(TcpListener::bind(addr).await?)),
             Listen::Unix(path) => {
-                use std::os::unix::fs::PermissionsExt;
+                use std::os::unix::fs::{FileTypeExt, PermissionsExt};
                 if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
                     if !parent.exists() {
                         std::fs::create_dir_all(parent)?;
                         std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700))?;
                     }
                 }
-                if path.exists() {
-                    // A live daemon answers; anything else is a stale file from a crash.
-                    if UnixStream::connect(path).await.is_ok() {
-                        return Err(AppError::Other(format!("another cr serve is already listening on {}", path.display())));
+                // Never delete anything but a stale socket: `--listen` may be a typo for a real file.
+                match std::fs::symlink_metadata(path) {
+                    Ok(meta) if meta.file_type().is_socket() => {
+                        // A live daemon answers; a socket nobody listens on is left by a crash.
+                        if UnixStream::connect(path).await.is_ok() {
+                            return Err(AppError::Other(format!("another cr serve is already listening on {}", path.display())));
+                        }
+                        std::fs::remove_file(path)?;
                     }
-                    std::fs::remove_file(path)?;
+                    Ok(_) => {
+                        return Err(AppError::Other(format!("{} exists and is not a socket; refusing to replace it", path.display())));
+                    }
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(e) => return Err(e.into()),
                 }
                 let listener = UnixListener::bind(path)?;
                 std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
@@ -156,4 +164,36 @@ pub fn run(cfg: Config) -> AppResult<()> {
         eprintln!("cr serve: stopped, runs left alive are re-adopted at the next start");
         Ok(())
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn bind_only_ever_removes_a_stale_socket() {
+        let dir = tempfile::tempdir().unwrap();
+        // a regular file, a directory and a symlink at the listen path are never touched
+        let file = dir.path().join("precious.db");
+        std::fs::write(&file, "data").unwrap();
+        let err = Bound::bind(&Listen::Unix(file.clone())).await.err().expect("must refuse").to_string();
+        assert!(err.contains("not a socket"), "{err}");
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "data");
+        let sub = dir.path().join("sub");
+        std::fs::create_dir(&sub).unwrap();
+        assert!(Bound::bind(&Listen::Unix(sub.clone())).await.is_err());
+        assert!(sub.is_dir());
+        let link = dir.path().join("link.sock");
+        std::os::unix::fs::symlink(&file, &link).unwrap();
+        assert!(Bound::bind(&Listen::Unix(link.clone())).await.is_err());
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "data");
+        // a socket nobody listens on (a crashed daemon) is replaced
+        let sock = dir.path().join("serve.sock");
+        drop(UnixListener::bind(&sock).unwrap());
+        assert!(sock.exists());
+        let bound = Bound::bind(&Listen::Unix(sock.clone())).await.unwrap();
+        // while a live one is respected
+        assert!(Bound::bind(&Listen::Unix(sock.clone())).await.is_err());
+        drop(bound);
+    }
 }
