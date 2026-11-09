@@ -39,7 +39,7 @@ Each area has a page under [`docs/features/`](docs/features/).
   with an auto-merge monitor and card metadata (plans, links, Claude sessions).
   → [board & inbox](docs/features/board-inbox.md)
 - **Focus & AI** — AI-tiered hunks so you read what matters, in-app review runs, a chat panel and
-  editable prompts, via the `claude` CLI.
+  editable prompts, via the `claude` or `opencode` CLI (profiles pick the harness and model).
   → [focus & AI](docs/features/focus-and-ai.md)
 - **Routines** — unattended AI runs on PRs, issues and the board: babysit CI, plan an issue,
   refine the plan in an agent session, implement it into a draft PR.
