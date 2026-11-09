@@ -47,11 +47,13 @@ impl GhRepo {
 /// Run a `gh` command in the given repo context. Returns stdout on success.
 pub fn run_gh(ctx: &GhRepo, args: &[&str]) -> AppResult<String> {
     let started = std::time::Instant::now();
-    let output = Command::new(crate::tools::gh_bin())
-        .current_dir(ctx.cwd())
-        .args(args)
-        .output()
-        .map_err(|e| AppError::Gh(format!("failed to spawn gh: {e}")))?;
+    let output = crate::cmd_deadline::output(Command::new(crate::tools::gh_bin()).current_dir(ctx.cwd()).args(args)).map_err(|e| {
+        if crate::cmd_deadline::is_timeout(&e) {
+            AppError::Gh(format!("`gh {}` {e}", args.first().copied().unwrap_or("")))
+        } else {
+            AppError::Gh(format!("failed to spawn gh: {e}"))
+        }
+    })?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();

@@ -15,6 +15,7 @@ mod definitions;
 mod diff_cache;
 pub mod error;
 pub mod export;
+pub mod cmd_deadline;
 pub mod gh;
 pub mod git;
 pub mod graph;

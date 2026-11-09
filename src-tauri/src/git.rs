@@ -15,17 +15,22 @@ pub fn run_git_env(repo: &Path, args: &[&str], env: &[(&str, &str)]) -> AppResul
     // Reads must not write: `git status` would otherwise refresh the index,
     // which the repo watcher sees as a change and reacts to with another status.
     let started = std::time::Instant::now();
-    let output = Command::new(crate::tools::git_bin())
-        .env("GIT_OPTIONAL_LOCKS", "0")
-        .envs(env.iter().copied())
-        .arg("-C")
-        .arg(repo)
-        .args(args)
-        .output()
-        .map_err(|e| {
-            log::warn!(target: "git", "failed to spawn git in {}: {e}", repo.display());
+    let output = crate::cmd_deadline::output(
+        Command::new(crate::tools::git_bin())
+            .env("GIT_OPTIONAL_LOCKS", "0")
+            .envs(env.iter().copied())
+            .arg("-C")
+            .arg(repo)
+            .args(args),
+    )
+    .map_err(|e| {
+        log::warn!(target: "git", "failed to run git in {}: {e}", repo.display());
+        if crate::cmd_deadline::is_timeout(&e) {
+            AppError::Git(format!("`git {}` {e}", args.first().copied().unwrap_or("")))
+        } else {
             AppError::Git(format!("failed to spawn git: {e}"))
-        })?;
+        }
+    })?;
 
     let ms = started.elapsed().as_millis();
     if !output.status.success() {

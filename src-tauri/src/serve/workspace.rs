@@ -74,6 +74,20 @@ fn is_primary(repo: &Path, path: &Path) -> bool {
 }
 
 pub fn resolve_in(conn: &Connection, spec: &WorkspaceSpec, base: &Path, pr_head: PrHead, allow_primary: bool) -> Result<PathBuf, ApiError> {
+    resolve_locked(conn, spec, base, pr_head, allow_primary, None)
+}
+
+/// [`resolve_in`] holding `lock` only around the steps that create or switch a worktree. Asking
+/// GitHub for a PR's head happens before the lock is taken, so a slow `gh` stalls only its own request.
+pub fn resolve_locked(
+    conn: &Connection,
+    spec: &WorkspaceSpec,
+    base: &Path,
+    pr_head: PrHead,
+    allow_primary: bool,
+    lock: Option<&std::sync::Mutex<()>>,
+) -> Result<PathBuf, ApiError> {
+    let lock = || lock.map(|l| l.lock().unwrap_or_else(|e| e.into_inner()));
     let (owner, name) = spec
         .repo
         .split_once('/')
@@ -112,6 +126,7 @@ pub fn resolve_in(conn: &Connection, spec: &WorkspaceSpec, base: &Path, pr_head:
         WorkspaceKind::MainClone => Ok(repo),
         WorkspaceKind::BranchWorktree => {
             let branch = spec.branch.as_deref().filter(|b| !b.is_empty()).ok_or_else(|| ApiError::bad_request("branch-worktree needs `branch`"))?;
+            let _guard = lock();
             let path = worktree::ensure_branch_worktree_in(&repo, &target("local", None, branch), None, base).map_err(no_wt)?;
             not_primary(path)
         }
@@ -119,8 +134,16 @@ pub fn resolve_in(conn: &Connection, spec: &WorkspaceSpec, base: &Path, pr_head:
             let number = spec.pr.ok_or_else(|| ApiError::bad_request("pr-worktree needs `pr`"))?;
             // The PR's real head branch always comes from GitHub: a client-supplied hint is only
             // trusted when it matches, so it cannot point a run at an unrelated worktree.
-            let (head_ref, head_sha) = pr_head(&repo, number).map_err(no_wt)?;
+            // Not trusted offline either: with `gh` unreachable the request fails rather than
+            // guessing which worktree the hint should map to.
+            let (head_ref, head_sha) = pr_head(&repo, number).map_err(|e| {
+                ApiError::new(
+                    ErrorCode::NoWorktree,
+                    format!("could not verify the head of PR #{number} with GitHub ({e}); the branch hint is not used without it, retry when `gh` is reachable"),
+                )
+            })?;
             validate_branch(&repo, &head_ref)?;
+            let _guard = lock();
             if let Some(hint) = spec.branch.as_deref().filter(|b| !b.is_empty()) {
                 if hint == head_ref {
                     let existing = worktree::list_worktrees(&repo).map_err(no_wt)?;
@@ -241,6 +264,29 @@ mod tests {
 
     fn no_gh(_: &Path, _: i64) -> AppResult<(String, String)> {
         panic!("gh must not be asked")
+    }
+
+    #[test]
+    fn github_is_asked_outside_the_workspace_lock_and_an_offline_gh_is_a_clear_error() {
+        let f = fixture();
+        let lock = std::sync::Mutex::new(());
+        let offline = |_: &Path, _: i64| -> AppResult<(String, String)> {
+            assert!(lock.try_lock().is_ok(), "gh must be asked without the lock");
+            Err(crate::error::AppError::Gh("timed out".into()))
+        };
+        let s = spec("acme/widgets", WorkspaceKind::PrWorktree, Some(7), Some("feat"));
+        let err = resolve_locked(&f.conn, &s, &f.base, &offline, true, Some(&lock)).unwrap_err();
+        assert_eq!(err.code, ErrorCode::NoWorktree);
+        assert!(err.message.contains("could not verify the head of PR #7") && err.message.contains("timed out"), "{}", err.message);
+        // reachable gh, existing worktree for the verified head: found, lock free during the ask
+        let wt = f.base.join("feat-wt");
+        git(&f.repo, &["worktree", "add", wt.to_str().unwrap(), "feat"]);
+        let online = |_: &Path, _: i64| -> AppResult<(String, String)> {
+            assert!(lock.try_lock().is_ok(), "gh must be asked without the lock");
+            Ok(("feat".into(), "0".repeat(40)))
+        };
+        let got = resolve_locked(&f.conn, &s, &f.base, &online, false, Some(&lock)).unwrap();
+        assert_eq!(got.canonicalize().unwrap(), wt.canonicalize().unwrap());
     }
 
     #[test]
