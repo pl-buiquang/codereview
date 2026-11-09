@@ -1,3 +1,4 @@
+pub mod ai;
 pub mod ai_gate;
 pub mod ai_usage;
 mod anchor;
