@@ -815,13 +815,14 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn option_like_values_and_bad_branches_are_refused() {
+        type Patch = Box<dyn Fn(&mut Value)>;
         let srv = server(1).await;
-        let post = |patch: Box<dyn Fn(&mut Value)>| {
+        let post = |patch: Patch| {
             let mut v: Value = serde_json::from_str(&run_body("k-bad", "true")).unwrap();
             patch(&mut v);
             v.to_string()
         };
-        let cases: Vec<Box<dyn Fn(&mut Value)>> = vec![
+        let cases: Vec<Patch> = vec![
             Box::new(|v| v["model"] = json!("--dangerously-skip-permissions")),
             Box::new(|v| {
                 v["tools"] = json!("allowlist");
