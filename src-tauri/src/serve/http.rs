@@ -113,9 +113,10 @@ impl Shared {
         Ok(h)
     }
 
-    fn resolve_workspace(&self, spec: &super::request::WorkspaceSpec) -> Result<PathBuf, ApiError> {
+    /// `read_only`: the run can't write, so a branch checked out in the main clone may be shared.
+    fn resolve_workspace(&self, spec: &super::request::WorkspaceSpec, read_only: bool) -> Result<PathBuf, ApiError> {
         let conn = crate::db::open(&self.app_db)?;
-        workspace::resolve_in(&conn, spec, &self.worktree_base, &*self.pr_head)
+        workspace::resolve_in(&conn, spec, &self.worktree_base, &*self.pr_head, read_only)
     }
 
     fn scratch(&self, run_id: i64) -> PathBuf {
@@ -249,6 +250,20 @@ fn needs_of(access: crate::ai::Access, tools: ToolsWire) -> Needs {
     Needs { access, tools: tools != ToolsWire::None, tool_allowlist: tools == ToolsWire::Allowlist }
 }
 
+/// Whether a request can only read: the one case that may share the user's main checkout.
+fn read_only_of(access: super::request::AccessWire, tools: ToolsWire) -> bool {
+    access == super::request::AccessWire::ReadOnly && matches!(tools, ToolsWire::None | ToolsWire::ReadOnly)
+}
+
+/// Values that end up in a harness' argv must not be readable as options.
+fn validate_args(model: &str, allowed_tools: &[String]) -> Result<(), ApiError> {
+    workspace::validate_arg_value("model", model)?;
+    for t in allowed_tools {
+        workspace::validate_arg_value("allowed tool", t)?;
+    }
+    Ok(())
+}
+
 fn caps_check(h: &dyn Harness, what: &str, needs: &Needs) -> Result<(), ApiError> {
     check_caps(h, what, needs).map_err(|e| ApiError::new(ErrorCode::CapabilityMissing, e.to_string()))
 }
@@ -258,9 +273,10 @@ async fn oneshot(State(s): State<SharedState>, body: Bytes) -> HttpResult<Json<O
     blocking(move || {
         static COUNTER: AtomicU64 = AtomicU64::new(0);
         let h = s.harness(&req.harness)?;
+        validate_args(&req.model, &req.allowed_tools)?;
         caps_check(h, "this call", &needs_of(req.access.access(), req.tools))?;
         let cwd = match &req.workspace {
-            Some(w) => s.resolve_workspace(w)?,
+            Some(w) => s.resolve_workspace(w, read_only_of(req.access, req.tools))?,
             None => std::env::temp_dir(),
         };
         let tag = format!("remote-oneshot-{}-{}", std::process::id(), COUNTER.fetch_add(1, Ordering::Relaxed));
@@ -305,13 +321,14 @@ fn create_run_blocking(s: &Shared, req: RunRequest) -> Result<(StatusCode, Value
         return Ok(existing(id));
     }
     let h = s.harness(&req.harness)?;
+    validate_args(&req.model, &req.allowed_tools)?;
     caps_check(h, "this run", &needs_of(req.access.access(), req.tools))?;
     let engine = &s.engine;
     if engine.active_count() as i64 >= s.max_queue {
         return Err(ApiError::new(ErrorCode::QueueFull, format!("{} runs are already queued or running", s.max_queue)));
     }
     let files = workspace::decode_attachments(&req.attachments)?;
-    let cwd = s.resolve_workspace(&req.workspace)?;
+    let cwd = s.resolve_workspace(&req.workspace, read_only_of(req.access, req.tools))?;
     // The attachment bytes are written to disk, never stored in the row.
     let stored = RunRequest { attachments: Vec::new(), ..req.clone() };
     let (id, created) = s
@@ -685,6 +702,43 @@ mod tests {
         assert_eq!(v["harnesses"][0]["caps"]["streaming"], true);
         let (status, v) = req(&srv, "GET", "/v1/nope", None).await;
         assert_eq!((status, v["error"]["code"].as_str()), (404, Some("not_found")));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn option_like_values_and_bad_branches_are_refused() {
+        let srv = server(1).await;
+        let post = |patch: Box<dyn Fn(&mut Value)>| {
+            let mut v: Value = serde_json::from_str(&run_body("k-bad", "true")).unwrap();
+            patch(&mut v);
+            v.to_string()
+        };
+        let cases: Vec<Box<dyn Fn(&mut Value)>> = vec![
+            Box::new(|v| v["model"] = json!("--dangerously-skip-permissions")),
+            Box::new(|v| {
+                v["tools"] = json!("allowlist");
+                v["allowed_tools"] = json!(["Read", "--evil"]);
+            }),
+            Box::new(|v| v["workspace"] = json!({"repo": "acme/widgets", "kind": "branch-worktree", "branch": "--upload-pack=x"})),
+            Box::new(|v| v["workspace"] = json!({"repo": "acme/widgets", "kind": "branch-worktree", "branch": "a..b"})),
+        ];
+        for case in cases {
+            let (status, v) = req(&srv, "POST", "/v1/runs", Some(&post(case))).await;
+            assert_eq!((status, v["error"]["code"].as_str()), (400, Some("bad_request")), "{v}");
+        }
+        // nothing was stored for a refused request
+        let (_, v) = req(&srv, "GET", "/v1/runs", None).await;
+        assert_eq!(v["runs"].as_array().map(Vec::len), Some(0));
+        let body = json!({"harness": "fake", "prompt": "x", "model": "-m"}).to_string();
+        let (status, _) = req(&srv, "POST", "/v1/oneshot", Some(&body)).await;
+        assert_eq!(status, 400);
+        // a branch of the main clone cannot be shared with a run that writes
+        let body = json!({
+            "idempotency_key": "k-main", "harness": "fake", "prompt": "go", "access": "edit", "tools": "edit",
+            "workspace": {"repo": "acme/widgets", "kind": "branch-worktree", "branch": "main"}
+        })
+        .to_string();
+        let (status, v) = req(&srv, "POST", "/v1/runs", Some(&body)).await;
+        assert_eq!((status, v["error"]["code"].as_str()), (422, Some("no_worktree")), "{v}");
     }
 
     #[tokio::test(flavor = "multi_thread")]
