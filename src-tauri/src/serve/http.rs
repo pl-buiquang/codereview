@@ -8,7 +8,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::body::Bytes;
-use axum::extract::{DefaultBodyLimit, Path as UrlPath, Query, State};
+use axum::extract::{DefaultBodyLimit, Path as UrlPath, Query, Request, State};
+use axum::middleware::Next;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
@@ -180,7 +181,48 @@ async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T, ApiError> + S
 // Router
 // ---------------------------------------------------------------------------------------------
 
-pub fn router(state: SharedState) -> Router {
+/// Browser-facing defences for the loopback TCP listener (the unix socket is out of a browser's reach).
+/// - Any `Origin` header is refused: browsers add it to cross-origin requests, the CLIs and the app never do.
+/// - `Host` must name a loopback address, which defeats DNS rebinding (TCP only).
+/// - A POST with a body must be `application/json`, so a plain HTML form cannot reach a handler.
+async fn guard(State(tcp): State<bool>, req: Request, next: Next) -> Response {
+    let refuse = |code, msg: &str| HttpError(ApiError::new(code, msg)).into_response();
+    let headers = req.headers();
+    if headers.contains_key("origin") {
+        return refuse(ErrorCode::Forbidden, "cross-origin requests are refused");
+    }
+    if tcp {
+        let host = headers.get("host").and_then(|v| v.to_str().ok()).unwrap_or("");
+        if !host_is_loopback(host) {
+            return refuse(ErrorCode::Forbidden, "the Host header must name a loopback address");
+        }
+    }
+    if req.method() == axum::http::Method::POST {
+        let has_body = headers.get("content-length").and_then(|v| v.to_str().ok()).map(|v| v.trim() != "0").unwrap_or(false)
+            || headers.contains_key("transfer-encoding");
+        let json = headers
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .map(|v| v.split(';').next().unwrap_or("").trim().eq_ignore_ascii_case("application/json"))
+            .unwrap_or(false);
+        if has_body && !json {
+            return refuse(ErrorCode::BadRequest, "Content-Type must be application/json");
+        }
+    }
+    next.run(req).await
+}
+
+/// `localhost`, `127.x.y.z` or `[::1]`, with or without a port.
+fn host_is_loopback(host: &str) -> bool {
+    let name = match host.strip_prefix('[') {
+        Some(rest) => rest.split(']').next().unwrap_or(""),
+        None => host.rsplit_once(':').map(|(h, _)| h).unwrap_or(host),
+    };
+    name.eq_ignore_ascii_case("localhost") || name.parse::<std::net::IpAddr>().map(|ip| ip.is_loopback()).unwrap_or(false)
+}
+
+/// `tcp`: the listener is a loopback TCP port, so the `Host` check applies.
+pub fn router(state: SharedState, tcp: bool) -> Router {
     Router::new()
         .route("/v1/info", get(info))
         .route("/v1/harnesses/{id}/models", get(models))
@@ -194,6 +236,7 @@ pub fn router(state: SharedState) -> Router {
         .route("/v1/sessions", get(sessions))
         .fallback(|| async { HttpError(ApiError::new(ErrorCode::NotFound, "no such endpoint")) })
         .layer(DefaultBodyLimit::max(workspace::MAX_ATTACHMENTS_TOTAL * 2))
+        .layer(axum::middleware::from_fn_with_state(tcp, guard))
         .with_state(state)
 }
 
@@ -682,7 +725,7 @@ mod tests {
     async fn call<S: AsyncReadExt + AsyncWriteExt + Unpin>(mut s: S, method: &str, path: &str, body: Option<&str>) -> (u16, String) {
         let body = body.unwrap_or("");
         let req = format!(
-            "{method} {path} HTTP/1.1\r\nHost: t\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+            "{method} {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
             body.len()
         );
         s.write_all(req.as_bytes()).await.unwrap();
@@ -997,6 +1040,70 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(1500)).await;
         let (status, v) = req(&srv, "POST", "/v1/oneshot", Some(&quick)).await;
         assert_eq!(status, 200, "{v}");
+    }
+
+    /// A request with exactly these header lines.
+    async fn raw(srv: &Server, method: &str, path: &str, headers: &[&str], body: &str) -> (u16, Value) {
+        let mut text = format!("{method} {path} HTTP/1.1\r\nConnection: close\r\n");
+        for h in headers {
+            text.push_str(&format!("{h}\r\n"));
+        }
+        text.push_str(&format!("Content-Length: {}\r\n\r\n{body}", body.len()));
+        let mut s = tokio::net::TcpStream::connect(srv.addr).await.unwrap();
+        s.write_all(text.as_bytes()).await.unwrap();
+        let mut out = Vec::new();
+        s.read_to_end(&mut out).await.unwrap();
+        let out = String::from_utf8_lossy(&out).to_string();
+        let (head, rest) = out.split_once("\r\n\r\n").unwrap();
+        let status = head.split_whitespace().nth(1).unwrap().parse().unwrap();
+        let rest = if head.to_ascii_lowercase().contains("transfer-encoding: chunked") { dechunk(rest) } else { rest.to_string() };
+        (status, serde_json::from_str(&rest).unwrap_or(Value::String(rest)))
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_tcp_listener_refuses_foreign_hosts_origins_and_non_json_posts() {
+        let srv = server(1).await;
+        let body = json!({"harness": "fake", "prompt": "hi"}).to_string();
+        // DNS rebinding: the Host is an attacker's name
+        let (s, v) = raw(&srv, "GET", "/v1/info", &["Host: evil.example.com"], "").await;
+        assert_eq!((s, v["error"]["code"].as_str()), (403, Some("forbidden")), "{v}");
+        let (s, _) = raw(&srv, "GET", "/v1/info", &["Host: 127.0.0.1:7777"], "").await;
+        assert_eq!(s, 200);
+        let (s, _) = raw(&srv, "GET", "/v1/info", &["Host: [::1]:7777"], "").await;
+        assert_eq!(s, 200);
+        let (s, _) = raw(&srv, "GET", "/v1/info", &["Host: 127.0.0.1.evil.example.com"], "").await;
+        assert_eq!(s, 403);
+        // CSRF from a web page: browsers add Origin
+        let (s, v) = raw(&srv, "POST", "/v1/runs/1/stop", &["Host: localhost", "Origin: https://evil.example.com"], "").await;
+        assert_eq!((s, v["error"]["code"].as_str()), (403, Some("forbidden")), "{v}");
+        // a form post cannot be application/json
+        for ct in ["Content-Type: text/plain", "Content-Type: application/x-www-form-urlencoded"] {
+            let (s, v) = raw(&srv, "POST", "/v1/oneshot", &["Host: localhost", ct], &body).await;
+            assert_eq!((s, v["error"]["code"].as_str()), (400, Some("bad_request")), "{ct}: {v}");
+        }
+        let (s, v) = raw(&srv, "POST", "/v1/oneshot", &["Host: localhost"], &body).await;
+        assert_eq!(s, 400, "{v}");
+        let (s, v) = raw(&srv, "POST", "/v1/oneshot", &["Host: localhost", "Content-Type: application/json; charset=utf-8"], &body).await;
+        assert_eq!(s, 200, "{v}");
+        // a body-less POST (stop) needs no content type; the run does not exist
+        let (s, _) = raw(&srv, "POST", "/v1/runs/999/stop", &["Host: localhost"], "").await;
+        assert_eq!(s, 404);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_unix_socket_skips_the_host_check_but_not_the_origin_one() {
+        let srv = server(1).await;
+        let sock = srv._dir.path().join("g.sock");
+        let bound = super::super::daemon::Bound::bind(&crate::serve::Listen::Unix(sock.clone())).await.unwrap();
+        tokio::spawn(super::super::daemon::serve(srv.state.clone(), bound, std::future::pending()));
+        let text = |host: &str, extra: &str| format!("GET /v1/info HTTP/1.1\r\nHost: {host}\r\n{extra}Connection: close\r\nContent-Length: 0\r\n\r\n");
+        for (req_text, want) in [(text("anything", ""), "200"), (text("anything", "Origin: https://x\r\n"), "403")] {
+            let mut s = tokio::net::UnixStream::connect(&sock).await.unwrap();
+            s.write_all(req_text.as_bytes()).await.unwrap();
+            let mut out = String::new();
+            s.read_to_string(&mut out).await.unwrap();
+            assert!(out.starts_with(&format!("HTTP/1.1 {want}")), "{out}");
+        }
     }
 
     #[tokio::test(flavor = "multi_thread")]

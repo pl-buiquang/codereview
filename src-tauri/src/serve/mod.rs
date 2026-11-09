@@ -41,6 +41,7 @@ pub enum ErrorCode {
     QueueFull,
     Conflict,
     Timeout,
+    Forbidden,
     BadRequest,
     NotFound,
     Internal,
@@ -56,6 +57,7 @@ impl ErrorCode {
             ErrorCode::QueueFull => "queue_full",
             ErrorCode::Conflict => "conflict",
             ErrorCode::Timeout => "timeout",
+            ErrorCode::Forbidden => "forbidden",
             ErrorCode::BadRequest => "bad_request",
             ErrorCode::NotFound => "not_found",
             ErrorCode::Internal => "internal",
@@ -70,6 +72,7 @@ impl ErrorCode {
             ErrorCode::QueueFull => 429,
             ErrorCode::Conflict => 409,
             ErrorCode::Timeout => 504,
+            ErrorCode::Forbidden => 403,
             ErrorCode::Internal => 500,
         }
     }

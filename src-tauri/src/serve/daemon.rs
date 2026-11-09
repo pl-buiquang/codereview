@@ -61,7 +61,7 @@ impl Bound {
 
 /// Serve the API on `bound` until `shutdown` completes. Open event streams do not hold it back.
 pub async fn serve(state: SharedState, bound: Bound, shutdown: impl Future<Output = ()>) -> std::io::Result<()> {
-    let app = http::router(state);
+    let app = http::router(state, matches!(bound, Bound::Tcp(_)));
     match bound {
         Bound::Tcp(l) => {
             tokio::select! { r = axum::serve(l, app) => r, _ = shutdown => Ok(()) }

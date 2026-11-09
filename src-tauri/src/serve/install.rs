@@ -135,7 +135,7 @@ pub fn status(listen: &Listen) -> AppResult<String> {
 
 /// `GET /v1/info` over a blocking socket.
 pub fn probe_info(listen: &Listen) -> Result<serde_json::Value, String> {
-    let request = "GET /v1/info HTTP/1.1\r\nHost: cr\r\nConnection: close\r\nAccept: application/json\r\n\r\n";
+    let request = "GET /v1/info HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nAccept: application/json\r\n\r\n";
     let mut raw = Vec::new();
     match listen {
         Listen::Unix(p) => exchange(std::os::unix::net::UnixStream::connect(p).map_err(|e| e.to_string())?, request, &mut raw)?,
