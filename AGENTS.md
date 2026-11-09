@@ -94,7 +94,7 @@ prompts and neutral options, runs them on the shared run engine (one `RunEngine`
 or loopback only (SSH tunnel; no token). Workspaces come from the repo registry of the app DB
 (`unknown_repo` otherwise; no auto-clone). Inside a remote run (`CODEREVIEW_REMOTE_RUN` set) `cr` writes
 board/focus/notify as outbox ops and answers reads from `context.json`; see `serve/remote.rs` for the op
-list. The serve DB has its own append-only migration list in `serve/store.rs`. Keep the wire types
+list. The serve DB has its own append-only migration list in `serve/store.rs`. A run row is `preparing` until its attachments are written (the engine ignores it), and `ServeStore::prune` is time-based (14 days) so idempotency keys outlive a client outage. `http.rs::guard` holds the TCP browser defences (Origin, Host, JSON content type); workspace resolution is serialised and validates branches (`workspace.rs`). Keep the wire types
 (`serve/request.rs`) and the endpoint list backward compatible within a `PROTOCOL`; bump it otherwise.
 The run types the engine and harnesses share (`RunTag`, `RunUsage`, `now_stamp`) live in `run_usage.rs`,
 not in the Tauri-bound `ai_usage.rs`.

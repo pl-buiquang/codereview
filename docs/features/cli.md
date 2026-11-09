@@ -142,7 +142,7 @@ tunnel (`ssh -L 7777:127.0.0.1:7777 host`, or forward the socket). It stores no 
 | Command | Description |
 |---|---|
 | `cr serve [--listen <path\|host:port>] [--serve-db <file>] [--max-concurrency <n>] [--log-level <l>]` | Run the daemon in the foreground. `--db` (global) is the codereview DB it reads the repo registry from; `--serve-db` (or `CODEREVIEW_SERVE_DB`) is its own database of runs, events and the outbox |
-| `cr serve --install [flags]` | Write a systemd user unit (`cr-serve.service`, `KillMode=process`) running that command, and enable it |
+| `cr serve --install [flags]` | Write a systemd user unit (`cr-serve.service`, `KillMode=process`) running that command, and enable it. `ExecStart` is the absolute path of the `cr` binary that ran `--install` (`current_exe()`), so re-run `--install` after moving or replacing the binary |
 | `cr serve --uninstall` | Stop and remove the unit |
 | `cr serve --status` | The unit's state and the daemon's `/v1/info`, if it answers |
 
@@ -156,6 +156,15 @@ Inside a remote run `cr` does not touch a database. `cr board meta add|rm`, `cr 
 when it mirrors the run); `cr board list|show`, `cr board meta list` and `cr focus show` print
 JSON from the context snapshot that came with the run request. Every other command fails with
 "not available in a remote run". `cr notify` exists only for this case.
+
+A systemd user service stops when the user's last session ends, so on a server run
+`loginctl enable-linger $USER` once; without it the daemon (and the runs it adopted) disappear at logout.
+
+Security: the unix socket (mode 0600, in a 0700 directory) is the default and the safe choice. A
+loopback TCP port has no authentication, so any local user can use it; the daemon therefore refuses
+requests with an `Origin` header, a non-loopback `Host`, and POST bodies that are not
+`application/json`. The serve database and the run directories are owner-only. Concurrent runs are
+capped (`--max-concurrency`), as are one-shot calls; finished runs are kept for 14 days.
 
 macOS has no systemd: run `cr serve` from a launchd agent (`~/Library/LaunchAgents/*.plist` with
 `ProgramArguments` = `cr serve --listen ...` and `KeepAlive`), and set `AbandonProcessGroup` so a

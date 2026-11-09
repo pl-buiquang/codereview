@@ -65,7 +65,8 @@ Each area has a page under [`docs/features/`](docs/features/).
 - **`cr` CLI and deep links** — script the same database from a terminal; `codereview://` links.
   → [CLI](docs/features/cli.md)
 - **`cr serve`** — a daemon exposing this machine's AI harnesses over HTTP+SSE (unix socket or
-  loopback, reached through SSH), for running routines on a remote machine.
+  loopback, reached through SSH), for running routines on a remote machine. Run
+  `loginctl enable-linger $USER` on the host or systemd stops the user unit when you log out.
   → [remote agent daemon](docs/features/cli.md#remote-agent-daemon-cr-serve)
 - **Settings & themes** — 4 design directions × dark/light/system, sync modes, AI profiles and
   usage, backup, auto-update. → [settings](docs/features/settings.md), [THEMING.md](THEMING.md)
