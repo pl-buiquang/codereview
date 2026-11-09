@@ -62,10 +62,45 @@ CREATE TABLE serve_outbox (
 );
 "#];
 
-/// Open (and migrate) the serve DB at `path`.
+/// Create `dir` (and missing parents) readable by the owner only. An existing directory is left alone.
+#[cfg(unix)]
+pub fn create_private_dir(dir: &Path) -> std::io::Result<()> {
+    use std::os::unix::fs::DirBuilderExt;
+    std::fs::DirBuilder::new().recursive(true).mode(0o700).create(dir)
+}
+
+#[cfg(not(unix))]
+pub fn create_private_dir(dir: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dir)
+}
+
+/// Make `dir` owner-only even when it already exists (the daemon's own directories).
+#[cfg(unix)]
+pub fn restrict_dir(dir: &Path) -> std::io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    create_private_dir(dir)?;
+    std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))
+}
+
+#[cfg(not(unix))]
+pub fn restrict_dir(dir: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dir)
+}
+
+/// Open (and migrate) the serve DB at `path`. The file is created owner-only, so the `-wal` and
+/// `-shm` files SQLite derives from it are too (prompts and answers are stored in it).
 pub fn open(path: &Path) -> AppResult<Connection> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
+    if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+        create_private_dir(parent)?;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        if !path.exists() {
+            std::fs::OpenOptions::new().write(true).create(true).truncate(false).mode(0o600).open(path)?;
+        } else if std::fs::metadata(path)?.permissions().mode() & 0o077 != 0 {
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+        }
     }
     let conn = Connection::open(path)?;
     conn.execute_batch("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;")?;
@@ -509,6 +544,34 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let db = ServeDb::open(&dir.path().join(format!("{name}.db"))).unwrap();
         (dir, db)
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn the_db_and_its_wal_are_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        let dir = tempfile::tempdir().unwrap();
+        let data = dir.path().join("fresh").join("data");
+        let path = data.join("serve.db");
+        let db = ServeDb::open(&path).unwrap();
+        db.insert_run("k", "claude", "", "{}", Path::new("/tmp"), 60).unwrap();
+        assert_eq!(mode(&data), 0o700);
+        assert_eq!(mode(&path), 0o600);
+        let wal = data.join("serve.db-wal");
+        assert!(wal.exists());
+        assert_eq!(mode(&wal), 0o600);
+        // a DB that an older version left world-readable is tightened
+        drop(db);
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        ServeDb::open(&path).unwrap();
+        assert_eq!(mode(&path), 0o600);
+        // restrict_dir tightens a directory that already exists
+        let shared = dir.path().join("shared");
+        std::fs::create_dir(&shared).unwrap();
+        std::fs::set_permissions(&shared, std::fs::Permissions::from_mode(0o755)).unwrap();
+        restrict_dir(&shared).unwrap();
+        assert_eq!(mode(&shared), 0o700);
     }
 
     #[test]

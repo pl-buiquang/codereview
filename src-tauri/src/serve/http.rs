@@ -76,6 +76,9 @@ pub struct Settings {
 
 /// Build the shared state: one run engine per available harness, each over its own view of the store.
 pub fn build(settings: Settings, harnesses: Vec<&'static dyn Harness>) -> AppResult<SharedState> {
+    // Runs hold prompts, answers and attachments: owner-only, whatever the umask.
+    let runs_base = settings.data_dir.join("serve_runs");
+    super::store::restrict_dir(&runs_base)?;
     let db = ServeDb::open(&settings.serve_db_path)?;
     let cap = Arc::new(AtomicI64::new(settings.max_concurrency.max(1)));
     let (tx, _) = broadcast::channel(256);
@@ -87,7 +90,7 @@ pub fn build(settings: Settings, harnesses: Vec<&'static dyn Harness>) -> AppRes
         });
     }
     let default = *harnesses.first().ok_or_else(|| AppError::Other("no harness".into()))?;
-    let store = ServeStore::new(db.clone(), cap.clone(), settings.data_dir.join("serve_runs"));
+    let store = ServeStore::new(db.clone(), cap.clone(), runs_base.clone());
     let sink = Arc::new(ServeSink {
         store: store.clone(),
         changes: changes.clone(),
@@ -109,7 +112,7 @@ pub fn build(settings: Settings, harnesses: Vec<&'static dyn Harness>) -> AppRes
         oneshot_slots: Arc::new(tokio::sync::Semaphore::new(settings.max_concurrency.max(1) as usize)),
         oneshot_timeout: settings.oneshot_timeout,
         workspace_lock: std::sync::Mutex::new(()),
-        runs_base: settings.data_dir.join("serve_runs"),
+        runs_base,
     }))
 }
 
@@ -1058,6 +1061,17 @@ mod tests {
         let status = head.split_whitespace().nth(1).unwrap().parse().unwrap();
         let rest = if head.to_ascii_lowercase().contains("transfer-encoding: chunked") { dechunk(rest) } else { rest.to_string() };
         (status, serde_json::from_str(&rest).unwrap_or(Value::String(rest)))
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_runs_dir_and_the_serve_db_are_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let srv = server(1).await;
+        let id = create(&srv, "k-perm", OK_RUN).await;
+        wait_done(&srv, id).await;
+        let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&srv.state.runs_base), 0o700);
+        assert_eq!(mode(&srv.state.serve_db_path), 0o600);
     }
 
     #[tokio::test(flavor = "multi_thread")]
