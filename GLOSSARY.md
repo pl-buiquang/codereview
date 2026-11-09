@@ -34,6 +34,10 @@ Glossary of domain terms used in this app.
 - **Access** — the neutral permission level of a run: default, read-only, edit, full.
 - **Profile** — planned: a named configuration of a harness (harness, model, settings) that
   features and routines select.
+- **Run engine** — the Tauri-free queue / process / event machinery behind routine runs
+  (`run_engine/`). The host supplies a `RunStore` (where runs and events live) and an `EventSink`
+  (what happens on events and when a run finishes); the app and, later, `cr serve` each plug in
+  their own.
 
 ## Reviews
 

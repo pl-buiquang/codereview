@@ -145,3 +145,23 @@ pub trait EventSink: Send + Sync {
     /// The run is over and recorded in the store.
     fn finished(&self, id: i64, fin: &Finished);
 }
+
+#[cfg(test)]
+mod tests {
+    /// The engine must stay usable from `cr serve`: no Tauri anywhere in this module.
+    #[test]
+    fn engine_has_no_tauri_dependency() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/run_engine");
+        for entry in std::fs::read_dir(dir).unwrap().flatten() {
+            let path = entry.path();
+            let text = std::fs::read_to_string(&path).unwrap();
+            // the needle is built at run time so this file does not match itself
+            let needle = format!("{}{}", "tau", "ri");
+            for (n, line) in text.lines().enumerate() {
+                let code = line.trim_start();
+                let is_use = code.starts_with("use ") || code.starts_with("pub use ") || code.contains(&format!("{needle}::"));
+                assert!(!(is_use && code.contains(&needle)), "{}:{} depends on {needle}: {line}", path.display(), n + 1);
+            }
+        }
+    }
+}

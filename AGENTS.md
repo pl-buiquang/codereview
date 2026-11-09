@@ -64,6 +64,13 @@ each harness translates them; `Caps` says what a harness supports. Never shell o
 a feature: add a field to the request type instead. Auth stays in the CLI, no token is stored. See
 `docs/adr/0006-ai-harness-and-profiles.md`.
 
+**Routine runs go through the run engine** (`src-tauri/src/run_engine/`, no Tauri import, a test
+enforces it): FIFO queue under `routine_max_concurrency`, per-run directory with stdout/stderr
+files (runs outlive the app), process groups, stop/timeout, tailing into numbered events, detach and
+re-adopt. The host plugs in a `RunStore` and an `EventSink`; `routines/manager.rs` is the app's
+adapter (SQLite store, Tauri events, handlers, notifications, usage log, and the preparation of a
+run). Launch processes only through `Harness`; keep Tauri out of the engine.
+
 **Comment anchoring contract** (the subtle cross-layer piece): a comment is identified by
 `(file_path, side, line)` where `side ∈ {LEFT, RIGHT}`. This same triple is the bridge across three
 places and must stay consistent:
