@@ -17,14 +17,14 @@ basics.
 
 | Feature | Claude Code | Other harnesses |
 |---|---|---|
-| Listed in Sessions (live) | yes | opencode: yes, TUIs running now (id, cwd, last activity, title); Codex: not yet |
+| Listed in Sessions (live) | yes | opencode and Codex: yes, TUIs running now (id, cwd, last activity, title) |
 | Session history, hook summaries, generated summaries | yes | no |
 | Focus the terminal, attach, stop, background jobs | yes | no |
 | Harness badge and filter in Sessions | yes | yes |
 | Open a new interactive session | yes | yes (`interactive_argv`) |
 | Resume from History | yes | no (history is Claude-only); a routine run resumes on its own harness from the Runs tab |
 | Card linking (session shown on the board card) | yes (pinned id, `claude_session`) | only if the harness pins a session id (`ai_session`); otherwise nothing is recorded |
-| Context file for issue sessions | appended to the system prompt | opencode: passed as the opening prompt of a new session; a harness that can't take it skips it with a note |
+| Context file for issue sessions | appended to the system prompt | opencode, Codex: passed as the opening prompt of a new session; a harness that can't take it skips it with a note |
 
 ---
 
@@ -57,7 +57,7 @@ Each area has a page under [`docs/features/`](docs/features/).
   with an auto-merge monitor and card metadata (plans, links, Claude sessions).
   → [board & inbox](docs/features/board-inbox.md)
 - **Focus & AI** — AI-tiered hunks so you read what matters, in-app review runs, a chat panel and
-  editable prompts, via the `claude` or `opencode` CLI (profiles pick the harness and model).
+  editable prompts, via the `claude`, `opencode` or `codex` CLI (profiles pick the harness and model).
   → [focus & AI](docs/features/focus-and-ai.md)
 - **Routines** — unattended AI runs on PRs, issues and the board: babysit CI, plan an issue,
   refine the plan in an agent session, implement it into a draft PR.

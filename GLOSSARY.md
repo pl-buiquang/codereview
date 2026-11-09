@@ -22,7 +22,7 @@ Glossary of domain terms used in this app.
 
 ## AI harness
 
-- **Harness** — a way of running an AI agent or model (Claude Code or opencode today; Codex or a
+- **Harness** — a way of running an AI agent or model (Claude Code, opencode or Codex today; a
   remote wrapper later). Implements the `Harness` trait; every AI feature of the app calls it
   instead of a CLI.
 - **Capabilities (Caps)** — what a harness supports (sessions, resume, fork, tools, streaming,

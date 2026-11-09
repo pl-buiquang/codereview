@@ -59,10 +59,12 @@ there is no git library and **no token is ever stored**; auth is entirely delega
 summaries, routine runs and interactive-session argv. It is an object-safe, synchronous trait like
 `provider.rs`; **profiles** select the harness (`ai::profiles`: routine profile, then feature profile
 for chat / summaries / theme / sessions, then the default; `ai::harness_by_id()` is the registry,
-Claude Code and opencode exist) and `ai/claude.rs` / `ai/opencode.rs` are the only places that
-build a `claude` / `opencode` command line or parse its output. `Harness::models()` feeds the
+Claude Code, opencode and Codex exist) and `ai/claude.rs` / `ai/opencode.rs` / `ai/codex.rs` are the
+only places that build a `claude` / `opencode` / `codex` command line or parse its output. `Harness::models()` feeds the
 profile editor's model picker (`ai_harness_models`, cached in `ai/models.rs`); opencode reports
 usage per step, so `Harness::accumulates` + `RunAcc` fold the final text and usage over the stream.
+Codex assigns its own session ids (`pins_session_id` false): `TurnResult.session_id` and
+`Harness::session_of_line` carry the id back, and `"allow_full"` in the profile settings gates its no-sandbox mode.
 Requests are neutral (`OneShot`, `ToolPolicy`, `Access`, `SessionMode`, `SystemPromptMode`) and
 each harness translates them; `Caps` says what a harness supports and `ai::check_caps` refuses a
 launch that exceeds them. Never shell out to `claude` from a feature: add a field to the request
