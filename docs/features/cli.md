@@ -131,21 +131,21 @@ See [`skills/board/SKILL.md`](../../skills/board/SKILL.md) for the agent workflo
 | `cr focus show <id>` | Status, level, model, stale marker, summary, tier counts, AI notes |
 | `cr focus clear <id>` | Delete the focus |
 
-## Remote agent daemon (`cr serve`)
+## Remote agent daemon (`cr worker`)
 
-`cr serve` runs the harnesses of this machine behind a versioned HTTP+SSE API (`/v1`), so another
+`cr worker` runs the harnesses of this machine behind a versioned HTTP+SSE API (`/v1`), so another
 instance of the app can launch runs and one-shot calls here. It listens on a **unix socket** (default
-`$XDG_RUNTIME_DIR/codereview/serve.sock`) or a **loopback** port only; reach it from the other machine with an SSH
+`$XDG_RUNTIME_DIR/codereview/worker.sock`) or a **loopback** port only; reach it from the other machine with an SSH
 tunnel (`ssh -L 7777:127.0.0.1:7777 host`, or forward the socket); the app opens that tunnel itself for the
 hosts configured in Settings → AI → Hosts ([setup guide](remote-hosts.md)). It stores no token. Design:
 [ADR 0007](../adr/0007-remote-agent-daemon.md).
 
 | Command | Description |
 |---|---|
-| `cr serve [--listen <path\|host:port>] [--serve-db <file>] [--max-concurrency <n>] [--log-level <l>]` | Run the daemon in the foreground. `--db` (global) is the codereview DB it reads the repo registry from; `--serve-db` (or `CODEREVIEW_SERVE_DB`) is its own database of runs, events and the outbox |
-| `cr serve --install [flags]` | Write a systemd user unit (`cr-serve.service`, `KillMode=process`) running that command, and enable it. `ExecStart` is the absolute path of the `cr` binary that ran `--install` (`current_exe()`), so re-run `--install` after moving or replacing the binary |
-| `cr serve --uninstall` | Stop and remove the unit |
-| `cr serve --status` | The unit's state and the daemon's `/v1/info`, if it answers |
+| `cr worker [--listen <path\|host:port>] [--worker-db <file>] [--max-concurrency <n>] [--log-level <l>]` | Run the daemon in the foreground. `--db` (global) is the codereview DB it reads the repo registry from; `--worker-db` (or `CODEREVIEW_WORKER_DB`) is its own database of runs, events and the outbox |
+| `cr worker --install [flags]` | Write a systemd user unit (`cr-worker.service`, `KillMode=process`) running that command, and enable it. `ExecStart` is the absolute path of the `cr` binary that ran `--install` (`current_exe()`), so re-run `--install` after moving or replacing the binary |
+| `cr worker --uninstall` | Stop and remove the unit |
+| `cr worker --status` | The unit's state and the daemon's `/v1/info`, if it answers |
 
 The remote must already know the repos: register them there with `cr repo add <path>`. A request that
 names an unknown repo fails with `unknown_repo`; nothing is cloned. Stopping the daemon (or the unit)
@@ -168,11 +168,11 @@ A systemd user service stops when the user's last session ends, so on a server r
 Security: the unix socket (mode 0600, in a 0700 directory) is the default and the safe choice. A
 loopback TCP port has no authentication, so any local user can use it; the daemon therefore refuses
 requests with an `Origin` header, a non-loopback `Host`, and POST bodies that are not
-`application/json`. The serve database and the run directories are owner-only. Concurrent runs are
+`application/json`. The worker database and the run directories are owner-only. Concurrent runs are
 capped (`--max-concurrency`), as are one-shot calls; finished runs are kept for 14 days.
 
-macOS has no systemd: run `cr serve` from a launchd agent (`~/Library/LaunchAgents/*.plist` with
-`ProgramArguments` = `cr serve --listen ...` and `KeepAlive`), and set `AbandonProcessGroup` so a
+macOS has no systemd: run `cr worker` from a launchd agent (`~/Library/LaunchAgents/*.plist` with
+`ProgramArguments` = `cr worker --listen ...` and `KeepAlive`), and set `AbandonProcessGroup` so a
 restart does not kill live runs.
 
 ## Opening the app

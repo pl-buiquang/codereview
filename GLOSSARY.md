@@ -51,11 +51,11 @@ Glossary of domain terms used in this app.
   enabled flag are editable.
 - **Run engine** — the Tauri-free queue / process / event machinery behind routine runs
   (`run_engine/`). The host supplies a `RunStore` (where runs and events live) and an `EventSink`
-  (what happens on events and when a run finishes); the app and `cr serve` each plug in their own.
-- **Remote agent daemon (`cr serve`)** — a long-lived process that exposes the local harnesses of its
+  (what happens on events and when a run finishes); the app and `cr worker` each plug in their own.
+- **Remote agent daemon (`cr worker`)** — a long-lived process that exposes the local harnesses of its
   machine over `/v1` HTTP+SSE on a unix socket or loopback port (reached through an SSH tunnel). A plain
   executor with its own run store; it never sees routine definitions or prompt templates (ADR 0007).
-- **Host** — a machine running `cr serve`, reached over an SSH tunnel the app opens (an SSH alias plus
+- **Host** — a machine running `cr worker`, reached over an SSH tunnel the app opens (an SSH alias plus
   the daemon's endpoint). A profile with a host runs its harness there. Connection states: not connected,
   connecting, connected, unreachable, protocol mismatch.
 - **Remote profile / remote run** — a profile with a host, and a plain routine run it starts: the host

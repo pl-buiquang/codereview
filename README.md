@@ -64,11 +64,11 @@ Each area has a page under [`docs/features/`](docs/features/).
   → [routines](docs/features/routines.md)
 - **`cr` CLI and deep links** — script the same database from a terminal; `codereview://` links.
   → [CLI](docs/features/cli.md)
-- **`cr serve`** — a daemon exposing this machine's AI harnesses over HTTP+SSE (unix socket or
+- **`cr worker`** — a daemon exposing this machine's AI harnesses over HTTP+SSE (unix socket or
   loopback, reached through SSH), for running routines on a remote machine. Run
   `loginctl enable-linger $USER` on the host or systemd stops the user unit when you log out.
-  → [remote agent daemon](docs/features/cli.md#remote-agent-daemon-cr-serve)
-- **Remote hosts** — point a profile at another machine running `cr serve`: the app opens the SSH tunnel,
+  → [remote agent daemon](docs/features/cli.md#remote-agent-daemon-cr-worker)
+- **Remote hosts** — point a profile at another machine running `cr worker`: the app opens the SSH tunnel,
   runs plain routines there and mirrors them (transcript, status, board writes, notifications), resuming
   after a dropped connection or a restart. → [remote hosts](docs/features/remote-hosts.md)
 - **Settings & themes** — 4 design directions × dark/light/system, sync modes, AI profiles and

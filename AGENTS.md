@@ -88,21 +88,21 @@ other), written by `Harness::normalize`. The engine takes a run's status, text a
 parser for rows without one. A new harness implements `normalize` and ships fixtures; unknown
 lines map to `Other`, never fail.
 
-**`cr serve`** (`src-tauri/src/serve/`, ADR 0007) is a daemon of the `cr` binary that exposes the local
-harnesses over `/v1` HTTP+SSE (axum, behind the default `serve` cargo feature; the store, wire types,
+**`cr worker`** (`src-tauri/src/worker/`, ADR 0007) is a daemon of the `cr` binary that exposes the local
+harnesses over `/v1` HTTP+SSE (axum, behind the default `worker` cargo feature; the store, wire types,
 workspace resolver, outbox and systemd helpers are plain Rust). It is a plain executor: it gets rendered
 prompts and neutral options, runs them on the shared run engine (one `RunEngine` for all harnesses, each run naming its own, a
-`ServeStore` over the daemon's own SQLite, `ServeSink` as the sink) and listens on a unix socket
+`WorkerStore` over the daemon's own SQLite, `WorkerSink` as the sink) and listens on a unix socket
 or loopback only (SSH tunnel; no token). Workspaces come from the repo registry of the app DB
 (`unknown_repo` otherwise; no auto-clone). Inside a remote run (`CODEREVIEW_REMOTE_RUN` set) `cr` writes
-board/focus/notify as outbox ops and answers reads from `context.json`; see `serve/remote.rs` for the op
-list. The serve DB has its own append-only migration list in `serve/store.rs`. A run row is `preparing` until its attachments are written (the engine ignores it), and `ServeStore::prune` is time-based (14 days) so idempotency keys outlive a client outage. `http.rs::guard` holds the TCP browser defences (Origin, Host, JSON content type); workspace resolution is serialised and validates branches (`workspace.rs`). Keep the wire types
-(`serve/request.rs`) and the endpoint list backward compatible within a `PROTOCOL`; bump it otherwise.
+board/focus/notify as outbox ops and answers reads from `context.json`; see `worker/remote.rs` for the op
+list. The worker DB has its own append-only migration list in `worker/store.rs`. A run row is `preparing` until its attachments are written (the engine ignores it), and `WorkerStore::prune` is time-based (14 days) so idempotency keys outlive a client outage. `http.rs::guard` holds the TCP browser defences (Origin, Host, JSON content type); workspace resolution is serialised and validates branches (`workspace.rs`). Keep the wire types
+(`worker/request.rs`) and the endpoint list backward compatible within a `PROTOCOL`; bump it otherwise.
 The run types the engine and harnesses share (`RunTag`, `RunUsage`, `now_stamp`) live in `run_usage.rs`,
 not in the Tauri-bound `ai_usage.rs`.
 
 **Remote hosts** (`src-tauri/src/remote/`, ADR 0008, `docs/features/remote-hosts.md`) are the app side of
-`cr serve`: `host.rs` (the `host` table, an SSH alias + the daemon's endpoint), `tunnel.rs` (the system
+`cr worker`: `host.rs` (the `host` table, an SSH alias + the daemon's endpoint), `tunnel.rs` (the system
 `ssh -N -L`, health checks, backoff, the per-host `ConnState`; `HostSpec`/`Health` keep it testable with a fake
 `ssh`), `http.rs`/`client.rs` (a blocking HTTP/SSE client of `/v1` over the tunnel's local end; errors are
 `RemoteError` strings `<code>: <message>` with the API's codes plus `host_unreachable`, `protocol_mismatch`,
@@ -114,7 +114,7 @@ plugged in through `MirrorHooks`) and `outbox.rs` (applies the run's outbox ops 
 `launch_remote` instead of the local engine, and every local-engine query ignores rows with a `host_id`. Local-only
 work (chat, interactive sessions, system routines) calls `Resolved::ensure_local`; a new feature that cannot run
 remotely must do the same. A harness' availability message comes from `Harness::unavailable_reason`. Tests use
-`remote::test_server` (an in-process `cr serve` on a unix socket, a TCP `Proxy` that cuts connections, a fake `ssh`
+`remote::test_server` (an in-process `cr worker` on a unix socket, a TCP `Proxy` that cuts connections, a fake `ssh`
 script): never a real host.
 
 **Comment anchoring contract** (the subtle cross-layer piece): a comment is identified by

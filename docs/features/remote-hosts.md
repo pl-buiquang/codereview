@@ -1,6 +1,6 @@
 # Remote hosts
 
-A **host** is another machine running the `cr serve` daemon ([ADR 0007](../adr/0007-remote-agent-daemon.md)).
+A **host** is another machine running the `cr worker` daemon ([ADR 0007](../adr/0007-remote-agent-daemon.md)).
 A profile that points at a host runs its harness there: plain routines (babysit, the issue routines, your own)
 and one-shot features (theme suggestions, session summaries) execute on the host, with the host's
 checkouts, tools and harness logins. The app keeps a **mirror** of each remote run, so the transcript, status,
@@ -22,10 +22,10 @@ You need SSH access to the host (key or agent; the app never prompts for a passw
    `cr repo add ~/code/widgets`. The host never clones by itself: a request for a repository it does not
    know fails with `unknown_repo`. The repository needs a GitHub `origin` remote (the request names
    `owner/name`).
-3. **Start the daemon as a service**: `cr serve --install` (a systemd user unit, `cr-serve.service`; macOS needs a
-   launchd agent, see [the CLI reference](cli.md#remote-agent-daemon-cr-serve)). On a server also run
+3. **Start the daemon as a service**: `cr worker --install` (a systemd user unit, `cr-worker.service`; macOS needs a
+   launchd agent, see [the CLI reference](cli.md#remote-agent-daemon-cr-worker)). On a server also run
    `loginctl enable-linger $USER` once, or the user service (and the runs it adopted) stops at logout.
-   `cr serve --status` shows the unit and what the daemon answers.
+   `cr worker --status` shows the unit and what the daemon answers.
 4. **Add an SSH alias** to `~/.ssh/config` on your machine, so the app only needs a name:
 
    ```
@@ -39,8 +39,8 @@ You need SSH access to the host (key or agent; the app never prompts for a passw
    question (a passphrase not in the agent, an unknown host key) makes the connection fail with
    `host_unreachable` and ssh's own message. Run `ssh koza true` once in a terminal to accept the host key.
 5. **Add the host in Settings → AI → Hosts**: a name, the SSH alias, and the daemon's endpoint on the host:
-   the **absolute** socket path (`echo $XDG_RUNTIME_DIR/codereview/serve.sock` on the host, typically
-   `/run/user/1000/codereview/serve.sock`; ssh expands neither `~` nor variables) or, if you started the
+   the **absolute** socket path (`echo $XDG_RUNTIME_DIR/codereview/worker.sock` on the host, typically
+   `/run/user/1000/codereview/worker.sock`; ssh expands neither `~` nor variables) or, if you started the
    daemon with `--listen 127.0.0.1:PORT`, that port. **Test connection** opens the tunnel and reports the
    host's `cr` version, protocol, harnesses and load.
 6. **Create a profile** (Settings → AI → Profiles → *Runs on* the host). The harness and model pickers load from
@@ -50,19 +50,19 @@ You need SSH access to the host (key or agent; the app never prompts for a passw
 ### A PATH that only interactive shells have
 
 Non-interactive ssh and systemd services do not read `~/.bashrc`, so tools installed by scripts that edit it
-(`~/.local/bin` for `claude`, `~/.opencode/bin` for `opencode`) are not on their `PATH`. `cr serve` adds the
+(`~/.local/bin` for `claude`, `~/.opencode/bin` for `opencode`) are not on their `PATH`. `cr worker` adds the
 usual per-user directories itself at start-up (`~/.local/bin`, `~/bin`, `~/.cargo/bin`, `~/.claude/local`,
 `~/.opencode/bin`) when they exist, so the service finds the harnesses. A harness installed somewhere else is
 reported as not installed (the host shows it as unavailable in the profile editor): either link it into
 `~/.local/bin`, or add `Environment=PATH=...` to the unit. For your own use of `cr` over ssh, call it by full
-path (`ssh koza ~/.local/bin/cr serve --status`).
+path (`ssh koza ~/.local/bin/cr worker --status`).
 
 ## Versions
 
 The app and the host must speak the same protocol. `GET /v1/info` reports an integer `protocol` and the `cr`
 version; when the number differs the host is marked **protocol mismatch** in Settings, with both versions
 and the fix, and nothing is sent to it. Update `cr` on the host to the app's version, restart the daemon
-(`systemctl --user restart cr-serve`; running harnesses survive a restart), then press **Test connection**.
+(`systemctl --user restart cr-worker`; running harnesses survive a restart), then press **Test connection**.
 Updating the host is manual.
 
 ## What a remote run does
@@ -98,7 +98,7 @@ Contexts without a GitHub repository (the board, a local virtual-PR review) cann
 
 | Message | Meaning |
 |---|---|
-| `host_unreachable: ...` | The tunnel could not be opened or the daemon did not answer; the text after the colon is ssh's (or the client's) own message. Check `ssh <alias> true`, that the daemon runs (`cr serve --status` on the host) and the endpoint path. |
+| `host_unreachable: ...` | The tunnel could not be opened or the daemon did not answer; the text after the colon is ssh's (or the client's) own message. Check `ssh <alias> true`, that the daemon runs (`cr worker --status` on the host) and the endpoint path. |
 | `protocol_mismatch: ...` | See *Versions*. |
 | `host_disabled: ...` | The host is switched off in Settings, or was removed. |
 | `unknown_repo` | Register the repository on the host with `cr repo add`. |
