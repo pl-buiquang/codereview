@@ -52,6 +52,9 @@ export function resumeCommand(s: Pick<AgentSession, "cwd" | "session_id"> & { ha
     case "opencode":
       resume = `opencode --session ${shellQuote(s.session_id)}`;
       break;
+    case "codex":
+      resume = `codex resume ${shellQuote(s.session_id)}`;
+      break;
     default:
       return null;
   }

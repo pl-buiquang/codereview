@@ -298,7 +298,8 @@ describe("helpers", () => {
     expect(resumeCommand({ cwd: "/a b/it's", session_id: "id", harness: "claude" })).toBe(`cd '/a b/it'\\''s'; claude --resume id`);
     expect(resumeCommand({ cwd: "/a", session_id: "ses_x", harness: "opencode" })).toBe("cd /a; opencode --session ses_x");
     // An unknown or missing harness has no resume command: never silently `claude --resume`.
-    expect(resumeCommand({ cwd: "/a", session_id: "id", harness: "codex" })).toBeNull();
+    expect(resumeCommand({ cwd: "/a", session_id: "01a1c0cb-03cb", harness: "codex" })).toBe("cd /a; codex resume 01a1c0cb-03cb");
+    expect(resumeCommand({ cwd: "/a", session_id: "id", harness: "gemini" })).toBeNull();
     expect(resumeCommand({ cwd: "/a", session_id: "id", harness: null })).toBeNull();
     expect(resumeCommand({ cwd: "/a", session_id: "id" })).toBeNull();
   });
