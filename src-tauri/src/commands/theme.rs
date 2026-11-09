@@ -65,6 +65,7 @@ pub async fn theme_suggest(
         return Err(AppError::Other(format!("the `{}` CLI was not found on PATH", harness.id())));
     }
     let model = resolved.model_or_builtin(MODEL);
+    let settings = resolved.settings.clone();
     if !SCOPES.contains(&scope.as_str()) {
         return Err(AppError::Other(format!("unknown theme scope: {scope}")));
     }
@@ -76,7 +77,9 @@ pub async fn theme_suggest(
     let turn = tauri::async_runtime::spawn_blocking(move || {
         let cwd = std::env::temp_dir().join("codereview_theme_suggest");
         std::fs::create_dir_all(&cwd)?;
-        harness.one_shot(&suggest_request(&system, &cwd, &prompt, &scope, inspiration.trim(), &model, harness.id()))
+        let mut req = suggest_request(&system, &cwd, &prompt, &scope, inspiration.trim(), &model, harness.id());
+        req.extra_args.extend(harness.settings_args(&settings));
+        harness.one_shot(&req)
     })
     .await
     .map_err(|e| AppError::Other(format!("theme task failed: {e}")))??;

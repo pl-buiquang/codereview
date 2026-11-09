@@ -23,9 +23,12 @@ use crate::claude_sessions::ClaudeSession;
 use crate::error::{AppError, AppResult};
 
 pub mod claude;
+pub mod models;
+pub mod opencode;
 pub mod profiles;
 
 pub use claude::ClaudeCode;
+pub use opencode::OpenCode;
 
 /// What a harness can do.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -288,16 +291,83 @@ pub trait Harness: Send + Sync {
     fn live_sessions(&self) -> Vec<ClaudeSession> {
         Vec::new()
     }
+    /// Model ids to offer in the profile editor: what the CLI lists, or a short static suggestion
+    /// list. May run a subprocess; callers cache ([`models`]).
+    fn models(&self) -> AppResult<Vec<String>> {
+        Ok(Vec::new())
+    }
+    /// The command-line flags a profile's `settings` stand for (an opencode agent, extra args),
+    /// appended to a request's `extra_args`. Settings the harness doesn't know are ignored.
+    fn settings_args(&self, _settings: &Value) -> Vec<String> {
+        Vec::new()
+    }
+    /// Whether a run's final text and usage are the sum over its stream rather than one `Final`
+    /// line (opencode reports per step): the run engine then folds them with [`RunAcc`].
+    fn accumulates(&self) -> bool {
+        false
+    }
+    /// The usage one stream line reports (one step), for harnesses that [accumulate](Self::accumulates).
+    fn step_usage(&self, _line: &str) -> Option<RunUsage> {
+        None
+    }
+}
+
+/// Folds the lines of a run into the final text and total usage of a harness that
+/// [accumulates](Harness::accumulates): the last text any step produced, the usage of all steps.
+#[derive(Debug, Default)]
+pub struct RunAcc {
+    text: String,
+    usage: RunUsage,
+    steps: i64,
+    any: bool,
+}
+
+impl RunAcc {
+    /// Take in one raw line and its normalized events.
+    pub fn push(&mut self, harness: &dyn Harness, line: &str, events: &[Event]) {
+        if !harness.accumulates() {
+            return;
+        }
+        for e in events {
+            if let Event::Text(t) = e {
+                self.text = t.clone();
+            }
+        }
+        if let Some(u) = harness.step_usage(line) {
+            self.any = true;
+            self.steps += 1;
+            self.usage.input_tokens += u.input_tokens;
+            self.usage.output_tokens += u.output_tokens;
+            self.usage.cache_read_tokens += u.cache_read_tokens;
+            self.usage.cache_creation_tokens += u.cache_creation_tokens;
+            self.usage.cost_usd += u.cost_usd;
+        }
+    }
+
+    /// `fin` completed with what the run produced: a final without text gets the last text, and
+    /// the usage is the total over all steps.
+    pub fn complete(&self, mut fin: FinalResult) -> FinalResult {
+        if !self.any && self.text.is_empty() {
+            return fin;
+        }
+        if fin.text.as_deref().is_none_or(str::is_empty) {
+            fin.text = Some(self.text.clone());
+        }
+        let session_id = fin.usage.session_id.take();
+        fin.usage = RunUsage { num_turns: self.steps, session_id, ..self.usage.clone() };
+        fin
+    }
 }
 
 // Compile-time proof that `Harness` is object-safe: this fails to build if a method breaks it.
 const _: Option<&dyn Harness> = None;
 
 static CLAUDE: ClaudeCode = ClaudeCode;
+static OPENCODE: OpenCode = OpenCode;
 
 /// Every harness the app knows, in display order.
-pub fn harnesses() -> [&'static dyn Harness; 1] {
-    [&CLAUDE]
+pub fn harnesses() -> [&'static dyn Harness; 2] {
+    [&CLAUDE, &OPENCODE]
 }
 
 /// The harness with this id (`"claude"`).

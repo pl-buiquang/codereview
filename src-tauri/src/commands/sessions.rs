@@ -123,7 +123,13 @@ fn extract_request<'a>(
     }
 }
 
-fn run_extract_summary(harness: &dyn Harness, session: &ClaudeSession, instructions: &str, model: &str) -> AppResult<TurnResult> {
+fn run_extract_summary(
+    harness: &dyn Harness,
+    settings: &serde_json::Value,
+    session: &ClaudeSession,
+    instructions: &str,
+    model: &str,
+) -> AppResult<TurnResult> {
     let transcript = claude_sessions::transcript_path(&session.session_id)
         .and_then(|p| session_summaries::transcript_extract(&p, EXTRACT_MAX_BYTES))
         .ok_or_else(|| AppError::Other("no conversation to summarize yet".into()))?;
@@ -131,7 +137,9 @@ fn run_extract_summary(harness: &dyn Harness, session: &ClaudeSession, instructi
     std::fs::create_dir_all(&cwd)?;
     let prompt = format!("<transcript>\n{transcript}</transcript>\nSummarize the transcript above.");
     let file_tag = format!("live_summary_{}", session.session_id);
-    harness.one_shot(&extract_request(session, instructions, &file_tag, &cwd, &prompt, model, harness.id()))
+    let mut req = extract_request(session, instructions, &file_tag, &cwd, &prompt, model, harness.id());
+    req.extra_args.extend(harness.settings_args(settings));
+    harness.one_shot(&req)
 }
 
 /// Summarize a running session and store it apart from the hook-written summaries. By default a
@@ -158,6 +166,7 @@ pub async fn generate_live_session_summary(
     }
     let extract_model = resolved.model_or_builtin(EXTRACT_MODEL);
     let stored_model = extract_model.clone();
+    let settings = resolved.settings.clone();
     let (turn, mode, session_id) = tauri::async_runtime::spawn_blocking(move || {
         let session = claude_sessions::live_sessions()
             .into_iter()
@@ -169,7 +178,7 @@ pub async fn generate_live_session_summary(
                 return Ok((turn, "fork", session.session_id));
             }
         }
-        run_extract_summary(harness, &session, &instructions, &extract_model).map(|turn| (turn, "extract", session.session_id))
+        run_extract_summary(harness, &settings, &session, &instructions, &extract_model).map(|turn| (turn, "extract", session.session_id))
     })
     .await
     .map_err(|e| AppError::Other(format!("summary task failed: {e}")))??;

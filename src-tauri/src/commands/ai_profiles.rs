@@ -68,9 +68,28 @@ pub async fn ai_harnesses() -> AppResult<Vec<HarnessInfo>> {
         .map_err(|e| AppError::Other(format!("harness probe failed: {e}")))
 }
 
+/// The model ids of a harness, grouped by provider: what its CLI lists (`opencode models`), or a short
+/// static suggestion list. Cached; `refresh` asks the CLI again. Empty when nothing is configured
+/// (opencode without a provider).
+#[tauri::command]
+pub async fn ai_harness_models(harness: String, refresh: Option<bool>) -> AppResult<Vec<ai::models::ModelGroup>> {
+    tauri::async_runtime::spawn_blocking(move || ai::models::for_harness(&harness, refresh.unwrap_or(false)))
+        .await
+        .map_err(|e| AppError::Other(format!("model listing failed: {e}")))?
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn harness_infos_list_opencode_without_an_allowlist() {
+        let infos = harness_infos();
+        let oc = infos.iter().find(|i| i.id == "opencode").unwrap();
+        assert_eq!(oc.name, "opencode");
+        assert!(!oc.caps.tool_allowlist && !oc.caps.fork && oc.caps.pins_session_id);
+        assert_eq!(infos.iter().map(|i| i.id).collect::<Vec<_>>(), ["claude", "opencode"]);
+    }
 
     #[test]
     fn harness_infos_list_claude_with_caps() {

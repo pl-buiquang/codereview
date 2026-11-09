@@ -287,6 +287,7 @@ pub fn run() {
             commands::ai_profiles::ai_feature_profiles_set,
             commands::ai_profiles::ai_import_legacy_models,
             commands::ai_profiles::ai_harnesses,
+            commands::ai_profiles::ai_harness_models,
             commands::routines::routine_list,
             commands::routines::routine_save,
             commands::routines::routine_delete,

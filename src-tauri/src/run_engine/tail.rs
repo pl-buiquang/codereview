@@ -6,7 +6,7 @@ use std::path::Path;
 use std::time::Duration;
 
 
-use crate::ai::{norm_json, FinalResult, Harness};
+use crate::ai::{norm_json, FinalResult, Harness, RunAcc};
 
 pub const TAIL_POLL: Duration = Duration::from_millis(200);
 /// Lines longer than this are stored as a stub (`truncated`, `bytes`) instead of verbatim.
@@ -42,6 +42,7 @@ pub fn tail_events(
     let Ok(file) = File::open(path) else { return Tail::Done(None) };
     let mut reader = BufReader::new(file);
     let mut result: Option<FinalResult> = None;
+    let mut acc = RunAcc::default();
     let mut seq = 0i64;
     let mut pending = String::new();
     let mut handle = |line: &str, result: &mut Option<FinalResult>| {
@@ -56,8 +57,9 @@ pub fn tail_events(
         if seq > skip {
             record(seq, &kind, line, &norm_json(&events, MAX_EVENT_BYTES));
         }
+        acc.push(harness, line, &events);
         if let Some(fin) = events.iter().find_map(|e| e.as_final()) {
-            *result = Some(fin);
+            *result = Some(acc.complete(fin));
         }
     };
     loop {

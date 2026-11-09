@@ -140,6 +140,11 @@ impl Harness for ClaudeCode {
         events
     }
 
+    fn models(&self) -> AppResult<Vec<String>> {
+        // The CLI has no model listing: aliases it understands.
+        Ok(["opus", "sonnet", "haiku"].map(String::from).to_vec())
+    }
+
     #[cfg(unix)]
     fn is_own_process(&self, pid: i32, session_id: Option<&str>) -> bool {
         let Ok(out) = Command::new("ps").args(["-o", "command=", "-p", &pid.to_string()]).output() else {
