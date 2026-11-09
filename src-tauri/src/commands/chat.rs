@@ -62,6 +62,7 @@ fn call_turn(
     let file_tag = format!("chat_{session_id}");
     let mut req = turn_request(review_id, session_id, &file_tag, is_first_turn, model, system_prompt, worktree_path, text);
     req.usage_tag = req.usage_tag.harness(resolved.harness.id());
+    req.extra_args.extend(resolved.harness.settings_args(&resolved.settings));
     resolved.harness.one_shot(&req)
 }
 
@@ -289,8 +290,14 @@ fn chat_profile(conn: &rusqlite::Connection, chat: Option<&Chat>, requested: Opt
     let pinned = chat.and_then(|c| c.profile_id);
     let resolved = profiles::resolve(conn, &[requested, pinned, feature]);
     let current = profiles::resolve(conn, &[pinned, feature]).profile_id;
-    let switched = chat.is_some_and(|c| c.session_id.is_some()) && requested.is_some() && resolved.profile_id != current;
-    (resolved, switched)
+    let has_session = chat.is_some_and(|c| c.session_id.is_some());
+    let switched = has_session && requested.is_some() && resolved.profile_id != current;
+    // A session only resumes in the harness that started it: a pinned profile that was deleted, or a
+    // changed default, can leave the chat on another harness without anyone having switched.
+    let other_harness = chat
+        .filter(|c| c.session_id.is_some())
+        .is_some_and(|c| c.session_harness.as_deref().unwrap_or("claude") != resolved.harness.id());
+    (resolved, switched || other_harness)
 }
 
 /// The profile the chat pane shows: the one the review's chat runs on.
@@ -414,8 +421,8 @@ pub async fn chat_send(
             None => {
                 conn.execute(
                     "INSERT INTO chat (review_id, model, session_id, total_input_tokens,
-                      total_output_tokens, total_cost_usd, worktree_path, profile_id, created_at, updated_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)",
+                      total_output_tokens, total_cost_usd, worktree_path, profile_id, session_harness, created_at, updated_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?10, ?9, ?9)",
                     params![
                         review_id,
                         model,
@@ -426,6 +433,7 @@ pub async fn chat_send(
                         worktree_path.to_str(),
                         resolved.profile_id,
                         ts,
+                        resolved.harness.id(),
                     ],
                 )?;
                 conn.last_insert_rowid()
@@ -440,7 +448,8 @@ pub async fn chat_send(
                         worktree_path = ?5,
                         profile_id = ?6,
                         model = ?7,
-                        updated_at = ?8
+                        updated_at = ?8,
+                        session_harness = ?10
                      WHERE id = ?9",
                     params![
                         session_id,
@@ -452,6 +461,7 @@ pub async fn chat_send(
                         model,
                         ts,
                         existing.id,
+                        resolved.harness.id(),
                     ],
                 )?;
                 existing.id
@@ -761,6 +771,36 @@ mod tests {
         conn.execute("UPDATE chat SET session_id = NULL", []).unwrap();
         let fresh: Chat = conn.query_row("SELECT * FROM chat", [], Chat::from_row).unwrap();
         assert!(!chat_profile(&conn, Some(&fresh), Some(b)).1, "nothing to restart");
+    }
+
+    #[test]
+    fn a_chat_whose_profile_now_resolves_to_another_harness_starts_a_new_session() {
+        let mut conn = crate::db::open_memory();
+        let oc = profiles::save(
+            &mut conn,
+            profiles::AiProfileInput {
+                id: None,
+                name: "OC".into(),
+                harness: "opencode".into(),
+                model: String::new(),
+                settings: serde_json::json!({}),
+                host_id: None,
+                is_default: true,
+            },
+        )
+        .unwrap();
+        // started on Claude (no recorded harness), now resolving to opencode (e.g. the pinned profile was deleted)
+        let chat = chat_row(&conn, Some("sid"), None);
+        let (r, switched) = chat_profile(&conn, Some(&chat), None);
+        assert_eq!((r.profile_id, switched), (Some(oc.id), true));
+        // the same chat recorded as started on opencode resumes
+        conn.execute("UPDATE chat SET session_harness = 'opencode'", []).unwrap();
+        let chat: Chat = conn.query_row("SELECT * FROM chat", [], Chat::from_row).unwrap();
+        assert!(!chat_profile(&conn, Some(&chat), None).1);
+        // nothing to restart without a session
+        conn.execute("UPDATE chat SET session_id = NULL, session_harness = NULL", []).unwrap();
+        let chat: Chat = conn.query_row("SELECT * FROM chat", [], Chat::from_row).unwrap();
+        assert!(!chat_profile(&conn, Some(&chat), None).1);
     }
 
     #[test]

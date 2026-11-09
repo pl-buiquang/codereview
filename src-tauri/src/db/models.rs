@@ -131,6 +131,8 @@ pub struct Chat {
     pub worktree_path: Option<String>,
     /// The profile the session was started with.
     pub profile_id: Option<i64>,
+    /// The harness the session lives in; `None` is Claude Code (chats from before harnesses).
+    pub session_harness: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -147,6 +149,7 @@ impl Chat {
             total_cost_usd: row.get("total_cost_usd")?,
             worktree_path: row.get("worktree_path")?,
             profile_id: row.get("profile_id")?,
+            session_harness: row.get("session_harness")?,
             created_at: row.get("created_at")?,
             updated_at: row.get("updated_at")?,
         })
