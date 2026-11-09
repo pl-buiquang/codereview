@@ -30,6 +30,7 @@ pub mod routines;
 pub mod run_engine;
 pub mod run_usage;
 pub mod stack_rebase;
+pub mod serve;
 pub mod session_summaries;
 pub mod sync;
 #[cfg(test)]

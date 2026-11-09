@@ -7,7 +7,7 @@ use crate::error::{AppError, AppResult};
 use crate::gh::{run_gh, GhRepo};
 use crate::git::{ensure_commit, run_git};
 
-fn worktrees_base() -> PathBuf {
+pub(crate) fn worktrees_base() -> PathBuf {
     worktrees_base_in(&dirs::home_dir().unwrap_or_else(|| PathBuf::from("/tmp")))
 }
 
@@ -25,7 +25,7 @@ pub fn ensure_branch_worktree(repo: &Path, target: &Target, head_sha: Option<&st
     ensure_branch_worktree_in(repo, target, head_sha, &worktrees_base())
 }
 
-fn ensure_branch_worktree_in(
+pub(crate) fn ensure_branch_worktree_in(
     repo: &Path,
     target: &Target,
     head_sha: Option<&str>,
