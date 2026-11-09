@@ -138,7 +138,10 @@ pub fn probe_info(listen: &Listen) -> Result<serde_json::Value, String> {
     let request = "GET /v1/info HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nAccept: application/json\r\n\r\n";
     let mut raw = Vec::new();
     match listen {
+        #[cfg(unix)]
         Listen::Unix(p) => exchange(std::os::unix::net::UnixStream::connect(p).map_err(|e| e.to_string())?, request, &mut raw)?,
+        #[cfg(not(unix))]
+        Listen::Unix(_) => return Err("unix sockets are not supported on this platform".to_string()),
         Listen::Tcp(a) => exchange(std::net::TcpStream::connect_timeout(a, std::time::Duration::from_secs(2)).map_err(|e| e.to_string())?, request, &mut raw)?,
     }
     let text = String::from_utf8_lossy(&raw);

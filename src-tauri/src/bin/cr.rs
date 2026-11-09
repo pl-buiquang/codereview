@@ -1,4 +1,4 @@
-#[cfg(feature = "worker")]
+#[cfg(all(feature = "worker", unix))]
 use std::path::PathBuf;
 use std::process;
 use std::sync::Mutex;
@@ -45,7 +45,7 @@ enum Cmd {
     },
     /// Run the agent daemon: expose this machine's harnesses over HTTP+SSE on a unix socket or a
     /// loopback port (reach it through an SSH tunnel). See docs/adr/0007.
-    #[cfg(feature = "worker")]
+    #[cfg(all(feature = "worker", unix))]
     Worker(WorkerArgs),
     /// Send a notification to the app (only inside a remote run, where it is recorded in the outbox)
     Notify {
@@ -147,7 +147,7 @@ enum Cmd {
     },
 }
 
-#[cfg(feature = "worker")]
+#[cfg(all(feature = "worker", unix))]
 #[derive(clap::Args)]
 struct WorkerArgs {
     /// Where to listen: a unix socket path (or unix:PATH) or a loopback host:port
@@ -622,7 +622,7 @@ fn main() {
         }
         return;
     }
-    #[cfg(feature = "worker")]
+    #[cfg(all(feature = "worker", unix))]
     if let Cmd::Worker(args) = cli.cmd {
         if let Err(e) = run_worker(args, cli.db.as_deref()) {
             eprintln!("error: {e}");
@@ -650,7 +650,7 @@ fn main() {
     }
 }
 
-#[cfg(feature = "worker")]
+#[cfg(all(feature = "worker", unix))]
 fn run_worker(args: WorkerArgs, app_db: Option<&str>) -> AppResult<()> {
     use codereview_lib::worker::{self, daemon, install};
     let listen = match &args.listen {
@@ -762,7 +762,7 @@ fn run_remote(remote: &RemoteRun, name: &str, cmd: Cmd, json: bool) -> AppResult
 
 fn run(cmd: Cmd, json: bool, db: &Db) -> AppResult<()> {
     match cmd {
-        #[cfg(feature = "worker")]
+        #[cfg(all(feature = "worker", unix))]
         Cmd::Worker(_) => unreachable!("handled before the database is opened"),
         Cmd::Notify { .. } => {
             return Err(AppError::Other("`cr notify` is only available in a remote run (see `cr worker`)".into()));

@@ -151,6 +151,17 @@ pub fn ssh_args(spec: &HostSpec, local: &Addr) -> Vec<String> {
 
 /// A private directory for the local ends of tunnels: owner-only and owned by us, as a predictable
 /// path under a shared temp dir must be.
+#[cfg(not(unix))]
+pub fn private_dir() -> AppResult<PathBuf> {
+    // No uid or mode bits here: the per-user temp dir is already private to the account.
+    let dir = std::env::temp_dir().join("codereview-tunnels");
+    std::fs::create_dir_all(&dir)?;
+    Ok(dir)
+}
+
+/// A private directory for the local ends of tunnels: owner-only and owned by us, as a predictable
+/// path under a shared temp dir must be.
+#[cfg(unix)]
 pub fn private_dir() -> AppResult<PathBuf> {
     use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
     let uid = unsafe { libc::geteuid() };
@@ -191,7 +202,12 @@ impl View {
     fn kill_ssh(&self) {
         let pid = self.pid.swap(0, Ordering::SeqCst);
         if pid != 0 {
-            unsafe { libc::kill(pid as i32, libc::SIGKILL) };
+            #[cfg(unix)]
+            unsafe {
+                libc::kill(pid as i32, libc::SIGKILL)
+            };
+            #[cfg(not(unix))]
+            let _ = std::process::Command::new("taskkill").args(["/F", "/PID", &pid.to_string()]).output();
         }
     }
 }
