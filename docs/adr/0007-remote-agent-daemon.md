@@ -1,0 +1,20 @@
+# Remote agents run through a plain executor daemon (`cr serve`) reached over SSH
+
+The app can only run AI harnesses on the machine it runs on. `cr serve` is a long-lived daemon of the `cr` binary that exposes the local harnesses of its machine over a versioned HTTP+SSE API, so another instance of the app can launch routine runs and one-shot calls there and mirror them.
+
+Decisions that are not obvious from the code:
+
+- **Trust model: loopback or unix socket only, SSH for reach.** The daemon listens on a unix socket or a loopback port and nothing else; the app reaches it through an SSH tunnel. Authentication is whatever SSH provides and the daemon stores no token. The API is auth-agnostic (no header is required), so a bearer token and TLS can be added later without changing endpoints. A non-loopback TCP address is refused at start-up.
+- **The remote is a plain executor.** It receives rendered prompts and neutral options (`Access`, `ToolPolicy`, timeout, harness id and model). Handlers, routine definitions and prompt templates stay in the app. The daemon never interprets a prompt.
+- **The remote owns its clones.** A request names `owner/name` plus a PR or branch, never a path. The daemon resolves the repo in its own codereview DB (the `cr repo` registry) and creates or reuses a worktree through `worktree.rs`. An unknown repo fails with `unknown_repo`; there is no auto-clone.
+- **Its own database.** The daemon keeps runs, events and the outbox in a SQLite file of its own (default in the platform data dir, `CODEREVIEW_SERVE_DB` or `--serve-db`), separate from the interactive app DB, which it only reads for the repo registry. While a run is live the daemon's store is authoritative; clients mirror it by event `seq`.
+- **One run engine.** The daemon plugs a `RunStore` and an `EventSink` into the same `run_engine` as the app. Shutdown detaches: the runs keep going and are re-adopted when the daemon restarts, so a restart or a lost tunnel never kills work.
+- **Strict protocol versioning.** `GET /v1/info` returns an integer `protocol`; a client with a different number refuses to use the host. Updating the remote is manual.
+- **`cr` inside a remote run uses an outbox.** The engine sets `CODEREVIEW_REMOTE_RUN` (and `CODEREVIEW_REMOTE_DIR`, the run's directory). In that mode `cr` writes (board meta and links, focus, notify) append structured, idempotent ops to the run's outbox instead of touching a DB the user does not look at; reads are answered from a context snapshot shipped with the run request. The client applies the ops when it mirrors the run and acknowledges them so the daemon can prune. Op ids make re-applying after a reconnect safe.
+- **Behind a feature.** The HTTP stack (`axum`) is an optional `serve` cargo feature, enabled by default for `cr`.
+
+## Considered Options
+
+- Starting the daemon on demand over SSH. Rejected: runs must continue while no app is connected, which needs a persistent process.
+- Direct network access with a token. Deferred (backlog): SSH already gives authentication and encryption without storing a secret.
+- Letting the remote run handlers. Rejected: the handlers write into the local app DB and need local state; shipping rendered prompts keeps the remote trivially small.
