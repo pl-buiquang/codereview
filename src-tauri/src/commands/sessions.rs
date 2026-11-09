@@ -35,6 +35,8 @@ pub async fn list_claude_sessions(
     let agents = claude_sessions::agents();
     let (mut sessions, mut exclude) = claude_sessions::live_sessions_and_hidden(&agents);
     let card_sessions = match_card_sessions(&cards, &meta, &sessions);
+    // Other harnesses give the basics only (no history, summaries or card links).
+    sessions.extend(ai::live_sessions_except("claude"));
     exclude.extend(sessions.iter().map(|s| s.session_id.clone()));
     let mut summaries = summary_dir
         .map(|d| d.trim().to_string())

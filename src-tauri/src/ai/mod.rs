@@ -372,13 +372,14 @@ pub fn harnesses() -> [&'static dyn Harness; 2] {
     [&CLAUDE, &OPENCODE]
 }
 
-/// Live sessions of every available harness, Claude first (the order of [`harnesses`]).
-pub fn live_sessions_all() -> Vec<AgentSession> {
-    live_sessions_of(&harnesses())
+/// Live sessions of every available harness except `skip` (Claude has a richer dedicated source),
+/// in the order of [`harnesses`].
+pub fn live_sessions_except(skip: &str) -> Vec<AgentSession> {
+    live_sessions_of(&harnesses(), skip)
 }
 
-fn live_sessions_of(harnesses: &[&dyn Harness]) -> Vec<AgentSession> {
-    harnesses.iter().filter(|h| h.available()).flat_map(|h| h.live_sessions()).collect()
+fn live_sessions_of(harnesses: &[&dyn Harness], skip: &str) -> Vec<AgentSession> {
+    harnesses.iter().filter(|h| h.id() != skip && h.available()).flat_map(|h| h.live_sessions()).collect()
 }
 
 /// The harness with this id (`"claude"`).
@@ -536,11 +537,11 @@ mod tests {
     }
 
     #[test]
-    fn live_sessions_merge_available_harnesses_in_order() {
+    fn live_sessions_merge_available_harnesses_in_order_minus_the_skipped() {
         let (a, b, c) = (Listing { id: "a", available: true }, Listing { id: "b", available: false }, Listing { id: "c", available: true });
-        let merged = live_sessions_of(&[&a, &b, &c]);
-        let ids: Vec<_> = merged.iter().map(|s| s.harness.as_str()).collect();
-        assert_eq!(ids, ["a", "c"]);
+        let ids = |skip| live_sessions_of(&[&a, &b, &c], skip).iter().map(|s| s.harness.clone()).collect::<Vec<_>>();
+        assert_eq!(ids("none"), ["a", "c"]);
+        assert_eq!(ids("a"), ["c"]);
     }
 
     #[test]
