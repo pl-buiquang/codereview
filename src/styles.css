@@ -195,6 +195,11 @@ button:hover {
   font-family: var(--font-ui);
   text-transform: uppercase;
 }
+.badge-harness {
+  color: var(--text-2);
+  border: 1px solid var(--border-strong);
+  text-transform: none;
+}
 .badge-draft {
   color: var(--warning);
   background: var(--warning-soft);

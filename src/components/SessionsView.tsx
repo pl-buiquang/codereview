@@ -37,6 +37,11 @@ export function attachCommand(s: Pick<AgentSession, "session_id" | "job_id">): s
 
 export { isWaiting };
 
+/** The harness ids present in `sessions`, sorted. */
+export function harnessIds(sessions: Pick<AgentSession, "harness">[]): string[] {
+  return [...new Set(sessions.map((s) => s.harness))].sort();
+}
+
 export function resumeCommand(s: Pick<AgentSession, "cwd" | "session_id">): string {
   return `cd ${shellQuote(s.cwd)}; claude --resume ${s.session_id}`;
 }
@@ -119,7 +124,11 @@ function TerminalSessions() {
     return m;
   }, [cardSessions]);
 
-  const sessions = sessionsQuery.data?.sessions ?? [];
+  const allSessions = sessionsQuery.data?.sessions ?? [];
+  const harnesses = harnessIds(allSessions);
+  const [harnessFilter, setHarnessFilter] = useState("");
+  const sessions = harnessFilter ? allSessions.filter((s) => s.harness === harnessFilter) : allSessions;
+  const showHarness = harnesses.length > 1;
   const live = sessions.filter((s) => s.live);
   const history = sessions.filter((s) => !s.live);
   const [historySearch, setHistorySearch] = useState("");
@@ -141,6 +150,21 @@ function TerminalSessions() {
             {live.length} live · {history.length} in the last {historyDays} day{historyDays === 1 ? "" : "s"}
           </p>
         </div>
+        {showHarness && (
+          <select
+            className="input"
+            aria-label="Filter by harness"
+            value={harnessFilter}
+            onChange={(e) => setHarnessFilter(e.target.value)}
+          >
+            <option value="">All harnesses</option>
+            {harnesses.map((h) => (
+              <option key={h} value={h}>
+                {h}
+              </option>
+            ))}
+          </select>
+        )}
       </header>
 
       <div className="cr-list sessions-list">
@@ -150,14 +174,17 @@ function TerminalSessions() {
         {!sessionsQuery.isLoading && (
           <>
             <h2 className="sessions-group-head">Live</h2>
-            {live.length === 0 && <p className="muted faint">No running Claude sessions.</p>}
+            {live.length === 0 && <p className="muted faint">No running sessions.</p>}
             {live.map((s) => (
               <SessionRow
                 key={s.session_id}
                 session={s}
+                showHarness={showHarness}
                 cards={cardsBySession.get(s.session_id) ?? []}
                 onShowCard={showBoardCard}
                 action={
+                  // Focus, attach and stop are only known for Claude sessions.
+                  s.harness !== "claude" ? null : (
                   <>
                     {s.kind === "bg" && s.job_id && (
                       <button
@@ -187,6 +214,7 @@ function TerminalSessions() {
                       </button>
                     )}
                   </>
+                  )
                 }
               />
             ))}
@@ -217,6 +245,7 @@ function TerminalSessions() {
               <SessionRow
                 key={s.session_id}
                 session={s}
+                showHarness={showHarness}
                 cards={[]}
                 onShowCard={showBoardCard}
                 action={
@@ -303,11 +332,13 @@ function statusClass(s: AgentSession): string {
 
 function SessionRow({
   session: s,
+  showHarness,
   cards,
   onShowCard,
   action,
 }: {
   session: AgentSession;
+  showHarness: boolean;
   cards: CardSession[];
   onShowCard: (cardId: string) => void;
   action: React.ReactNode;
@@ -318,7 +349,7 @@ function SessionRow({
   const fork = useSettingsStore((st) => st.sessionSummaryFork);
   const summaries = s.summaries ?? [];
   const cost = summaries.find((x) => x.cost)?.cost; // newest first, and cumulative
-  const canExpand = s.live || summaries.length > 0;
+  const canExpand = (s.live && s.harness === "claude") || summaries.length > 0;
   const aiOff = useAiDisabledReason();
   const generate = useMutation({
     mutationFn: () => api.generateLiveSessionSummary(s.session_id, fork),
@@ -350,6 +381,11 @@ function SessionRow({
             ) : (
               <span className="sessions-name" title={s.original_name ?? undefined}>
                 {s.name ?? s.session_id}
+              </span>
+            )}
+            {showHarness && (
+              <span className="badge badge-harness" title={`Harness: ${s.harness}`}>
+                {s.harness}
               </span>
             )}
             {s.kind === "bg" && (

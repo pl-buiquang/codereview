@@ -312,4 +312,31 @@ describe("helpers", () => {
     expect(matchesSessionSearch(s, "token refresh")).toBe(true);
     expect(matchesSessionSearch(s, "login front")).toBe(false);
   });
+
+  it("shows harness badges and a filter once several harnesses are listed, with Claude-only actions hidden", async () => {
+    listClaudeSessions.mockResolvedValue(
+      snapshot([
+        session({ session_id: "c1", name: "claude one" }),
+        session({ session_id: "o1", name: "opencode one", harness: "opencode", focus: "no_terminal", tmux: null }),
+      ]),
+    );
+    renderView();
+    await screen.findByText("opencode one");
+    expect(screen.getByTitle("Harness: opencode")).toBeInTheDocument();
+    expect(screen.getByTitle("Harness: claude")).toBeInTheDocument();
+    // Only the Claude row has a Focus button.
+    expect(screen.getAllByRole("button", { name: /Focus/ })).toHaveLength(1);
+
+    await userEvent.selectOptions(screen.getByLabelText("Filter by harness"), "opencode");
+    expect(screen.queryByText("claude one")).not.toBeInTheDocument();
+    expect(screen.getByText("opencode one")).toBeInTheDocument();
+  });
+
+  it("shows no harness UI when only one harness is present", async () => {
+    listClaudeSessions.mockResolvedValue(snapshot([session()]));
+    renderView();
+    await screen.findByText("live one");
+    expect(screen.queryByLabelText("Filter by harness")).not.toBeInTheDocument();
+    expect(screen.queryByTitle("Harness: claude")).not.toBeInTheDocument();
+  });
 });
