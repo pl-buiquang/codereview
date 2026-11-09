@@ -190,6 +190,8 @@ export interface AiRun {
   target_title: string | null;
   base_ref: string | null;
   head_ref: string | null;
+  /** Id of the harness that ran it. */
+  harness: string;
 }
 
 export interface Target {

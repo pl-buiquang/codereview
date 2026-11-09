@@ -248,6 +248,8 @@ pub struct AiRun {
     pub target_title: Option<String>,
     pub base_ref: Option<String>,
     pub head_ref: Option<String>,
+    /// Id of the harness that ran it.
+    pub harness: String,
 }
 
 /// Lower bound (inclusive) of a range; `None` means all time.
@@ -332,7 +334,7 @@ pub fn runs(conn: &Connection, since: Option<&str>, feature: Option<&str>, limit
             r.status, r.error, r.input_tokens, r.output_tokens, r.cache_read_tokens,
             r.cache_creation_tokens, r.cost_usd,
             COALESCE(repo.friendly_name, repo.remote_owner || '/' || repo.remote_name, repo.local_path),
-            t.github_pr_number, t.title, t.base_ref, t.head_ref
+            t.github_pr_number, t.title, t.base_ref, t.head_ref, r.harness
          FROM ai_run r
          LEFT JOIN review rev ON rev.id = r.review_id
          LEFT JOIN target t ON t.id = COALESCE(rev.target_id, r.target_id)
@@ -364,6 +366,7 @@ pub fn runs(conn: &Connection, since: Option<&str>, feature: Option<&str>, limit
             target_title: r.get(18)?,
             base_ref: r.get(19)?,
             head_ref: r.get(20)?,
+            harness: r.get(21)?,
         })
     })?
     .collect()
@@ -578,5 +581,7 @@ mod tests {
         let harnesses: Vec<String> =
             conn.prepare("SELECT harness FROM ai_run ORDER BY id").unwrap().query_map([], |r| r.get(0)).unwrap().map(Result::unwrap).collect();
         assert_eq!(harnesses, ["claude", "codex"]);
+        let listed: Vec<String> = runs(&conn, None, None, 10).unwrap().into_iter().map(|r| r.harness).collect();
+        assert_eq!(listed, ["codex", "claude"]);
     }
 }

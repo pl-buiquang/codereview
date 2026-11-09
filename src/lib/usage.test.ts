@@ -1,11 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { featureLabel, formatCost, formatDuration, formatTokens, runSubject, shortModel } from "./usage";
+import { costLabel, featureLabel, formatCost, formatDuration, formatTokens, runSubject, shortModel } from "./usage";
 
 describe("usage formatting", () => {
   it("formats cost", () => {
     expect(formatCost(0)).toBe("$0");
     expect(formatCost(0.004)).toBe("<$0.01");
     expect(formatCost(1.644545)).toBe("$1.64");
+  });
+
+  it("shows n/a for the cost of a harness that cannot report one", () => {
+    expect(costLabel(0, false)).toBe("n/a");
+    expect(costLabel(1.5, false)).toBe("n/a");
+    expect(costLabel(1.5, true)).toBe("$1.50");
+    expect(costLabel(0, undefined)).toBe("$0");
   });
 
   it("formats token counts", () => {

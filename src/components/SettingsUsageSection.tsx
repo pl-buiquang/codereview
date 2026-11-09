@@ -4,7 +4,7 @@ import { api } from "../lib/api";
 import { useUIStore } from "../store";
 import { useSettingsStore } from "../lib/settings";
 import type { AiRun, UsageRange, UsageTotals } from "../lib/types";
-import { featureLabel, formatCost, formatDuration, formatTokens, runSubject, shortModel } from "../lib/usage";
+import { costLabel, featureLabel, formatCost, formatDuration, formatTokens, runSubject, shortModel } from "../lib/usage";
 
 const RANGES: { value: UsageRange; label: string }[] = [
   { value: "today", label: "Today" },
@@ -49,7 +49,7 @@ function formatStarted(iso: string): string {
   return new Date(iso).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
-function RunRow({ run }: { run: AiRun }) {
+function RunRow({ run, reportsCost }: { run: AiRun; reportsCost: boolean | undefined }) {
   const openReview = useUIStore((s) => s.openReview);
   const subject = runSubject(run);
   const models = (run.models.length ? run.models : run.requested_model ? [run.requested_model] : []).map(shortModel);
@@ -72,7 +72,9 @@ function RunRow({ run }: { run: AiRun }) {
       <td className="num">{formatTokens(run.input_tokens)}</td>
       <td className="num">{formatTokens(run.output_tokens)}</td>
       <td className="num">{formatTokens(run.cache_read_tokens + run.cache_creation_tokens)}</td>
-      <td className="num">{formatCost(run.cost_usd)}</td>
+      <td className="num" title={reportsCost === false ? "This harness does not report a cost" : undefined}>
+        {costLabel(run.cost_usd, reportsCost)}
+      </td>
       <td className="num nowrap">{formatDuration(run.duration_ms)}</td>
       <td>{run.status === "error" && <span className="badge badge-draft" title={run.error ?? undefined}>failed</span>}</td>
     </tr>
@@ -85,6 +87,9 @@ export function UsageSection() {
 
   const summary = useQuery({ queryKey: ["ai-usage", "summary", range], queryFn: () => api.aiUsageSummary(range) });
   const runs = useQuery({ queryKey: ["ai-usage", "runs", range, feature], queryFn: () => api.aiUsageRuns(range, feature) });
+
+  const harnesses = useQuery({ queryKey: ["ai-harnesses"], queryFn: api.aiHarnesses, staleTime: 60_000 });
+  const reportsCost = new Map((harnesses.data ?? []).map((h) => [h.id, h.caps.reports_cost]));
 
   const summaryDir = useSettingsStore((s) => s.sessionSummaryDir);
   const sessions = useQuery({
@@ -263,7 +268,7 @@ export function UsageSection() {
               </thead>
               <tbody>
                 {runs.data.map((r) => (
-                  <RunRow key={r.id} run={r} />
+                  <RunRow key={r.id} run={r} reportsCost={reportsCost.get(r.harness)} />
                 ))}
               </tbody>
             </table>

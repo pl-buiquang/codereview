@@ -6,6 +6,11 @@ export function formatCost(usd: number): string {
   return `$${usd.toFixed(2)}`;
 }
 
+/** The cost of a run, or "n/a" when its harness cannot report one (`reportsCost` false; unknown harness: shown as is). */
+export function costLabel(usd: number, reportsCost: boolean | undefined): string {
+  return reportsCost === false ? "n/a" : formatCost(usd);
+}
+
 export function formatTokens(n: number): string {
   if (n < 1000) return String(n);
   if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`;
