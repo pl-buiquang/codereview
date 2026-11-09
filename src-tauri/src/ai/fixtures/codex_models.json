@@ -1,0 +1,64 @@
+{
+ "models": [
+  {
+   "slug": "gpt-6-astra",
+   "visibility": "list",
+   "priority": 2
+  },
+  {
+   "slug": "gpt-6.1-sol",
+   "visibility": "list",
+   "priority": 1
+  },
+  {
+   "slug": "gpt-6.1-terra",
+   "visibility": "list",
+   "priority": 7
+  },
+  {
+   "slug": "gpt-6-sol",
+   "visibility": "list",
+   "priority": 3
+  },
+  {
+   "slug": "gpt-6-luna",
+   "visibility": "list",
+   "priority": 4
+  },
+  {
+   "slug": "gpt-5.6-sol",
+   "visibility": "list",
+   "priority": 5
+  },
+  {
+   "slug": "gpt-5.6-terra",
+   "visibility": "list",
+   "priority": 8
+  },
+  {
+   "slug": "gpt-5.6-luna",
+   "visibility": "list",
+   "priority": 9
+  },
+  {
+   "slug": "gpt-daybreak-blue-latest",
+   "visibility": "hide",
+   "priority": 11
+  },
+  {
+   "slug": "gpt-daybreak-red-latest",
+   "visibility": "hide",
+   "priority": 12
+  },
+  {
+   "slug": "gpt-5.5",
+   "visibility": "list",
+   "priority": 13
+  },
+  {
+   "slug": "codex-auto-review",
+   "visibility": "hide",
+   "priority": 43
+  }
+ ]
+}

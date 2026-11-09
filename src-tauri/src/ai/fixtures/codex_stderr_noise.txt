@@ -1,0 +1,4 @@
+Reading additional input from stdin...
+2026-11-09T14:48:47.955284Z ERROR rmcp::transport::worker: worker quit with fatal: Transport channel closed, when Client(HttpRequest(HttpRequest("invalid port number")))
+2026-11-09T14:48:48.047121Z ERROR rmcp::transport::worker: worker quit with fatal: Transport channel closed, when AuthRequired(AuthRequiredError { www_authenticate_header: "Bearer resource_metadata=\"https://mcp.example.com/.well-known/oauth-protected-resource\"" })
+Error: thread/resume: thread/resume failed: no rollout found for thread id 00000000-0000-0000-0000-000000000000 (code -32600)
