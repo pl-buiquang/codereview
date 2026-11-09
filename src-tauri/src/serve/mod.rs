@@ -17,6 +17,7 @@ use crate::error::{AppError, AppResult};
 pub mod daemon;
 #[cfg(all(feature = "serve", unix))]
 pub mod http;
+pub mod install;
 pub mod remote;
 pub mod request;
 pub mod sink;
