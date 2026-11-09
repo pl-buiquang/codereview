@@ -453,54 +453,111 @@ struct Tui {
     session: Option<String>,
 }
 
+/// Every subcommand of the opencode CLI across versions (`opencode --help` of 2.2.5 plus the ones
+/// older releases had), so `opencode <sub>` is never taken for a TUI started in directory `<sub>`.
 const SUBCOMMANDS: &[&str] = &[
     "upgrade", "update", "uninstall", "acp", "api", "debug", "auth", "mcp", "plugin", "models", "stats", "mini", "run",
-    "session", "service", "reload", "pair", "serve",
+    "session", "service", "reload", "pair", "serve", "attach", "web", "github", "export", "import", "agent", "completion",
+    "generate",
 ];
 
-/// `(session id, directory argument)` of a `ps` args line when it is an interactive opencode TUI
-/// (no subcommand); `None` for anything else (`opencode run`, `opencode serve`, other programs).
-fn parse_tui_args(args: &str) -> Option<(Option<String>, Option<String>)> {
-    let mut it = args.split_whitespace();
-    let bin = it.next()?;
+/// Flags that take their value as the next argument. Anything else starting with `-` is a switch.
+const VALUE_FLAGS: &[&str] = &[
+    "--session", "-s", "--server", "--model", "-m", "--agent", "--port", "--hostname", "--log-level", "--completions",
+];
+
+/// `(session id, directory argument)` of an opencode command line when it is an interactive TUI (no
+/// subcommand); `None` for anything else (`opencode run`, `opencode serve`, other programs).
+/// Values are read only for the known value flags, and `--prompt` ends the parse: everything after
+/// it is prompt text, which may hold words that look like flags, subcommands or paths. The directory
+/// is only a candidate; the caller checks that it exists.
+fn parse_tui_args(argv: &[String]) -> Option<(Option<String>, Option<String>)> {
+    let bin = argv.first()?;
     if bin.rsplit('/').next() != Some("opencode") {
         return None;
     }
     let (mut session, mut dir) = (None, None);
+    let mut it = argv[1..].iter().map(String::as_str);
     while let Some(a) = it.next() {
         match a {
+            "--prompt" => break,
             "--session" | "-s" => session = it.next().map(String::from),
-            "--server" | "--prompt" => {
+            _ if VALUE_FLAGS.contains(&a) => {
                 it.next();
             }
+            _ if a.starts_with("--prompt=") => break,
             _ if a.starts_with("--session=") => session = a.strip_prefix("--session=").map(String::from),
             _ if a.starts_with('-') => {}
-            _ if SUBCOMMANDS.contains(&a) && dir.is_none() => return None,
-            _ => dir = Some(a.to_string()),
+            _ if dir.is_none() && SUBCOMMANDS.contains(&a) => return None,
+            _ => {
+                dir.get_or_insert_with(|| a.to_string());
+            }
         }
     }
     Some((session, dir))
 }
 
-/// Parse `ps -eo pid=,tty=,args=` output into the running TUIs; `cwd_of` resolves a pid's working directory.
-fn parse_tuis(ps: &str, cwd_of: impl Fn(i64) -> Option<String>) -> Vec<Tui> {
+/// Lexically resolve `.` and `..` (and repeated slashes) of an absolute path, so paths compare
+/// equal however they were spelled. Symlinks are not followed.
+fn normalize_path(p: &str) -> String {
+    let mut parts: Vec<&str> = Vec::new();
+    for c in p.split('/') {
+        match c {
+            "" | "." => {}
+            ".." => {
+                parts.pop();
+            }
+            c => parts.push(c),
+        }
+    }
+    format!("/{}", parts.join("/"))
+}
+
+/// The next whitespace-delimited field of `s` and the rest after it (leading blanks trimmed).
+fn next_field(s: &str) -> Option<(&str, &str)> {
+    let s = s.trim_start();
+    if s.is_empty() {
+        return None;
+    }
+    let end = s.find(char::is_whitespace).unwrap_or(s.len());
+    Some((&s[..end], s[end..].trim_start()))
+}
+
+/// Parse `ps -eo pid=,tty=,args=` output into the running TUIs. `argv_of` gives the exact argv of a
+/// pid when the OS has it (`/proc/<pid>/cmdline`), else the whitespace-split `ps` args are used;
+/// `cwd_of` resolves a pid's working directory; `is_dir` says whether a path exists as a directory.
+fn parse_tuis(
+    ps: &str,
+    argv_of: impl Fn(i64) -> Option<Vec<String>>,
+    cwd_of: impl Fn(i64) -> Option<String>,
+    is_dir: impl Fn(&str) -> bool,
+) -> Vec<Tui> {
     ps.lines()
         .filter_map(|line| {
-            let mut f = line.split_whitespace();
-            let pid: i64 = f.next()?.parse().ok()?;
-            let tty = f.next()?.to_string();
-            let args = line.trim_start().splitn(3, char::is_whitespace).nth(2)?.trim_start();
-            let args = args.strip_prefix(tty.as_str()).unwrap_or(args).trim_start();
-            let (session, dir) = parse_tui_args(args)?;
-            let base = cwd_of(pid)?;
-            let cwd = match dir {
-                Some(d) if d.starts_with('/') => d,
-                Some(d) => format!("{}/{}", base.trim_end_matches('/'), d.trim_start_matches("./")),
-                None => base,
-            };
-            Some(Tui { pid, tty: (tty != "?").then_some(tty), cwd, session })
+            let (pid, rest) = next_field(line)?;
+            let pid: i64 = pid.parse().ok()?;
+            let (tty, args) = next_field(rest)?;
+            let ps_argv: Vec<String> = args.split_whitespace().map(String::from).collect();
+            if ps_argv.first()?.rsplit('/').next() != Some("opencode") {
+                return None;
+            }
+            let argv = argv_of(pid).filter(|a| !a.is_empty()).unwrap_or(ps_argv);
+            let (session, dir) = parse_tui_args(&argv)?;
+            let base = normalize_path(&cwd_of(pid)?);
+            let cwd = dir
+                .map(|d| if d.starts_with('/') { normalize_path(&d) } else { normalize_path(&format!("{base}/{d}")) })
+                .filter(|d| is_dir(d))
+                .unwrap_or(base);
+            // `?` on Linux, `??` on macOS: no controlling terminal.
+            Some(Tui { pid, tty: (tty != "?" && tty != "??").then(|| tty.to_string()), cwd, session })
         })
         .collect()
+}
+
+/// The exact argv of a process from `/proc/<pid>/cmdline` (NUL-separated); `None` without /proc.
+fn proc_argv(pid: i64) -> Option<Vec<String>> {
+    let raw = std::fs::read(format!("/proc/{pid}/cmdline")).ok()?;
+    Some(raw.split(|b| *b == 0).filter(|a| !a.is_empty()).map(|a| String::from_utf8_lossy(a).into_owned()).collect())
 }
 
 /// Pair each TUI with its session: the one it was started on (`--session`), else the most
@@ -516,7 +573,7 @@ fn match_tuis(tuis: &[Tui], listed: impl Fn(&str) -> Vec<ListedSession>) -> Vec<
         let sessions = listed(&t.cwd);
         let found = match &t.session {
             Some(id) => sessions.iter().find(|s| &s.id == id),
-            None => sessions.iter().find(|s| s.directory == t.cwd && !taken.contains(&s.id)),
+            None => sessions.iter().find(|s| normalize_path(&s.directory) == t.cwd && !taken.contains(&s.id)),
         };
         let Some(s) = found else { continue };
         taken.push(s.id.clone());
@@ -573,7 +630,7 @@ fn list_in(dir: &str) -> Vec<ListedSession> {
 /// running TUI are not reported.
 fn live_sessions_now() -> Vec<AgentSession> {
     let Ok(ps) = Command::new("ps").args(["-eo", "pid=,tty=,args="]).output() else { return Vec::new() };
-    let tuis = parse_tuis(&String::from_utf8_lossy(&ps.stdout), proc_cwd);
+    let tuis = parse_tuis(&String::from_utf8_lossy(&ps.stdout), proc_argv, proc_cwd, |d| std::path::Path::new(d).is_dir());
     let cache = std::cell::RefCell::new(std::collections::HashMap::<String, Vec<ListedSession>>::new());
     match_tuis(&tuis, |dir| cache.borrow_mut().entry(dir.to_string()).or_insert_with(|| list_in(dir)).clone())
 }
@@ -872,27 +929,95 @@ mod tests {
         assert!(parse_session_list("not json").is_empty());
     }
 
+    fn av(a: &str) -> Vec<String> {
+        a.split_whitespace().map(String::from).collect()
+    }
+
     #[test]
     fn tui_args_tell_the_tui_from_other_invocations() {
-        assert_eq!(parse_tui_args("opencode"), Some((None, None)));
-        assert_eq!(parse_tui_args("/home/me/.opencode/bin/opencode -s ses_a --prompt hi"), Some((Some("ses_a".into()), None)));
-        assert_eq!(parse_tui_args("opencode --session ses_a /work"), Some((Some("ses_a".into()), Some("/work".into()))));
-        assert_eq!(parse_tui_args("opencode run --format json"), None);
-        assert_eq!(parse_tui_args("/x/opencode serve --service"), None);
-        assert_eq!(parse_tui_args("vim opencode"), None);
+        assert_eq!(parse_tui_args(&av("opencode")), Some((None, None)));
+        assert_eq!(parse_tui_args(&av("/home/me/.opencode/bin/opencode -s ses_a --prompt hi")), Some((Some("ses_a".into()), None)));
+        assert_eq!(parse_tui_args(&av("opencode --session ses_a /work")), Some((Some("ses_a".into()), Some("/work".into()))));
+        assert_eq!(parse_tui_args(&av("opencode run --format json")), None);
+        assert_eq!(parse_tui_args(&av("/x/opencode serve --service")), None);
+        assert_eq!(parse_tui_args(&av("vim opencode")), None);
+        for sub in ["attach", "web", "github", "export", "import", "agent", "completion", "generate"] {
+            assert_eq!(parse_tui_args(&av(&format!("opencode {sub}"))), None, "{sub}");
+        }
+    }
+
+    #[test]
+    fn a_multi_word_prompt_is_not_parsed_for_flags_or_paths() {
+        // The words of the prompt look like a path, a flag, a short flag and a subcommand.
+        let argv = vec!["opencode", "--session", "ses_a", "--prompt", "look at /x and --session ses_b, -s ses_c then run it"]
+            .into_iter()
+            .map(String::from)
+            .collect::<Vec<_>>();
+        assert_eq!(parse_tui_args(&argv), Some((Some("ses_a".into()), None)));
+        // The same line as `ps` prints it (split on blanks), and with the prompt first.
+        assert_eq!(
+            parse_tui_args(&av("opencode --prompt look at /x --session ses_b -s ses_c run")),
+            Some((None, None))
+        );
+        assert_eq!(parse_tui_args(&av("opencode --prompt=do /x -s ses_b")), Some((None, None)));
+    }
+
+    #[test]
+    fn value_flags_do_not_leak_into_session_or_directory() {
+        assert_eq!(parse_tui_args(&av("opencode -m anthropic/foo")), Some((None, None)));
+        assert_eq!(parse_tui_args(&av("opencode --model anthropic/foo /work")), Some((None, Some("/work".into()))));
+        assert_eq!(parse_tui_args(&av("opencode --agent build -s ses_a")), Some((Some("ses_a".into()), None)));
+        assert_eq!(parse_tui_args(&av("opencode --port 4096 --hostname 0.0.0.0")), Some((None, None)));
+        // A value that spells a subcommand is a value, not the subcommand.
+        assert_eq!(parse_tui_args(&av("opencode --agent run")), Some((None, None)));
+        assert_eq!(parse_tui_args(&av("opencode --session=ses_z --continue")), Some((Some("ses_z".into()), None)));
+    }
+
+    #[test]
+    fn paths_are_normalized_lexically() {
+        assert_eq!(normalize_path("/a/b/../c/./d//e"), "/a/c/d/e");
+        assert_eq!(normalize_path("/a/.."), "/");
+        assert_eq!(normalize_path("/.."), "/");
     }
 
     #[test]
     fn running_tuis_are_read_from_ps() {
-        let ps = "  11 pts/3 opencode --session ses_a\n  12 ?     /x/opencode serve --service\n  13 pts/4 opencode sub\n  14 pts/5 bash\n";
-        let tuis = parse_tuis(ps, |pid| Some(format!("/cwd/{pid}")));
+        let ps = "  11 pts/3 opencode --session ses_a\n  12 ?     /x/opencode serve --service\n  13 pts/4 opencode sub\n  14 pts/5 bash\n  15 pts/6 opencode ../up\n";
+        let tuis = parse_tuis(ps, |_| None, |pid| Some(format!("/cwd/{pid}")), |d| d == "/cwd/13/sub" || d == "/cwd/up");
         assert_eq!(
             tuis,
             vec![
                 Tui { pid: 11, tty: Some("pts/3".into()), cwd: "/cwd/11".into(), session: Some("ses_a".into()) },
                 Tui { pid: 13, tty: Some("pts/4".into()), cwd: "/cwd/13/sub".into(), session: None },
+                Tui { pid: 15, tty: Some("pts/6".into()), cwd: "/cwd/up".into(), session: None },
             ]
         );
+        // A positional that is not an existing directory is ignored: the TUI runs in its cwd.
+        let tuis = parse_tuis("5 pts/1 opencode nonsense\n", |_| None, |_| Some("/w".into()), |_| false);
+        assert_eq!(tuis[0].cwd, "/w");
+    }
+
+    #[test]
+    fn the_exact_argv_wins_over_the_split_ps_args() {
+        let ps = "21 pts/1 opencode --prompt fix the thing in /x --session ses_nope\n";
+        let exact = vec!["opencode", "-s", "ses_real", "--prompt", "fix the thing in /x --session ses_nope"];
+        let tuis = parse_tuis(ps, |_| Some(exact.iter().map(|s| s.to_string()).collect()), |_| Some("/w".into()), |_| true);
+        assert_eq!(tuis[0].session.as_deref(), Some("ses_real"));
+        assert_eq!(tuis[0].cwd, "/w");
+    }
+
+    #[test]
+    fn macos_ps_output_has_padded_columns_and_double_question_mark_ttys() {
+        let ps = "  501 ttys003  opencode --session ses_m\n  502 ??       /opt/homebrew/bin/opencode\n99999 ttys010  /Users/me/.opencode/bin/opencode -m a/b\n";
+        let tuis = parse_tuis(ps, |_| None, |_| Some("/Users/me/app".into()), |_| false);
+        assert_eq!(tuis.iter().map(|t| (t.pid, t.tty.as_deref())).collect::<Vec<_>>(), [
+            (501, Some("ttys003")),
+            (502, None),
+            (99999, Some("ttys010")),
+        ]);
+        assert_eq!(tuis[0].session.as_deref(), Some("ses_m"));
+        // A Linux `?` is no terminal either.
+        assert_eq!(parse_tuis("7 ? opencode\n", |_| None, |_| Some("/w".into()), |_| false)[0].tty, None);
     }
 
     #[test]
