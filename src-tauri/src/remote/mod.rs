@@ -6,3 +6,5 @@
 //! (agent, key, `~/.ssh/config`) is the user's.
 
 pub mod host;
+pub mod error;
+pub mod tunnel;
