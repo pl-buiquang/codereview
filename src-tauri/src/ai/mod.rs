@@ -355,6 +355,9 @@ impl RunAcc {
             }
         }
         if let Some(u) = harness.step_usage(line) {
+            // Sums what each line reports. Codex's `turn.completed` carries the thread's cumulative
+            // usage, so this would double count if a run ever printed more than one of them
+            // (`codex exec` prints one; `before` is subtracted by the caller for resumed threads).
             self.any = true;
             self.steps += 1;
             self.usage.input_tokens += u.input_tokens;
