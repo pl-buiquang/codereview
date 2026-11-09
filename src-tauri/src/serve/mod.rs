@@ -14,6 +14,7 @@ use serde::Serialize;
 use crate::error::{AppError, AppResult};
 
 pub mod request;
+pub mod store;
 pub mod workspace;
 
 /// Integer protocol version of `/v1`; a client with another number must not use the host.
