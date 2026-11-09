@@ -114,8 +114,9 @@ pub trait RunStore: Send + Sync {
     fn set_process(&self, id: i64, pid: u32, cwd: &Path, session_id: &str);
     fn set_cleanup(&self, id: i64, dirs: &[PathBuf]);
     fn cleanup_dirs(&self, id: i64) -> Vec<PathBuf>;
-    /// Idempotent on `(run_id, seq)`; the store stamps the time.
-    fn append_event(&self, id: i64, seq: i64, kind: &str, json: &str);
+    /// Idempotent on `(run_id, seq)`; the store stamps the time. `json` is the raw line (or a stub),
+    /// `norm` its harness-neutral form (`ai::norm_json`).
+    fn append_event(&self, id: i64, seq: i64, kind: &str, json: &str, norm: &str);
     fn last_seq(&self, id: i64) -> i64;
     fn running_runs(&self) -> AppResult<Vec<RunningRun>>;
     /// Write the final state of a `running` run (a row already settled is left alone).

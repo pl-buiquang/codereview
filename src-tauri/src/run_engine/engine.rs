@@ -308,9 +308,9 @@ impl RunEngine {
             skip,
             alive,
             &|| self.inner.lock().unwrap().detaching,
-            &mut |seq, kind, line| {
+            &mut |seq, kind, line, norm| {
                 let json = event_json(kind, line);
-                self.store.append_event(run_id, seq, kind, &json);
+                self.store.append_event(run_id, seq, kind, &json, norm);
                 self.sink.event(run_id, seq, kind, &json);
             },
         )
@@ -495,6 +495,7 @@ mod tests {
         session_id: Option<String>,
         started_at: Option<String>,
         events: Vec<(i64, String)>,
+        norms: Vec<(i64, String)>,
         text: String,
         error: Option<String>,
     }
@@ -584,11 +585,13 @@ mod tests {
         fn cleanup_dirs(&self, _: i64) -> Vec<PathBuf> {
             Vec::new()
         }
-        fn append_event(&self, id: i64, seq: i64, kind: &str, _: &str) {
+        fn append_event(&self, id: i64, seq: i64, kind: &str, _: &str, norm: &str) {
             let mut rows = self.rows.lock().unwrap();
-            let ev = &mut rows.get_mut(&id).unwrap().events;
-            ev.retain(|(s, _)| *s != seq);
-            ev.push((seq, kind.into()));
+            let row = rows.get_mut(&id).unwrap();
+            row.events.retain(|(s, _)| *s != seq);
+            row.events.push((seq, kind.into()));
+            row.norms.retain(|(s, _)| *s != seq);
+            row.norms.push((seq, norm.into()));
         }
         fn last_seq(&self, id: i64) -> i64 {
             self.rows.lock().unwrap()[&id].events.iter().map(|(s, _)| *s).max().unwrap_or(0)
@@ -848,7 +851,7 @@ mod tests {
         let store = FakeStore::new("adopt_done", 1);
         let sink = FakeSink::new(Duration::from_secs(60));
         store.add(1, "running");
-        store.append_event(1, 1, "assistant", "{}");
+        store.append_event(1, 1, "assistant", "{}", "{}");
         leave_files(&store, 1, "{\"type\":\"assistant\"}\n{\"type\":\"result\",\"result\":\"late\"}\n");
         let e = engine(&store, &sink, false);
         e.adopt_detached();
@@ -856,6 +859,12 @@ mod tests {
         // seq 1 was recorded before: only the result is new
         assert_eq!(store.row(1).events, vec![(1, "assistant".to_string()), (2, "result".to_string())]);
         assert_eq!(store.row(1).text, "late");
+        // the new line was stored with its normalized form next to it; the old one is untouched
+        let norms = store.row(1).norms;
+        assert_eq!(norms[0], (1, "{}".to_string()));
+        let last: serde_json::Value = serde_json::from_str(&norms[1].1).unwrap();
+        assert_eq!((last["v"].clone(), last["events"][0]["type"].clone()), (1.into(), "final".into()));
+        assert_eq!(last["events"][0]["text"], "late");
         assert!(!store.root.join("1").exists());
     }
 

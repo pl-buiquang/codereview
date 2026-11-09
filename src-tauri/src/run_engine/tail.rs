@@ -6,7 +6,7 @@ use std::path::Path;
 use std::time::Duration;
 
 
-use crate::ai::{FinalResult, Harness};
+use crate::ai::{norm_json, FinalResult, Harness};
 
 pub const TAIL_POLL: Duration = Duration::from_millis(200);
 /// Lines longer than this are stored as a stub (`truncated`, `bytes`) instead of verbatim.
@@ -37,7 +37,7 @@ pub fn tail_events(
     skip: i64,
     alive: &mut dyn FnMut() -> bool,
     detaching: &dyn Fn() -> bool,
-    record: &mut dyn FnMut(i64, &str, &str),
+    record: &mut dyn FnMut(i64, &str, &str, &str),
 ) -> Tail {
     let Ok(file) = File::open(path) else { return Tail::Done(None) };
     let mut reader = BufReader::new(file);
@@ -49,12 +49,14 @@ pub fn tail_events(
             return;
         }
         let (kind, _) = harness.parse_line(line);
+        // Normalized before the raw line is cut to a stub, and also for the lines recorded by an
+        // earlier session: the final may be among them.
+        let events = harness.normalize(line);
         seq += 1;
         if seq > skip {
-            record(seq, &kind, line);
+            record(seq, &kind, line, &norm_json(&events, MAX_EVENT_BYTES));
         }
-        // Also for the lines recorded by an earlier session: the final may be among them.
-        if let Some(fin) = harness.normalize(line).iter().find_map(|e| e.as_final()) {
+        if let Some(fin) = events.iter().find_map(|e| e.as_final()) {
             *result = Some(fin);
         }
     };
@@ -101,7 +103,7 @@ mod tests {
         )
         .unwrap();
         let mut seen = Vec::new();
-        let tail = tail_events(&ClaudeCode, &path, 2, &mut || false, &|| false, &mut |s, k, _| seen.push((s, k.to_string())));
+        let tail = tail_events(&ClaudeCode, &path, 2, &mut || false, &|| false, &mut |s, k, _, _| seen.push((s, k.to_string())));
         // blank lines are not numbered; the first two lines were recorded earlier; an unterminated
         // last line is still drained once the process is gone
         assert_eq!(seen, vec![(3, "raw".to_string()), (4, "result".to_string())]);
@@ -112,7 +114,7 @@ mod tests {
 
     #[test]
     fn missing_file_is_done_without_result() {
-        let tail = tail_events(&ClaudeCode, &tmp("none"), 0, &mut || false, &|| false, &mut |_, _, _| {});
+        let tail = tail_events(&ClaudeCode, &tmp("none"), 0, &mut || false, &|| false, &mut |_, _, _, _| {});
         assert!(matches!(tail, Tail::Done(None)));
     }
 
@@ -121,7 +123,7 @@ mod tests {
         let path = tmp("detach");
         std::fs::write(&path, "{\"type\":\"assistant\"}\n").unwrap();
         let mut n = 0;
-        let tail = tail_events(&ClaudeCode, &path, 0, &mut || true, &|| true, &mut |_, _, _| n += 1);
+        let tail = tail_events(&ClaudeCode, &path, 0, &mut || true, &|| true, &mut |_, _, _, _| n += 1);
         assert!(matches!(tail, Tail::Detached));
         assert_eq!(n, 1);
         let _ = std::fs::remove_file(&path);

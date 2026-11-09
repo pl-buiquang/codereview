@@ -67,6 +67,8 @@ pub struct RoutineRun {
     pub error: Option<String>,
     pub cost_usd: f64,
     pub num_turns: i64,
+    /// Id of the harness the run is on (`claude` for every run before harnesses existed).
+    pub harness: String,
     pub queued_at: String,
     pub started_at: Option<String>,
     pub ended_at: Option<String>,
@@ -97,6 +99,7 @@ impl RoutineRun {
             error: row.get("error")?,
             cost_usd: row.get("cost_usd")?,
             num_turns: row.get("num_turns")?,
+            harness: row.get("harness")?,
             queued_at: row.get("queued_at")?,
             started_at: row.get("started_at")?,
             ended_at: row.get("ended_at")?,
@@ -165,14 +168,16 @@ pub struct RunEvent {
     pub ts: String,
     pub kind: String,
     pub json: String,
+    /// Harness-neutral form of the line (`{"v":1,"events":[..]}`); `None` for runs recorded before it existed.
+    pub norm: Option<String>,
 }
 
 pub fn run_events(conn: &Connection, run_id: i64, after_seq: i64) -> AppResult<Vec<RunEvent>> {
     let mut stmt = conn
-        .prepare("SELECT seq, ts, kind, json FROM routine_run_event WHERE run_id = ?1 AND seq > ?2 ORDER BY seq")?;
+        .prepare("SELECT seq, ts, kind, json, norm FROM routine_run_event WHERE run_id = ?1 AND seq > ?2 ORDER BY seq")?;
     let rows = stmt
         .query_map(params![run_id, after_seq], |r| {
-            Ok(RunEvent { seq: r.get(0)?, ts: r.get(1)?, kind: r.get(2)?, json: r.get(3)? })
+            Ok(RunEvent { seq: r.get(0)?, ts: r.get(1)?, kind: r.get(2)?, json: r.get(3)?, norm: r.get(4)? })
         })?
         .collect::<rusqlite::Result<_>>()?;
     Ok(rows)
@@ -488,11 +493,11 @@ impl RunStore for SqliteRunStore {
         json.and_then(|j| serde_json::from_str(&j).ok()).unwrap_or_default()
     }
 
-    fn append_event(&self, id: i64, seq: i64, kind: &str, json: &str) {
+    fn append_event(&self, id: i64, seq: i64, kind: &str, json: &str, norm: &str) {
         let _ = self.with_conn(|c| {
             c.execute(
-                "INSERT OR REPLACE INTO routine_run_event (run_id, seq, ts, kind, json) VALUES (?1, ?2, ?3, ?4, ?5)",
-                params![id, seq, now(), kind, json],
+                "INSERT OR REPLACE INTO routine_run_event (run_id, seq, ts, kind, json, norm) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![id, seq, now(), kind, json, norm],
             )?;
             Ok(())
         });
@@ -638,8 +643,11 @@ impl EventSink for AppSink {
         let (model, harness) = {
             let db = app.state::<Db>();
             let conn = db.0.lock().unwrap();
-            (handlers::effective_model(&conn, &run, &routine), profiles::resolve_routine(&conn, routine.profile_id).harness.id())
+            let harness = profiles::resolve_routine(&conn, routine.profile_id).harness.id();
+            let _ = conn.execute("UPDATE routine_run SET harness = ?1 WHERE id = ?2", params![harness, run.id]);
+            (handlers::effective_model(&conn, &run, &routine), harness)
         };
+
         log::info!(target: "routines", "run {}: starting {} on {}", run.id, routine.key, run.context_label);
         Ok(Some(build_prepared(
             &routine,
@@ -840,6 +848,25 @@ mod tests {
             .unwrap();
         }
         assert_eq!(run_events(&conn, run_id, 1).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn rows_without_a_normalized_form_are_still_returned() {
+        let (conn, rid) = seeded();
+        insert_run(&conn, rid, "a", "running").unwrap();
+        let run_id = conn.last_insert_rowid();
+        // seq 1 as an older version wrote it (no norm), seq 2 as the engine writes it now
+        conn.execute("INSERT INTO routine_run_event (run_id, seq, ts, kind, json) VALUES (?1, 1, 't', 'assistant', '{}')", params![run_id])
+            .unwrap();
+        conn.execute(
+            "INSERT INTO routine_run_event (run_id, seq, ts, kind, json, norm) VALUES (?1, 2, 't', 'result', '{}', ?2)",
+            params![run_id, r#"{"v":1,"events":[]}"#],
+        )
+        .unwrap();
+        let events = run_events(&conn, run_id, 0).unwrap();
+        assert_eq!(events[0].norm, None);
+        assert_eq!(events[1].norm.as_deref(), Some(r#"{"v":1,"events":[]}"#));
+        assert_eq!(get_run(&conn, run_id).unwrap().harness, "claude");
     }
 
     fn test_routine(mode: &str) -> Routine {
