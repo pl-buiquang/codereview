@@ -23,7 +23,7 @@ pub mod image_diff;
 pub mod inbox;
 pub mod logging;
 pub mod mirror;
-mod path_env;
+pub mod path_env;
 pub mod provider;
 pub mod prompts;
 pub mod remote;

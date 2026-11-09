@@ -606,6 +606,10 @@ fn resolve_reference(reference: Option<String>, here: bool) -> AppResult<String>
 
 fn main() {
     let cli = Cli::parse();
+    // Repair PATH before resolving the tools: `tools::init` caches each lookup once, so under
+    // systemd (or a non-interactive ssh) it would otherwise cache "not found" for `claude`,
+    // `codex` and `opencode` and the worker would report no harness.
+    codereview_lib::path_env::ensure_login_path();
     tools::init();
 
     // Inside a remote run `cr` never touches a database: writes go to the run's outbox and reads
