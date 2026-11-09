@@ -394,13 +394,31 @@ pub fn harness_for() -> &'static dyn Harness {
     &CLAUDE
 }
 
-/// The argv of an interactive session of the harness the `sessions` feature profile selects.
-pub fn interactive_argv(db: &crate::db::Db, opts: &Interactive<'_>) -> AppResult<Vec<String>> {
-    let resolved = profiles::resolve_feature(&db.0.lock().unwrap(), profiles::Feature::Sessions);
-    let harness = resolved.harness;
+/// The harness an interactive session launches on: `requested` (the picker's choice) when given,
+/// else the one the `sessions` feature profile selects.
+pub fn sessions_harness(conn: &rusqlite::Connection, requested: Option<&str>) -> AppResult<&'static dyn Harness> {
+    match requested.map(str::trim).filter(|h| !h.is_empty()) {
+        Some(id) => harness_by_id(id).ok_or_else(|| AppError::Other(format!("unknown harness '{id}'"))),
+        None => Ok(profiles::resolve_feature(conn, profiles::Feature::Sessions).harness),
+    }
+}
+
+/// The argv that opens an interactive session on `harness`.
+pub fn argv_of(harness: &dyn Harness, opts: &Interactive<'_>) -> AppResult<Vec<String>> {
     harness
         .interactive_argv(opts)
         .ok_or_else(|| AppError::Other(format!("{} cannot open an interactive session like this", harness.name())))
+}
+
+/// The argv of an interactive session of the harness the `sessions` feature profile selects.
+pub fn interactive_argv(db: &crate::db::Db, opts: &Interactive<'_>) -> AppResult<Vec<String>> {
+    interactive_argv_with(db, None, opts)
+}
+
+/// Like [`interactive_argv`], on the harness `requested` (a launch-time pick) when given.
+pub fn interactive_argv_with(db: &crate::db::Db, requested: Option<&str>, opts: &Interactive<'_>) -> AppResult<Vec<String>> {
+    let harness = sessions_harness(&db.0.lock().unwrap(), requested)?;
+    argv_of(harness, opts)
 }
 
 /// What a run needs from its harness.
@@ -542,6 +560,15 @@ mod tests {
         let ids = |skip| live_sessions_of(&[&a, &b, &c], skip).iter().map(|s| s.harness.clone()).collect::<Vec<_>>();
         assert_eq!(ids("none"), ["a", "c"]);
         assert_eq!(ids("a"), ["c"]);
+    }
+
+    #[test]
+    fn the_picker_overrides_the_sessions_profile_default() {
+        let conn = crate::db::open_memory();
+        assert_eq!(sessions_harness(&conn, None).unwrap().id(), "claude");
+        assert_eq!(sessions_harness(&conn, Some("")).unwrap().id(), "claude");
+        assert_eq!(sessions_harness(&conn, Some("claude")).unwrap().id(), "claude");
+        assert!(sessions_harness(&conn, Some("nope")).is_err());
     }
 
     #[test]

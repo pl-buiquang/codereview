@@ -92,7 +92,7 @@ function TerminalSessions() {
   });
   const resume = useMutation({
     mutationFn: (s: AgentSession) =>
-      api.resumeClaudeSession(s.session_id, s.cwd, s.repo ?? null, defaultTerminal, tmuxTarget, tmuxSessionName),
+      api.resumeClaudeSession(s.session_id, s.cwd, s.repo ?? null, defaultTerminal, tmuxTarget, tmuxSessionName, s.harness),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["claude-sessions"] }),
     onError: (e) => toast.error(`Could not resume session:\n${String(e)}`),
   });

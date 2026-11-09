@@ -209,6 +209,7 @@ pub async fn focus_claude_session(session_id: String) -> AppResult<()> {
 }
 
 /// Open an ended session in a new tmux window running `claude --resume`.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn resume_claude_session(
     session_id: String,
@@ -217,9 +218,10 @@ pub async fn resume_claude_session(
     host: terminal::TerminalHost,
     tmux_target: terminal::TmuxTarget,
     tmux_session: String,
+    harness: Option<String>,
     db: State<'_, Db>,
 ) -> AppResult<()> {
-    if claude_sessions::live_sessions().iter().any(|s| s.session_id == session_id) {
+    if live_session_ids().contains(&session_id) {
         return Err(AppError::Other("this session is already running — focus it instead".into()));
     }
     if !std::path::Path::new(&cwd).is_dir() {
@@ -227,7 +229,8 @@ pub async fn resume_claude_session(
     }
     let repo = repo.unwrap_or_else(|| cwd.trim_end_matches('/').rsplit('/').next().unwrap_or(&cwd).to_string());
     let window_name: String = session_id.chars().take(8).collect();
-    let argv = ai::interactive_argv(&db, &ai::Interactive {
+    // A session resumes on the harness that owns it (the session row's harness), else the profile default.
+    let argv = ai::interactive_argv_with(&db, harness.as_deref(), &ai::Interactive {
         session: SessionMode::Resume(&session_id),
         system_prompt_file: None,
         system_prompt_mode: SystemPromptMode::Append,
@@ -273,7 +276,7 @@ fn load_session_cards(conn: &Connection) -> AppResult<(Vec<SessionCard>, Session
         .query_map([], |r| Ok(SessionCard { id: r.get(0)?, repo: r.get(1)?, number: r.get(2)?, head_ref: r.get(3)? }))?
         .collect::<Result<Vec<_>, _>>()?;
     let mut meta = SessionIdsByCard::new();
-    let mut stmt = conn.prepare("SELECT card_id, value FROM board_meta WHERE kind = 'claude_session'")?;
+    let mut stmt = conn.prepare("SELECT card_id, value FROM board_meta WHERE kind IN ('claude_session', 'ai_session')")?;
     for row in stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))? {
         let (card, value) = row?;
         meta.entry(card).or_default().insert(value);
@@ -310,15 +313,31 @@ fn match_card_sessions(
     out
 }
 
-/// Most recent `claude_session` recorded on the card that isn't currently live (resuming a live
-/// session would put two writers on one transcript).
-pub(crate) fn resumable_card_session(conn: &Connection, card_id: &str, live: &HashSet<String>) -> AppResult<Option<String>> {
+/// Ids of the live sessions of every harness.
+pub(crate) fn live_session_ids() -> HashSet<String> {
+    claude_sessions::live_sessions()
+        .into_iter()
+        .chain(ai::live_sessions_except("claude"))
+        .map(|s| s.session_id)
+        .collect()
+}
+
+/// Most recent session of `harness` recorded on the card (`claude_session` rows are Claude's) that
+/// isn't currently live (resuming a live session would put two writers on one transcript).
+pub(crate) fn resumable_card_session(
+    conn: &Connection,
+    card_id: &str,
+    live: &HashSet<String>,
+    harness: &str,
+) -> AppResult<Option<String>> {
     let mut stmt = conn.prepare(
-        "SELECT value FROM board_meta WHERE card_id = ?1 AND kind = 'claude_session'
+        "SELECT value FROM board_meta WHERE card_id = ?1
+           AND ((kind = 'claude_session' AND ?2 = 'claude')
+             OR (kind = 'ai_session' AND COALESCE(harness, 'claude') = ?2))
          ORDER BY created_at DESC, id DESC",
     )?;
     let ids = stmt
-        .query_map(params![card_id], |r| r.get::<_, String>(0))?
+        .query_map(params![card_id, harness], |r| r.get::<_, String>(0))?
         .collect::<Result<Vec<_>, _>>()?;
     Ok(ids.into_iter().find(|id| !live.contains(id)))
 }
@@ -403,15 +422,17 @@ pub async fn review_open_agent(
     host: terminal::TerminalHost,
     tmux_target: terminal::TmuxTarget,
     tmux_session: String,
+    harness: Option<String>,
     db: State<'_, Db>,
 ) -> AppResult<()> {
     let worktree_path = crate::commands::chat::ensure_chat_worktree(review_id, db.clone()).await?;
-    let live: HashSet<String> = claude_sessions::live_sessions().into_iter().map(|s| s.session_id).collect();
+    let live = live_session_ids();
+    let harness = ai::sessions_harness(&db.0.lock().unwrap(), harness.as_deref())?;
     let (ctx, resume) = {
         let conn = db.0.lock().unwrap();
         let ctx = review_session_ctx(&conn, review_id)?;
         let resume = match &ctx.card {
-            Some(card) => resumable_card_session(&conn, &card.id, &live)?,
+            Some(card) => resumable_card_session(&conn, &card.id, &live, harness.id())?,
             None => None,
         };
         (ctx, resume)
@@ -425,7 +446,7 @@ pub async fn review_open_agent(
         Some(n) => format!("#{n}"),
         None => target.head_ref.clone(),
     };
-    let argv = ai::interactive_argv(&db, &ai::Interactive {
+    let argv = ai::argv_of(harness, &ai::Interactive {
         session: resume.as_deref().map_or(SessionMode::Ephemeral, SessionMode::Resume),
         system_prompt_file: None,
         system_prompt_mode: SystemPromptMode::Append,
@@ -505,17 +526,20 @@ mod tests {
     fn resumable_skips_live_sessions() {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(
-            "CREATE TABLE board_meta (id INTEGER PRIMARY KEY, card_id TEXT, kind TEXT, value TEXT, created_at TEXT);
-             INSERT INTO board_meta (card_id, kind, value, created_at) VALUES
-               ('c', 'claude_session', 'old', '2026-01-01'),
-               ('c', 'claude_session', 'new', '2026-01-02'),
-               ('c', 'note', 'x', '2026-01-03');",
+            "CREATE TABLE board_meta (id INTEGER PRIMARY KEY, card_id TEXT, kind TEXT, value TEXT, created_at TEXT, harness TEXT);
+             INSERT INTO board_meta (card_id, kind, value, created_at, harness) VALUES
+               ('c', 'claude_session', 'old', '2026-01-01', NULL),
+               ('c', 'claude_session', 'new', '2026-01-02', NULL),
+               ('c', 'ai_session', 'oc1', '2026-01-04', 'opencode'),
+               ('c', 'note', 'x', '2026-01-03', NULL);",
         )
         .unwrap();
-        assert_eq!(resumable_card_session(&conn, "c", &HashSet::new()).unwrap().as_deref(), Some("new"));
+        assert_eq!(resumable_card_session(&conn, "c", &HashSet::new(), "claude").unwrap().as_deref(), Some("new"));
+        assert_eq!(resumable_card_session(&conn, "c", &HashSet::new(), "opencode").unwrap().as_deref(), Some("oc1"));
+        assert_eq!(resumable_card_session(&conn, "c", &HashSet::new(), "codex").unwrap(), None);
         let live = HashSet::from(["new".to_string()]);
-        assert_eq!(resumable_card_session(&conn, "c", &live).unwrap().as_deref(), Some("old"));
-        assert_eq!(resumable_card_session(&conn, "other", &live).unwrap(), None);
+        assert_eq!(resumable_card_session(&conn, "c", &live, "claude").unwrap().as_deref(), Some("old"));
+        assert_eq!(resumable_card_session(&conn, "other", &live, "claude").unwrap(), None);
     }
     #[test]
     fn review_sessions_match_worktree_or_card() {

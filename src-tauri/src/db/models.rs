@@ -457,9 +457,25 @@ pub struct BoardMetaRow {
     pub label: Option<String>,
     pub cwd: Option<String>,
     pub created_at: String,
+    /// Harness of an `ai_session` row.
+    pub harness: Option<String>,
 }
 
 impl BoardMetaRow {
+    /// Whether this row points at an AI session (`claude_session` or `ai_session`).
+    pub fn is_session(&self) -> bool {
+        matches!(self.kind.as_str(), "claude_session" | "ai_session")
+    }
+
+    /// The harness of a session row: `claude_session` rows (and untagged ones) are Claude's.
+    pub fn session_harness(&self) -> Option<&str> {
+        match self.kind.as_str() {
+            "claude_session" => Some("claude"),
+            "ai_session" => Some(self.harness.as_deref().unwrap_or("claude")),
+            _ => None,
+        }
+    }
+
     pub fn from_row(row: &Row) -> rusqlite::Result<Self> {
         Ok(Self {
             id: row.get("id")?,
@@ -470,6 +486,7 @@ impl BoardMetaRow {
             label: row.get("label")?,
             cwd: row.get("cwd")?,
             created_at: row.get("created_at")?,
+            harness: row.get("harness")?,
         })
     }
 }

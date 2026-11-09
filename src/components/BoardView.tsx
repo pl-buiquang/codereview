@@ -274,7 +274,8 @@ export function BoardView() {
     onError: (e) => toast.error(`Could not open terminal:\n${String(e)}`),
   });
   const openAgent = useMutation({
-    mutationFn: (cardId: string) => api.boardOpenAgent(cardId, defaultTerminal, tmuxTarget, tmuxSessionName, parseRepoBasePaths(repoBasePaths)),
+    mutationFn: ({ cardId, harness }: { cardId: string; harness?: string }) =>
+      api.boardOpenAgent(cardId, defaultTerminal, tmuxTarget, tmuxSessionName, parseRepoBasePaths(repoBasePaths), harness ?? null),
     onSuccess: () => {
       invalidate();
       queryClient.invalidateQueries({ queryKey: ["claude-sessions"] });
@@ -282,7 +283,8 @@ export function BoardView() {
     onError: (e) => toast.error(`Could not open agent session:\n${String(e)}`),
   });
   const openIssueAgent = useMutation({
-    mutationFn: (cardId: string) => api.boardOpenIssueAgent(cardId, defaultTerminal, tmuxTarget, tmuxSessionName),
+    mutationFn: ({ cardId, harness }: { cardId: string; harness?: string }) =>
+      api.boardOpenIssueAgent(cardId, defaultTerminal, tmuxTarget, tmuxSessionName, harness ?? null),
     onSuccess: () => {
       invalidate();
       queryClient.invalidateQueries({ queryKey: ["claude-sessions"] });
@@ -724,14 +726,14 @@ export function BoardView() {
                               busy: openShell.isPending || openAgent.isPending || focusSession.isPending,
                               onFocus: (id) => focusSession.mutate(id),
                               onOpenShell: () => openShell.mutate(card.id),
-                              onOpenAgent: () => openAgent.mutate(card.id),
+                              onOpenAgent: (harness) => openAgent.mutate({ cardId: card.id, harness }),
                             }
                           : card.type === "issue"
                             ? {
                                 sessions: focusableByCard.get(card.id) ?? [],
                                 busy: openIssueAgent.isPending || focusSession.isPending,
                                 onFocus: (id) => focusSession.mutate(id),
-                                onOpenAgent: () => openIssueAgent.mutate(card.id),
+                                onOpenAgent: (harness) => openIssueAgent.mutate({ cardId: card.id, harness }),
                               }
                             : null
                       }

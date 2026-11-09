@@ -1568,7 +1568,8 @@ function ReviewHeader({
     onError: (e) => toast.error(`Could not open terminal:\n${String(e)}`),
   });
   const openAgent = useMutation({
-    mutationFn: () => api.reviewOpenAgent(review.id, defaultTerminal, tmuxTarget, tmuxSessionName),
+    mutationFn: (harness?: string) =>
+      api.reviewOpenAgent(review.id, defaultTerminal, tmuxTarget, tmuxSessionName, harness ?? null),
     onSuccess: () => {
       invalidateWorktree();
       queryClient.invalidateQueries({ queryKey: ["review-agent-sessions", review.id] });
@@ -2151,7 +2152,7 @@ function ReviewHeader({
                   disabledReason={noCloneReason ?? (claudeAvailable ? null : "Claude CLI not found")}
                   close={close}
                   onFocus={(id) => focusSession.mutate(id)}
-                  onOpenNew={() => openAgent.mutate()}
+                  onOpenNew={(harness) => openAgent.mutate(harness)}
                 />
                 <hr className="btn-split-menu-separator" />
                 <button role="menuitem" onClick={run(() => setShowExport(true))}>

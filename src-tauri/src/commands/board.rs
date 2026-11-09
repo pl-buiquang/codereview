@@ -677,6 +677,7 @@ pub async fn board_open_shell(
 
 /// Ensure the PR card's chat worktree exists, then open a tmux window there running Claude —
 /// resuming the card's latest recorded session when it isn't already live.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn board_open_agent(
     card_id: String,
@@ -684,18 +685,20 @@ pub async fn board_open_agent(
     host: crate::terminal::TerminalHost,
     tmux_target: crate::terminal::TmuxTarget,
     tmux_session: String,
+    harness: Option<String>,
     db: State<'_, Db>,
 ) -> AppResult<()> {
     let (owner, name, number) = pr_card_coords(&db, &card_id)?;
     let review = crate::commands::review::create_review_for_pr_impl(&db, &owner, &name, number, &base_paths, true)?;
     let worktree_path = crate::commands::chat::ensure_chat_worktree(review.id, db.clone()).await?;
-    let live: std::collections::HashSet<String> =
-        crate::claude_sessions::live_sessions().into_iter().map(|s| s.session_id).collect();
-    let resume = {
+    let live = crate::commands::sessions::live_session_ids();
+    let (harness, resume) = {
         let conn = db.0.lock().unwrap();
-        crate::commands::sessions::resumable_card_session(&conn, &card_id, &live)?
+        let harness = crate::ai::sessions_harness(&conn, harness.as_deref())?;
+        let resume = crate::commands::sessions::resumable_card_session(&conn, &card_id, &live, harness.id())?;
+        (harness, resume)
     };
-    let argv = crate::ai::interactive_argv(&db, &crate::ai::Interactive {
+    let argv = crate::ai::argv_of(harness, &crate::ai::Interactive {
         session: resume.as_deref().map_or(crate::ai::SessionMode::Ephemeral, crate::ai::SessionMode::Resume),
         system_prompt_file: None,
         system_prompt_mode: crate::ai::SystemPromptMode::Append,
@@ -720,6 +723,38 @@ fn validate_meta_kind(kind: &str) -> AppResult<()> {
         "file" | "link" | "note" | "claude_session" => Ok(()),
         other => Err(AppError::Other(format!("invalid metadata kind '{other}' (expected file, link, note or claude_session)"))),
     }
+}
+
+/// Record a session of `harness` on a card: a `claude_session` row for Claude (what the hooks and
+/// the `cr` CLI write), an `ai_session` row tagged with the harness for any other. Recording the
+/// same session twice is a no-op.
+pub fn board_meta_add_session(
+    conn: &Connection,
+    card_id: &str,
+    harness: &str,
+    session_id: &str,
+    cwd: Option<&str>,
+) -> AppResult<BoardMetaRow> {
+    if harness == "claude" {
+        return board_meta_add_impl(conn, card_id, "claude_session", session_id, None, None, cwd);
+    }
+    let existing = conn
+        .query_row(
+            "SELECT * FROM board_meta WHERE card_id = ?1 AND kind = 'ai_session' AND harness = ?2 AND value = ?3",
+            params![card_id, harness, session_id],
+            BoardMetaRow::from_row,
+        )
+        .optional()?;
+    if let Some(existing) = existing {
+        return Ok(existing);
+    }
+    conn.execute(
+        "INSERT INTO board_meta (card_id, kind, value, cwd, created_at, harness)
+         VALUES (?1, 'ai_session', ?2, ?3, ?4, ?5)",
+        params![card_id, session_id, cwd, now(), harness],
+    )?;
+    conn.query_row("SELECT * FROM board_meta WHERE id = ?1", params![conn.last_insert_rowid()], BoardMetaRow::from_row)
+        .map_err(Into::into)
 }
 
 /// Attach a metadata item to a card. Adding the same `claude_session` value
@@ -870,6 +905,24 @@ mod tests {
             params![id, typ],
         )
         .unwrap();
+    }
+
+    #[test]
+    fn sessions_are_recorded_per_harness_and_deduplicated() {
+        let conn = open_memory();
+        seed_card(&conn, "i1", "owner/repo", 1, "issue");
+        let claude = board_meta_add_session(&conn, "i1", "claude", "c1", Some("/x")).unwrap();
+        assert_eq!((claude.kind.as_str(), claude.session_harness()), ("claude_session", Some("claude")));
+        let oc = board_meta_add_session(&conn, "i1", "opencode", "o1", None).unwrap();
+        assert_eq!((oc.kind.as_str(), oc.session_harness()), ("ai_session", Some("opencode")));
+        assert_eq!(board_meta_add_session(&conn, "i1", "opencode", "o1", None).unwrap().id, oc.id);
+        assert!(oc.is_session() && claude.is_session());
+        // The public kind validation still only takes the kinds a user can add by hand.
+        assert!(board_meta_add_impl(&conn, "i1", "ai_session", "x", None, None, None).is_err());
+        // A pre-existing claude_session row without a harness reads as Claude's.
+        let legacy = board_meta_list_impl(&conn, "i1").unwrap().into_iter().find(|m| m.id == claude.id).unwrap();
+        assert_eq!(legacy.harness, None);
+        assert_eq!(legacy.session_harness(), Some("claude"));
     }
 
     #[test]

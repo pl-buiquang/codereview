@@ -2,13 +2,12 @@
 //! metadata (notes, files, links, the linked plan) appended to its system prompt. This is the
 //! refine step between the Plan and Implement routines.
 
-use std::collections::HashSet;
 use std::path::PathBuf;
 
 use rusqlite::Connection;
 use tauri::State;
 
-use crate::commands::board::{board_meta_add_impl, board_meta_list_impl, card_row};
+use crate::commands::board::{board_meta_add_session, board_meta_list_impl, card_row};
 use crate::commands::chat::new_session_id;
 use crate::commands::repo::expand_home;
 use crate::commands::sessions::resumable_card_session;
@@ -16,7 +15,7 @@ use crate::db::models::BoardMetaRow;
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
 use crate::routines::{context::repo_local_path, manager::routine_settings};
-use crate::{claude_sessions, prompts, terminal};
+use crate::{prompts, terminal};
 
 /// Newest `file` meta tagged `plan`: the plan the Plan routine (or the user) linked.
 fn linked_plan(meta: &[BoardMetaRow]) -> Option<&BoardMetaRow> {
@@ -30,11 +29,11 @@ fn plan_status(text: &str) -> Option<String> {
     front.lines().find_map(|l| l.strip_prefix("status:")).map(|v| v.trim().to_string()).filter(|v| !v.is_empty())
 }
 
-/// One line per note / file / link; recorded Claude sessions are bookkeeping, not context.
+/// One line per note / file / link; recorded AI sessions are bookkeeping, not context.
 fn render_meta(meta: &[BoardMetaRow]) -> String {
     let lines: Vec<String> = meta
         .iter()
-        .filter(|m| m.kind != "claude_session")
+        .filter(|m| !m.is_session())
         .map(|m| {
             let tag = m.tag.as_deref().filter(|t| !t.is_empty()).map(|t| format!(" [{t}]")).unwrap_or_default();
             let label = m.label.as_deref().filter(|l| !l.is_empty()).map(|l| format!(" {l}:")).unwrap_or_default();
@@ -100,19 +99,23 @@ pub async fn board_open_issue_agent(
     host: terminal::TerminalHost,
     tmux_target: terminal::TmuxTarget,
     tmux_session: String,
+    harness: Option<String>,
     db: State<'_, Db>,
 ) -> AppResult<()> {
-    let live: HashSet<String> = claude_sessions::live_sessions().into_iter().map(|s| s.session_id).collect();
-    let (card, local_path, context, resume) = {
+    let live = crate::commands::sessions::live_session_ids();
+    let (harness, card, local_path, context, resume) = {
         let conn = db.0.lock().unwrap();
+        let harness = crate::ai::sessions_harness(&conn, harness.as_deref())?;
         let card = card_row(&conn, &card_id)?;
         let local_path = repo_local_path(&conn, &card.repo)
             .filter(|p| std::path::Path::new(&expand_home(p)).is_dir())
             .map(|p| expand_home(&p))
             .ok_or_else(|| AppError::Other(format!("{} has no local clone — link one in Repositories", card.repo)))?;
         let context = render_context(&conn, &card_id)?;
-        let resume = resumable_card_session(&conn, &card_id, &live)?.filter(|id| transcript_exists(id));
-        (card, local_path, context, resume)
+        // Only Claude's transcripts can be checked here; another harness' recorded session is trusted.
+        let resume = resumable_card_session(&conn, &card_id, &live, harness.id())?
+            .filter(|id| harness.id() != "claude" || transcript_exists(id));
+        (harness, card, local_path, context, resume)
     };
 
     let context_file: PathBuf = std::env::temp_dir().join(format!("codereview_issue_session_{}.md", card.number));
@@ -121,15 +124,17 @@ pub async fn board_open_issue_agent(
     let new_id;
     let session = match resume.as_deref() {
         Some(id) => crate::ai::SessionMode::Resume(id),
-        None => {
+        None if harness.caps().pins_session_id => {
             // Pin the id so the session can be recorded on the card: the SessionStart hook resolves
             // cards from the checked-out branch, which the main clone never matches.
             new_id = new_session_id();
-            board_meta_add_impl(&db.0.lock().unwrap(), &card_id, "claude_session", &new_id, None, None, Some(&local_path))?;
+            board_meta_add_session(&db.0.lock().unwrap(), &card_id, harness.id(), &new_id, Some(&local_path))?;
             crate::ai::SessionMode::New(&new_id)
         }
+        // A harness that can't pin an id can't be linked to the card: nothing is recorded.
+        None => crate::ai::SessionMode::Ephemeral,
     };
-    let argv = crate::ai::interactive_argv(&db, &crate::ai::Interactive {
+    let argv = crate::ai::argv_of(harness, &crate::ai::Interactive {
         session,
         system_prompt_file: Some(&context_file),
         system_prompt_mode: crate::ai::SystemPromptMode::Append,
@@ -140,6 +145,7 @@ pub async fn board_open_issue_agent(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::board::board_meta_add_impl;
     use crate::db::open_memory;
     use rusqlite::params;
 
@@ -153,6 +159,7 @@ mod tests {
             label: None,
             cwd: None,
             created_at: String::new(),
+            harness: None,
         }
     }
 

@@ -132,6 +132,7 @@ export function MetaRow({
         }
         size={13}
       />
+      {meta.kind === "ai_session" && <span className="chip">{meta.harness ?? "claude"}</span>}
       {meta.tag && <span className="chip">{meta.tag}</span>}
       {meta.kind === "note" ? (
         <span className="board-meta-value">{meta.value}</span>
@@ -286,7 +287,7 @@ export interface TerminalAction {
   onFocus: (sessionId: string) => void;
   /** Absent for issue cards, which have no worktree to open a shell in. */
   onOpenShell?: () => void;
-  onOpenAgent: () => void;
+  onOpenAgent: (harness?: string) => void;
 }
 
 function PrActionsMenu({

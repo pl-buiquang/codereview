@@ -62,6 +62,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("migrations/0043_ai_profiles.sql"),
     include_str!("migrations/0044_run_event_norm.sql"),
     include_str!("migrations/0045_chat_session_harness.sql"),
+    include_str!("migrations/0046_board_meta_ai_session.sql"),
 ];
 
 pub fn open(path: &Path) -> AppResult<Connection> {
@@ -132,6 +133,34 @@ mod tests {
         for expected in ["comment", "repository", "review", "target", "board_card", "board_link", "board_meta"] {
             assert!(tables.contains(&expected.to_string()), "missing {expected}");
         }
+    }
+
+    #[test]
+    fn migration_0045_keeps_claude_sessions_and_accepts_ai_sessions() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        for sql in &MIGRATIONS[..44] {
+            conn.execute_batch(sql).unwrap();
+        }
+        conn.pragma_update(None, "user_version", 44i64).unwrap();
+        conn.execute_batch(
+            "INSERT INTO board_card (id, type, tracked_at) VALUES ('c', 'issue', 'now');
+             INSERT INTO board_meta (card_id, kind, value, cwd, created_at) VALUES ('c', 'claude_session', 's1', '/x', 'now');",
+        )
+        .unwrap();
+        migrate(&conn).unwrap();
+        let row: (String, String, Option<String>) = conn
+            .query_row("SELECT kind, value, harness FROM board_meta", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap();
+        assert_eq!(row, ("claude_session".into(), "s1".into(), None));
+        conn.execute(
+            "INSERT INTO board_meta (card_id, kind, value, created_at, harness) VALUES ('c', 'ai_session', 'o1', 'now', 'opencode')",
+            [],
+        )
+        .unwrap();
+        assert!(conn
+            .execute("INSERT INTO board_meta (card_id, kind, value, created_at) VALUES ('c', 'bogus', 'x', 'now')", [])
+            .is_err());
     }
 
     #[test]

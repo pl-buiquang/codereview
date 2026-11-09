@@ -114,7 +114,7 @@ describe("SessionsView", () => {
     renderView();
     await userEvent.click(await screen.findByRole("button", { name: /Resume/ }));
     await waitFor(() =>
-      expect(resumeClaudeSession).toHaveBeenCalledWith("s3", "/Users/me/projects/app", "org/app", "iterm2", "current", "codereview"),
+      expect(resumeClaudeSession).toHaveBeenCalledWith("s3", "/Users/me/projects/app", "org/app", "iterm2", "current", "codereview", "claude"),
     );
   });
 

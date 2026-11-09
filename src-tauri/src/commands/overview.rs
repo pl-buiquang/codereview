@@ -122,7 +122,7 @@ pub fn build_snapshot(cards: &[BoardCardWithExtras], now: DateTime<Utc>) -> (Str
         if !tags.is_empty() {
             f.push(format!("tags={}", tags.join(",")));
         }
-        let sessions = c.meta.iter().filter(|m| m.kind == "claude_session").count();
+        let sessions = c.meta.iter().filter(|m| m.is_session()).count();
         if sessions > 0 {
             f.push(format!("sess={sessions}"));
         }

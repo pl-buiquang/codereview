@@ -765,7 +765,7 @@ export interface FocusView {
 
 export type BoardLane = "backlog" | "in_progress" | "submitted" | "reviews" | "done";
 
-export type BoardMetaKind = "file" | "link" | "note" | "claude_session";
+export type BoardMetaKind = "file" | "link" | "note" | "claude_session" | "ai_session";
 
 export interface BoardMeta {
   id: number;
@@ -776,6 +776,8 @@ export interface BoardMeta {
   label: string | null;
   cwd: string | null;
   created_at: string;
+  /** Harness of an `ai_session` row; `claude_session` rows are Claude's. */
+  harness?: string | null;
 }
 
 /** One board card (an issue or PR). Mirrors the backend `board_card` row. */

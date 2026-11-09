@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { api } from "../lib/api";
 import type { AgentSession } from "../lib/types";
 import { Icon } from "./icons";
 import { isWaiting } from "./SessionsView";
@@ -67,9 +69,12 @@ export function AgentSessionItems({
   disabledReason?: string | null;
   close: () => void;
   onFocus: (sessionId: string) => void;
-  onOpenNew: () => void;
+  /** `harness` is set when the user picked one; otherwise the `sessions` profile decides. */
+  onOpenNew: (harness?: string) => void;
 }) {
   const disabled = busy || disabledReason != null;
+  const harnesses = useQuery({ queryKey: ["ai-harnesses"], queryFn: () => api.aiHarnesses(), staleTime: 60_000 });
+  const pickable = (harnesses.data ?? []).filter((h) => h.available && h.caps.interactive_tui);
   return (
     <>
       {sessions.map((s) => (
@@ -98,6 +103,21 @@ export function AgentSessionItems({
       >
         New agent session
       </button>
+      {pickable.length > 1 &&
+        pickable.map((h) => (
+          <button
+            key={h.id}
+            role="menuitem"
+            disabled={disabled}
+            title={`Open a new terminal running ${h.name} instead of the default`}
+            onClick={() => {
+              close();
+              onOpenNew(h.id);
+            }}
+          >
+            New {h.name} session
+          </button>
+        ))}
     </>
   );
 }

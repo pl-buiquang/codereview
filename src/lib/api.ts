@@ -422,12 +422,23 @@ export const api = {
     tmuxTarget: TmuxTarget,
     tmuxSession: string,
     basePaths: string[] = [],
-  ) => invoke<void>("board_open_agent", { cardId, basePaths, host, tmuxTarget, tmuxSession }),
-  boardOpenIssueAgent: (cardId: string, host: TerminalHost, tmuxTarget: TmuxTarget, tmuxSession: string) =>
-    invoke<void>("board_open_issue_agent", { cardId, host, tmuxTarget, tmuxSession }),
+    harness: string | null = null,
+  ) => invoke<void>("board_open_agent", { cardId, basePaths, host, tmuxTarget, tmuxSession, harness }),
+  boardOpenIssueAgent: (
+    cardId: string,
+    host: TerminalHost,
+    tmuxTarget: TmuxTarget,
+    tmuxSession: string,
+    harness: string | null = null,
+  ) => invoke<void>("board_open_issue_agent", { cardId, host, tmuxTarget, tmuxSession, harness }),
   reviewAgentSessions: (reviewId: number) => invoke<AgentSession[]>("review_agent_sessions", { reviewId }),
-  reviewOpenAgent: (reviewId: number, host: TerminalHost, tmuxTarget: TmuxTarget, tmuxSession: string) =>
-    invoke<void>("review_open_agent", { reviewId, host, tmuxTarget, tmuxSession }),
+  reviewOpenAgent: (
+    reviewId: number,
+    host: TerminalHost,
+    tmuxTarget: TmuxTarget,
+    tmuxSession: string,
+    harness: string | null = null,
+  ) => invoke<void>("review_open_agent", { reviewId, host, tmuxTarget, tmuxSession, harness }),
   listClaudeSessions: (historyDays: number, summaryDir: string) =>
     invoke<SessionsSnapshot>("list_claude_sessions", { historyDays, summaryDir }),
   generateLiveSessionSummary: (sessionId: string, fork: boolean) =>
@@ -440,7 +451,8 @@ export const api = {
     host: TerminalHost,
     tmuxTarget: TmuxTarget,
     tmuxSession: string,
-  ) => invoke<void>("resume_claude_session", { sessionId, cwd, repo, host, tmuxTarget, tmuxSession }),
+    harness: string | null = null,
+  ) => invoke<void>("resume_claude_session", { sessionId, cwd, repo, host, tmuxTarget, tmuxSession, harness }),
   stopClaudeSession: (sessionId: string) => invoke<void>("stop_claude_session", { sessionId }),
   boardMetaAdd: (args: {
     cardId: string;
@@ -524,7 +536,8 @@ export const api = {
     host: TerminalHost,
     tmuxTarget: TmuxTarget,
     tmuxSession: string,
-  ) => invoke<void>("checkout_open_claude", { repoId, worktreePath, host, tmuxTarget, tmuxSession }),
+    harness: string | null = null,
+  ) => invoke<void>("checkout_open_claude", { repoId, worktreePath, host, tmuxTarget, tmuxSession, harness }),
 
   // Graph mutations (spec 24); every call runs in the context checkout (`worktreePath`, null = main).
   gitCheckoutBranch: (repoId: number, worktreePath: string | null, name: string) =>
