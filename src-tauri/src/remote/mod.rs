@@ -8,3 +8,7 @@
 pub mod host;
 pub mod error;
 pub mod tunnel;
+pub mod http;
+pub mod client;
+#[cfg(all(test, feature = "serve", unix))]
+mod test_server;

@@ -15,7 +15,7 @@ use std::path::Path;
 use std::process::Child;
 use std::time::Duration;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::run_usage::{RunTag, RunUsage};
@@ -34,7 +34,7 @@ pub use opencode::OpenCode;
 pub use session::AgentSession;
 
 /// What a harness can do.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Caps {
     pub sessions: bool,
     pub resume: bool,
@@ -64,7 +64,7 @@ pub enum ToolPolicy {
 }
 
 /// The permission level of a run.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Access {
     /// The harness' own default (explicit, so the user's global settings never leak in).
