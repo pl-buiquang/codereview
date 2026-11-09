@@ -118,18 +118,22 @@ pub async fn board_open_issue_agent(
     let context_file: PathBuf = std::env::temp_dir().join(format!("codereview_issue_session_{}.md", card.number));
     std::fs::write(&context_file, context)?;
 
-    let mut argv = vec!["claude".to_string()];
-    match resume {
-        Some(id) => argv.extend(["--resume".to_string(), id]),
+    let new_id;
+    let session = match resume.as_deref() {
+        Some(id) => crate::ai::SessionMode::Resume(id),
         None => {
             // Pin the id so the session can be recorded on the card: the SessionStart hook resolves
             // cards from the checked-out branch, which the main clone never matches.
-            let id = new_session_id();
-            board_meta_add_impl(&db.0.lock().unwrap(), &card_id, "claude_session", &id, None, None, Some(&local_path))?;
-            argv.extend(["--session-id".to_string(), id]);
+            new_id = new_session_id();
+            board_meta_add_impl(&db.0.lock().unwrap(), &card_id, "claude_session", &new_id, None, None, Some(&local_path))?;
+            crate::ai::SessionMode::New(&new_id)
         }
-    }
-    argv.extend(["--append-system-prompt-file".to_string(), context_file.to_string_lossy().into_owned()]);
+    };
+    let argv = crate::ai::interactive_argv(&crate::ai::Interactive {
+        session,
+        system_prompt_file: Some(&context_file),
+        system_prompt_mode: crate::ai::SystemPromptMode::Append,
+    })?;
     terminal::open_session(host, tmux_target, &tmux_session, &card.repo, &format!("#{}", card.number), &local_path, &argv)
 }
 

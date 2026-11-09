@@ -206,7 +206,11 @@ pub async fn resume_claude_session(
     }
     let repo = repo.unwrap_or_else(|| cwd.trim_end_matches('/').rsplit('/').next().unwrap_or(&cwd).to_string());
     let window_name: String = session_id.chars().take(8).collect();
-    let argv = ["claude".to_string(), "--resume".to_string(), session_id];
+    let argv = ai::interactive_argv(&ai::Interactive {
+        session: SessionMode::Resume(&session_id),
+        system_prompt_file: None,
+        system_prompt_mode: SystemPromptMode::Append,
+    })?;
     terminal::open_session(host, tmux_target, &tmux_session, &repo, &window_name, &cwd, &argv)
 }
 

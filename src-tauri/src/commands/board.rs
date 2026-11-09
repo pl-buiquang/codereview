@@ -695,10 +695,11 @@ pub async fn board_open_agent(
         let conn = db.0.lock().unwrap();
         crate::commands::sessions::resumable_card_session(&conn, &card_id, &live)?
     };
-    let mut argv = vec!["claude".to_string()];
-    if let Some(id) = resume {
-        argv.extend(["--resume".to_string(), id]);
-    }
+    let argv = crate::ai::interactive_argv(&crate::ai::Interactive {
+        session: resume.as_deref().map_or(crate::ai::SessionMode::Ephemeral, crate::ai::SessionMode::Resume),
+        system_prompt_file: None,
+        system_prompt_mode: crate::ai::SystemPromptMode::Append,
+    })?;
     crate::terminal::open_session(
         host,
         tmux_target,

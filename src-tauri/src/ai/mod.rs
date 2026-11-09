@@ -19,7 +19,7 @@ use serde_json::Value;
 
 use crate::ai_usage::{RunTag, RunUsage};
 use crate::claude_sessions::ClaudeSession;
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 
 pub mod claude;
 
@@ -204,6 +204,14 @@ const _: Option<&dyn Harness> = None;
 pub fn harness_for() -> &'static dyn Harness {
     static CLAUDE: ClaudeCode = ClaudeCode;
     &CLAUDE
+}
+
+/// The argv of an interactive session of the current harness.
+pub fn interactive_argv(opts: &Interactive<'_>) -> AppResult<Vec<String>> {
+    let harness = harness_for();
+    harness
+        .interactive_argv(opts)
+        .ok_or_else(|| AppError::Other(format!("{} cannot open an interactive session like this", harness.name())))
 }
 
 // Adding a harness

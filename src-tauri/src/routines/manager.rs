@@ -9,7 +9,6 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -22,8 +21,9 @@ use tauri_plugin_notification::NotificationExt;
 use super::context::{self, ContextRef, Light};
 use super::handlers;
 use super::{get as get_routine, Routine};
-use crate::ai_usage::{self, RunUsage};
-use crate::commands::chat::{new_session_id, ClaudeEnvelope};
+use crate::ai::{self, Access, FinalResult, OneShot, SessionMode, StreamRun, SystemPrompt, SystemPromptMode, ToolPolicy};
+use crate::ai_usage::{self, RunTag, RunUsage};
+use crate::commands::chat::new_session_id;
 use crate::commands::focus::child_path;
 use crate::db::{Db, DbPath};
 use crate::error::{AppError, AppResult};
@@ -300,19 +300,6 @@ pub fn mark_interrupted(conn: &Connection, db_path: &Path) -> AppResult<usize> {
     Ok(n)
 }
 
-/// Whether `pid` is still a `claude -p` (of that session, when known): guards against pid reuse.
-#[cfg(unix)]
-fn is_our_claude(pid: i32, session_id: Option<&str>) -> bool {
-    let Ok(out) = Command::new("ps").args(["-o", "command=", "-p", &pid.to_string()]).output() else { return false };
-    let cmd = String::from_utf8_lossy(&out.stdout);
-    cmd.contains("claude") && cmd.contains(" -p") && session_id.is_none_or(|s| cmd.contains(s))
-}
-
-#[cfg(not(unix))]
-fn is_our_claude(_pid: i32, _session_id: Option<&str>) -> bool {
-    false
-}
-
 #[cfg(unix)]
 fn process_alive(pid: i32) -> bool {
     // SAFETY: signal 0 only probes for existence.
@@ -325,7 +312,7 @@ fn process_alive(_pid: i32) -> bool {
 }
 
 fn kill_leftover(pid: i32) {
-    if is_our_claude(pid, None) {
+    if ai::harness_for().is_own_process(pid, None) {
         signal_group(pid, SIGTERM);
     }
 }
@@ -651,43 +638,44 @@ fn settle(app: &AppHandle, run: &RoutineRun, routine: &Routine, outcome: &Outcom
     app.state::<RoutineManager>().pump(app);
 }
 
-/// The `claude -p` stream-json command of a run, before its stdio and process group are set.
-fn stream_command(
-    routine: &Routine,
-    prep: &handlers::Prep,
-    cwd: &Path,
-    model: &str,
-    session_id: &str,
-    prompt_path: &Path,
+/// The streaming request of a run.
+#[allow(clippy::too_many_arguments)]
+fn stream_request<'a>(
+    routine: &'a Routine,
+    prep: &'a handlers::Prep,
+    cwd: &'a Path,
+    model: &'a str,
+    session_id: &'a str,
+    prompt_path: &'a Path,
+    prompt: &'a str,
     db_path: &Path,
-) -> Command {
-    let mut cmd = Command::new(crate::tools::claude_bin());
-    cmd.current_dir(cwd)
-        .args(["-p", "--output-format", "stream-json", "--verbose", "--strict-mcp-config"])
-        .arg("--permission-mode")
-        .arg(&routine.permission_mode)
-        .arg("--add-dir")
-        .arg(cwd);
-    for dir in &prep.extra_dirs {
-        cmd.arg("--add-dir").arg(dir);
-    }
-    if !routine.allowed_tools.is_empty() || !prep.extra_tools.is_empty() {
-        cmd.arg("--allowedTools").args(routine.allowed_tools.iter().chain(&prep.extra_tools));
-    }
-    if !model.is_empty() {
-        cmd.arg("--model").arg(model);
-    }
-    cmd.args(&routine.extra_args).arg("--session-id").arg(session_id).arg(
-        if routine.system_prompt_mode == "replace" { "--system-prompt-file" } else { "--append-system-prompt-file" },
-    );
-    cmd.arg(prompt_path);
-    // A self-paced /loop or background wait must not hit the 10-minute idle cap of `-p`.
-    cmd.env("CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS", "0");
-    cmd.env("CODEREVIEW_DB", db_path);
+    usage_tag: RunTag,
+) -> OneShot<'a> {
+    let mut env: Vec<(String, std::ffi::OsString)> = vec![("CODEREVIEW_DB".into(), db_path.into())];
     if let Some(path) = child_path() {
-        cmd.env("PATH", path);
+        env.push(("PATH".into(), path.into()));
     }
-    cmd
+    OneShot {
+        model,
+        system_prompt: Some(SystemPrompt::File(prompt_path)),
+        system_prompt_mode: if routine.system_prompt_mode == "replace" {
+            SystemPromptMode::Replace
+        } else {
+            SystemPromptMode::Append
+        },
+        file_tag: "",
+        prompt,
+        cwd,
+        extra_dirs: prep.extra_dirs.iter().map(PathBuf::as_path).collect(),
+        tools: ToolPolicy::Allowlist(routine.allowed_tools.iter().chain(&prep.extra_tools).cloned().collect()),
+        access: Access::Native(routine.permission_mode.clone()),
+        session: SessionMode::New(session_id),
+        max_turns: None,
+        effort: None,
+        env,
+        extra_args: routine.extra_args.clone(),
+        usage_tag,
+    }
 }
 
 fn run_process(app: &AppHandle, run: &RoutineRun, routine: &Routine) -> Outcome {
@@ -744,23 +732,26 @@ fn run_process(app: &AppHandle, run: &RoutineRun, routine: &Routine) -> Outcome 
 
     let session_id = new_session_id();
     let model = handlers::effective_model(run, routine);
-    let mut cmd = stream_command(routine, &prep, &cwd, &model, &session_id, &prompt_path, &app.state::<DbPath>().0);
-    // Files, not pipes: the process must outlive us when the app quits with runs left alive.
-    cmd.stdin(Stdio::piped()).stdout(Stdio::from(stdout_file)).stderr(Stdio::from(stderr_file));
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        cmd.process_group(0);
-    }
-
     log::info!(target: "routines", "run {}: starting {} on {}", run.id, routine.key, run.context_label);
-    let spawned = cmd.spawn();
+    let req = stream_request(
+        routine,
+        &prep,
+        &cwd,
+        &model,
+        &session_id,
+        &prompt_path,
+        &prompt,
+        &app.state::<DbPath>().0,
+        handlers::usage_tag(routine, run),
+    );
+    let timeout = Duration::from_secs(routine.timeout_min.max(1) as u64 * 60);
+    let spawned = ai::harness_for().spawn(StreamRun { req, stdout: stdout_file, stderr: stderr_file, timeout });
     let mut child = match spawned {
         Ok(c) => c,
         Err(e) => {
             let _ = std::fs::remove_file(&prompt_path);
             cleanup();
-            return fail(format!("failed to spawn claude: {e}"));
+            return fail(e.to_string());
         }
     };
     let pid = child.id();
@@ -803,11 +794,7 @@ fn run_process(app: &AppHandle, run: &RoutineRun, routine: &Routine) -> Outcome 
 
 /// Usage and failure reason of a run that produced `result` (if it did) and then ended with `exit`.
 fn outcome_from(result: Option<Value>, stderr: String, exit: Result<String, String>) -> Outcome {
-    let usage = result
-        .as_ref()
-        .and_then(|v| serde_json::from_value::<ClaudeEnvelope>(v.clone()).ok())
-        .map(|e| e.run_usage())
-        .unwrap_or_default();
+    let usage = result.as_ref().map(|v| ai::harness_for().final_result(v).usage).unwrap_or_default();
     let failure = match (&result, exit) {
         (Some(_), _) => None,
         (None, Ok(s)) => Some(format!("claude exited with {s} without a result. {}", stderr.trim())),
@@ -844,7 +831,7 @@ fn tail_events(app: &AppHandle, run_id: i64, path: &Path, skip: i64, alive: &mut
         if line.trim().is_empty() {
             return;
         }
-        let (kind, value) = parse_line(line);
+        let (kind, value) = ai::harness_for().parse_line(line);
         seq += 1;
         if seq > skip {
             record_event(app, run_id, seq, &kind, line);
@@ -897,7 +884,7 @@ fn adopt(app: AppHandle, run_id: i64) {
         .unwrap_or(0) as i32;
     let dir = run_dir(&app, run_id);
     let out = dir.join(STDOUT_FILE);
-    let alive = pid > 0 && is_our_claude(pid, run.session_id.as_deref());
+    let alive = pid > 0 && ai::harness_for().is_own_process(pid, run.session_id.as_deref());
     // Gone without a result: it died with the app, or was killed meanwhile.
     if !alive && !file_has_result(&out) {
         return settle_lost(&app, run_id);
@@ -929,7 +916,7 @@ fn adopt(app: AppHandle, run_id: i64) {
 
 fn file_has_result(path: &Path) -> bool {
     std::fs::read_to_string(path)
-        .map(|text| text.lines().rev().any(|l| parse_line(l).0 == "result"))
+        .map(|text| text.lines().rev().any(|l| ai::harness_for().parse_line(l).0 == "result"))
         .unwrap_or(false)
 }
 
@@ -961,14 +948,6 @@ fn discard_run_files(app: &AppHandle, run_id: i64) {
     let _ = std::fs::remove_dir_all(run_dir(app, run_id));
 }
 
-/// `(type, parsed line)` of one stream-json line; unparseable lines are kept as `raw`.
-fn parse_line(line: &str) -> (String, Option<Value>) {
-    match serde_json::from_str::<Value>(line) {
-        Ok(v) => (v.get("type").and_then(Value::as_str).unwrap_or("unknown").to_string(), Some(v)),
-        Err(_) => ("raw".to_string(), None),
-    }
-}
-
 fn record_event(app: &AppHandle, run_id: i64, seq: i64, kind: &str, line: &str) {
     let json = if line.len() > MAX_EVENT_BYTES {
         serde_json::json!({ "type": kind, "truncated": true, "bytes": line.len() }).to_string()
@@ -991,22 +970,14 @@ fn needs_attention(text: &str) -> bool {
     text.lines().any(|l| l.trim_start().starts_with("NEEDS_ATTENTION:"))
 }
 
-fn result_text(result: &Value) -> Option<String> {
-    match result.get("result")? {
-        Value::String(s) => Some(s.clone()),
-        Value::Null => None,
-        other => Some(other.to_string()),
-    }
-}
-
 /// The status a finished run settles on. A stop request wins over whatever the process reported.
-fn final_status(stop: Option<&'static str>, result: Option<&Value>, text: &str) -> &'static str {
+fn final_status(stop: Option<&'static str>, result: Option<&FinalResult>, text: &str) -> &'static str {
     if let Some(reason) = stop {
         return reason;
     }
     match result {
         None => "error",
-        Some(v) if v.get("is_error").and_then(Value::as_bool).unwrap_or(false) => "error",
+        Some(r) if r.is_error => "error",
         Some(_) if needs_attention(text) => "needs_attention",
         Some(_) => "ok",
     }
@@ -1020,8 +991,9 @@ fn finalize(app: &AppHandle, run_id: i64, routine: Option<&Routine>, run: Option
         (inner.stops.remove(&run_id), inner.shutting_down)
     };
     discard_run_files(app, run_id);
-    let text = outcome.result.as_ref().and_then(result_text).unwrap_or_default();
-    let status = final_status(stop, outcome.result.as_ref(), &text);
+    let result = outcome.result.as_ref().map(|v| ai::harness_for().final_result(v));
+    let text = result.as_ref().and_then(|r| r.text.clone()).unwrap_or_default();
+    let status = final_status(stop, result.as_ref(), &text);
     let error = match status {
         "error" => Some(outcome.failure.clone().unwrap_or_else(|| {
             if text.is_empty() { "the run reported an error".to_string() } else { text.clone() }
@@ -1111,13 +1083,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_line_extracts_type() {
-        assert_eq!(parse_line(r#"{"type":"assistant","x":1}"#).0, "assistant");
-        assert_eq!(parse_line(r#"{"x":1}"#).0, "unknown");
-        assert_eq!(parse_line("not json").0, "raw");
-    }
-
-    #[test]
     fn needs_attention_is_a_line_prefix() {
         assert!(needs_attention("done\nNEEDS_ATTENTION: lint config is broken"));
         assert!(needs_attention("  NEEDS_ATTENTION: x"));
@@ -1126,8 +1091,9 @@ mod tests {
 
     #[test]
     fn final_status_precedence() {
-        let ok = json!({ "type": "result", "is_error": false, "result": "fine" });
-        let err = json!({ "type": "result", "is_error": true, "result": "boom" });
+        let result = |v: Value| ai::harness_for().final_result(&v);
+        let ok = result(json!({ "type": "result", "is_error": false, "result": "fine" }));
+        let err = result(json!({ "type": "result", "is_error": true, "result": "boom" }));
         assert_eq!(final_status(None, Some(&ok), "fine"), "ok");
         assert_eq!(final_status(None, Some(&ok), "x\nNEEDS_ATTENTION: y"), "needs_attention");
         assert_eq!(final_status(None, Some(&err), "boom"), "error");
@@ -1269,7 +1235,9 @@ mod tests {
         let prompt = Path::new("/runs/5/system.txt");
         let db = Path::new("/data/cr.db");
         for (mode, flag) in [("append", "--append-system-prompt-file"), ("replace", "--system-prompt-file")] {
-            let cmd = stream_command(&test_routine(mode), &prep, cwd, "opus", "sid", prompt, db);
+            let routine = test_routine(mode);
+            let req = stream_request(&routine, &prep, cwd, "opus", "sid", prompt, "p", db, RunTag::new("t"));
+            let cmd = crate::ai::claude::command(&req, true, Some(prompt));
             assert_eq!(
                 argv(&cmd),
                 strs(&[
@@ -1296,7 +1264,9 @@ mod tests {
         let mut routine = test_routine("append");
         routine.allowed_tools.clear();
         routine.extra_args.clear();
-        let cmd = stream_command(&routine, &handlers::Prep::default(), Path::new("/r"), "", "s", Path::new("/p"), Path::new("/d"));
+        let prep = handlers::Prep::default();
+        let req = stream_request(&routine, &prep, Path::new("/r"), "", "s", Path::new("/p"), "p", Path::new("/d"), RunTag::new("t"));
+        let cmd = crate::ai::claude::command(&req, true, Some(Path::new("/p")));
         assert_eq!(
             argv(&cmd),
             strs(&[
@@ -1308,6 +1278,7 @@ mod tests {
 
     #[test]
     fn stream_fixture_kinds_and_final_status() {
+        let h = ai::harness_for();
         let lines = [
             (r#"{"type":"system","subtype":"init"}"#, "system"),
             (r#"{"type":"assistant","message":{}}"#, "assistant"),
@@ -1316,22 +1287,21 @@ mod tests {
             ("garbage", "raw"),
         ];
         for (line, kind) in lines {
-            assert_eq!(parse_line(line).0, kind);
+            assert_eq!(h.parse_line(line).0, kind);
         }
         let ok = r#"{"type":"result","is_error":false,"result":"all good","num_turns":3,"session_id":"s","total_cost_usd":0.5,"usage":{"input_tokens":1,"output_tokens":2}}"#;
         let attention = r#"{"type":"result","is_error":false,"result":"x\nNEEDS_ATTENTION: look"}"#;
         let error = r#"{"type":"result","is_error":true,"result":"boom"}"#;
         let status = |line: &str| {
-            let (kind, v) = parse_line(line);
+            let (kind, v) = h.parse_line(line);
             assert_eq!(kind, "result");
-            let v = v.unwrap();
-            let text = result_text(&v).unwrap_or_default();
-            final_status(None, Some(&v), &text)
+            let r = h.final_result(&v.unwrap());
+            final_status(None, Some(&r), &r.text.clone().unwrap_or_default())
         };
         assert_eq!(status(ok), "ok");
         assert_eq!(status(attention), "needs_attention");
         assert_eq!(status(error), "error");
-        let o = outcome_from(parse_line(ok).1, String::new(), Ok("0".into()));
+        let o = outcome_from(h.parse_line(ok).1, String::new(), Ok("0".into()));
         assert_eq!((o.usage.num_turns, o.usage.input_tokens, o.usage.output_tokens, o.usage.cost_usd), (3, 1, 2, 0.5));
     }
 }

@@ -495,7 +495,11 @@ pub fn checkout_open_claude(
         &repo,
         &window_name,
         &path,
-        &["claude".to_string()],
+        &crate::ai::interactive_argv(&crate::ai::Interactive {
+            session: crate::ai::SessionMode::Ephemeral,
+            system_prompt_file: None,
+            system_prompt_mode: crate::ai::SystemPromptMode::Append,
+        })?,
     )
 }
 

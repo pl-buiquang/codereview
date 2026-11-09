@@ -461,4 +461,70 @@ mod tests {
         assert!(result.is_err());
         assert!(usage.models.is_empty());
     }
+
+    #[test]
+    fn interactive_argv_per_session_mode() {
+        let argv = |session, file: Option<&Path>, mode| {
+            ClaudeCode.interactive_argv(&Interactive { session, system_prompt_file: file, system_prompt_mode: mode })
+        };
+        let append = SystemPromptMode::Append;
+        assert_eq!(argv(SessionMode::Ephemeral, None, append), Some(vec!["claude".to_string()]));
+        assert_eq!(
+            argv(SessionMode::Resume("s1"), None, append),
+            Some(vec!["claude".into(), "--resume".into(), "s1".into()])
+        );
+        assert_eq!(
+            argv(SessionMode::New("n1"), Some(Path::new("/ctx.md")), append),
+            Some(vec![
+                "claude".into(),
+                "--session-id".into(),
+                "n1".into(),
+                "--append-system-prompt-file".into(),
+                "/ctx.md".into()
+            ])
+        );
+        assert_eq!(
+            argv(SessionMode::Resume("s1"), Some(Path::new("/c")), SystemPromptMode::Replace),
+            Some(vec!["claude".into(), "--resume".into(), "s1".into(), "--system-prompt-file".into(), "/c".into()])
+        );
+        assert_eq!(argv(SessionMode::Fork("s1"), None, append), None);
+    }
+
+    #[test]
+    fn final_result_reads_status_text_and_usage() {
+        let ok = ClaudeCode.final_result(&serde_json::from_str(OK).unwrap());
+        assert!(!ok.is_error);
+        assert_eq!(ok.text.as_deref(), Some("hi"));
+        assert_eq!((ok.usage.num_turns, ok.usage.cost_usd), (2, 1.5));
+        let err = ClaudeCode.final_result(&serde_json::json!({"is_error": true, "result": null}));
+        assert!(err.is_error && err.text.is_none());
+        let structured = ClaudeCode.final_result(&serde_json::json!({"result": {"a": 1}}));
+        assert_eq!(structured.text.as_deref(), Some("{\"a\":1}"));
+    }
+
+    #[test]
+    fn spawn_refuses_an_inline_system_prompt() {
+        let dir = std::env::temp_dir();
+        let req = OneShot {
+            model: "",
+            system_prompt: Some(SystemPrompt::Text("x")),
+            system_prompt_mode: SystemPromptMode::Append,
+            file_tag: "t",
+            prompt: "",
+            cwd: &dir,
+            extra_dirs: Vec::new(),
+            tools: ToolPolicy::Allowlist(Vec::new()),
+            access: Access::Default,
+            session: SessionMode::Ephemeral,
+            max_turns: None,
+            effort: None,
+            env: Vec::new(),
+            extra_args: Vec::new(),
+            usage_tag: RunTag::new("t"),
+        };
+        let file = || std::fs::File::create(dir.join("codereview_spawn_test.out")).unwrap();
+        let run = StreamRun { req, stdout: file(), stderr: file(), timeout: std::time::Duration::from_secs(1) };
+        assert!(ClaudeCode.spawn(run).is_err());
+        let _ = std::fs::remove_file(dir.join("codereview_spawn_test.out"));
+    }
 }
