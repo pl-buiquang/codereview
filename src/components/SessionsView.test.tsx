@@ -2,13 +2,14 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { CardSession, AgentSession, SessionsSnapshot } from "../lib/types";
+import type { CardSession, AgentSession, HostSessions, RemoteSession, SessionsSnapshot } from "../lib/types";
 
 const listClaudeSessions = vi.fn();
 const focusClaudeSession = vi.fn();
 const resumeClaudeSession = vi.fn();
 const generateLiveSessionSummary = vi.fn();
 const routineRunList = vi.fn();
+const listRemoteSessions = vi.fn();
 vi.mock("../lib/api", () => ({
   api: {
     listClaudeSessions: (d: number, dir: string) => listClaudeSessions(d, dir),
@@ -16,10 +17,12 @@ vi.mock("../lib/api", () => ({
     resumeClaudeSession: (...args: unknown[]) => resumeClaudeSession(...args),
     generateLiveSessionSummary: (id: string, fork: boolean) => generateLiveSessionSummary(id, fork),
     routineRunList: (filter: unknown) => routineRunList(filter),
+    listRemoteSessions: () => listRemoteSessions(),
   },
 }));
 
 import { SessionsView, matchesSessionSearch, resumeCommand, tildePath } from "./SessionsView";
+import { sshAttachCommand } from "../lib/remoteSessions";
 import { useUIStore } from "../store";
 import { useSettingsStore } from "../lib/settings";
 
@@ -68,6 +71,7 @@ describe("SessionsView", () => {
     focusClaudeSession.mockResolvedValue(undefined);
     resumeClaudeSession.mockResolvedValue(undefined);
     routineRunList.mockResolvedValue([]);
+    listRemoteSessions.mockResolvedValue([]);
     localStorage.clear();
     listClaudeSessions.mockResolvedValue(snapshot([
       session(),
@@ -231,6 +235,80 @@ describe("SessionsView", () => {
     expect(screen.getByText("Fix login")).toBeInTheDocument();
     expect(screen.getByText("Refactor sync")).toBeInTheDocument();
   });
+
+  describe("remote sessions", () => {
+    const remote = (over: Partial<RemoteSession> = {}): RemoteSession => ({
+      ...session({ session_id: "r1", name: "remote one", cwd: "/home/lynks/code/widgets", repo: "acme/widgets", tmux: { session: "main", window: "@2", pane: "%7", label: "main:2" }, focus: "no_terminal", pid: null }),
+      host_id: 1,
+      host_name: "koza",
+      host_ssh_target: "koza",
+      ...over,
+    });
+    const hostRow = (over: Partial<HostSessions> = {}): HostSessions => ({ host_id: 1, host_name: "koza", status: "ok", error: null, sessions: [remote()], ...over });
+
+    it("shows a remote session with its host badge and only the copy-ssh action", async () => {
+      listRemoteSessions.mockResolvedValue([hostRow()]);
+      renderView();
+      await screen.findByText("remote one");
+      expect(screen.getByTitle("Host: koza")).toBeInTheDocument();
+      const copy = screen.getByRole("button", { name: /Copy ssh/ });
+      expect(copy).toHaveAttribute("title", expect.stringContaining("ssh -t koza"));
+      expect(copy).toHaveAttribute("title", expect.stringContaining("select-pane -t %7"));
+      // the local actions stay on the local rows only
+      expect(screen.getAllByRole("button", { name: /Focus/ })).toHaveLength(3);
+      const writeText = vi.fn().mockResolvedValue(undefined);
+      Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+      await userEvent.click(copy);
+      await waitFor(() => expect(writeText).toHaveBeenCalledWith(expect.stringMatching(/^ssh -t koza /)));
+    });
+
+    it("a remote row cannot be expanded to generate a summary", async () => {
+      listRemoteSessions.mockResolvedValue([hostRow()]);
+      renderView();
+      await screen.findByText("remote one");
+      expect(screen.getByText("remote one").closest("button")).toBeNull();
+    });
+
+    it("shows an unreachable host as a muted row and keeps the local list", async () => {
+      listRemoteSessions.mockResolvedValue([
+        hostRow(),
+        hostRow({ host_id: 2, host_name: "nija", status: "unreachable", error: "ssh: connection refused", sessions: [] }),
+      ]);
+      renderView();
+      await screen.findByText("remote one");
+      expect(screen.getByText("live one")).toBeInTheDocument();
+      expect(screen.getByText("unreachable")).toBeInTheDocument();
+      expect(screen.getByText("ssh: connection refused", { exact: false })).toBeInTheDocument();
+    });
+
+    it("filters by host", async () => {
+      listRemoteSessions.mockResolvedValue([hostRow()]);
+      renderView();
+      await screen.findByText("remote one");
+      await userEvent.selectOptions(screen.getByLabelText("Filter by host"), "local");
+      expect(screen.queryByText("remote one")).not.toBeInTheDocument();
+      expect(screen.getByText("live one")).toBeInTheDocument();
+      await userEvent.selectOptions(screen.getByLabelText("Filter by host"), "host:1");
+      expect(screen.getByText("remote one")).toBeInTheDocument();
+      expect(screen.queryByText("live one")).not.toBeInTheDocument();
+    });
+
+    it("has no host UI when no host is configured", async () => {
+      renderView();
+      await screen.findByText("live one");
+      expect(screen.queryByLabelText("Filter by host")).not.toBeInTheDocument();
+    });
+
+    it("builds the ssh attach command per case", () => {
+      const base = { host_ssh_target: "koza", harness: "claude", session_id: "abc", cwd: "/home/x/my app", job_id: null, tmux: null };
+      expect(sshAttachCommand({ ...base, tmux: { session: "main", window: "@2", pane: "%7", label: null } })).toBe(
+        String.raw`ssh -t koza '$SHELL -lc '\''tmux attach -t main \; select-window -t @2 \; select-pane -t %7'\'''`,
+      );
+      expect(sshAttachCommand({ ...base, job_id: "job1" })).toContain("claude attach job1");
+      expect(sshAttachCommand(base)).toContain("claude --resume abc");
+      expect(sshAttachCommand({ ...base, harness: "mystery" })).toBeNull();
+    });
+  });
 });
 
 describe("SessionsView tab badges", () => {
@@ -345,4 +423,5 @@ describe("helpers", () => {
     expect(screen.queryByLabelText("Filter by harness")).not.toBeInTheDocument();
     expect(screen.queryByTitle("Harness: claude")).not.toBeInTheDocument();
   });
+
 });

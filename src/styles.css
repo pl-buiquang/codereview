@@ -200,6 +200,11 @@ button:hover {
   border: 1px solid var(--border-strong);
   text-transform: none;
 }
+.badge-host {
+  color: var(--accent, var(--text-2));
+  border: 1px solid var(--border-strong);
+  text-transform: none;
+}
 .badge-draft {
   color: var(--warning);
   background: var(--warning-soft);
@@ -5936,6 +5941,13 @@ input[type="range"] {
 }
 .sessions-card {
   padding: 10px 14px;
+}
+.sessions-host-down {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  border-style: dashed;
 }
 .sessions-row-head {
   display: flex;

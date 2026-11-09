@@ -10,7 +10,9 @@ import { isWaiting, useWaitingSessions } from "../lib/sessionCounts";
 import { STATUS_LABEL, useActiveRoutineRuns, useUnseenRoutineProblems } from "../lib/routines";
 import { useAiDisabledReason, useSettingsStore } from "../lib/settings";
 import { useUIStore, type SessionsTab } from "../store";
-import type { CardSession, AgentSession, SessionCost, SessionFocusState } from "../lib/types";
+import type { CardSession, AgentSession, RemoteSession, SessionCost, SessionFocusState } from "../lib/types";
+import { attachCommand, resumeCommand } from "../lib/sessionCommands";
+import { HOST_STATUS_LABEL, hostFilterMatches, isRemote, mergeRemoteSessions, remoteKey, sshAttachCommand, type HostFilter } from "../lib/remoteSessions";
 import { Icon } from "./icons";
 import { Markdown } from "./Markdown";
 import { RoutinesConfigTab } from "./routines/RoutinesConfigTab";
@@ -27,38 +29,11 @@ export function tildePath(path: string): string {
   return path.replace(/^\/(Users|home)\/[^/]+(?=\/|$)/, "~");
 }
 
-function shellQuote(s: string): string {
-  return /^[\w./~@%+=:-]+$/.test(s) ? s : `'${s.replace(/'/g, `'\\''`)}'`;
-}
-
-export function attachCommand(s: Pick<AgentSession, "session_id" | "job_id">): string {
-  return `claude attach ${s.job_id ?? s.session_id.slice(0, 8)}`;
-}
-
-export { isWaiting };
+export { isWaiting, attachCommand, resumeCommand };
 
 /** The harness ids present in `sessions`, sorted. */
 export function harnessIds(sessions: Pick<AgentSession, "harness">[]): string[] {
   return [...new Set(sessions.map((s) => s.harness))].sort();
-}
-
-/** The shell command resuming a session, or `null` when its harness has no known resume command. */
-export function resumeCommand(s: Pick<AgentSession, "cwd" | "session_id"> & { harness?: string | null }): string | null {
-  let resume: string;
-  switch (s.harness) {
-    case "claude":
-      resume = `claude --resume ${shellQuote(s.session_id)}`;
-      break;
-    case "opencode":
-      resume = `opencode --session ${shellQuote(s.session_id)}`;
-      break;
-    case "codex":
-      resume = `codex resume ${shellQuote(s.session_id)}`;
-      break;
-    default:
-      return null;
-  }
-  return `cd ${shellQuote(s.cwd)}; ${resume}`;
 }
 
 /** Every whitespace-separated word of `q` must appear (case-insensitive) in the session's text. */
@@ -99,6 +74,13 @@ function TerminalSessions() {
     refetchOnWindowFocus: true,
   });
   useRefetchOnActivate(homeActive, sessionsQuery.refetch);
+  // Remote hosts are asked apart from the local scan: a slow host never delays the local list.
+  const remoteQuery = useQuery({
+    queryKey: ["remote-sessions"],
+    queryFn: api.listRemoteSessions,
+    refetchInterval: homeActive ? 5_000 : false,
+    refetchOnWindowFocus: true,
+  });
   const cardSessions = sessionsQuery.data?.card_sessions;
 
   const focus = useMutation({
@@ -139,10 +121,19 @@ function TerminalSessions() {
     return m;
   }, [cardSessions]);
 
-  const allSessions = sessionsQuery.data?.sessions ?? [];
-  const harnesses = harnessIds(allSessions);
+  const { sessions: mergedSessions, down } = useMemo(
+    () => mergeRemoteSessions(sessionsQuery.data?.sessions ?? [], remoteQuery.data ?? []),
+    [sessionsQuery.data, remoteQuery.data],
+  );
+  const knownHosts = remoteQuery.data ?? [];
+  const showHost = knownHosts.length > 0;
+  const harnesses = harnessIds(mergedSessions);
   const [harnessFilter, setHarnessFilter] = useState("");
-  const sessions = harnessFilter ? allSessions.filter((s) => s.harness === harnessFilter) : allSessions;
+  const [hostFilter, setHostFilter] = useState<HostFilter>("");
+  const sessions = mergedSessions.filter(
+    (s) => (!harnessFilter || s.harness === harnessFilter) && hostFilterMatches(hostFilter, hostIdOf(s)),
+  );
+  const shownDown = down.filter((h) => hostFilterMatches(hostFilter, h.host_id));
   const showHarness = harnesses.length > 1;
   const live = sessions.filter((s) => s.live);
   const history = sessions.filter((s) => !s.live);
@@ -165,6 +156,17 @@ function TerminalSessions() {
             {live.length} live · {history.length} in the last {historyDays} day{historyDays === 1 ? "" : "s"}
           </p>
         </div>
+        {showHost && (
+          <select className="input" aria-label="Filter by host" value={hostFilter} onChange={(e) => setHostFilter(e.target.value)}>
+            <option value="">All hosts</option>
+            <option value="local">This machine</option>
+            {knownHosts.map((h) => (
+              <option key={h.host_id} value={`host:${h.host_id}`}>
+                {h.host_name}
+              </option>
+            ))}
+          </select>
+        )}
         {showHarness && (
           <select
             className="input"
@@ -190,15 +192,24 @@ function TerminalSessions() {
           <>
             <h2 className="sessions-group-head">Live</h2>
             {live.length === 0 && <p className="muted faint">No running sessions.</p>}
+            {shownDown.map((h) => (
+              <div key={`down-${h.host_id}`} className="card sessions-card sessions-host-down muted" title={h.error ?? undefined}>
+                <span className="badge badge-host">{h.host_name}</span> {HOST_STATUS_LABEL[h.status]}
+                {h.error && <span className="faint"> · {h.error}</span>}
+              </div>
+            ))}
             {live.map((s) => (
               <SessionRow
-                key={s.session_id}
+                key={isRemote(s) ? remoteKey(s) : s.session_id}
                 session={s}
                 showHarness={showHarness}
-                cards={cardsBySession.get(s.session_id) ?? []}
+                showHost={showHost}
+                cards={isRemote(s) ? [] : (cardsBySession.get(s.session_id) ?? [])}
                 onShowCard={showBoardCard}
                 action={
-                  // Focus, attach and stop are only known for Claude sessions.
+                  isRemote(s) ? (
+                    <CopySshButton session={s} onCopy={copyCommand} />
+                  ) : // Focus, attach and stop are only known for Claude sessions.
                   s.harness !== "claude" ? null : (
                     <>
                       {s.kind === "bg" && s.job_id && (
@@ -260,12 +271,16 @@ function TerminalSessions() {
               const cmd = resumeCommand(s);
               return (
                 <SessionRow
-                  key={s.session_id}
+                  key={isRemote(s) ? remoteKey(s) : s.session_id}
                   session={s}
                   showHarness={showHarness}
+                  showHost={showHost}
                   cards={[]}
                   onShowCard={showBoardCard}
                   action={
+                    isRemote(s) ? (
+                      <CopySshButton session={s} onCopy={copyCommand} />
+                    ) : (
                     <div className="btn-split">
                       <button
                         className="btn btn-sm"
@@ -285,6 +300,7 @@ function TerminalSessions() {
                         <Icon name="copy" size={12} />
                       </button>
                     </div>
+                    )
                   }
                 />
               );
@@ -295,6 +311,23 @@ function TerminalSessions() {
     </section>
   );
 }
+
+/** The only action of a remote session: copy the ssh command that reaches it. */
+function CopySshButton({ session: s, onCopy }: { session: RemoteSession; onCopy: (command: string, what: string) => void }) {
+  const cmd = sshAttachCommand(s);
+  return (
+    <button
+      className="btn btn-sm"
+      disabled={cmd === null}
+      title={cmd === null ? `No attach command known for harness ${s.harness}` : `Copy: ${cmd}`}
+      onClick={() => cmd && onCopy(cmd, "ssh attach")}
+    >
+      <Icon name="copy" size={13} /> Copy ssh
+    </button>
+  );
+}
+
+const hostIdOf = (s: AgentSession | RemoteSession): number | null => (isRemote(s) ? s.host_id : null);
 
 /** Background sessions nobody is attached to: jump to an agent view to open it, else copy attach. */
 function BackgroundOpenButton({
@@ -352,12 +385,14 @@ function statusClass(s: AgentSession): string {
 function SessionRow({
   session: s,
   showHarness,
+  showHost,
   cards,
   onShowCard,
   action,
 }: {
   session: AgentSession;
   showHarness: boolean;
+  showHost: boolean;
   cards: CardSession[];
   onShowCard: (cardId: string) => void;
   action: React.ReactNode;
@@ -368,7 +403,8 @@ function SessionRow({
   const fork = useSettingsStore((st) => st.sessionSummaryFork);
   const summaries = s.summaries ?? [];
   const cost = summaries.find((x) => x.cost)?.cost; // newest first, and cumulative
-  const canExpand = (s.live && s.harness === "claude") || summaries.length > 0;
+  // Summaries are generated from a local transcript: a remote session has none to expand.
+  const canExpand = !isRemote(s) && ((s.live && s.harness === "claude") || summaries.length > 0);
   const aiOff = useAiDisabledReason();
   const generate = useMutation({
     mutationFn: () => api.generateLiveSessionSummary(s.session_id, fork),
@@ -400,6 +436,11 @@ function SessionRow({
             ) : (
               <span className="sessions-name" title={s.original_name ?? undefined}>
                 {s.name ?? s.session_id}
+              </span>
+            )}
+            {showHost && (
+              <span className="badge badge-host" title={isRemote(s) ? `Host: ${s.host_name}` : "This machine"}>
+                {isRemote(s) ? s.host_name : "local"}
               </span>
             )}
             {showHarness && (
