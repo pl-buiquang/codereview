@@ -12,7 +12,7 @@ import {
   type HunkFocus,
 } from "../lib/focus";
 import type { FocusLevel, FocusOverride, FocusView } from "../lib/types";
-import { useAiDisabledReason, useSettingsStore } from "../lib/settings";
+import { useAiDisabledReason } from "../lib/settings";
 import { Markdown } from "./Markdown";
 import { MODEL_OPTIONS } from "./ChatPanel";
 
@@ -37,10 +37,9 @@ export function FocusGenerate({
   claudeAvailable: boolean;
   generate: GenerateFocus;
 }) {
-  const chatModel = useSettingsStore((s) => s.chatModel);
   const [open, setOpen] = useState(false);
   const aiOff = useAiDisabledReason();
-  const [model, setModel] = useState(chatModel);
+  const [model, setModel] = useState("");
   if (view?.focus.status === "generating" || generate.isPending) {
     return (
       <span className="focus-status">

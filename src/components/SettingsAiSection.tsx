@@ -2,31 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { useSettingsStore } from "../lib/settings";
+import { AiProfilesSection } from "./SettingsAiProfiles";
 import { useUIStore } from "../store";
 import { toast } from "../lib/toast";
 import type { PromptInfo } from "../lib/types";
-import { MODEL_OPTIONS } from "./ChatPanel";
-
-function ModelInput({
-  value,
-  onChange,
-  placeholder,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-  placeholder: string;
-}) {
-  return (
-    <input
-      type="text"
-      className="input"
-      list="ai-model-options"
-      placeholder={placeholder}
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-    />
-  );
-}
 
 function PromptEditor({ prompt }: { prompt: PromptInfo }) {
   const qc = useQueryClient();
@@ -90,10 +69,6 @@ function PromptEditor({ prompt }: { prompt: PromptInfo }) {
 }
 
 export function AiSection() {
-  const chatModel = useSettingsStore((s) => s.chatModel);
-  const setChatModel = useSettingsStore((s) => s.setChatModel);
-  const overviewModel = useSettingsStore((s) => s.overviewModel);
-  const setOverviewModel = useSettingsStore((s) => s.setOverviewModel);
   const aiEnabled = useSettingsStore((s) => s.aiEnabled);
   const setAiEnabled = useSettingsStore((s) => s.setAiEnabled);
   const showRoutinesConfig = useUIStore((s) => s.showRoutinesConfig);
@@ -101,14 +76,6 @@ export function AiSection() {
 
   return (
     <div className="settings-section-narrow ai-settings">
-      <datalist id="ai-model-options">
-        {MODEL_OPTIONS.filter((o) => o.value).map((o) => (
-          <option key={o.value} value={o.value}>
-            {o.label}
-          </option>
-        ))}
-      </datalist>
-
       <section className="settings-group">
         <h3>AI features</h3>
         <div className="settings-row">
@@ -123,40 +90,14 @@ export function AiSection() {
           />
         </div>
         <span className="settings-hint muted">
-          Master switch for everything the app runs through <code>claude -p</code>: review chat, focus, AI
-          review, board insights, session summaries and routines. While it is off, those buttons are disabled
+          Master switch for everything the app runs through an AI harness: review chat, focus, AI review,
+          board insights, session summaries and routines. While it is off, those buttons are disabled
           and queued routine runs wait. Terminal sessions (new agent session, resume) are not affected. Off by
           default.
         </span>
       </section>
 
-      <section className="settings-group">
-        <h3>Models</h3>
-        <label className="settings-row settings-row-stack">
-          <span>Chat &amp; focus model</span>
-          <ModelInput
-            value={chatModel}
-            onChange={setChatModel}
-            placeholder="leave empty to use opus (ANTHROPIC_DEFAULT_OPUS_MODEL)"
-          />
-          <span className="settings-hint muted">
-            Passed as <code>--model</code> to <code>claude -p</code>. Leave empty to use the
-            env-configured default (Bedrock ARN, model name, etc.).
-          </span>
-        </label>
-        <label className="settings-row settings-row-stack">
-          <span>Board overview model</span>
-          <ModelInput
-            value={overviewModel}
-            onChange={setOverviewModel}
-            placeholder="leave empty to use the env default"
-          />
-          <span className="settings-hint muted">
-            Runs with <code>--effort low</code> and no tools; a fast model keeps the overview
-            snappy.
-          </span>
-        </label>
-      </section>
+      <AiProfilesSection />
 
       <section className="settings-group">
         <h3>Prompts</h3>

@@ -373,7 +373,7 @@ export const api = {
   boardLastRefreshAt: () => invoke<string | null>("board_last_refresh_at"),
   boardList: () => invoke<BoardCard[]>("board_list"),
   boardOverviewGet: () => invoke<BoardOverview | null>("board_overview_get"),
-  boardOverviewGenerate: (model: string) =>
+  boardOverviewGenerate: (model?: string) =>
     invoke<BoardOverview>("board_overview_generate", { model: model || null }),
 
   // AI prompts

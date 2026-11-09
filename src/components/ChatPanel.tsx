@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import type { ChatMessage } from "../lib/types";
-import { useAiDisabledReason, useSettingsStore } from "../lib/settings";
+import { useAiDisabledReason } from "../lib/settings";
+import { profileLabel } from "../lib/aiProfiles";
 import { confirmDialog } from "../lib/confirm";
 import { Icon } from "./icons";
 import { Markdown } from "./Markdown";
@@ -31,8 +32,8 @@ export function ChatPanel({
   onPendingConsumed,
 }: ChatPanelProps) {
   const queryClient = useQueryClient();
-  const chatModel = useSettingsStore((s) => s.chatModel);
-  const setChatModel = useSettingsStore((s) => s.setChatModel);
+  // The profile chosen in the pane; null keeps the one the chat runs on.
+  const [picked, setPicked] = useState<number | null>(null);
   const [input, setInput] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -51,9 +52,22 @@ export function ChatPanel({
     refetchOnWindowFocus: false,
   });
 
+  const profilesQuery = useQuery({ queryKey: ["ai-profiles"], queryFn: api.aiProfileList });
+  const pinnedQuery = useQuery({
+    queryKey: ["chat-profile", reviewId],
+    queryFn: () => api.chatProfileId(reviewId),
+    refetchOnWindowFocus: false,
+  });
+  const profiles = profilesQuery.data ?? [];
+  const runningProfile = pinnedQuery.data ?? profiles.find((p) => p.is_default)?.id ?? null;
+  const profileId = picked ?? runningProfile;
+  const switching = picked != null && picked !== runningProfile && (messagesQuery.data?.length ?? 0) > 0;
+
   const sendMutation = useMutation({
-    mutationFn: (text: string) => api.chatSend(reviewId, text),
+    mutationFn: (text: string) => api.chatSend(reviewId, text, picked),
     onSuccess: () => {
+      setPicked(null);
+      queryClient.invalidateQueries({ queryKey: ["chat-profile", reviewId] });
       queryClient.invalidateQueries({ queryKey: ["chat-messages", reviewId] });
       queryClient.invalidateQueries({ queryKey: ["chat-branch", reviewId] });
       queryClient.invalidateQueries({ queryKey: ["review", reviewId] });
@@ -65,6 +79,7 @@ export function ChatPanel({
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["chat-messages", reviewId] });
       queryClient.invalidateQueries({ queryKey: ["chat-branch", reviewId] });
+      queryClient.invalidateQueries({ queryKey: ["chat-profile", reviewId] });
       sendMutation.reset();
     },
   });
@@ -241,17 +256,23 @@ export function ChatPanel({
           }}
           rows={3}
         />
+        {switching && (
+          <div className="chat-switch-note muted">
+            Switching profile starts a new session; the earlier messages are replayed to it once.
+          </div>
+        )}
         <div className="chat-toolbar">
           <select
             className="chat-model-select"
-            value={chatModel}
-            onChange={(e) => setChatModel(e.target.value)}
-            disabled={busy || aiOff != null}
-            title={aiOff ?? "Model"}
+            value={profileId ?? ""}
+            onChange={(e) => setPicked(Number(e.target.value))}
+            disabled={busy || aiOff != null || profiles.length === 0}
+            title={aiOff ?? "Profile (harness and model). Switching starts a new session."}
+            aria-label="Profile"
           >
-            {MODEL_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
+            {profiles.map((p) => (
+              <option key={p.id} value={p.id}>
+                {profileLabel(p)}
               </option>
             ))}
           </select>

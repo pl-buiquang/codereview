@@ -107,6 +107,17 @@ export const DEFAULT_IGNORE_RULES: IgnoreRule[] = [
   { id: "preset-not-involved", name: "PRs / issues I'm not involved in", enabled: true, involved: false },
 ];
 
+export interface LegacyAiModels {
+  chat: string;
+  overview: string;
+}
+
+function parseLegacyAiModels(v: unknown): LegacyAiModels | null {
+  if (!v || typeof v !== "object") return null;
+  const o = v as Record<string, unknown>;
+  return { chat: typeof o.chat === "string" ? o.chat : "", overview: typeof o.overview === "string" ? o.overview : "" };
+}
+
 type PersistedSettings = Pick<
   SettingsState,
   | "direction"
@@ -127,8 +138,7 @@ type PersistedSettings = Pick<
   | "boardStatusBorderSide"
   | "aiEnabled"
   | "aiEnabled"
-  | "chatModel"
-  | "overviewModel"
+  | "legacyAiModels"
   | "boardOverviewOpen"
   | "boardMonitor"
   | "boardMonitorLogOpen"
@@ -171,8 +181,7 @@ const DEFAULTS: PersistedSettings = {
   logLevel: DEFAULT_LOG_LEVEL,
   boardStatusBorderSide: "top",
   aiEnabled: false,
-  chatModel: "",
-  overviewModel: "sonnet",
+  legacyAiModels: null,
   boardOverviewOpen: false,
   boardMonitor: false,
   boardMonitorLogOpen: false,
@@ -237,12 +246,11 @@ interface SettingsState {
   diffMarkers: boolean;
   /** Files with more changed lines (add + del) are not rendered in the diff. */
   largeDiffMaxLines: number;
-  /** Master switch for every app-spawned `claude -p` feature (chat, focus, AI review, overview, routines). */
+  /** Master switch for every app-spawned AI feature (chat, focus, AI review, overview, routines). */
   aiEnabled: boolean;
-  /** Model passed to `claude -p --model`. Empty = use env default (opus). */
-  chatModel: string;
-  /** Model for the board AI overview; empty = same resolution as chat. */
-  overviewModel: string;
+  /** The chat / overview model fields of settings saved before AI profiles, until the backend has
+   *  imported them into profiles (`useImportLegacyAiModels`). Null once done, and on fresh installs. */
+  legacyAiModels: LegacyAiModels | null;
   boardOverviewOpen: boolean;
   /** Keep approved auto-merge PRs mergeable: update BEHIND branches, rerun failed CI. */
   boardMonitor: boolean;
@@ -294,7 +302,7 @@ interface SettingsState {
   setAutoFetchMinutes: (minutes: number) => void;
   setBoardStatusBorderSide: (side: BoardBorderSide) => void;
   setAiEnabled: (on: boolean) => void;
-  setChatModel: (s: string) => void;
+  clearLegacyAiModels: () => void;
   setMarkEdits: (b: boolean) => void;
   setDiffMarkers: (b: boolean) => void;
   setLargeDiffMaxLines: (n: number) => void;
@@ -307,7 +315,6 @@ interface SettingsState {
   setSessionHistoryDays: (days: number) => void;
   setSessionSummaryDir: (s: string) => void;
   setSessionSummaryFork: (on: boolean) => void;
-  setOverviewModel: (m: string) => void;
   setBoardOverviewOpen: (open: boolean) => void;
   setBoardNeedsActionSnoozed: (on: boolean) => void;
   setBoardMonitor: (on: boolean) => void;
@@ -397,7 +404,7 @@ export const useSettingsStore = create<SettingsState>()(
       setAutoFetchMinutes: (autoFetchMinutes) => set({ autoFetchMinutes }),
       setBoardStatusBorderSide: (boardStatusBorderSide) => set({ boardStatusBorderSide }),
       setAiEnabled: (aiEnabled) => set({ aiEnabled }),
-      setChatModel: (chatModel) => set({ chatModel }),
+      clearLegacyAiModels: () => set({ legacyAiModels: null }),
       setMarkEdits: (markEdits) => set({ markEdits }),
       setDiffMarkers: (diffMarkers) => set({ diffMarkers }),
       setLargeDiffMaxLines: (largeDiffMaxLines) => set({ largeDiffMaxLines }),
@@ -410,7 +417,6 @@ export const useSettingsStore = create<SettingsState>()(
       setSessionHistoryDays: (sessionHistoryDays) => set({ sessionHistoryDays }),
       setSessionSummaryDir: (sessionSummaryDir) => set({ sessionSummaryDir }),
       setSessionSummaryFork: (sessionSummaryFork) => set({ sessionSummaryFork }),
-      setOverviewModel: (overviewModel) => set({ overviewModel }),
       setBoardOverviewOpen: (boardOverviewOpen) => set({ boardOverviewOpen }),
       setBoardMonitor: (boardMonitor) => set({ boardMonitor }),
       setBoardMonitorLogOpen: (boardMonitorLogOpen) => set({ boardMonitorLogOpen }),
@@ -426,7 +432,7 @@ export const useSettingsStore = create<SettingsState>()(
     }),
     {
       name: "codereview-settings",
-      version: 12,
+      version: 13,
       storage: createJSONStorage(() => mirroredStorage),
       partialize: (s) => pickPersisted(s),
       // Adding a key needs no version bump: the merge fills it from DEFAULTS.
@@ -448,6 +454,15 @@ export const useSettingsStore = create<SettingsState>()(
         }
         if (version < 11 && p.diffFontSize === 12.5) out.diffFontSize = 12;
         if (version < 12 && p.sessionHistoryDays === 3) out.sessionHistoryDays = 30;
+        // v13: the chat / overview model fields moved into AI profiles; keep their values until imported.
+        if (version < 13) {
+          const str = (v: unknown) => (typeof v === "string" ? v.trim() : "");
+          const chat = str(p.chatModel);
+          const overview = str(p.overviewModel);
+          out.legacyAiModels = chat || overview ? { chat, overview } : null;
+        } else {
+          out.legacyAiModels = parseLegacyAiModels(p.legacyAiModels);
+        }
         return out;
       },
     },
@@ -466,7 +481,7 @@ export function exportSettings(prompts: Record<string, string> = {}): string {
       app: "codereview",
       kind: "settings",
       exportedAt: new Date().toISOString(),
-      settings: pickPersisted(useSettingsStore.getState()),
+      settings: (({ legacyAiModels: _transient, ...rest }) => rest)(pickPersisted(useSettingsStore.getState())),
       prompts,
     },
     null,
@@ -512,6 +527,8 @@ export function parsePromptOverrides(json: string): Record<string, string> | nul
 function sanitizeSettings(source: Record<string, unknown>): Partial<PersistedSettings> {
   const picked: Record<string, unknown> = {};
   for (const key of PERSISTED_KEYS) {
+    // Transient migration state, not a setting: never imported from a file.
+    if (key === "legacyAiModels") continue;
     const value = source[key];
     if (typeof value !== typeof DEFAULTS[key]) continue;
     if (Array.isArray(value) !== Array.isArray(DEFAULTS[key])) continue;

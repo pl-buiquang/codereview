@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildTranscript, cardContextKey, formatDuration, prContextKey } from "./routines";
+import { buildTranscript, cardContextKey, claudeOptions, formatDuration, prContextKey, resolvedHarness, withClaudeOptions } from "./routines";
 
 describe("context keys", () => {
   it("lowercases the repo like the backend does", () => {
@@ -52,5 +52,25 @@ describe("buildTranscript", () => {
       line({ type: "assistant", message: { content: [{ type: "text", text: "  " }] } }),
     ]);
     expect(items).toEqual([]);
+  });
+});
+
+describe("routine harness options", () => {
+  it("fills in defaults and keeps other harnesses' entries when patching", () => {
+    expect(claudeOptions({})).toEqual({ permission_mode: "", allowed_tools: [], extra_args: [], system_prompt_mode: "append" });
+    const patched = withClaudeOptions({ codex: { sandbox: "x" }, claude: { allowed_tools: ["Read"] } }, { extra_args: ["--effort", "low"] });
+    expect(patched.codex).toEqual({ sandbox: "x" });
+    expect(patched.claude).toEqual({ permission_mode: "", allowed_tools: ["Read"], extra_args: ["--effort", "low"], system_prompt_mode: "append" });
+  });
+
+  it("resolves the harness of a profile choice, falling back to the default profile", () => {
+    const profiles = [
+      { id: 1, harness: "claude", is_default: true },
+      { id: 2, harness: "codex", is_default: false },
+    ];
+    expect(resolvedHarness(2, profiles)).toBe("codex");
+    expect(resolvedHarness(null, profiles)).toBe("claude");
+    expect(resolvedHarness(99, profiles)).toBe("claude");
+    expect(resolvedHarness(null, [])).toBe("claude");
   });
 });

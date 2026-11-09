@@ -221,7 +221,7 @@ describe("ImageDiffPane", () => {
       imageDiffManifest.mockResolvedValue(manifest([entry({})]));
       setup();
       await userEvent.click(await screen.findByRole("button", { name: "AI report" }));
-      expect(imageDiffRunReport).toHaveBeenCalledWith(9, undefined);
+      expect(imageDiffRunReport).toHaveBeenCalledWith(9);
       expect(await screen.findByText(/No report yet/)).toBeInTheDocument();
     });
 

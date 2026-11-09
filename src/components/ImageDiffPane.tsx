@@ -11,7 +11,7 @@ import {
   useImageDiffStatus,
   type ImageSlot,
 } from "../lib/imageDiff";
-import { useAiDisabledReason, useSettingsStore } from "../lib/settings";
+import { useAiDisabledReason } from "../lib/settings";
 import { toast } from "../lib/toast";
 import type {
   ImageChange,
@@ -311,7 +311,6 @@ export function ImageDiffPane({
   const [zoom, setZoom] = useState<string | null>(null);
   const [tab, setTab] = useState<"images" | "report">("images");
   const aiOff = useAiDisabledReason();
-  const chatModel = useSettingsStore((s) => s.chatModel);
   const envQuery = useQuery({ queryKey: ["environment"], queryFn: api.checkEnvironment, staleTime: Infinity });
   const claudeAvailable = envQuery.data ? envQuery.data.claude != null : true;
 
@@ -332,7 +331,7 @@ export function ImageDiffPane({
     onError: (e) => toast.error(`Could not generate image diffs:\n${String(e)}`),
   });
   const runReport = useMutation({
-    mutationFn: () => api.imageDiffRunReport(reviewId, chatModel || undefined),
+    mutationFn: () => api.imageDiffRunReport(reviewId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["image-diff-status", reviewId] });
       setTab("report");

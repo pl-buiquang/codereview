@@ -86,7 +86,6 @@ describe("useSettingsStore", () => {
         "boardStatusBorderSide",
         "botLogins",
         "conversationIgnoreRules",
-        "chatModel",
         "customTheme",
         "defaultTerminal",
         "defaultThreeDot",
@@ -103,7 +102,7 @@ describe("useSettingsStore", () => {
         "markEdits",
         "diffMarkers",
         "mode",
-        "overviewModel",
+        "legacyAiModels",
         "repoBasePaths",
         "repoStripPrefixes",
         "sessionHistoryDays",
@@ -130,7 +129,7 @@ describe("exportSettings / importSettings", () => {
     s.setFileTestPatterns("");
     const applied = importSettings(json);
     const n = useSettingsStore.getState();
-    expect(applied).toBe(41);
+    expect(applied).toBe(39);
     expect(n.mode).toBe("light");
     expect(n.diffFontSize).toBe(15);
     expect(n.fileTestPatterns).toBe("*.spec.rb");
@@ -327,5 +326,37 @@ describe("rehydrating a stored custom theme", () => {
     expect(theme).toMatchObject({ base: "b", uiFont: "inter", identFont: "base", shadows: "base", scrim: "base" });
     expect(() => customThemeStyle(theme, "dark")).not.toThrow();
     localStorage.removeItem("codereview-settings");
+  });
+});
+
+describe("migrate: AI models moved into profiles", () => {
+  it("keeps the old chat and overview models until the backend has imported them", () => {
+    const out = migrate({ chatModel: " opus ", overviewModel: "sonnet", mode: "dark" }, 12) as Record<string, unknown>;
+    expect(out.legacyAiModels).toEqual({ chat: "opus", overview: "sonnet" });
+    expect(out).not.toHaveProperty("chatModel");
+    expect(out).not.toHaveProperty("overviewModel");
+    expect(out.mode).toBe("dark");
+  });
+
+  it("has nothing to import when both were empty or absent", () => {
+    expect((migrate({ chatModel: "", overviewModel: "" }, 12) as Record<string, unknown>).legacyAiModels).toBeNull();
+    expect((migrate({}, 11) as Record<string, unknown>).legacyAiModels).toBeNull();
+  });
+
+  it("keeps a pending import across later migrations and drops malformed values", () => {
+    expect((migrate({ legacyAiModels: { chat: "opus", overview: "" } }, 13) as Record<string, unknown>).legacyAiModels).toEqual({
+      chat: "opus",
+      overview: "",
+    });
+    expect((migrate({ legacyAiModels: "x" }, 13) as Record<string, unknown>).legacyAiModels).toBeNull();
+  });
+
+  it("clearLegacyAiModels forgets them, and settings files never carry them", () => {
+    useSettingsStore.setState({ legacyAiModels: { chat: "opus", overview: "" } });
+    expect(JSON.parse(exportSettings()).settings).not.toHaveProperty("legacyAiModels");
+    expect(() => importSettings(JSON.stringify({ mode: "dark", legacyAiModels: { chat: "x", overview: "y" } }))).not.toThrow();
+    expect(useSettingsStore.getState().legacyAiModels).toEqual({ chat: "opus", overview: "" });
+    useSettingsStore.getState().clearLegacyAiModels();
+    expect(useSettingsStore.getState().legacyAiModels).toBeNull();
   });
 });

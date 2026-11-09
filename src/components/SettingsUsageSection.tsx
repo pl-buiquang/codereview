@@ -272,8 +272,8 @@ export function UsageSection() {
       </section>
 
       <p className="settings-hint">
-        Costs are the API-equivalent prices claude reports; on a subscription they are not billed. Only runs the app
-        starts itself with <code>claude -p</code> are counted above. Terminal sessions are listed separately, as
+        Costs are the API-equivalent prices the harness reports; on a subscription they are not billed. Only runs the
+        app starts itself are counted above. Terminal sessions are listed separately, as
         estimated by your SessionEnd hook, dated by their last summary. Codex runs
         (<code>/local-review --codex</code>) are not included. A routine run is logged when it ends, so one still running
         does not appear yet.

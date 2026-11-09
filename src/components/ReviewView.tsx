@@ -221,7 +221,6 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
     [queryClient, reviewId],
   );
   const generateFocus = useGenerateFocus(reviewId);
-  const chatModel = useSettingsStore((s) => s.chatModel);
 
   const detailQuery = useQuery({
     queryKey: ["review", reviewId],
@@ -1005,7 +1004,7 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
                 onRegenerate={
                   focusView.focus.status === "generating"
                     ? undefined
-                    : () => generateFocus.mutate({ model: chatModel || undefined })
+                    : () => generateFocus.mutate({})
                 }
               />
             )}
@@ -1287,7 +1286,6 @@ function ReviewHeader({
     staleTime: Infinity,
   });
   const claudeAvailable = envQuery.data ? envQuery.data.claude != null : true;
-  const chatModel = useSettingsStore((s) => s.chatModel);
   const aiOff = useAiDisabledReason();
   const focusGenerating = focusView?.focus.status === "generating" || generateFocus.isPending;
   const hasFocus = focusView?.focus.planned_at != null;
@@ -1297,7 +1295,7 @@ function ReviewHeader({
   });
   const aiReviewRunning = aiReviewStatus.data ?? null;
   const runAiReview = useMutation({
-    mutationFn: (layer: AiReviewLayer) => api.runAiReview(detail.review.id, layer, chatModel || undefined),
+    mutationFn: (layer: AiReviewLayer) => api.runAiReview(detail.review.id, layer),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["ai-review-status", detail.review.id] }),
     onError: (e) => toast.error(`Could not start AI review:\n${String(e)}`),
   });
@@ -2055,7 +2053,7 @@ function ReviewHeader({
                       aiOff ??
                       (claudeAvailable ? "Tier every hunk again with AI (default chat model)" : "Claude CLI not found")
                     }
-                    onClick={run(() => generateFocus.mutate({ model: chatModel || undefined }))}
+                    onClick={run(() => generateFocus.mutate({}))}
                   >
                     Regenerate AI focus
                   </button>

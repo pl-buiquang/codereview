@@ -24,6 +24,7 @@ import { dismissSplash } from "./lib/splash";
 import { GIT_CHANGED_EVENT, gitChangedQueryKeys, type GitChangedPayload } from "./lib/gitChanged";
 import { useSyncBridge } from "./lib/sync";
 import { useRoutineEvents } from "./lib/routines";
+import { useImportLegacyAiModels } from "./lib/aiProfiles";
 import { useImageDiffEvents } from "./lib/imageDiff";
 import { brief, log } from "./lib/log";
 import { useUIStore, type Tab } from "./store";
@@ -58,6 +59,7 @@ function App() {
   useDeepLinkListener();
   useSyncBridge();
   useRoutineEvents();
+  useImportLegacyAiModels();
   useImageDiffEvents();
   const tabs = useUIStore((s) => s.tabs);
   const closeTab = useUIStore((s) => s.closeTab);

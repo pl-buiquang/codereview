@@ -7251,3 +7251,25 @@ button.status-bar-seg:hover {
   flex: 0 0 auto;
   user-select: text;
 }
+
+/* Settings → AI profiles, chat profile switch note */
+.ai-profile-row {
+  align-items: center;
+  gap: 8px;
+}
+.ai-profile-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.ai-profile-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.chat-switch-note {
+  font-size: 11px;
+  padding: 0 2px 4px;
+}
