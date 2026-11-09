@@ -12,3 +12,6 @@ pub mod http;
 pub mod client;
 #[cfg(all(test, feature = "serve", unix))]
 mod test_server;
+pub mod harness;
+pub mod runtime;
+pub mod startup;

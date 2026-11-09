@@ -35,8 +35,8 @@ pub fn insert_run(
     tx.execute(
         "INSERT INTO ai_run (started_at, duration_ms, feature, variant, review_id, target_id, label,
            requested_model, status, error, num_turns, input_tokens, output_tokens, cache_read_tokens,
-           cache_creation_tokens, cost_usd, session_id, harness)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+           cache_creation_tokens, cost_usd, session_id, harness, host_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
         params![
             started_at,
             duration_ms,
@@ -56,6 +56,7 @@ pub fn insert_run(
             usage.cost_usd,
             usage.session_id,
             tag.harness,
+            tag.host_id,
         ],
     )?;
     let run_id = tx.last_insert_rowid();
@@ -179,6 +180,8 @@ pub struct AiRun {
     pub head_ref: Option<String>,
     /// Id of the harness that ran it.
     pub harness: String,
+    /// Name of the remote host that ran it (`None`: this machine; the id of a removed host reads as `host #id`).
+    pub host: Option<String>,
 }
 
 /// Lower bound (inclusive) of a range; `None` means all time.
@@ -263,7 +266,8 @@ pub fn runs(conn: &Connection, since: Option<&str>, feature: Option<&str>, limit
             r.status, r.error, r.input_tokens, r.output_tokens, r.cache_read_tokens,
             r.cache_creation_tokens, r.cost_usd,
             COALESCE(repo.friendly_name, repo.remote_owner || '/' || repo.remote_name, repo.local_path),
-            t.github_pr_number, t.title, t.base_ref, t.head_ref, r.harness
+            t.github_pr_number, t.title, t.base_ref, t.head_ref, r.harness,
+            CASE WHEN r.host_id IS NULL THEN NULL ELSE COALESCE((SELECT name FROM host WHERE id = r.host_id), 'host #' || r.host_id) END
          FROM ai_run r
          LEFT JOIN review rev ON rev.id = r.review_id
          LEFT JOIN target t ON t.id = COALESCE(rev.target_id, r.target_id)
@@ -296,6 +300,7 @@ pub fn runs(conn: &Connection, since: Option<&str>, feature: Option<&str>, limit
             base_ref: r.get(19)?,
             head_ref: r.get(20)?,
             harness: r.get(21)?,
+            host: r.get(22)?,
         })
     })?
     .collect()
@@ -512,5 +517,17 @@ mod tests {
         assert_eq!(harnesses, ["claude", "codex"]);
         let listed: Vec<String> = runs(&conn, None, None, 10).unwrap().into_iter().map(|r| r.harness).collect();
         assert_eq!(listed, ["codex", "claude"]);
+    }
+
+    #[test]
+    fn runs_record_the_host_that_ran_them() {
+        let mut conn = crate::db::open_memory();
+        conn.execute("INSERT INTO host (name, ssh_target, remote_endpoint, created_at, updated_at) VALUES ('koza', 'koza', '1', 'n', 'n')", []).unwrap();
+        let koza = conn.last_insert_rowid();
+        insert_run(&mut conn, &RunTag::new("chat"), "2026-10-20T10:00:00.000Z", 1, &usage(0.1, vec![]), None).unwrap();
+        insert_run(&mut conn, &RunTag::new("chat").host(Some(koza)), "2026-10-20T10:01:00.000Z", 1, &usage(0.1, vec![]), None).unwrap();
+        insert_run(&mut conn, &RunTag::new("chat").host(Some(999)), "2026-10-20T10:02:00.000Z", 1, &usage(0.1, vec![]), None).unwrap();
+        let hosts: Vec<Option<String>> = runs(&conn, None, None, 10).unwrap().into_iter().map(|r| r.host).collect();
+        assert_eq!(hosts, [Some("host #999".to_string()), Some("koza".to_string()), None]);
     }
 }

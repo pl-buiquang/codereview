@@ -339,6 +339,8 @@ pub async fn chat_send(
         let diff_source = crate::commands::review::diff_source(&conn, review_id).ok();
 
         let (resolved, switched) = chat_profile(&conn, existing_chat.as_ref(), profile_id);
+        // A chat keeps a session and edits a local worktree; protocol 1 has no remote sessions.
+        resolved.ensure_local("A review chat")?;
         // A switch starts a new session, so the conversation so far goes into its first prompt.
         let replay = match (&existing_chat, switched) {
             (Some(chat), true) => replay_block(&earlier_messages(&conn, chat.id)?, REPLAY_CAP_BYTES),

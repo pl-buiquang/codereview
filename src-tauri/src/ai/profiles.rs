@@ -273,7 +273,23 @@ impl Resolved {
     }
 
     fn from_profile(p: AiProfile, harness: &'static dyn Harness, explicit: bool) -> Self {
+        // A profile with a host runs that harness on the host.
+        let harness = match p.host_id {
+            Some(host) => crate::remote::harness::for_host(host, harness.id()).unwrap_or(harness),
+            None => harness,
+        };
         Self { profile_id: Some(p.id), harness, model: p.model, settings: p.settings, host_id: p.host_id, explicit }
+    }
+
+    /// Refuse a profile that runs on a remote host for work that can only happen on this machine
+    /// (`what` names it: system routines, interactive sessions, multi-turn chats).
+    pub fn ensure_local(&self, what: &str) -> AppResult<()> {
+        match self.host_id {
+            None => Ok(()),
+            Some(_) => Err(AppError::Other(format!(
+                "{what} runs on this machine only, but its profile runs on a remote host: pick a profile without a host"
+            ))),
+        }
     }
 
     /// The model of a request: `requested` (a launch override) wins, then the profile's. Claude
@@ -281,7 +297,8 @@ impl Resolved {
     pub fn model_for(&self, requested: &str) -> String {
         let requested = requested.trim();
         let model = if requested.is_empty() { self.model.as_str() } else { requested };
-        if self.harness.id() == "claude" {
+        // The env fallback is this machine's; a remote Claude has its own.
+        if self.harness.id() == "claude" && self.host_id.is_none() {
             resolve_model(Some(model.to_string()))
         } else {
             model.to_string()
@@ -561,6 +578,27 @@ mod tests {
         let t = resolve_feature(&conn, Feature::Theme);
         assert_eq!((t.profile_id, t.explicit), (Some(default), false));
         assert_eq!(resolve_routine(&conn, None).profile_id, Some(default));
+    }
+
+    #[test]
+    fn a_profile_with_a_host_resolves_to_the_remote_harness_and_refuses_local_only_work() {
+        let mut conn = open_memory();
+        let host = crate::remote::host::save(
+            &conn,
+            crate::remote::host::HostInput { id: None, name: "koza".into(), ssh_target: "koza".into(), remote_endpoint: "7777".into(), enabled: true },
+        )
+        .unwrap();
+        let mut remote = input("Remote");
+        remote.host_id = Some(host.id);
+        remote.model = "opus".into();
+        let id = save(&mut conn, remote).unwrap().id;
+        let r = resolve_routine(&conn, Some(id));
+        assert_eq!((r.host_id, r.harness.id(), r.model_for("").as_str()), (Some(host.id), "claude", "opus"));
+        assert!(!r.harness.caps().sessions, "remote harnesses have no sessions");
+        let err = r.ensure_local("“Focus”").unwrap_err().to_string();
+        assert!(err.contains("“Focus” runs on this machine only"), "{err}");
+        let local = resolve_routine(&conn, None);
+        local.ensure_local("x").unwrap();
     }
 
     #[test]

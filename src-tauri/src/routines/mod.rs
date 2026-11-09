@@ -696,7 +696,16 @@ pub fn save(conn: &Connection, input: RoutineInput) -> AppResult<Routine> {
 
     // System routines: the handler owns everything but the profile, model, timeout and enabled flag.
     if let Some(id) = input.id {
-        if get(conn, id)?.is_system() {
+        let existing = get(conn, id)?;
+        if existing.is_system() {
+            if let Some(pid) = input.profile_id {
+                if crate::ai::profiles::get(conn, pid)?.is_some_and(|p| p.host_id.is_some()) {
+                    return Err(AppError::Other(format!(
+                        "“{}” is a system routine: it runs on this machine only, pick a profile without a host",
+                        existing.name
+                    )));
+                }
+            }
             conn.execute(
                 "UPDATE routine SET profile_id = ?2, model = ?3, timeout_min = ?4, enabled = ?5, updated_at = ?6 WHERE id = ?1",
                 params![id, input.profile_id, input.model.trim(), timeout, input.enabled as i64, now],
@@ -1063,6 +1072,30 @@ mod tests {
         assert_eq!(saved.prompt_template, focus.prompt_template);
         assert_eq!(saved.access, focus.access);
         assert_eq!(saved.harness_overrides, focus.harness_overrides);
+    }
+
+    #[test]
+    fn system_routines_refuse_a_remote_profile_but_plain_ones_take_it() {
+        let conn = open_memory();
+        seed(&conn).unwrap();
+        let host = crate::remote::host::save(
+            &conn,
+            crate::remote::host::HostInput { id: None, name: "koza".into(), ssh_target: "koza".into(), remote_endpoint: "7777".into(), enabled: true },
+        )
+        .unwrap();
+        conn.execute("INSERT INTO ai_profile (name, harness, host_id, created_at, updated_at) VALUES ('R', 'claude', ?1, 'n', 'n')", params![host.id]).unwrap();
+        let remote = conn.last_insert_rowid();
+        let focus = plain_by_key(&conn, "focus");
+        let mut edit = input("x");
+        edit.id = Some(focus.id);
+        edit.profile_id = Some(remote);
+        let err = save(&conn, edit).unwrap_err().to_string();
+        assert!(err.contains("runs on this machine only"), "{err}");
+        assert_eq!(get(&conn, focus.id).unwrap().profile_id, focus.profile_id);
+
+        let mut plain = input("Plain");
+        plain.profile_id = Some(remote);
+        assert_eq!(save(&conn, plain).unwrap().profile_id, Some(remote));
     }
 
     #[test]

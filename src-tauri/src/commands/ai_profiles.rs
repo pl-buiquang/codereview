@@ -60,20 +60,46 @@ fn harness_infos() -> Vec<HarnessInfo> {
         .collect()
 }
 
-/// The known harnesses with their capabilities, availability and version.
+/// The harnesses of a remote host: those the host offers that this build knows.
+fn remote_infos(host_id: i64) -> AppResult<Vec<HarnessInfo>> {
+    let offered = crate::commands::hosts::remote_harness_infos(host_id)?;
+    Ok(ai::harnesses()
+        .into_iter()
+        .filter_map(|h| {
+            let r = offered.iter().find(|o| o.id == h.id())?;
+            // Protocol 1 carries no sessions or interactive use: show what a remote profile can really do.
+            let caps = Caps { sessions: false, resume: false, fork: false, interactive_tui: false, pins_session_id: false, ..r.caps.clone() };
+            Some(HarnessInfo { id: h.id(), name: h.name(), caps, available: r.available, version: r.version.clone() })
+        })
+        .collect())
+}
+
+/// The known harnesses with their capabilities, availability and version; with `host_id`, those of that host.
 #[tauri::command]
-pub async fn ai_harnesses() -> AppResult<Vec<HarnessInfo>> {
-    tauri::async_runtime::spawn_blocking(harness_infos)
-        .await
-        .map_err(|e| AppError::Other(format!("harness probe failed: {e}")))
+pub async fn ai_harnesses(host_id: Option<i64>) -> AppResult<Vec<HarnessInfo>> {
+    tauri::async_runtime::spawn_blocking(move || match host_id {
+        Some(id) => remote_infos(id),
+        None => Ok(harness_infos()),
+    })
+    .await
+    .map_err(|e| AppError::Other(format!("harness probe failed: {e}")))?
 }
 
 /// The model ids of a harness, grouped by provider: what its CLI lists (`opencode models`), or a short
 /// static suggestion list. Cached; `refresh` asks the CLI again. Empty when nothing is configured
 /// (opencode without a provider).
 #[tauri::command]
-pub async fn ai_harness_models(harness: String, refresh: Option<bool>) -> AppResult<Vec<ai::models::ModelGroup>> {
-    tauri::async_runtime::spawn_blocking(move || ai::models::for_harness(&harness, refresh.unwrap_or(false)))
+pub async fn ai_harness_models(harness: String, refresh: Option<bool>, host_id: Option<i64>) -> AppResult<Vec<ai::models::ModelGroup>> {
+    tauri::async_runtime::spawn_blocking(move || match host_id {
+        Some(host) => {
+            ai::harness_by_id(&harness).ok_or_else(|| AppError::Other(format!("unknown harness `{harness}`")))?;
+            let ids = crate::remote::harness::for_host(host, &harness)
+                .ok_or_else(|| AppError::Other(format!("unknown harness `{harness}`")))?
+                .models()?;
+            Ok(ai::models::group(&ids))
+        }
+        None => ai::models::for_harness(&harness, refresh.unwrap_or(false)),
+    })
         .await
         .map_err(|e| AppError::Other(format!("model listing failed: {e}")))?
 }

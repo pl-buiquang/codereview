@@ -16,11 +16,13 @@ pub struct RunTag {
     pub model: String,
     /// Id of the harness that ran it.
     pub harness: &'static str,
+    /// The remote host that ran it; `None` for a local run.
+    pub host_id: Option<i64>,
 }
 
 impl RunTag {
     pub fn new(feature: &'static str) -> Self {
-        Self { feature, variant: None, review_id: None, target_id: None, label: String::new(), model: String::new(), harness: "claude" }
+        Self { feature, variant: None, review_id: None, target_id: None, label: String::new(), model: String::new(), harness: "claude", host_id: None }
     }
 
     pub fn variant(mut self, variant: impl Into<String>) -> Self {
@@ -35,6 +37,11 @@ impl RunTag {
 
     pub fn harness(mut self, harness: &'static str) -> Self {
         self.harness = harness;
+        self
+    }
+
+    pub fn host(mut self, host_id: Option<i64>) -> Self {
+        self.host_id = host_id;
         self
     }
 

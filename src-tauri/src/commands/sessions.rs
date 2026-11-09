@@ -163,8 +163,8 @@ pub async fn generate_live_session_summary(
         )
     };
     let harness = resolved.harness;
-    if !harness.available() {
-        return Err(AppError::Other(format!("the `{}` CLI was not found on PATH", harness.id())));
+    if let Some(reason) = harness.unavailable_reason() {
+        return Err(AppError::Other(reason));
     }
     let extract_model = resolved.model_or_builtin(EXTRACT_MODEL);
     let stored_model = extract_model.clone();

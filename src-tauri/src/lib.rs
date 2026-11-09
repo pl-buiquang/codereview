@@ -221,6 +221,7 @@ pub fn run() {
             app.manage(Db(Mutex::new(conn)));
             ai_usage::init(app.handle().clone());
             app.manage(db::DbPath(db_path.clone()));
+            remote::startup::init(app.handle());
             routines::manager::RoutineManager::start_ticker(app.handle().clone());
             routines::manager::RoutineManager::adopt_detached(app.handle());
             app.manage(sync::SyncEngine::start(app.handle().clone()));
@@ -288,6 +289,8 @@ pub fn run() {
             commands::hosts::host_list,
             commands::hosts::host_save,
             commands::hosts::host_delete,
+            commands::hosts::host_states,
+            commands::hosts::host_test,
             commands::ai_profiles::ai_profile_save,
             commands::ai_profiles::ai_profile_delete,
             commands::ai_profiles::ai_feature_profiles_get,
@@ -520,7 +523,12 @@ pub fn run() {
                     show_quit_prompt(app, active);
                 }
                 // Routine runs lead their own process groups, so they'd outlive us unless killed here.
-                tauri::RunEvent::Exit => app.state::<routines::manager::RoutineManager>().kill_all(app),
+                tauri::RunEvent::Exit => {
+                    if let Some(rt) = remote::runtime::global() {
+                        rt.shutdown();
+                    }
+                    app.state::<routines::manager::RoutineManager>().kill_all(app)
+                }
                 _ => {}
             }
         });

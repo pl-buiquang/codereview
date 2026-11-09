@@ -7,7 +7,11 @@ use std::time::Duration;
 
 use serde_json::Value;
 
-use super::tunnel::Addr;
+use std::sync::{Arc, Mutex};
+
+use super::host::{save, HostInput};
+use super::runtime::RemoteRuntime;
+use super::tunnel::{Addr, SshConfig, TunnelManager};
 use crate::ai::{Access, Caps, Event as AiEvent, Harness, Interactive, OneShot, StreamRun, TurnResult};
 use crate::error::{AppError, AppResult};
 use crate::serve::http::{build, SharedState, Settings, ONESHOT_TIMEOUT};
@@ -132,5 +136,28 @@ impl TestServer {
         });
         std::thread::sleep(Duration::from_millis(50));
         TestServer { addr: Addr::Unix(sock), state, repo, _dir: dir }
+    }
+}
+
+impl TestServer {
+    /// A runtime with host 1 (`koza`) whose tunnel is a fake `ssh` that only sleeps; the tunnel's local
+    /// socket is a link to this server's, so the whole client path runs for real except the network.
+    pub fn runtime(&self) -> Arc<RemoteRuntime> {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = self._dir.path().join("tun");
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("fake-ssh");
+        std::fs::write(&script, "#!/bin/sh\nexec sleep 300\n").unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let mut cfg = SshConfig::new(dir.clone());
+        cfg.program = script.into_os_string();
+        cfg.ready_timeout = Duration::from_secs(3);
+        let Addr::Unix(sock) = self.addr.clone() else { unreachable!() };
+        std::os::unix::fs::symlink(sock, dir.join(format!("h1-{}.sock", std::process::id()))).unwrap();
+        let tunnels = TunnelManager::new(cfg, Arc::new(super::client::InfoHealth), Box::new(|_, _| {}));
+        let conn = crate::db::open_memory();
+        save(&conn, HostInput { id: None, name: "koza".into(), ssh_target: "koza".into(), remote_endpoint: "/run/x.sock".into(), enabled: true }).unwrap();
+        let conn = Mutex::new(conn);
+        RemoteRuntime::new(tunnels, Box::new(move |id| super::host::require(&conn.lock().unwrap(), id)))
     }
 }

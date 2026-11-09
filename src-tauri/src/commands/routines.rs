@@ -66,9 +66,13 @@ pub fn launch(
 ) -> AppResult<RoutineRun> {
     crate::ai_gate::ensure_enabled()?;
     let db = app.state::<Db>();
-    let harness = profiles::resolve_routine(&db.0.lock().unwrap(), routine.profile_id).harness;
-    if !harness.available() {
-        return Err(AppError::Other(format!("the `{}` CLI was not found on PATH", harness.id())));
+    let resolved = profiles::resolve_routine(&db.0.lock().unwrap(), routine.profile_id);
+    if routine.is_system() {
+        resolved.ensure_local(&format!("“{}” (a system routine)", routine.name))?;
+    }
+    let harness = resolved.harness;
+    if let Some(reason) = harness.unavailable_reason() {
+        return Err(AppError::Other(reason));
     }
     crate::ai::check_caps(harness, &format!("“{}”", routine.name), &routines::launch_needs(routine, harness.id()))?;
     let light = context::light(&db, context)?;

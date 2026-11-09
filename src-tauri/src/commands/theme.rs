@@ -61,8 +61,8 @@ pub async fn theme_suggest(
     crate::ai_gate::ensure_enabled()?;
     let resolved = profiles::resolve_feature(&db.0.lock().unwrap(), Feature::Theme);
     let harness = resolved.harness;
-    if !harness.available() {
-        return Err(AppError::Other(format!("the `{}` CLI was not found on PATH", harness.id())));
+    if let Some(reason) = harness.unavailable_reason() {
+        return Err(AppError::Other(reason));
     }
     let model = resolved.model_or_builtin(MODEL);
     let settings = resolved.settings.clone();

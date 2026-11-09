@@ -274,6 +274,11 @@ pub trait Harness: Send + Sync {
     fn version(&self) -> Option<String> {
         None
     }
+    /// Why the harness can't run now, for a message (`None` when it can). A local harness is
+    /// missing from `PATH`; a remote one may be unreachable, disabled or not installed on its host.
+    fn unavailable_reason(&self) -> Option<String> {
+        (!self.available()).then(|| format!("the `{}` CLI was not found on PATH", self.id()))
+    }
 
     /// Run to completion, parse the result and record its usage (failed runs included).
     fn one_shot(&self, req: &OneShot<'_>) -> AppResult<TurnResult>;
@@ -426,7 +431,11 @@ pub fn harness_for() -> &'static dyn Harness {
 pub fn sessions_harness(conn: &rusqlite::Connection, requested: Option<&str>) -> AppResult<&'static dyn Harness> {
     match requested.map(str::trim).filter(|h| !h.is_empty()) {
         Some(id) => harness_by_id(id).ok_or_else(|| AppError::Other(format!("unknown harness '{id}'"))),
-        None => Ok(profiles::resolve_feature(conn, profiles::Feature::Sessions).harness),
+        None => {
+            let resolved = profiles::resolve_feature(conn, profiles::Feature::Sessions);
+            resolved.ensure_local("An interactive session")?;
+            Ok(resolved.harness)
+        }
     }
 }
 
@@ -596,6 +605,25 @@ mod tests {
         assert_eq!(sessions_harness(&conn, Some("")).unwrap().id(), "claude");
         assert_eq!(sessions_harness(&conn, Some("claude")).unwrap().id(), "claude");
         assert!(sessions_harness(&conn, Some("nope")).is_err());
+    }
+
+    #[test]
+    fn interactive_sessions_refuse_a_remote_sessions_profile() {
+        let mut conn = crate::db::open_memory();
+        let host = crate::remote::host::save(
+            &conn,
+            crate::remote::host::HostInput { id: None, name: "koza".into(), ssh_target: "koza".into(), remote_endpoint: "7777".into(), enabled: true },
+        )
+        .unwrap();
+        let input = profiles::AiProfileInput {
+            id: None, name: "R".into(), harness: "claude".into(), model: String::new(), settings: serde_json::json!({}), host_id: Some(host.id), is_default: false,
+        };
+        let id = profiles::save(&mut conn, input).unwrap().id;
+        profiles::set_feature_profiles(&mut conn, &profiles::FeatureProfiles { sessions: Some(id), ..Default::default() }).unwrap();
+        let err = sessions_harness(&conn, None).err().unwrap().to_string();
+        assert!(err.contains("An interactive session runs on this machine only"), "{err}");
+        // an explicit pick in the launch menu is a local harness
+        assert_eq!(sessions_harness(&conn, Some("claude")).unwrap().id(), "claude");
     }
 
     #[test]
