@@ -293,7 +293,7 @@ impl RunEngine {
         self.store.set_process(run_id, pid, &p.cwd, &p.session_id);
 
         if let Some(mut stdin) = child.stdin.take() {
-            let _ = stdin.write_all(p.prompt.as_bytes());
+            let _ = stdin.write_all(stdin_payload(harness.caps().replaces_system_prompt, &p.system_prompt, &p.prompt).as_bytes());
         }
         let tail = self.tail(harness, run_id, &dir.join(STDOUT_FILE), 0, &mut || matches!(child.try_wait(), Ok(None)));
         let result = match tail {
@@ -429,6 +429,16 @@ impl RunEngine {
     }
 }
 
+/// What goes on a streamed run's stdin. A harness that cannot take the system prompt natively
+/// (everything but Claude Code) gets it in front of the prompt, the way `message` does for one-shots.
+fn stdin_payload(replaces_system_prompt: bool, system: &str, prompt: &str) -> String {
+    if replaces_system_prompt || system.trim().is_empty() {
+        prompt.to_string()
+    } else {
+        format!("{}\n\n---\n\n{}", system.trim_end(), prompt)
+    }
+}
+
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
@@ -463,7 +473,7 @@ mod tests {
                 streaming: true,
                 interactive_tui: false,
                 reports_cost: false,
-                replaces_system_prompt: false,
+                replaces_system_prompt: self.prefix == "native:",
                 access_levels: vec![],
                 pins_session_id: false,
             }
@@ -768,6 +778,31 @@ mod tests {
         wait_for("both done", || store.status(1) == "ok" && store.status(2) == "ok");
         assert_eq!(store.row(1).text, "done");
         assert_eq!(store.row(2).text, "alt:done");
+    }
+
+    const ECHO_STDIN: &str = r#"printf '{"type":"result","result":"%s"}\n' "$(cat | tr '\n' '~')""#;
+
+    #[test]
+    fn the_system_prompt_reaches_a_harness_that_cannot_take_it_natively() {
+        for (prefix, want) in [("", "sys~~---~~hi"), ("native:", "hi")] {
+            let store = FakeStore::new("stdin_payload", 1);
+            let sink = FakeSink::new(Duration::from_secs(60));
+            store.add(1, "queued");
+            sink.script(1, ECHO_STDIN);
+            let h: &'static FakeHarness = Box::leak(Box::new(FakeHarness { own: false, prefix }));
+            let _ = sink.harness.set(h);
+            RunEngine::new(store.clone(), sink.clone(), h).pump();
+            wait_for("done", || store.status(1) == "ok");
+            let text = store.row(1).text;
+            assert_eq!(text.strip_prefix(prefix).unwrap_or(&text), want);
+        }
+    }
+
+    #[test]
+    fn stdin_payload_prepends_only_when_needed() {
+        assert_eq!(stdin_payload(true, "sys", "hi"), "hi");
+        assert_eq!(stdin_payload(false, "  \n", "hi"), "hi");
+        assert_eq!(stdin_payload(false, "sys\n", "hi"), "sys\n\n---\n\nhi");
     }
 
     #[test]
