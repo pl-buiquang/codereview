@@ -92,17 +92,19 @@ export function AgentSessionItems({
           {isWaiting(s) ? "Waiting" : "Focus"} agent: {s.name ?? s.session_id.slice(0, 8)}
         </button>
       ))}
-      <button
-        role="menuitem"
-        disabled={disabled}
-        title={disabledReason ?? "Open a new terminal running Claude in the chat worktree"}
-        onClick={() => {
-          close();
-          onOpenNew();
-        }}
-      >
-        New agent session
-      </button>
+      {pickable.length <= 1 && (
+        <button
+          role="menuitem"
+          disabled={disabled}
+          title={disabledReason ?? "Open a new terminal running Claude in the chat worktree"}
+          onClick={() => {
+            close();
+            onOpenNew();
+          }}
+        >
+          New agent session
+        </button>
+      )}
       {pickable.length > 1 &&
         pickable.map((h) => (
           <button
