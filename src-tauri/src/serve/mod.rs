@@ -13,6 +13,7 @@ use serde::Serialize;
 
 use crate::error::{AppError, AppResult};
 
+pub mod remote;
 pub mod request;
 pub mod store;
 pub mod workspace;
