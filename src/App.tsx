@@ -12,6 +12,7 @@ import { ConfirmDialog } from "./components/ConfirmDialog";
 import { CommandPalette } from "./components/CommandPalette";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { SettingsView } from "./components/SettingsView";
+import { StatusBar } from "./components/StatusBar";
 import { api } from "./lib/api";
 import { toast } from "./lib/toast";
 import { isCloseTabShortcut, isCommandPaletteShortcut, isEditableTarget, navHistoryDirection, tabSwitchDirection } from "./lib/keyboard";
@@ -265,6 +266,7 @@ function App() {
         <AppSidebar />
         <TabPanes />
       </div>
+      <StatusBar />
       <Toaster />
       <TooltipLayer />
       <ConfirmDialog />

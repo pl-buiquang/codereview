@@ -61,8 +61,6 @@ export function HomeNav({
     },
     board: { count: boardActions, title: `${plural(boardActions, "card")} ${boardActions === 1 ? "needs" : "need"} your action` },
   };
-  const versionQuery = useQuery({ queryKey: ["appVersion"], queryFn: api.appVersion, staleTime: Infinity });
-
   const { data: repos } = useQuery({
     queryKey: ["repositories"],
     queryFn: api.listRepositories,
@@ -194,11 +192,6 @@ export function HomeNav({
           <Icon name="gear" size={15} />
           {!collapsed && "Settings"}
         </button>
-        {!collapsed && versionQuery.data && (
-          <div className="cr-side-version" title={`CodeReview ${versionQuery.data}`}>
-            {versionQuery.data}
-          </div>
-        )}
       </div>
     </nav>
   );
