@@ -46,7 +46,10 @@ pub struct Shared {
     pub cap: Arc<AtomicI64>,
     pub worktree_base: PathBuf,
     pub pr_head: PrHeadFn,
-    pub max_queue: i64,
+    pub max_queue: AtomicI64,
+    /// Serialises workspace resolution: two requests for the same branch must not both run `git worktree add`.
+    /// There is no lock on the worktree itself: a queued run does not hold its worktree (ADR 0007).
+    pub workspace_lock: std::sync::Mutex<()>,
     /// `<data_dir>/serve_runs`: the run directories (`<id>`) and the attachment scratch dirs (`scratch/<id>`).
     pub runs_base: PathBuf,
 }
@@ -94,7 +97,8 @@ pub fn build(settings: Settings, harnesses: Vec<&'static dyn Harness>) -> AppRes
         cap,
         worktree_base: settings.worktree_base,
         pr_head: settings.pr_head,
-        max_queue: MAX_QUEUE,
+        max_queue: AtomicI64::new(MAX_QUEUE),
+        workspace_lock: std::sync::Mutex::new(()),
         runs_base: settings.data_dir.join("serve_runs"),
     }))
 }
@@ -115,6 +119,7 @@ impl Shared {
 
     /// `read_only`: the run can't write, so a branch checked out in the main clone may be shared.
     fn resolve_workspace(&self, spec: &super::request::WorkspaceSpec, read_only: bool) -> Result<PathBuf, ApiError> {
+        let _guard = self.workspace_lock.lock().unwrap_or_else(|e| e.into_inner());
         let conn = crate::db::open(&self.app_db)?;
         workspace::resolve_in(&conn, spec, &self.worktree_base, &*self.pr_head, read_only)
     }
@@ -324,8 +329,9 @@ fn create_run_blocking(s: &Shared, req: RunRequest) -> Result<(StatusCode, Value
     validate_args(&req.model, &req.allowed_tools)?;
     caps_check(h, "this run", &needs_of(req.access.access(), req.tools))?;
     let engine = &s.engine;
-    if engine.active_count() as i64 >= s.max_queue {
-        return Err(ApiError::new(ErrorCode::QueueFull, format!("{} runs are already queued or running", s.max_queue)));
+    let max_queue = s.max_queue.load(Ordering::Relaxed);
+    if engine.active_count() as i64 >= max_queue {
+        return Err(ApiError::new(ErrorCode::QueueFull, format!("{max_queue} runs are already queued or running")));
     }
     let files = workspace::decode_attachments(&req.attachments)?;
     let cwd = s.resolve_workspace(&req.workspace, read_only_of(req.access, req.tools))?;
@@ -892,6 +898,30 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    async fn concurrent_requests_for_one_branch_share_a_single_worktree() {
+        let srv = Arc::new(server(4).await);
+        git(&srv.repo, &["branch", "feat"]);
+        let mut tasks = Vec::new();
+        for i in 0..5 {
+            let srv = srv.clone();
+            tasks.push(tokio::spawn(async move {
+                let mut v: Value = serde_json::from_str(&run_body(&format!("wt-{i}"), r#"printf '{"type":"result","result":"%s"}\n' "$(pwd)""#)).unwrap();
+                v["workspace"] = json!({"repo": "acme/widgets", "kind": "branch-worktree", "branch": "feat"});
+                let (status, created) = req(&srv, "POST", "/v1/runs", Some(&v.to_string())).await;
+                assert_eq!(status, 201, "{created}");
+                wait_done(&srv, created["id"].as_i64().unwrap()).await
+            }));
+        }
+        let mut dirs = std::collections::HashSet::new();
+        for t in tasks {
+            let done = t.await.unwrap();
+            assert_eq!(done["status"], "ok", "{done}");
+            dirs.insert(done["text"].as_str().unwrap().to_string());
+        }
+        assert_eq!(dirs.len(), 1, "{dirs:?}");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
     async fn stop_kills_a_running_run_and_a_queued_one() {
         let srv = server(1).await;
         let running = create(&srv, "k-run", "sleep 30").await;
@@ -951,32 +981,13 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn a_full_queue_is_refused() {
         let srv = server(1).await;
-        // the state is shared with the serving task, so serve a copy with a smaller limit
-        let state = {
-            let s = &srv.state;
-            Arc::new(Shared {
-                db: s.db.clone(),
-                app_db: s.app_db.clone(),
-                serve_db_path: s.serve_db_path.clone(),
-                harnesses: s.harnesses.clone(),
-                engine: s.engine.clone(),
-                changes: s.changes.clone(),
-                cap: s.cap.clone(),
-                worktree_base: s.worktree_base.clone(),
-                pr_head: Box::new(|_, _| Err(crate::error::AppError::Other("x".into()))),
-                max_queue: 1,
-                runs_base: s.runs_base.clone(),
-            })
-        };
-        let bound = super::super::daemon::Bound::bind(&crate::serve::Listen::Tcp("127.0.0.1:0".parse().unwrap())).await.unwrap();
-        let addr = bound.local_addr().unwrap();
-        tokio::spawn(super::super::daemon::serve(state.clone(), bound, std::future::pending()));
-        let small = Server { addr, state, repo: srv.repo.clone(), _dir: tempfile::tempdir().unwrap() };
-        let first = create(&small, "q1", "sleep 30").await;
-        let (s, v) = req(&small, "POST", "/v1/runs", Some(&run_body("q2", "true"))).await;
+        srv.state.max_queue.store(1, Ordering::Relaxed);
+        let small = &srv;
+        let first = create(small, "q1", "sleep 30").await;
+        let (s, v) = req(small, "POST", "/v1/runs", Some(&run_body("q2", "true"))).await;
         assert_eq!((s, v["error"]["code"].as_str()), (429, Some("queue_full")));
-        req(&small, "POST", &format!("/v1/runs/{first}/stop"), None).await;
-        wait_done(&small, first).await;
+        req(small, "POST", &format!("/v1/runs/{first}/stop"), None).await;
+        wait_done(small, first).await;
     }
 
     #[tokio::test(flavor = "multi_thread")]
