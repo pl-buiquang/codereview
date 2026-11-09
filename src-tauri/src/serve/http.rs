@@ -338,10 +338,16 @@ fn create_run_blocking(s: &Shared, req: RunRequest) -> Result<(StatusCode, Value
     if !created {
         return Ok(existing(id));
     }
+    // The row is `preparing` until the attachments are on disk, so a concurrent pump cannot start
+    // the run without them.
     if let Err(e) = workspace::write_attachments(&s.scratch(id), &files) {
         s.db.delete_run(id);
         let _ = std::fs::remove_dir_all(s.scratch(id));
         return Err(ApiError::internal(format!("failed to store the attachments: {e}")));
+    }
+    if !s.db.mark_queued(id) {
+        let _ = std::fs::remove_dir_all(s.scratch(id));
+        return Err(ApiError::internal("the run vanished while it was being prepared"));
     }
     engine.submit(id);
     Ok((StatusCode::CREATED, json!({ "id": id, "created": true })))
@@ -835,6 +841,54 @@ mod tests {
         wait_done(&srv, a["id"].as_i64().unwrap()).await;
         let (_, list) = req(&srv, "GET", "/v1/runs", None).await;
         assert_eq!(list["runs"].as_array().unwrap().len(), 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_run_is_not_started_before_its_preparation_is_done() {
+        let srv = server(2).await;
+        let key = "k-prep";
+        let (id, created) = srv
+            .state
+            .db
+            .insert_run(key, "fake", "", &run_body(key, OK_RUN), &srv.repo, 60)
+            .unwrap();
+        assert!(created);
+        // a pump (any other request finishing, a restart) cannot take it while it is `preparing`
+        srv.state.engine.pump();
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert_eq!(srv.state.db.status(id).as_deref(), Some("preparing"));
+        assert_eq!(srv.state.db.get_run(id).unwrap().unwrap().last_seq, 0);
+        // a failed preparation removes only that row, never one the engine already owns
+        assert!(srv.state.db.mark_queued(id));
+        srv.state.db.delete_run(id);
+        assert!(srv.state.db.status(id).is_some(), "a queued row is not deleted");
+        srv.state.engine.pump();
+        assert_eq!(wait_done(&srv, id).await["status"], "ok");
+        // a crash between insert and queue leaves a row the next start purges
+        let (stale, _) = srv.state.db.insert_run("k-stale", "fake", "", &run_body("k-stale", "true"), &srv.repo, 60).unwrap();
+        assert_eq!(srv.state.db.purge_preparing(), vec![stale]);
+        assert!(srv.state.db.status(stale).is_none());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn concurrent_creates_with_attachments_always_see_the_files() {
+        let srv = Arc::new(server(4).await);
+        let script = r#"printf '{"type":"result","result":"%s"}\n' "$(cat "$EXTRA/note.txt")""#;
+        let mut tasks = Vec::new();
+        for i in 0..6 {
+            let srv = srv.clone();
+            tasks.push(tokio::spawn(async move {
+                let mut v: Value = serde_json::from_str(&run_body(&format!("race-{i}"), script)).unwrap();
+                v["attachments"] = json!([{"name": "note.txt", "content_base64": "aGVsbG8="}]);
+                let (status, created) = req(&srv, "POST", "/v1/runs", Some(&v.to_string())).await;
+                assert_eq!(status, 201, "{created}");
+                wait_done(&srv, created["id"].as_i64().unwrap()).await
+            }));
+        }
+        for t in tasks {
+            let done = t.await.unwrap();
+            assert_eq!((done["status"].as_str(), done["text"].as_str()), (Some("ok"), Some("hello")), "{done}");
+        }
     }
 
     #[tokio::test(flavor = "multi_thread")]

@@ -22,7 +22,7 @@ CREATE TABLE serve_run (
     idem_key     TEXT NOT NULL UNIQUE,
     harness      TEXT NOT NULL,
     model        TEXT NOT NULL DEFAULT '',
-    status       TEXT NOT NULL DEFAULT 'queued',
+    status       TEXT NOT NULL DEFAULT 'preparing',
     request      TEXT NOT NULL,
     cwd          TEXT NOT NULL,
     timeout_secs INTEGER NOT NULL,
@@ -78,8 +78,9 @@ pub fn open(path: &Path) -> AppResult<Connection> {
     Ok(conn)
 }
 
+/// `preparing`: inserted but its attachments are not on disk yet, so the engine must not pick it up.
 pub fn is_terminal(status: &str) -> bool {
-    !matches!(status, "queued" | "running")
+    !matches!(status, "preparing" | "queued" | "running")
 }
 
 /// A run row as the API reports it.
@@ -165,7 +166,8 @@ impl ServeDb {
         Ok(Arc::new(Self(Mutex::new(open(path)?))))
     }
 
-    /// Insert a queued run, or return the one that already has this idempotency key. `true`: created.
+    /// Insert a `preparing` run (the engine ignores it until [`mark_queued`](Self::mark_queued)), or
+    /// return the one that already has this idempotency key. `true`: created.
     pub fn insert_run(
         &self,
         idem_key: &str,
@@ -191,9 +193,32 @@ impl ServeDb {
         conn.query_row("SELECT id FROM serve_run WHERE idem_key = ?1", params![idem_key], |r| r.get(0)).ok()
     }
 
-    /// Remove a run that never started (its scratch could not be prepared).
+    /// The run is fully prepared (attachments written): the engine may start it. False when it is no
+    /// longer `preparing`.
+    pub fn mark_queued(&self, id: i64) -> bool {
+        let n = self
+            .0
+            .lock()
+            .unwrap()
+            .execute("UPDATE serve_run SET status = 'queued', updated_at = ?2 WHERE id = ?1 AND status = 'preparing'", params![id, now_stamp()])
+            .unwrap_or(0);
+        n == 1
+    }
+
+    /// Remove a run whose preparation failed. Only a `preparing` row goes: once queued the engine owns it.
     pub fn delete_run(&self, id: i64) {
-        let _ = self.0.lock().unwrap().execute("DELETE FROM serve_run WHERE id = ?1 AND status = 'queued'", params![id]);
+        let _ = self.0.lock().unwrap().execute("DELETE FROM serve_run WHERE id = ?1 AND status = 'preparing'", params![id]);
+    }
+
+    /// Startup: rows a crashed daemon left `preparing` never became runs. Returns their ids.
+    pub fn purge_preparing(&self) -> Vec<i64> {
+        let conn = self.0.lock().unwrap();
+        let ids: Vec<i64> = conn
+            .prepare("SELECT id FROM serve_run WHERE status = 'preparing'")
+            .and_then(|mut st| st.query_map([], |r| r.get(0))?.collect())
+            .unwrap_or_default();
+        let _ = conn.execute("DELETE FROM serve_run WHERE status = 'preparing'", []);
+        ids
     }
 
     pub fn get_run(&self, id: i64) -> AppResult<Option<RunRow>> {
@@ -376,7 +401,7 @@ impl RunStore for ServeStore {
     }
 
     fn active_count(&self) -> AppResult<usize> {
-        Ok(self.count(&["queued", "running"])? as usize)
+        Ok(self.count(&["preparing", "queued", "running"])? as usize)
     }
 
     fn kill_queued(&self) -> AppResult<()> {
@@ -520,6 +545,10 @@ mod tests {
         let (d, db) = temp_db("life");
         let (id, _) = db.insert_run("k", "claude", "", "{}", Path::new("/tmp"), 60).unwrap();
         let store = ServeStore::new(db.clone(), Arc::new(AtomicI64::new(1)), d.path().join("runs"));
+        assert_eq!(store.next_queued().unwrap(), None, "a preparing run is invisible to the engine");
+        assert_eq!(store.active_count().unwrap(), 1, "but it counts against the queue limit");
+        assert!(db.mark_queued(id));
+        assert!(!db.mark_queued(id));
         assert_eq!(store.next_queued().unwrap(), Some(id));
         assert!(store.mark_running(id).unwrap());
         assert!(!store.mark_running(id).unwrap());
@@ -540,6 +569,7 @@ mod tests {
         let (d, db) = temp_db("out");
         let (id, _) = db.insert_run("k", "claude", "", "{}", Path::new("/tmp"), 60).unwrap();
         let store = ServeStore::new(db.clone(), Arc::new(AtomicI64::new(1)), d.path().join("runs"));
+        db.mark_queued(id);
         {
             let conn = db.0.lock().unwrap();
             assert_eq!(append_outbox(&conn, id, "board_link", &json!({"a": 1})).unwrap(), format!("{id}:1"));

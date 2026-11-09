@@ -77,6 +77,8 @@ pub async fn serve(state: SharedState, bound: Bound, shutdown: impl Future<Outpu
 /// Start the engines: timeouts, re-adoption of runs left alive by an earlier daemon, queued runs,
 /// and the sweep of attachment dirs whose run is over.
 pub fn start_engines(state: &SharedState) {
+    // Rows a crashed daemon left half-created never became runs; their scratch goes with the sweep.
+    state.db.purge_preparing();
     sweep_scratch(state);
     state.engine.start_ticker();
     state.engine.adopt_detached();
