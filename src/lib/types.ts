@@ -318,6 +318,7 @@ export interface ToolEnv {
   gh_authed: boolean;
   claude: string | null;
   opencode: string | null;
+  codex: string | null;
 }
 
 // --- GitHub PR metadata (review header; read-only, ephemeral) ---

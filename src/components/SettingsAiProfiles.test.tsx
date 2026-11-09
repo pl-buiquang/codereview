@@ -66,6 +66,13 @@ const opencode: HarnessInfo = {
   caps: { ...claude.caps, fork: false, tool_allowlist: false, replaces_system_prompt: false },
 };
 
+const codex: HarnessInfo = {
+  ...opencode,
+  id: "codex",
+  name: "Codex",
+  caps: { ...opencode.caps, reports_cost: false, pins_session_id: false },
+};
+
 function renderSection() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
@@ -79,7 +86,7 @@ beforeEach(() => {
   aiProfileList.mockReset().mockResolvedValue([profile(), profile({ id: 2, name: "Fast", model: "haiku", is_default: false })]);
   aiProfileSave.mockReset().mockImplementation((p) => Promise.resolve(profile(p)));
   aiProfileDelete.mockReset().mockResolvedValue(undefined);
-  aiHarnesses.mockReset().mockResolvedValue([claude, opencode]);
+  aiHarnesses.mockReset().mockResolvedValue([claude, opencode, codex]);
   aiHarnessModels.mockReset().mockImplementation((harness: string) =>
     Promise.resolve(harness === "claude" ? [{ provider: "", models: ["sonnet", "opus"] }] : []),
   );
@@ -181,5 +188,32 @@ describe("AiProfilesSection", () => {
     expect(screen.getByRole("button", { name: "Copy command" })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Refresh models" }));
     await waitFor(() => expect(aiHarnessModels).toHaveBeenCalledWith("opencode", true));
+  });
+
+  it("edits the sandbox and full-access switch of a Codex profile as controls over the settings JSON", async () => {
+    const user = userEvent.setup();
+    renderSection();
+    await within(await screen.findByTestId("ai-profiles")).findByText("Fast");
+    await user.click(screen.getByRole("button", { name: "Add profile" }));
+    await user.type(screen.getByLabelText("Name"), "Codex edit");
+    await user.selectOptions(screen.getByLabelText("Harness"), "Codex");
+    const panel = await screen.findByTestId("codex-settings");
+    await user.selectOptions(within(panel).getByLabelText("Sandbox"), "workspace-write");
+    const json = screen.getByLabelText(/^Settings \(JSON/) as HTMLTextAreaElement;
+    expect(JSON.parse(json.value)).toEqual({ sandbox: "workspace-write" });
+    await user.click(within(panel).getByLabelText(/Allow full access/));
+    expect(JSON.parse(json.value)).toEqual({ sandbox: "workspace-write", allow_full: true });
+    await user.click(screen.getByRole("button", { name: "Add" }));
+    await waitFor(() => expect(aiProfileSave).toHaveBeenCalled());
+    expect(aiProfileSave.mock.calls[0][0]).toMatchObject({ harness: "codex", settings: { sandbox: "workspace-write", allow_full: true } });
+  });
+
+  it("shows no Codex controls for other harnesses", async () => {
+    const user = userEvent.setup();
+    renderSection();
+    await within(await screen.findByTestId("ai-profiles")).findByText("Fast");
+    await user.click(screen.getByRole("button", { name: "Add profile" }));
+    await user.selectOptions(screen.getByLabelText("Harness"), "opencode");
+    expect(screen.queryByTestId("codex-settings")).toBeNull();
   });
 });

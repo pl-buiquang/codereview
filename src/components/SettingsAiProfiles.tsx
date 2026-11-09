@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { toast } from "../lib/toast";
 import { confirmDialog } from "../lib/confirm";
-import { FEATURE_ROWS, profileEditorFields } from "../lib/aiProfiles";
+import { CODEX_SANDBOXES, codexSettings, FEATURE_ROWS, profileEditorFields, withCodexSettings } from "../lib/aiProfiles";
 import { ModelPicker } from "./ModelPicker";
 import type { AiProfile, AiProfileInput, FeatureProfiles, HarnessInfo } from "../lib/types";
 
@@ -80,6 +80,21 @@ export function AiProfilesSection() {
     setFeatures.mutate({ ...(features.data ?? { chat: null, summaries: null, theme: null, sessions: null }), [key]: value === "" ? null : Number(value) });
 
   const fields = draft ? profileEditorFields(info(draft.harness)) : null;
+
+  /** The settings text as an object, or null while it isn't valid JSON (the Codex controls then wait). */
+  const settingsObject = (): Record<string, unknown> | null => {
+    try {
+      const parsed = JSON.parse(settingsText || "{}");
+      return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+    } catch {
+      return null;
+    }
+  };
+  const codex = draft?.harness === "codex" ? settingsObject() : null;
+  const patchCodex = (patch: Parameters<typeof withCodexSettings>[1]) => {
+    const current = settingsObject();
+    if (current) setSettingsText(JSON.stringify(withCodexSettings(current, patch), null, 2));
+  };
 
   return (
     <>
@@ -161,6 +176,39 @@ export function AiProfilesSection() {
               </select>
             </label>
             {fields.model && <ModelPicker harness={draft.harness} value={draft.model} onChange={(model) => setDraft({ ...draft, model })} />}
+            {fields.settings && draft.harness === "codex" && (
+              <div className="codex-settings" data-testid="codex-settings">
+                <label>
+                  Sandbox
+                  <select
+                    className="input"
+                    value={codex ? codexSettings(codex).sandbox : ""}
+                    disabled={!codex}
+                    onChange={(e) => patchCodex({ sandbox: e.target.value })}
+                  >
+                    {CODEX_SANDBOXES.map((m) => (
+                      <option key={m} value={m}>
+                        {m === "" ? "From the run's access level" : m}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="settings-check">
+                  <input
+                    type="checkbox"
+                    checked={codex ? codexSettings(codex).allowFull : false}
+                    disabled={!codex}
+                    onChange={(e) => patchCodex({ allowFull: e.target.checked })}
+                  />{" "}
+                  Allow full access (no sandbox)
+                </label>
+                <span className="settings-hint muted">
+                  Codex asks for no approvals when run by the app. Read only and edit use its OS sandbox; full access runs
+                  commands with <strong>no sandbox</strong> and only happens when allowed here. Edit mode cannot commit
+                  in a linked worktree and has no network.
+                </span>
+              </div>
+            )}
             {fields.settings && (
               <label>
                 Settings <span className="muted">(JSON, no secrets)</span>

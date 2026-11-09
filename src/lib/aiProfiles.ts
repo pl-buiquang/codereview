@@ -22,6 +22,27 @@ export function profileEditorFields(info: HarnessInfo | undefined): { model: boo
   return { model: true, settings: info != null && info.id !== "claude" };
 }
 
+/** The sandbox modes of a Codex profile (`settings.sandbox`); empty means "from the run's access level". */
+export const CODEX_SANDBOXES = ["", "read-only", "workspace-write", "danger-full-access"] as const;
+
+/** The Codex-specific settings a profile editor edits as controls. */
+export interface CodexSettings {
+  sandbox: string;
+  allowFull: boolean;
+}
+
+export function codexSettings(settings: Record<string, unknown>): CodexSettings {
+  const sandbox = typeof settings.sandbox === "string" && (CODEX_SANDBOXES as readonly string[]).includes(settings.sandbox) ? settings.sandbox : "";
+  return { sandbox, allowFull: settings.allow_full === true };
+}
+
+/** `settings` with the Codex controls applied; an empty sandbox and a false `allow_full` are removed, other keys kept. */
+export function withCodexSettings(settings: Record<string, unknown>, patch: Partial<CodexSettings>): Record<string, unknown> {
+  const { sandbox, allowFull } = { ...codexSettings(settings), ...patch };
+  const { sandbox: _s, allow_full: _a, ...rest } = settings;
+  return { ...rest, ...(sandbox ? { sandbox } : {}), ...(allowFull ? { allow_full: true } : {}) };
+}
+
 /** The features that pick a profile, in the order of the Settings table. */
 export const FEATURE_ROWS: { key: keyof FeatureProfiles; label: string; hint: string }[] = [
   { key: "chat", label: "Review chat", hint: "The review chat. Chats pin the profile they started with." },

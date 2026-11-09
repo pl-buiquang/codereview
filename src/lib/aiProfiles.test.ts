@@ -7,7 +7,7 @@ import type { HarnessInfo } from "./types";
 const aiImportLegacyModels = vi.fn();
 vi.mock("./api", () => ({ api: { aiImportLegacyModels: (...a: unknown[]) => aiImportLegacyModels(...a) } }));
 
-import { filterModelGroups, profileEditorFields, profileLabel, useImportLegacyAiModels } from "./aiProfiles";
+import { codexSettings, filterModelGroups, profileEditorFields, profileLabel, useImportLegacyAiModels, withCodexSettings } from "./aiProfiles";
 import { useSettingsStore } from "./settings";
 
 const info = (id: string): HarnessInfo => ({
@@ -83,5 +83,17 @@ describe("useImportLegacyAiModels", () => {
     renderHook(() => useImportLegacyAiModels(), { wrapper });
     await waitFor(() => expect(aiImportLegacyModels).toHaveBeenCalled());
     expect(useSettingsStore.getState().legacyAiModels).toEqual({ chat: "opus", overview: "" });
+  });
+});
+
+describe("codex settings", () => {
+  it("reads the sandbox and allow_full, ignoring unknown values", () => {
+    expect(codexSettings({})).toEqual({ sandbox: "", allowFull: false });
+    expect(codexSettings({ sandbox: "read-only", allow_full: true })).toEqual({ sandbox: "read-only", allowFull: true });
+    expect(codexSettings({ sandbox: "yolo", allow_full: "yes" })).toEqual({ sandbox: "", allowFull: false });
+  });
+  it("patches them in and drops the empty ones, keeping other keys", () => {
+    expect(withCodexSettings({ extra_args: ["--color", "never"] }, { sandbox: "workspace-write" })).toEqual({ extra_args: ["--color", "never"], sandbox: "workspace-write" });
+    expect(withCodexSettings({ sandbox: "workspace-write", allow_full: true, x: 1 }, { sandbox: "", allowFull: false })).toEqual({ x: 1 });
   });
 });
