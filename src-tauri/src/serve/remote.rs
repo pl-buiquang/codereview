@@ -92,7 +92,10 @@ impl RemoteRun {
             .and_then(Value::as_array)
             .and_then(|cards| {
                 cards.iter().find(|c| {
-                    c["card"]["repo"].as_str().is_some_and(|r| r.eq_ignore_ascii_case(&repo)) && c["card"]["number"].as_i64() == Some(number)
+                    // `cr board show --json` is flat (the card's fields next to `lane` and `meta`); a nested
+                    // `{"card": {..}}` is accepted too.
+                    let card = if c.get("card").is_some_and(Value::is_object) { &c["card"] } else { c };
+                    card["repo"].as_str().is_some_and(|r| r.eq_ignore_ascii_case(&repo)) && card["number"].as_i64() == Some(number)
                 })
             })
             .cloned()
@@ -161,6 +164,17 @@ mod tests {
         assert_eq!(r.cards().unwrap().len(), 1);
         assert_eq!(r.focus(12).unwrap()["focus"]["status"], "ready");
         assert!(r.focus(13).unwrap().is_null());
+    }
+
+    #[test]
+    fn the_real_flat_board_json_is_found_too() {
+        // The shape `BoardCardWithExtras` serializes to: `#[serde(flatten)]` puts the card's fields at the top.
+        let flat = json!({"id": "c1", "type": "pr", "repo": "Acme/Widgets", "number": 3, "title": "T", "lane": "in_progress", "meta": []});
+        let dir = tempfile::tempdir().unwrap();
+        write_snapshot(dir.path(), &json!({"cards": [flat]})).unwrap();
+        let r = remote(dir.path(), 1, Path::new("unused"));
+        assert_eq!(r.card("acme", "widgets", 3).unwrap()["title"], "T");
+        assert!(r.card("acme", "widgets", 4).is_err());
     }
 
     #[test]
