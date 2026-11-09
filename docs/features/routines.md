@@ -1,9 +1,21 @@
 # Routines
 
-A routine is a named, unattended `claude -p` run with its own prompt, scoped to a PR, a review, an
+A routine is a named, unattended AI run with its own prompt, scoped to a PR, a review, an
 issue or the board. Launch one from a card's **Routines…** menu; runs show up in Sessions →
-Routines, and routines are edited in Sessions → Config. Built-in routines can be edited and
+Routines, and routines are edited in Sessions → Config. Plain built-in routines can be edited and
 **Reset** to their shipped text.
+
+Sessions → Config splits the list in two. **Routines** are plain: yours, plus Babysit and the issue
+routines, fully editable. **System routines** (focus, AI review layers, board overview, plan issue, image
+diff report) have a Rust handler that owns their prompt and tools; each shows a short description and
+only four controls: profile, model, timeout and enabled.
+
+A routine runs on its **profile** (empty: the default profile from Settings → AI) and its own **model**
+when set, which a launch can override. **Access** (read only, edit files, full access) is the neutral
+permission level every harness translates; the *Claude Code options* group (permission mode, system
+prompt mode, allowed tools, extra args) appears when the resolved harness is Claude Code, and a
+permission mode set there wins over the access. A launch is refused, naming the missing capability, when
+the harness cannot give the access or tools a routine needs.
 
 ## Issue to PR: plan, refine, implement
 

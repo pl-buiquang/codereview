@@ -57,11 +57,18 @@ there is no git library and **no token is ever stored**; auth is entirely delega
 
 **All AI calls go through `ai::Harness`** (`src-tauri/src/ai/`) — chat, theme suggestions, session
 summaries, routine runs and interactive-session argv. It is an object-safe, synchronous trait like
-`provider.rs`; `ai::harness_for()` resolves it (always Claude Code for now, profiles are planned) and
-`ai/claude.rs` is the only place that builds a `claude` command line or parses Claude's output.
+`provider.rs`; **profiles** select the harness (`ai::profiles`: routine profile, then feature profile
+for chat / summaries / theme / sessions, then the default; `ai::harness_by_id()` is the registry,
+only Claude Code exists for now) and `ai/claude.rs` is the only place that builds a `claude`
+command line or parses Claude's output.
 Requests are neutral (`OneShot`, `ToolPolicy`, `Access`, `SessionMode`, `SystemPromptMode`) and
-each harness translates them; `Caps` says what a harness supports. Never shell out to `claude` from
-a feature: add a field to the request type instead. Auth stays in the CLI, no token is stored. See
+each harness translates them; `Caps` says what a harness supports and `ai::check_caps` refuses a
+launch that exceeds them. Never shell out to `claude` from a feature: add a field to the request
+type instead. Resolve the profile (`profiles::resolve_feature` / `resolve_routine`) rather than
+calling `harness_for()`, which is only for the run engine's process control. Routines carry a
+`kind` (`plain` / `system`), a neutral `access` and per-harness `harness_overrides`; the old
+Claude columns on `routine` are written but no longer read (drop them in a later migration).
+Chats pin `chat.profile_id`; a switch starts a new session and replays earlier messages once. Auth stays in the CLI, no token is stored. See
 `docs/adr/0006-ai-harness-and-profiles.md`.
 
 **Routine runs go through the run engine** (`src-tauri/src/run_engine/`, no Tauri import, a test

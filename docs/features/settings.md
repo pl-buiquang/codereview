@@ -85,11 +85,11 @@ Shows the paths found for `git` and `gh` and whether `gh` is authenticated (`gh 
 
 ## AI
 
-Models (chat & focus, board overview) and editable prompts. See [focus-and-ai.md](focus-and-ai.md#prompts-and-models-settings--ai).
+Harness availability, profiles (harness + model), the feature to profile table, and editable prompts. See [focus-and-ai.md](focus-and-ai.md#prompts-and-models-settings--ai).
 
 ## Usage
 
-Cost and token history of the app's `claude -p` runs. See [focus-and-ai.md](focus-and-ai.md#usage-tracking-settings--usage).
+Cost and token history of the app's AI runs. See [focus-and-ai.md](focus-and-ai.md#usage-tracking-settings--usage).
 
 ## Logs
 

@@ -31,9 +31,24 @@ Glossary of domain terms used in this app.
   (chat turns, theme suggestions, session summaries).
 - **Streaming run** — a detached run of a routine whose output goes to files and is tailed; it
   can outlive the app and be re-adopted.
-- **Access** — the neutral permission level of a run: default, read-only, edit, full.
-- **Profile** — planned: a named configuration of a harness (harness, model, settings) that
-  features and routines select.
+- **Access** — the neutral permission level of a run: default, read-only, edit, full. A routine
+  stores `read_only`, `edit` or `full`; each harness translates it. Harness-native details (Claude's
+  permission mode, allowed tools, extra args, system prompt mode) live in the routine's
+  `harness_overrides`, keyed by harness id, and a native permission mode wins over the access.
+- **Profile** — a named configuration of a harness: harness id, model, harness-specific settings
+  and, later, a host. Never holds a secret. One profile is the **default**.
+- **Profile resolution** — which profile a run uses: the routine's own profile, else the profile
+  mapped to its feature (chat, summaries, theme, sessions), else the default profile. A launch can
+  override the model only. With no usable profile it is Claude Code with the legacy model
+  fallback (`CODEREVIEW_CHAT_MODEL`, `ANTHROPIC_DEFAULT_OPUS_MODEL`).
+- **Feature profile** — the profile mapped to one of the features that are not routines: review
+  chat, live session summaries, theme suggestions, interactive sessions.
+- **Pinned profile** — the profile a review chat started its session with. Picking another one
+  starts a new session and replays the earlier messages once.
+- **Routine kind** — `plain` (editable, user routines plus babysit and the issue routines) or
+  `system` (every routine with a Rust handler: focus, AI review layers, board overview, issue plan,
+  image diff report). System routines run locally and only their profile, model, timeout and
+  enabled flag are editable.
 - **Run engine** — the Tauri-free queue / process / event machinery behind routine runs
   (`run_engine/`). The host supplies a `RunStore` (where runs and events live) and an `EventSink`
   (what happens on events and when a run finishes); the app and, later, `cr serve` each plug in

@@ -1,6 +1,6 @@
 # Focus and AI features
 
-Everything AI in CodeReview shells out to the [`claude` CLI](https://docs.claude.com/en/docs/claude-code) (`claude -p`). Nothing is bundled and the app stores no API key.
+Everything AI in CodeReview runs through a harness, today the [`claude` CLI](https://docs.claude.com/en/docs/claude-code) (`claude -p`). Nothing is bundled and the app stores no API key.
 
 - **Auth** is whatever your `claude` install already uses (Claude subscription, API key, Bedrock, ...). The app does not pass `--bare` or an empty `--setting-sources`, so Claude reads its own auth and settings from `~/.claude/`. It does pass `--strict-mcp-config` (no MCP servers) and an explicit `--permission-mode acceptEdits`, so your own default permission mode never leaks in.
 - If `claude` is not on `PATH`, the AI actions are disabled (Settings → General → Environment shows what was found).
@@ -98,7 +98,7 @@ A per-review conversation with Claude, in the review view ([`ChatPanel.tsx`](../
 - Needs a **local clone**. The chat runs in the PR branch's checkout (an existing worktree or one the app creates) where Claude can read, edit and commit. It is told not to push unless asked.
 - The first turn starts a `claude -p` session; later turns `--resume` it. If the chat moves to a different checkout, a new session starts.
 - The system prompt carries the PR title, repo, changed files, existing comments and the `cr` commands for the review, so Claude can read, add, update or resolve comments itself.
-- A model selector sits in the panel; the default comes from Settings → AI.
+- A profile selector sits in the panel (the profile the chat runs on; the default comes from Settings → AI). A chat pins the profile it started with; picking another one starts a new session and the earlier messages are replayed to it once (capped at about 200 KB, oldest dropped first).
 - **Send to Chat**: in the line comment composer, this button sends your text, prefixed with the file, line range, side and the diff snippet, to the Chat panel instead of creating a comment. The panel expands if collapsed.
 - Assistant replies show their output token count. Clear the chat to start over (required to pick up an edited Review chat prompt).
 
@@ -113,14 +113,15 @@ A per-review conversation with Claude, in the review view ([`ChatPanel.tsx`](../
 | Focus mode | Generate focus | An app-mode suffix (review id, `cr focus set` instructions) is always appended. Applies in the app only, not to the `/local-review --focus` skill |
 | Review chat | First chat turn | Placeholders: `{{title}}`, `{{repo}}`, `{{pr_line}}`, `{{diff_summary}}`, `{{head_ref}}`, `{{worktree_path}}`, `{{comments}}`, `{{review_id}}`. Applies to new chats |
 
-**Models**:
+**Harnesses** shows whether each harness binary was found and its version.
 
-- *Chat & focus model*: passed as `--model` to `claude -p` (also used by in-app AI review runs). Empty falls back to `CODEREVIEW_CHAT_MODEL`, then `ANTHROPIC_DEFAULT_OPUS_MODEL`, then Claude's own default.
-- *Board overview model*: default `sonnet`; runs with `--effort low` and no tools.
+**Profiles**: a profile is a harness plus a model (and harness-specific settings, never a secret). The *default* profile applies wherever nothing more specific is chosen. The model field accepts any name; Claude Code suggests `sonnet`, `opus`, `fable` and `haiku`. An empty model means the harness' own default, which for Claude Code falls back to `CODEREVIEW_CHAT_MODEL`, then `ANTHROPIC_DEFAULT_OPUS_MODEL`, then Claude's own default. The model of the former *Chat & focus model* and *Board overview model* fields was imported into the profiles once.
+
+**Features** maps review chat, session summaries, theme suggestions and interactive sessions to a profile (empty: the default profile). Summaries and theme suggestions keep their fast built-in model unless the profile mapped to them sets one. Routines (focus, AI review, board insights, babysit...) pick their profile in Sessions → Config; a routine runs on its profile, else the default, and a launch can still override the model.
 
 ## Usage tracking (Settings → Usage)
 
-Every `claude -p` run the app spawns is recorded in the local `ai_run` table, failed ones included ([`ai_usage.rs`](../../src-tauri/src/ai_usage.rs)).
+Every run the app spawns through a harness is recorded in the local `ai_run` table (with the harness that ran it), failed ones included ([`ai_usage.rs`](../../src-tauri/src/ai_usage.rs)).
 
 - Range: Today / 7 days (default) / 30 days / All time.
 - Totals: cost, runs (and failures), input, output and cache tokens, run time.
