@@ -1413,6 +1413,7 @@ mod tests {
         assert_eq!(sandbox(Access::Full, &full()).unwrap(), "danger-full-access");
     }
 
+    #[cfg(unix)]
     #[test]
     fn add_dir_is_validated_on_save_and_at_run_time() {
         use std::os::unix::fs::symlink;
@@ -1498,6 +1499,7 @@ mod tests {
         assert!(Codex.validate_settings(&evil).is_err());
     }
 
+    #[cfg(unix)]
     #[test]
     fn add_dir_refuses_dotdot_through_a_symlink_to_a_sensitive_dir() {
         use std::os::unix::fs::symlink;

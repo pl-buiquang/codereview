@@ -561,7 +561,7 @@ fn last_lines(path: &Path, n: usize) -> String {
     lines[lines.len().saturating_sub(n)..].join(" / ")
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use std::sync::atomic::AtomicUsize;
