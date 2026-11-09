@@ -147,7 +147,7 @@ export function AiProfilesSection() {
               </span>
             </span>
             <span className="ai-profile-actions">
-              {!p.is_default && (
+              {!p.is_default && p.host_id == null && (
                 <button className="btn btn-sm" onClick={() => save.mutate({ ...p, is_default: true })}>
                   Make default
                 </button>
@@ -305,7 +305,7 @@ export function AiProfilesSection() {
             >
               <option value="">Default profile</option>
               {list
-                .filter((p) => !p.is_default)
+                .filter((p) => !p.is_default && !(p.host_id != null && (f.key === "chat" || f.key === "sessions")))
                 .map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.name}

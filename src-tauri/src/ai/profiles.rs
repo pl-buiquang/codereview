@@ -166,6 +166,15 @@ pub fn save(conn: &mut Connection, input: AiProfileInput) -> AppResult<AiProfile
     if let Some(host_id) = input.host_id {
         crate::remote::host::require(conn, host_id)?;
     }
+    if input.host_id.is_some() {
+        // The default profile serves chat, sessions and system routines, which only run on this machine.
+        let default_id: Option<i64> = conn.query_row("SELECT id FROM ai_profile WHERE is_default = 1", [], |r| r.get(0)).optional()?;
+        if input.is_default || default_id.is_none() || default_id == input.id {
+            return Err(AppError::Other(
+                "the default profile must run on this machine (chat, interactive sessions and system routines can't use a remote host): create a local default first, or save this profile without making it the default".into(),
+            ));
+        }
+    }
     let settings = serde_json::to_string(&input.settings).unwrap_or_else(|_| "{}".into());
     let model = input.model.trim().to_string();
     let now = chrono::Utc::now().to_rfc3339();
@@ -235,6 +244,14 @@ pub fn set_feature_profiles(conn: &mut Connection, map: &FeatureProfiles) -> App
     for feature in Feature::ALL {
         match map.get(feature) {
             Some(id) => {
+                // Chats keep a session and edit a local worktree; interactive sessions open a local terminal.
+                let remote: bool = tx
+                    .query_row("SELECT host_id IS NOT NULL FROM ai_profile WHERE id = ?1", params![id], |r| r.get(0))
+                    .optional()?
+                    .unwrap_or(false);
+                if remote && matches!(feature, Feature::Chat | Feature::Sessions) {
+                    return Err(AppError::Other(format!("the {} feature runs on this machine only: pick a profile without a host", feature.key())));
+                }
                 let exists: bool = tx.query_row("SELECT COUNT(*) FROM ai_profile WHERE id = ?1", params![id], |r| r.get::<_, i64>(0))? > 0;
                 if !exists {
                     return Err(AppError::Other(format!("profile {id} not found")));
@@ -479,6 +496,67 @@ mod tests {
         let mut remote = input("Remote");
         remote.host_id = Some(host.id);
         assert_eq!(save(&mut conn, remote).unwrap().host_id, Some(host.id));
+    }
+
+    fn koza(conn: &Connection) -> i64 {
+        crate::remote::host::save(
+            conn,
+            crate::remote::host::HostInput { id: None, name: "koza".into(), ssh_target: "koza".into(), remote_endpoint: "7777".into(), enabled: true },
+        )
+        .unwrap()
+        .id
+    }
+
+    #[test]
+    fn a_remote_profile_can_never_be_the_default() {
+        let mut conn = open_memory();
+        let host = koza(&conn);
+        let mut remote = input("Remote");
+        remote.host_id = Some(host);
+        remote.is_default = true;
+        assert!(save(&mut conn, remote).unwrap_err().to_string().contains("default profile must run on this machine"));
+        // nor can the current default be moved to a host by editing it
+        let default = default_profile(&conn).unwrap().unwrap();
+        let mut edit = input("Claude Code");
+        edit.id = Some(default.id);
+        edit.host_id = Some(host);
+        assert!(save(&mut conn, edit).is_err());
+        assert_eq!(default_profile(&conn).unwrap().unwrap().host_id, None);
+        // a non-default remote profile is fine, and a later "make default" is refused
+        let mut ok = input("Remote");
+        ok.host_id = Some(host);
+        let saved = save(&mut conn, ok).unwrap();
+        let mut promote = input("Remote");
+        promote.id = Some(saved.id);
+        promote.host_id = Some(host);
+        promote.is_default = true;
+        assert!(save(&mut conn, promote).is_err());
+        // without any default a remote profile would become one: refused as well
+        conn.execute("DELETE FROM ai_profile", []).unwrap();
+        let mut first = input("Remote");
+        first.host_id = Some(host);
+        assert!(save(&mut conn, first).is_err());
+    }
+
+    #[test]
+    fn a_remote_profile_cannot_be_mapped_to_chat_or_sessions() {
+        let mut conn = open_memory();
+        let host = koza(&conn);
+        let mut remote = input("Remote");
+        remote.host_id = Some(host);
+        let id = save(&mut conn, remote).unwrap().id;
+        for map in [
+            FeatureProfiles { chat: Some(id), ..Default::default() },
+            FeatureProfiles { sessions: Some(id), ..Default::default() },
+        ] {
+            let err = set_feature_profiles(&mut conn, &map).unwrap_err().to_string();
+            assert!(err.contains("runs on this machine only"), "{err}");
+        }
+        assert_eq!(feature_profiles(&conn), FeatureProfiles::default());
+        // one-shot features may use it
+        let ok = FeatureProfiles { summaries: Some(id), theme: Some(id), ..Default::default() };
+        set_feature_profiles(&mut conn, &ok).unwrap();
+        assert_eq!(feature_profiles(&conn), ok);
     }
 
     #[test]
