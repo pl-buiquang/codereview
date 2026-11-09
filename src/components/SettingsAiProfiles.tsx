@@ -5,6 +5,8 @@ import { toast } from "../lib/toast";
 import { confirmDialog } from "../lib/confirm";
 import { CODEX_SANDBOXES, codexSettings, FEATURE_ROWS, profileEditorFields, withCodexSettings } from "../lib/aiProfiles";
 import { ModelPicker } from "./ModelPicker";
+import { AiHostsSection } from "./SettingsAiHosts";
+import { hostName, hostsQuery, readableRemoteError, useHostStates, connLabel } from "../lib/hosts";
 import type { AiProfile, AiProfileInput, FeatureProfiles, HarnessInfo } from "../lib/types";
 
 const BLANK: AiProfileInput = { id: null, name: "", harness: "claude", model: "", settings: {}, host_id: null, is_default: false };
@@ -15,12 +17,26 @@ export function AiProfilesSection() {
   const profiles = useQuery({ queryKey: ["ai-profiles"], queryFn: api.aiProfileList });
   const harnesses = useQuery({ queryKey: ["ai-harnesses"], queryFn: api.aiHarnesses, staleTime: 60_000 });
   const features = useQuery({ queryKey: ["ai-feature-profiles"], queryFn: api.aiFeatureProfilesGet });
+  const hosts = useQuery(hostsQuery());
+  const hostStates = useHostStates();
   const [draft, setDraft] = useState<AiProfileInput | null>(null);
   const [settingsText, setSettingsText] = useState("{}");
 
+  // A remote profile edits against what its host offers, not what this machine has.
+  const draftHost = draft?.host_id ?? null;
+  const remoteHarnesses = useQuery({
+    queryKey: ["ai-harnesses-on", draftHost],
+    queryFn: () => api.aiHarnessesOn(draftHost as number),
+    enabled: draftHost != null,
+    retry: false,
+    staleTime: 30_000,
+  });
+
   const list = profiles.data ?? [];
   const infos = harnesses.data ?? [];
+  const editorInfos = draftHost != null ? (remoteHarnesses.data ?? []) : infos;
   const info = (id: string): HarnessInfo | undefined => infos.find((h) => h.id === id);
+  const editorInfo = (id: string): HarnessInfo | undefined => editorInfos.find((h) => h.id === id);
 
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ["ai-profiles"] });
@@ -53,7 +69,7 @@ export function AiProfilesSection() {
   const submit = () => {
     if (!draft) return;
     let settings: Record<string, unknown> = {};
-    if (profileEditorFields(info(draft.harness)).settings) {
+    if (profileEditorFields(editorInfo(draft.harness)).settings) {
       try {
         const parsed = JSON.parse(settingsText || "{}");
         if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("not an object");
@@ -79,7 +95,7 @@ export function AiProfilesSection() {
   const pick = (key: keyof FeatureProfiles, value: string) =>
     setFeatures.mutate({ ...(features.data ?? { chat: null, summaries: null, theme: null, sessions: null }), [key]: value === "" ? null : Number(value) });
 
-  const fields = draft ? profileEditorFields(info(draft.harness)) : null;
+  const fields = draft ? profileEditorFields(editorInfo(draft.harness)) : null;
 
   /** The settings text as an object, or null while it isn't valid JSON (the Codex controls then wait). */
   const settingsObject = (): Record<string, unknown> | null => {
@@ -112,6 +128,8 @@ export function AiProfilesSection() {
         ))}
       </section>
 
+      <AiHostsSection />
+
       <section className="settings-group" data-testid="ai-profiles">
         <h3>Profiles</h3>
         <span className="settings-hint muted">
@@ -125,6 +143,7 @@ export function AiProfilesSection() {
               <span className="muted">
                 {" "}
                 {info(p.harness)?.name ?? p.harness} · {p.model || "default model"}
+                {p.host_id != null && ` · on ${hostName(hosts.data, p.host_id)}`}
               </span>
             </span>
             <span className="ai-profile-actions">
@@ -161,21 +180,52 @@ export function AiProfilesSection() {
               Name
               <input className="input" value={draft.name} required onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
             </label>
+            {(hosts.data ?? []).length > 0 && (
+              <label>
+                Runs on
+                <select
+                  className="input"
+                  value={draft.host_id ?? ""}
+                  onChange={(e) => setDraft({ ...draft, host_id: e.target.value === "" ? null : Number(e.target.value), model: "" })}
+                >
+                  <option value="">This machine</option>
+                  {(hosts.data ?? []).map((h) => (
+                    <option key={h.id} value={h.id}>
+                      {h.name} ({h.enabled ? connLabel(hostStates.get(h.id)) : "disabled"})
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            {draftHost != null && (
+              <span className="settings-hint muted" data-testid="remote-profile-hint">
+                {remoteHarnesses.isLoading && `Asking ${hostName(hosts.data, draftHost)} for its harnesses…`}
+                {remoteHarnesses.isError && (
+                  <span className="form-warning">{readableRemoteError(String(remoteHarnesses.error))}</span>
+                )}
+                {remoteHarnesses.isSuccess &&
+                  "Runs plain routines and one-shot features on that host, with its harnesses and models. Chats, interactive sessions and system routines stay on this machine."}
+              </span>
+            )}
             <label>
               Harness
               <select
                 className="input"
                 value={draft.harness}
                 onChange={(e) => setDraft({ ...draft, harness: e.target.value, model: "" })}
+                disabled={draftHost != null && !remoteHarnesses.isSuccess}
               >
-                {infos.map((h) => (
-                  <option key={h.id} value={h.id}>
+                {editorInfos.map((h) => (
+                  <option key={h.id} value={h.id} disabled={draftHost != null && !h.available}>
                     {h.name}
+                    {draftHost != null && !h.available ? " (not installed on the host)" : ""}
                   </option>
                 ))}
               </select>
             </label>
-            {fields.model && <ModelPicker harness={draft.harness} value={draft.model} onChange={(model) => setDraft({ ...draft, model })} />}
+            {fields.model && (draftHost == null || remoteHarnesses.isSuccess) && (
+              <ModelPicker harness={draft.harness} hostId={draftHost} value={draft.model} onChange={(model) => setDraft({ ...draft, model })} />
+            )}
             {fields.settings && draft.harness === "codex" && (
               <div className="codex-settings" data-testid="codex-settings">
                 <label>

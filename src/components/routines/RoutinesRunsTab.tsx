@@ -11,6 +11,7 @@ import { Icon } from "../icons";
 import { resumeCommand } from "../SessionsView";
 import { RunStatusBadge } from "./RunStatusBadge";
 import { RunTranscript } from "./RunTranscript";
+import { hostName, hostsQuery, readableRemoteError, useHostStates } from "../../lib/hosts";
 
 const ALL_STATUSES = Object.keys(STATUS_LABEL) as RoutineRunStatus[];
 
@@ -45,6 +46,11 @@ export function RoutinesRunsTab() {
   const routines = useQuery({ queryKey: ["routines"], queryFn: api.routineList });
   const harnesses = useQuery({ queryKey: ["ai-harnesses"], queryFn: api.aiHarnesses, staleTime: 60_000 });
   const harnessNames = new Map((harnesses.data ?? []).map((h) => [h.id, h.name]));
+  const hosts = useQuery(hostsQuery());
+  const hostStates = useHostStates();
+  /** A run on a host whose tunnel is down: still running there, the app is not receiving. */
+  const disconnected = (run: RoutineRun) =>
+    run.host_id != null && isActiveRun(run.status) && hostStates.get(run.host_id)?.state !== "connected" && hostStates.has(run.host_id);
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["routine-runs"] });
   const stop = useMutation({ mutationFn: api.routineRunStop, onSuccess: invalidate, onError: (e) => toast.error(String(e)) });
@@ -125,6 +131,12 @@ export function RoutinesRunsTab() {
               <span className="muted"> · {run.context_label}</span>
             </span>
             <span className="routine-run-meta">
+              {run.host_id != null && (
+                <span className="badge" title="Runs on a remote host" data-testid="run-host-badge">
+                  {hostName(hosts.data, run.host_id)}
+                </span>
+              )}
+              {disconnected(run) && <span className="badge badge-danger">disconnected</span>}
               <RunStatusBadge status={run.status} />
               <span className="muted">{timeAgo(run.started_at ?? run.queued_at)}</span>
             </span>
@@ -147,6 +159,18 @@ export function RoutinesRunsTab() {
                   {selected.cost_usd > 0 && ` · $${selected.cost_usd.toFixed(2)}`}
                   {selected.num_turns > 0 && ` · ${selected.num_turns} turns`}
                   {` · ${harnessNames.get(selected.harness) ?? selected.harness}`}
+                  {selected.host_id != null && ` · on ${hostName(hosts.data, selected.host_id)}`}
+                  {disconnected(selected) && (
+                    <>
+                      {" "}
+                      <span
+                        className="badge badge-danger"
+                        title="The run goes on at the host. The transcript resumes when the connection is back."
+                      >
+                        disconnected
+                      </span>
+                    </>
+                  )}
                 </p>
               </div>
               <div className="routine-run-actions">
@@ -169,7 +193,7 @@ export function RoutinesRunsTab() {
                     Run again
                   </button>
                 )}
-                {!isActiveRun(selected.status) && selected.session_id && selected.cwd && (() => {
+                {!isActiveRun(selected.status) && selected.host_id == null && selected.session_id && selected.cwd && (() => {
                   const cmd = resumeCommand({ cwd: selected.cwd, session_id: selected.session_id, harness: selected.harness });
                   return (
                   <div className="btn-split">
@@ -199,7 +223,7 @@ export function RoutinesRunsTab() {
             </div>
             {selected.note && <p className="muted">Note: {selected.note}</p>}
             {selected.cwd && <p className="muted routine-cwd">{selected.cwd}</p>}
-            {selected.error && <p className="form-warning">{selected.error}</p>}
+            {selected.error && <p className="form-warning">{selected.host_id != null ? readableRemoteError(selected.error) : selected.error}</p>}
             {selected.status === "needs_attention" && selected.result_text && (
               <p className="form-warning">{selected.result_text.split("\n").find((l) => l.trim().startsWith("NEEDS_ATTENTION:"))}</p>
             )}

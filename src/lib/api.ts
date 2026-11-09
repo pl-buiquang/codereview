@@ -48,6 +48,10 @@ import type {
   AiProfileInput,
   FeatureProfiles,
   HarnessInfo,
+  Host,
+  HostInput,
+  HostState,
+  HostTest,
   ModelGroup,
   Routine,
   RoutineContextRef,
@@ -169,7 +173,15 @@ export const api = {
   aiImportLegacyModels: (chat: string, overview: string) =>
     invoke<boolean>("ai_import_legacy_models", { chat, overview }),
   aiHarnesses: () => invoke<HarnessInfo[]>("ai_harnesses"),
-  aiHarnessModels: (harness: string, refresh = false) => invoke<ModelGroup[]>("ai_harness_models", { harness, refresh }),
+  aiHarnessModels: (harness: string, refresh = false, hostId: number | null = null) =>
+    invoke<ModelGroup[]>("ai_harness_models", { harness, refresh, hostId }),
+  /** The harnesses of a remote host (what it offers and can do). */
+  aiHarnessesOn: (hostId: number) => invoke<HarnessInfo[]>("ai_harnesses", { hostId }),
+  hostList: () => invoke<Host[]>("host_list"),
+  hostSave: (host: HostInput) => invoke<Host>("host_save", { host }),
+  hostDelete: (id: number) => invoke<void>("host_delete", { id }),
+  hostStates: () => invoke<HostState[]>("host_states"),
+  hostTest: (id: number) => invoke<HostTest>("host_test", { id }),
   routineList: () => invoke<Routine[]>("routine_list"),
   routineSave: (routine: RoutineInput) => invoke<Routine>("routine_save", { routine }),
   routineDelete: (id: number) => invoke<void>("routine_delete", { id }),

@@ -65,6 +65,7 @@ function RunRow({ run, reportsCost }: { run: AiRun; reportsCost: boolean | undef
         ) : (
           subject
         )}
+        {run.host && <span className="muted"> · on {run.host}</span>}
       </td>
       <td className="usage-models" title={models.join(", ")}>
         {models.join(", ") || "default"}

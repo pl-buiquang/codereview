@@ -9,10 +9,10 @@ const MAX_SHOWN = 60;
 
 /** The model field of the profile editor: free text that doubles as a search over the harness'
  *  models, grouped by provider, with a refresh and an empty-state hint for opencode. */
-export function ModelPicker({ harness, value, onChange }: { harness: string; value: string; onChange: (model: string) => void }) {
+export function ModelPicker({ harness, value, onChange, hostId = null }: { harness: string; value: string; onChange: (model: string) => void; hostId?: number | null }) {
   const queryClient = useQueryClient();
-  const key = ["ai-models", harness];
-  const models = useQuery({ queryKey: key, queryFn: () => api.aiHarnessModels(harness), staleTime: Infinity });
+  const key = hostId == null ? ["ai-models", harness] : ["ai-models", harness, hostId];
+  const models = useQuery({ queryKey: key, queryFn: () => (hostId == null ? api.aiHarnessModels(harness) : api.aiHarnessModels(harness, false, hostId)), staleTime: Infinity, retry: hostId == null });
   const [open, setOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -30,7 +30,7 @@ export function ModelPicker({ harness, value, onChange }: { harness: string; val
   const refresh = async () => {
     setRefreshing(true);
     try {
-      queryClient.setQueryData(key, await api.aiHarnessModels(harness, true));
+      queryClient.setQueryData(key, await (hostId == null ? api.aiHarnessModels(harness, true) : api.aiHarnessModels(harness, true, hostId)));
     } catch (e) {
       toast.error(String(e));
     } finally {

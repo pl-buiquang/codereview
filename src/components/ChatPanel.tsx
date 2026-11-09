@@ -270,7 +270,8 @@ export function ChatPanel({
             title={aiOff ?? "Profile (harness and model). Switching starts a new session."}
             aria-label="Profile"
           >
-            {profiles.map((p) => (
+            {/* Chats keep a session and edit a local worktree: remote profiles are not offered (a selected one stays visible). */}
+            {profiles.filter((p) => p.host_id == null || p.id === profileId).map((p) => (
               <option key={p.id} value={p.id}>
                 {profileLabel(p)}
               </option>

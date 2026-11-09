@@ -35,32 +35,43 @@ const BLANK: RoutineInput = {
 const toInput = (r: Routine): RoutineInput => ({ ...r });
 const ACCESS_LEVELS: RoutineAccess[] = ["read_only", "edit", "full"];
 
-/** Profile picker; "Default profile" is a null profile id. */
+/** Profile picker; "Default profile" is a null profile id. System routines run on this machine, so
+ *  they are offered local profiles only (`localOnly`); plain routines may also take a remote one. */
 function ProfileSelect({
   profiles,
   value,
   onChange,
+  localOnly = false,
 }: {
   profiles: AiProfile[];
   value: number | null;
   onChange: (id: number | null) => void;
+  localOnly?: boolean;
 }) {
   const def = profiles.find((p) => p.is_default);
+  const defRemote = localOnly && def?.host_id != null;
+  const offered = profiles.filter((p) => !p.is_default && !(localOnly && p.host_id != null));
   return (
-    <select
-      className="input"
-      value={value ?? ""}
-      onChange={(e) => onChange(e.target.value === "" ? null : Number(e.target.value))}
-    >
-      <option value="">Default profile{def ? ` (${def.name})` : ""}</option>
-      {profiles
-        .filter((p) => !p.is_default)
-        .map((p) => (
+    <>
+      <select
+        className="input"
+        value={value ?? ""}
+        onChange={(e) => onChange(e.target.value === "" ? null : Number(e.target.value))}
+      >
+        <option value="">Default profile{def ? ` (${def.name})` : ""}</option>
+        {offered.map((p) => (
           <option key={p.id} value={p.id}>
             {p.name}
+            {p.host_id != null ? " (remote host)" : ""}
           </option>
         ))}
-    </select>
+      </select>
+      {defRemote && (
+        <span className="settings-hint form-warning" data-testid="default-remote-warning">
+          The default profile runs on a remote host, which system routines can't use: pick a local profile here.
+        </span>
+      )}
+    </>
   );
 }
 
@@ -93,7 +104,7 @@ export function SystemRoutineCard({
       <div className="routine-system-controls">
         <label>
           Profile
-          <ProfileSelect profiles={profiles} value={draft.profile_id} onChange={(profile_id) => setDraft({ ...draft, profile_id })} />
+          <ProfileSelect profiles={profiles} localOnly value={draft.profile_id} onChange={(profile_id) => setDraft({ ...draft, profile_id })} />
         </label>
         <label>
           Model

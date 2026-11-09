@@ -11,6 +11,12 @@ const aiHarnesses = vi.fn();
 const aiHarnessModels = vi.fn();
 const aiFeatureProfilesGet = vi.fn();
 const aiFeatureProfilesSet = vi.fn();
+const hostList = vi.fn();
+const hostStates = vi.fn();
+const hostSave = vi.fn();
+const hostDelete = vi.fn();
+const hostTest = vi.fn();
+const aiHarnessesOn = vi.fn();
 vi.mock("../lib/api", () => ({
   api: {
     aiProfileList: (...a: unknown[]) => aiProfileList(...a),
@@ -20,6 +26,12 @@ vi.mock("../lib/api", () => ({
     aiHarnessModels: (...a: unknown[]) => aiHarnessModels(...a),
     aiFeatureProfilesGet: (...a: unknown[]) => aiFeatureProfilesGet(...a),
     aiFeatureProfilesSet: (...a: unknown[]) => aiFeatureProfilesSet(...a),
+    hostList: (...a: unknown[]) => hostList(...a),
+    hostStates: (...a: unknown[]) => hostStates(...a),
+    hostSave: (...a: unknown[]) => hostSave(...a),
+    hostDelete: (...a: unknown[]) => hostDelete(...a),
+    hostTest: (...a: unknown[]) => hostTest(...a),
+    aiHarnessesOn: (...a: unknown[]) => aiHarnessesOn(...a),
   },
 }));
 vi.mock("../lib/confirm", () => ({ confirmDialog: () => Promise.resolve(true) }));
@@ -92,6 +104,12 @@ beforeEach(() => {
   );
   aiFeatureProfilesGet.mockReset().mockResolvedValue({ chat: null, summaries: null, theme: null, sessions: null });
   aiFeatureProfilesSet.mockReset().mockResolvedValue(undefined);
+  hostList.mockReset().mockResolvedValue([]);
+  hostStates.mockReset().mockResolvedValue([]);
+  hostSave.mockReset().mockImplementation((h) => Promise.resolve({ ...h, id: h.id ?? 7, type: "ssh", last_seen: null, last_protocol: null, last_version: null }));
+  hostDelete.mockReset().mockResolvedValue(undefined);
+  hostTest.mockReset();
+  aiHarnessesOn.mockReset();
 });
 
 describe("AiProfilesSection", () => {
@@ -215,5 +233,84 @@ describe("AiProfilesSection", () => {
     await user.click(screen.getByRole("button", { name: "Add profile" }));
     await user.selectOptions(screen.getByLabelText("Harness"), "opencode");
     expect(screen.queryByTestId("codex-settings")).toBeNull();
+  });
+
+  describe("remote hosts", () => {
+    const koza = { id: 5, name: "koza", type: "ssh", ssh_target: "koza", remote_endpoint: "/run/user/1000/codereview/serve.sock", enabled: true, last_seen: null, last_protocol: null, last_version: null };
+
+    it("lists hosts with their state and tests a connection", async () => {
+      const user = userEvent.setup();
+      hostList.mockResolvedValue([koza]);
+      hostStates.mockResolvedValue([{ host_id: 5, state: { state: "unreachable", error: "Connection refused" } }]);
+      hostTest.mockResolvedValue({ protocol: 1, version: "0.6.0", host: "koza", harnesses: ["Claude Code"], running: 0, queued: 0, max_concurrency: 4 });
+      renderSection();
+      const panel = await screen.findByTestId("ai-hosts");
+      await within(panel).findByText("koza");
+      expect(within(panel).getByText("unreachable")).toBeTruthy();
+      expect(within(panel).getByText("Connection refused")).toBeTruthy();
+      await user.click(within(panel).getByRole("button", { name: "Test connection" }));
+      const result = await within(panel).findByTestId("host-test-result");
+      expect(result.textContent).toContain("cr 0.6.0 (protocol 1)");
+      expect(hostTest).toHaveBeenCalledWith(5);
+    });
+
+    it("explains a protocol mismatch with both versions and the update hint", async () => {
+      hostList.mockResolvedValue([koza]);
+      hostStates.mockResolvedValue([{ host_id: 5, state: { state: "protocol_mismatch", remote_protocol: 2, remote_version: "0.9.0", local_protocol: 1 } }]);
+      renderSection();
+      const panel = await screen.findByTestId("ai-hosts");
+      const text = (await within(panel).findByText(/The host runs cr 0\.9\.0/)).textContent;
+      expect(text).toContain("protocol 2");
+      expect(text).toContain("protocol 1");
+      expect(text).toContain("cr serve --install");
+    });
+
+    it("adds a host", async () => {
+      const user = userEvent.setup();
+      renderSection();
+      const panel = await screen.findByTestId("ai-hosts");
+      await user.click(within(panel).getByRole("button", { name: "Add host" }));
+      await user.type(within(panel).getByLabelText("Name"), "nija");
+      await user.type(within(panel).getByLabelText("SSH target"), "nija");
+      await user.type(within(panel).getByLabelText(/Daemon socket or port/), "7777");
+      await user.click(within(panel).getByRole("button", { name: "Add" }));
+      await waitFor(() => expect(hostSave).toHaveBeenCalled());
+      expect(hostSave.mock.calls[0][0]).toEqual({ id: null, name: "nija", ssh_target: "nija", remote_endpoint: "7777", enabled: true });
+    });
+
+    it("loads the harnesses and models of a remote profile from its host", async () => {
+      const user = userEvent.setup();
+      hostList.mockResolvedValue([koza]);
+      aiHarnessesOn.mockResolvedValue([{ ...claude, available: true }, { ...opencode, available: false }]);
+      aiHarnessModels.mockImplementation((_harness: string, _refresh?: boolean, host?: number) =>
+        Promise.resolve(host === 5 ? [{ provider: "", models: ["remote-opus"] }] : []),
+      );
+      renderSection();
+      await within(await screen.findByTestId("ai-profiles")).findByText("Fast");
+      await user.click(screen.getByRole("button", { name: "Add profile" }));
+      await user.selectOptions(await screen.findByLabelText("Runs on"), "5");
+      await waitFor(() => expect(aiHarnessesOn).toHaveBeenCalledWith(5));
+      expect((await screen.findByTestId("remote-profile-hint")).textContent).toContain("system routines stay on this machine");
+      expect(screen.getByRole("option", { name: /opencode \(not installed on the host\)/ })).toBeTruthy();
+      await user.click(screen.getByLabelText("Model"));
+      expect(await screen.findByRole("option", { name: "remote-opus" })).toBeTruthy();
+      expect(aiHarnessModels).toHaveBeenCalledWith("claude", false, 5);
+      await user.type(screen.getByLabelText("Name"), "Remote");
+      await user.click(screen.getByRole("button", { name: "Add" }));
+      await waitFor(() => expect(aiProfileSave).toHaveBeenCalled());
+      expect(aiProfileSave.mock.calls[0][0]).toMatchObject({ name: "Remote", harness: "claude", host_id: 5 });
+    });
+
+    it("says so when the host cannot be reached while editing a remote profile", async () => {
+      const user = userEvent.setup();
+      hostList.mockResolvedValue([koza]);
+      aiHarnessesOn.mockRejectedValue("host_unreachable: ssh: Connection timed out");
+      renderSection();
+      await within(await screen.findByTestId("ai-profiles")).findByText("Fast");
+      await user.click(screen.getByRole("button", { name: "Add profile" }));
+      await user.selectOptions(await screen.findByLabelText("Runs on"), "5");
+      expect((await screen.findByTestId("remote-profile-hint")).textContent).toContain("The host could not be reached: ssh: Connection timed out");
+      expect(screen.queryByLabelText("Model")).toBeNull();
+    });
   });
 });

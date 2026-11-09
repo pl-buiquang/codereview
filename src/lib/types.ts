@@ -192,6 +192,8 @@ export interface AiRun {
   head_ref: string | null;
   /** Id of the harness that ran it. */
   harness: string;
+  /** Name of the remote host that ran it; null for this machine. */
+  host: string | null;
 }
 
 export interface Target {
@@ -1175,6 +1177,8 @@ export interface RoutineRun {
   num_turns: number;
   /** Id of the harness the run is on. */
   harness: string;
+  /** The remote host the run lives on; null for a run on this machine. */
+  host_id: number | null;
   queued_at: string;
   started_at: string | null;
   ended_at: string | null;
@@ -1292,4 +1296,51 @@ export interface FeatureProfiles {
   summaries: number | null;
   theme: number | null;
   sessions: number | null;
+}
+
+/** A machine running `cr serve`, reached over an SSH tunnel. */
+export interface Host {
+  id: number;
+  name: string;
+  type: "ssh" | "direct";
+  /** Alias from ~/.ssh/config. */
+  ssh_target: string;
+  /** Absolute socket path, or a loopback port, of the daemon on the host. */
+  remote_endpoint: string;
+  enabled: boolean;
+  last_seen: string | null;
+  last_protocol: number | null;
+  last_version: string | null;
+}
+
+export interface HostInput {
+  id: number | null;
+  name: string;
+  ssh_target: string;
+  remote_endpoint: string;
+  enabled: boolean;
+}
+
+/** The connection state of a host (pushed as the `host-state` event). */
+export type ConnState =
+  | { state: "disconnected" }
+  | { state: "connecting" }
+  | { state: "connected"; protocol: number; version: string }
+  | { state: "unreachable"; error: string }
+  | { state: "protocol_mismatch"; remote_protocol: number; remote_version: string; local_protocol: number };
+
+export interface HostState {
+  host_id: number;
+  state: ConnState;
+}
+
+/** What "Test connection" learned from the host. */
+export interface HostTest {
+  protocol: number;
+  version: string;
+  host: string;
+  harnesses: string[];
+  running: number;
+  queued: number;
+  max_concurrency: number;
 }

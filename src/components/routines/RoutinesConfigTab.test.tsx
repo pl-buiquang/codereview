@@ -115,6 +115,29 @@ describe("RoutinesConfigTab", () => {
     expect(routineSave.mock.calls[0][0]).toMatchObject({ id: 2, profile_id: 2, model: "sonnet", enabled: false, timeout_min: 30 });
   });
 
+  it("offers remote profiles to plain routines but not to system routines", async () => {
+    aiProfileList.mockResolvedValue([
+      profile(),
+      profile({ id: 2, name: "Local fast", is_default: false }),
+      profile({ id: 3, name: "On koza", host_id: 5, is_default: false }),
+    ]);
+    renderTab();
+    const card = await screen.findByTestId("system-routine-focus");
+    const sysOptions = within(card).getAllByRole("option").map((o) => o.textContent);
+    expect(sysOptions).toContain("Local fast");
+    expect(sysOptions.join("|")).not.toContain("On koza");
+    const form = within(document.querySelector("form")!);
+    expect(form.getByRole("option", { name: "On koza (remote host)" })).toBeTruthy();
+    expect(screen.queryByTestId("default-remote-warning")).toBeNull();
+  });
+
+  it("warns a system routine when the default profile is remote", async () => {
+    aiProfileList.mockResolvedValue([profile({ host_id: 5 })]);
+    renderTab();
+    const card = await screen.findByTestId("system-routine-focus");
+    expect(within(card).getByTestId("default-remote-warning").textContent).toContain("system routines can't use");
+  });
+
   it("shows the Claude Code options only when the resolved harness is Claude", async () => {
     const user = userEvent.setup();
     aiProfileList.mockResolvedValue([profile(), profile({ id: 2, name: "Codex", harness: "codex", is_default: false })]);
