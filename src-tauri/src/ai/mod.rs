@@ -619,7 +619,8 @@ mod tests {
             id: None, name: "R".into(), harness: "claude".into(), model: String::new(), settings: serde_json::json!({}), host_id: Some(host.id), is_default: false,
         };
         let id = profiles::save(&mut conn, input).unwrap().id;
-        profiles::set_feature_profiles(&mut conn, &profiles::FeatureProfiles { sessions: Some(id), ..Default::default() }).unwrap();
+        // The mapping is refused now; data written before that rule must still not reach a remote host.
+        conn.execute("INSERT INTO meta (key, value) VALUES ('ai_profile.sessions', ?1)", [id.to_string()]).unwrap();
         let err = sessions_harness(&conn, None).err().unwrap().to_string();
         assert!(err.contains("An interactive session runs on this machine only"), "{err}");
         // an explicit pick in the launch menu is a local harness
