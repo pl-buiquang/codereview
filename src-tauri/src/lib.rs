@@ -29,6 +29,8 @@ pub mod routines;
 pub mod stack_rebase;
 pub mod session_summaries;
 pub mod sync;
+#[cfg(test)]
+mod test_support;
 pub mod terminal;
 pub mod tools;
 pub mod watch;

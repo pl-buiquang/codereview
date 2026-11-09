@@ -651,6 +651,45 @@ fn settle(app: &AppHandle, run: &RoutineRun, routine: &Routine, outcome: &Outcom
     app.state::<RoutineManager>().pump(app);
 }
 
+/// The `claude -p` stream-json command of a run, before its stdio and process group are set.
+fn stream_command(
+    routine: &Routine,
+    prep: &handlers::Prep,
+    cwd: &Path,
+    model: &str,
+    session_id: &str,
+    prompt_path: &Path,
+    db_path: &Path,
+) -> Command {
+    let mut cmd = Command::new(crate::tools::claude_bin());
+    cmd.current_dir(cwd)
+        .args(["-p", "--output-format", "stream-json", "--verbose", "--strict-mcp-config"])
+        .arg("--permission-mode")
+        .arg(&routine.permission_mode)
+        .arg("--add-dir")
+        .arg(cwd);
+    for dir in &prep.extra_dirs {
+        cmd.arg("--add-dir").arg(dir);
+    }
+    if !routine.allowed_tools.is_empty() || !prep.extra_tools.is_empty() {
+        cmd.arg("--allowedTools").args(routine.allowed_tools.iter().chain(&prep.extra_tools));
+    }
+    if !model.is_empty() {
+        cmd.arg("--model").arg(model);
+    }
+    cmd.args(&routine.extra_args).arg("--session-id").arg(session_id).arg(
+        if routine.system_prompt_mode == "replace" { "--system-prompt-file" } else { "--append-system-prompt-file" },
+    );
+    cmd.arg(prompt_path);
+    // A self-paced /loop or background wait must not hit the 10-minute idle cap of `-p`.
+    cmd.env("CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS", "0");
+    cmd.env("CODEREVIEW_DB", db_path);
+    if let Some(path) = child_path() {
+        cmd.env("PATH", path);
+    }
+    cmd
+}
+
 fn run_process(app: &AppHandle, run: &RoutineRun, routine: &Routine) -> Outcome {
     let manager = app.state::<RoutineManager>();
     let fail = |msg: String| Outcome { failure: Some(msg), ..Outcome::default() };
@@ -705,32 +744,7 @@ fn run_process(app: &AppHandle, run: &RoutineRun, routine: &Routine) -> Outcome 
 
     let session_id = new_session_id();
     let model = handlers::effective_model(run, routine);
-    let mut cmd = Command::new(crate::tools::claude_bin());
-    cmd.current_dir(&cwd)
-        .args(["-p", "--output-format", "stream-json", "--verbose", "--strict-mcp-config"])
-        .arg("--permission-mode")
-        .arg(&routine.permission_mode)
-        .arg("--add-dir")
-        .arg(&cwd);
-    for dir in &prep.extra_dirs {
-        cmd.arg("--add-dir").arg(dir);
-    }
-    if !routine.allowed_tools.is_empty() || !prep.extra_tools.is_empty() {
-        cmd.arg("--allowedTools").args(routine.allowed_tools.iter().chain(&prep.extra_tools));
-    }
-    if !model.is_empty() {
-        cmd.arg("--model").arg(&model);
-    }
-    cmd.args(&routine.extra_args).arg("--session-id").arg(&session_id).arg(
-        if routine.system_prompt_mode == "replace" { "--system-prompt-file" } else { "--append-system-prompt-file" },
-    );
-    cmd.arg(&prompt_path);
-    // A self-paced /loop or background wait must not hit the 10-minute idle cap of `-p`.
-    cmd.env("CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS", "0");
-    cmd.env("CODEREVIEW_DB", &app.state::<DbPath>().0);
-    if let Some(path) = child_path() {
-        cmd.env("PATH", path);
-    }
+    let mut cmd = stream_command(routine, &prep, &cwd, &model, &session_id, &prompt_path, &app.state::<DbPath>().0);
     // Files, not pipes: the process must outlive us when the app quits with runs left alive.
     cmd.stdin(Stdio::piped()).stdout(Stdio::from(stdout_file)).stderr(Stdio::from(stderr_file));
     #[cfg(unix)]
@@ -1219,5 +1233,105 @@ mod tests {
             .unwrap();
         }
         assert_eq!(run_events(&conn, run_id, 1).unwrap().len(), 2);
+    }
+
+    fn test_routine(mode: &str) -> Routine {
+        Routine {
+            id: 1,
+            key: "k".into(),
+            name: "K".into(),
+            description: String::new(),
+            context_type: "pr".into(),
+            prompt_template: String::new(),
+            system_prompt: String::new(),
+            system_prompt_mode: mode.into(),
+            needs_worktree: false,
+            permission_mode: "acceptEdits".into(),
+            allowed_tools: vec!["Bash(git:*)".into(), "Read".into()],
+            extra_args: vec!["--effort".into(), "high".into()],
+            model: String::new(),
+            timeout_min: 1,
+            builtin: false,
+            handler: None,
+            enabled: true,
+        }
+    }
+
+    #[test]
+    fn stream_command_argv_and_env_per_system_prompt_mode() {
+        use crate::test_support::{argv, envs, strs};
+        let prep = handlers::Prep {
+            extra_dirs: vec![PathBuf::from("/skills")],
+            extra_tools: vec!["Skill".into()],
+            ..handlers::Prep::default()
+        };
+        let cwd = Path::new("/repo");
+        let prompt = Path::new("/runs/5/system.txt");
+        let db = Path::new("/data/cr.db");
+        for (mode, flag) in [("append", "--append-system-prompt-file"), ("replace", "--system-prompt-file")] {
+            let cmd = stream_command(&test_routine(mode), &prep, cwd, "opus", "sid", prompt, db);
+            assert_eq!(
+                argv(&cmd),
+                strs(&[
+                    "-p", "--output-format", "stream-json", "--verbose", "--strict-mcp-config",
+                    "--permission-mode", "acceptEdits", "--add-dir", "/repo", "--add-dir", "/skills",
+                    "--allowedTools", "Bash(git:*)", "Read", "Skill", "--model", "opus", "--effort", "high",
+                    "--session-id", "sid", flag, "/runs/5/system.txt",
+                ])
+            );
+            assert_eq!(
+                envs(&cmd),
+                vec![
+                    ("CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS".to_string(), "0".to_string()),
+                    ("CODEREVIEW_DB".to_string(), "/data/cr.db".to_string()),
+                ]
+            );
+            assert_eq!(cmd.get_current_dir(), Some(cwd));
+        }
+    }
+
+    #[test]
+    fn stream_command_omits_empty_tools_and_model() {
+        use crate::test_support::{argv, strs};
+        let mut routine = test_routine("append");
+        routine.allowed_tools.clear();
+        routine.extra_args.clear();
+        let cmd = stream_command(&routine, &handlers::Prep::default(), Path::new("/r"), "", "s", Path::new("/p"), Path::new("/d"));
+        assert_eq!(
+            argv(&cmd),
+            strs(&[
+                "-p", "--output-format", "stream-json", "--verbose", "--strict-mcp-config", "--permission-mode",
+                "acceptEdits", "--add-dir", "/r", "--session-id", "s", "--append-system-prompt-file", "/p",
+            ])
+        );
+    }
+
+    #[test]
+    fn stream_fixture_kinds_and_final_status() {
+        let lines = [
+            (r#"{"type":"system","subtype":"init"}"#, "system"),
+            (r#"{"type":"assistant","message":{}}"#, "assistant"),
+            (r#"{"type":"user"}"#, "user"),
+            (r#"{"x":1}"#, "unknown"),
+            ("garbage", "raw"),
+        ];
+        for (line, kind) in lines {
+            assert_eq!(parse_line(line).0, kind);
+        }
+        let ok = r#"{"type":"result","is_error":false,"result":"all good","num_turns":3,"session_id":"s","total_cost_usd":0.5,"usage":{"input_tokens":1,"output_tokens":2}}"#;
+        let attention = r#"{"type":"result","is_error":false,"result":"x\nNEEDS_ATTENTION: look"}"#;
+        let error = r#"{"type":"result","is_error":true,"result":"boom"}"#;
+        let status = |line: &str| {
+            let (kind, v) = parse_line(line);
+            assert_eq!(kind, "result");
+            let v = v.unwrap();
+            let text = result_text(&v).unwrap_or_default();
+            final_status(None, Some(&v), &text)
+        };
+        assert_eq!(status(ok), "ok");
+        assert_eq!(status(attention), "needs_attention");
+        assert_eq!(status(error), "error");
+        let o = outcome_from(parse_line(ok).1, String::new(), Ok("0".into()));
+        assert_eq!((o.usage.num_turns, o.usage.input_tokens, o.usage.output_tokens, o.usage.cost_usd), (3, 1, 2, 0.5));
     }
 }

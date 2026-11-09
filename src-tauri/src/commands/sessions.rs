@@ -66,14 +66,43 @@ fn session_tag(variant: &str, session: &ClaudeSession) -> crate::ai_usage::RunTa
     crate::ai_usage::RunTag::new("session_summary").variant(variant).label(format!("{project} ({short})"))
 }
 
-fn run_fork_summary(session: &ClaudeSession, instructions: &str) -> AppResult<crate::commands::chat::TurnResult> {
+fn fork_command(session: &ClaudeSession) -> std::process::Command {
     let mut cmd = std::process::Command::new(crate::tools::claude_bin());
     cmd.current_dir(&session.cwd)
         .args(["-p", "--output-format", "json", "--resume", &session.session_id])
         .args(["--fork-session", "--no-session-persistence", "--max-turns", "1"])
         .env("CLAUDE_SUMMARY_RUNNING", "1");
+    cmd
+}
+
+fn run_fork_summary(session: &ClaudeSession, instructions: &str) -> AppResult<crate::commands::chat::TurnResult> {
+    let cmd = fork_command(session);
     let prompt = format!("{instructions}\n\nSummarize this conversation so far. Do not call any tools.");
     crate::commands::chat::run_command(cmd, &prompt, &session_tag("fork", session))
+}
+
+fn extract_run<'a>(
+    session: &ClaudeSession,
+    instructions: &'a str,
+    file_tag: &'a str,
+    cwd: &'a std::path::Path,
+    prompt: &'a str,
+) -> crate::commands::chat::ClaudeRun<'a> {
+    crate::commands::chat::ClaudeRun {
+        model: EXTRACT_MODEL,
+        allowed_tools: &[],
+        permission_mode: "default",
+        system_prompt: Some(instructions),
+        prompt_file_tag: file_tag,
+        cwd,
+        extra_dirs: &[],
+        session: None,
+        env: vec![("CLAUDE_SUMMARY_RUNNING".into(), "1".into())],
+        extra_args: &["--tools", "", "--effort", "low"],
+        replace_system_prompt: true,
+        prompt,
+        tag: session_tag("extract", session),
+    }
 }
 
 fn run_extract_summary(
@@ -86,21 +115,8 @@ fn run_extract_summary(
     let cwd = std::env::temp_dir().join("codereview_live_summary");
     std::fs::create_dir_all(&cwd)?;
     let prompt = format!("<transcript>\n{transcript}</transcript>\nSummarize the transcript above.");
-    crate::commands::chat::run_claude(crate::commands::chat::ClaudeRun {
-        model: EXTRACT_MODEL,
-        allowed_tools: &[],
-        permission_mode: "default",
-        system_prompt: Some(instructions),
-        prompt_file_tag: &format!("live_summary_{}", session.session_id),
-        cwd: &cwd,
-        extra_dirs: &[],
-        session: None,
-        env: vec![("CLAUDE_SUMMARY_RUNNING".into(), "1".into())],
-        extra_args: &["--tools", "", "--effort", "low"],
-        replace_system_prompt: true,
-        prompt: &prompt,
-        tag: session_tag("extract", session),
-    })
+    let file_tag = format!("live_summary_{}", session.session_id);
+    crate::commands::chat::run_claude(extract_run(session, instructions, &file_tag, &cwd, &prompt))
 }
 
 /// Summarize a running session and store it apart from the hook-written summaries. By default a
@@ -497,5 +513,37 @@ mod tests {
     #[test]
     fn review_sessions_without_worktree_or_card_is_empty() {
         assert!(match_review_sessions(None, None, &HashMap::new(), vec![session("s1", None, None)]).is_empty());
+    }
+
+    #[test]
+    fn extract_summary_argv_and_env() {
+        use crate::test_support::{argv, envs, strs};
+        let sess = session("abcdef123456", None, None);
+        let cwd = std::path::Path::new("/tmp/codereview_live_summary");
+        let run = extract_run(&sess, "instr", "live_summary_abcdef123456", cwd, "p");
+        let cmd = crate::commands::chat::claude_command(&run, Some(std::path::Path::new("/tmp/codereview_live_summary_abcdef123456.txt")));
+        assert_eq!(
+            argv(&cmd),
+            strs(&[
+                "-p", "--output-format", "json", "--strict-mcp-config", "--permission-mode", "default",
+                "--add-dir", "/tmp/codereview_live_summary", "--model", "haiku", "--tools", "", "--effort", "low",
+                "--no-session-persistence", "--system-prompt-file",
+                "/tmp/codereview_live_summary_abcdef123456.txt",
+            ])
+        );
+        assert_eq!(envs(&cmd), vec![("CLAUDE_SUMMARY_RUNNING".to_string(), "1".to_string())]);
+    }
+
+    #[test]
+    fn fork_summary_argv_and_env() {
+        use crate::test_support::{argv, envs, strs};
+        let sess = session("sid-1", None, None);
+        let cmd = fork_command(&sess);
+        assert_eq!(
+            argv(&cmd),
+            strs(&["-p", "--output-format", "json", "--resume", "sid-1", "--fork-session", "--no-session-persistence", "--max-turns", "1"])
+        );
+        assert_eq!(envs(&cmd), vec![("CLAUDE_SUMMARY_RUNNING".to_string(), "1".to_string())]);
+        assert_eq!(cmd.get_current_dir(), Some(std::path::Path::new("/x")));
     }
 }

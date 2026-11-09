@@ -156,14 +156,29 @@ fn call_claude_turn(
     worktree_path: &Path,
     text: &str,
 ) -> AppResult<TurnResult> {
-    run_claude(ClaudeRun {
+    let file_tag = format!("chat_{session_id}");
+    run_claude(turn_run(review_id, session_id, &file_tag, is_first_turn, model, system_prompt, worktree_path, text))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn turn_run<'a>(
+    review_id: i64,
+    session_id: &'a str,
+    file_tag: &'a str,
+    is_first_turn: bool,
+    model: &'a str,
+    system_prompt: Option<&'a str>,
+    worktree_path: &'a Path,
+    text: &'a str,
+) -> ClaudeRun<'a> {
+    ClaudeRun {
         model,
         allowed_tools: &["Bash", "Read", "Glob", "Grep", "Edit", "Write"],
         // Explicit, so the user's own `~/.claude/settings.json` (e.g. a
         // `defaultMode: plan`) never leaks into this non-interactive session.
         permission_mode: "acceptEdits",
         system_prompt: if is_first_turn { system_prompt } else { None },
-        prompt_file_tag: &format!("chat_{session_id}"),
+        prompt_file_tag: file_tag,
         cwd: worktree_path,
         extra_dirs: &[],
         session: Some((session_id, is_first_turn)),
@@ -172,7 +187,7 @@ fn call_claude_turn(
         replace_system_prompt: false,
         prompt: text,
         tag: RunTag::new("chat").review(review_id),
-    })
+    }
 }
 
 /// Model resolution priority:
@@ -188,7 +203,8 @@ pub(crate) fn resolve_model(model: Option<String>) -> String {
         .unwrap_or_default()
 }
 
-pub(crate) fn run_claude(run: ClaudeRun) -> AppResult<TurnResult> {
+/// The `claude -p` command of `run`, with the system prompt read from `prompt_path`.
+pub(crate) fn claude_command(run: &ClaudeRun, prompt_path: Option<&Path>) -> Command {
     let mut cmd = Command::new(crate::tools::claude_bin());
     // Run from the reviewed project so CLAUDE.md, git context, etc. come from
     // it, not the Tauri app's directory.
@@ -228,23 +244,25 @@ pub(crate) fn run_claude(run: ClaudeRun) -> AppResult<TurnResult> {
             cmd.arg("--no-session-persistence");
         }
     }
+    if let Some(path) = prompt_path {
+        let flag = if run.replace_system_prompt { "--system-prompt-file" } else { "--append-system-prompt-file" };
+        cmd.arg(flag).arg(path);
+    }
+    cmd
+}
 
+pub(crate) fn run_claude(run: ClaudeRun) -> AppResult<TurnResult> {
     // The file name is deterministic per tag to avoid leaking temp files on crash.
     let system_prompt_path = match run.system_prompt {
         Some(sys) => {
             let path = std::env::temp_dir().join(format!("codereview_{}.txt", run.prompt_file_tag));
             std::fs::write(&path, sys)
                 .map_err(|e| AppError::Chat(format!("failed to write system prompt: {e}")))?;
-            let flag = if run.replace_system_prompt {
-                "--system-prompt-file"
-            } else {
-                "--append-system-prompt-file"
-            };
-            cmd.arg(flag).arg(&path);
             Some(path)
         }
         None => None,
     };
+    let cmd = claude_command(&run, system_prompt_path.as_deref());
     let tag = run.prompt_file_tag;
     log::info!(
         target: "claude",
@@ -833,5 +851,62 @@ mod tests {
         let (result, usage) = interpret(b"not json", "", true, 0);
         assert!(result.is_err());
         assert!(usage.models.is_empty());
+    }
+
+    mod argv_snapshots {
+        use super::*;
+        use crate::test_support::{argv, envs, strs};
+
+        const WORKTREE: &str = "/w/tree";
+
+        #[test]
+        fn first_turn_pins_the_session_and_appends_the_system_prompt() {
+            let wt = Path::new(WORKTREE);
+            let run = turn_run(7, "sid", "chat_sid", true, "opus", Some("sys"), wt, "hello");
+            let prompt = Path::new("/tmp/codereview_chat_sid.txt");
+            let cmd = claude_command(&run, Some(prompt));
+            assert_eq!(
+                argv(&cmd),
+                strs(&[
+                    "-p", "--output-format", "json", "--strict-mcp-config", "--permission-mode", "acceptEdits",
+                    "--add-dir", WORKTREE, "--allowedTools", "Bash", "Read", "Glob", "Grep", "Edit", "Write",
+                    "--model", "opus", "--session-id", "sid", "--append-system-prompt-file",
+                    "/tmp/codereview_chat_sid.txt",
+                ])
+            );
+            assert!(envs(&cmd).is_empty());
+            assert_eq!(cmd.get_current_dir(), Some(wt));
+        }
+
+        #[test]
+        fn next_turn_resumes_and_sends_no_system_prompt() {
+            let wt = Path::new(WORKTREE);
+            let run = turn_run(7, "sid", "chat_sid", false, "", Some("sys"), wt, "again");
+            assert!(run.system_prompt.is_none());
+            let cmd = claude_command(&run, None);
+            assert_eq!(
+                argv(&cmd),
+                strs(&[
+                    "-p", "--output-format", "json", "--strict-mcp-config", "--permission-mode", "acceptEdits",
+                    "--add-dir", WORKTREE, "--allowedTools", "Bash", "Read", "Glob", "Grep", "Edit", "Write",
+                    "--resume", "sid",
+                ])
+            );
+            assert!(envs(&cmd).is_empty());
+        }
+
+        #[test]
+        fn extra_dirs_and_replace_mode_are_honoured() {
+            let wt = Path::new(WORKTREE);
+            let extra = Path::new("/other");
+            let mut run = turn_run(1, "s", "t", true, "m", Some("x"), wt, "p");
+            let dirs = [extra];
+            run.extra_dirs = &dirs;
+            run.replace_system_prompt = true;
+            let cmd = claude_command(&run, Some(Path::new("/p.txt")));
+            let a = argv(&cmd);
+            assert_eq!(&a[6..10], &strs(&["--add-dir", WORKTREE, "--add-dir", "/other"])[..]);
+            assert_eq!(&a[a.len() - 2..], &strs(&["--system-prompt-file", "/p.txt"])[..]);
+        }
     }
 }

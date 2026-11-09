@@ -19,6 +19,30 @@ fn user_message(current: &serde_json::Value, scope: &str, inspiration: &str, fee
     format!("Scope: {scope}\nInspiration: {inspiration}\n{fix}Current theme (JSON):\n{current}\n")
 }
 
+fn suggest_run<'a>(
+    system: &'a str,
+    cwd: &'a std::path::Path,
+    prompt: &'a str,
+    scope: &'a str,
+    inspiration: &str,
+) -> ClaudeRun<'a> {
+    ClaudeRun {
+        model: MODEL,
+        allowed_tools: &[],
+        permission_mode: "default",
+        system_prompt: Some(system),
+        prompt_file_tag: "theme_suggest",
+        cwd,
+        extra_dirs: &[],
+        session: None,
+        env: vec![("CLAUDE_SUMMARY_RUNNING".into(), "1".into())],
+        extra_args: &["--tools", "", "--effort", "medium"],
+        replace_system_prompt: true,
+        prompt,
+        tag: RunTag::new("theme_suggest").variant(scope).label(inspiration.to_string()),
+    }
+}
+
 /// Ask Claude for a custom theme. Returns the model's raw reply; the frontend extracts and
 /// validates the JSON (`src/lib/themeSuggest.ts`).
 #[tauri::command]
@@ -44,21 +68,7 @@ pub async fn theme_suggest(
     let turn = tauri::async_runtime::spawn_blocking(move || {
         let cwd = std::env::temp_dir().join("codereview_theme_suggest");
         std::fs::create_dir_all(&cwd)?;
-        run_claude(ClaudeRun {
-            model: MODEL,
-            allowed_tools: &[],
-            permission_mode: "default",
-            system_prompt: Some(&system),
-            prompt_file_tag: "theme_suggest",
-            cwd: &cwd,
-            extra_dirs: &[],
-            session: None,
-            env: vec![("CLAUDE_SUMMARY_RUNNING".into(), "1".into())],
-            extra_args: &["--tools", "", "--effort", "medium"],
-            replace_system_prompt: true,
-            prompt: &prompt,
-            tag: RunTag::new("theme_suggest").variant(scope.as_str()).label(inspiration.trim().to_string()),
-        })
+        run_claude(suggest_run(&system, &cwd, &prompt, &scope, inspiration.trim()))
     })
     .await
     .map_err(|e| AppError::Other(format!("theme task failed: {e}")))??;
@@ -83,5 +93,23 @@ mod tests {
         let current = serde_json::json!({});
         assert!(user_message(&current, "all", "x", Some("dark: text on surface is 3.1:1")).contains("Fix:"));
         assert!(!user_message(&current, "all", "x", Some("  ")).contains("Fix:"));
+    }
+
+    #[test]
+    fn suggest_run_argv_and_env() {
+        use crate::test_support::{argv, envs, strs};
+        let cwd = std::path::Path::new("/tmp/codereview_theme_suggest");
+        let run = suggest_run("sys", cwd, "prompt", "syntax", "nordic");
+        let cmd = crate::commands::chat::claude_command(&run, Some(std::path::Path::new("/tmp/codereview_theme_suggest.txt")));
+        assert_eq!(
+            argv(&cmd),
+            strs(&[
+                "-p", "--output-format", "json", "--strict-mcp-config", "--permission-mode", "default",
+                "--add-dir", "/tmp/codereview_theme_suggest", "--model", "sonnet", "--tools", "", "--effort",
+                "medium", "--no-session-persistence", "--system-prompt-file", "/tmp/codereview_theme_suggest.txt",
+            ])
+        );
+        assert_eq!(envs(&cmd), vec![("CLAUDE_SUMMARY_RUNNING".to_string(), "1".to_string())]);
+        assert_eq!(cmd.get_current_dir(), Some(cwd));
     }
 }
