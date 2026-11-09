@@ -422,6 +422,7 @@ fn interpret(stdout: &[u8], stderr: &str, success: bool, exit_code: i32) -> (App
         .unwrap_or_default();
 
     let turn = TurnResult {
+        session_id: None,
         text: text_out,
         input_tokens: usage.input_tokens,
         output_tokens: usage.output_tokens,

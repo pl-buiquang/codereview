@@ -306,7 +306,7 @@ fn error_text(v: &Value) -> String {
 }
 
 /// What goes to opencode's stdin: the system prompt (it has no flag for one) above the prompt.
-fn message(req: &OneShot<'_>) -> AppResult<String> {
+pub(crate) fn message(req: &OneShot<'_>) -> AppResult<String> {
     let system = match req.system_prompt {
         Some(SystemPrompt::Text(t)) => t.to_string(),
         Some(SystemPrompt::File(path)) => std::fs::read_to_string(path)
@@ -411,6 +411,7 @@ pub(crate) fn interpret(stdout: &str, stderr: &str, exit_code: i32) -> (AppResul
         return (Err(AppError::Chat(text)), fin.usage);
     }
     let turn = TurnResult {
+        session_id: None,
         text,
         input_tokens: fin.usage.input_tokens,
         output_tokens: fin.usage.output_tokens,
@@ -505,7 +506,7 @@ fn parse_tui_args(argv: &[String]) -> Option<(Option<String>, Option<String>)> {
 
 /// Lexically resolve `.` and `..` (and repeated slashes) of an absolute path, so paths compare
 /// equal however they were spelled. Symlinks are not followed.
-fn normalize_path(p: &str) -> String {
+pub(crate) fn normalize_path(p: &str) -> String {
     let mut parts: Vec<&str> = Vec::new();
     for c in p.split('/') {
         match c {
@@ -520,7 +521,7 @@ fn normalize_path(p: &str) -> String {
 }
 
 /// The next whitespace-delimited field of `s` and the rest after it (leading blanks trimmed).
-fn next_field(s: &str) -> Option<(&str, &str)> {
+pub(crate) fn next_field(s: &str) -> Option<(&str, &str)> {
     let s = s.trim_start();
     if s.is_empty() {
         return None;
@@ -530,7 +531,7 @@ fn next_field(s: &str) -> Option<(&str, &str)> {
 }
 
 /// `ps etime` (`[[dd-]hh:]mm:ss`) in seconds.
-fn parse_etime(s: &str) -> Option<i64> {
+pub(crate) fn parse_etime(s: &str) -> Option<i64> {
     let (days, rest) = match s.split_once('-') {
         Some((d, r)) => (d.parse::<i64>().ok()?, r),
         None => (0, s),
@@ -581,13 +582,13 @@ fn parse_tuis(
 }
 
 /// The exact argv of a process from `/proc/<pid>/cmdline` (NUL-separated); `None` without /proc.
-fn proc_argv(pid: i64) -> Option<Vec<String>> {
+pub(crate) fn proc_argv(pid: i64) -> Option<Vec<String>> {
     let raw = std::fs::read(format!("/proc/{pid}/cmdline")).ok()?;
     Some(raw.split(|b| *b == 0).filter(|a| !a.is_empty()).map(|a| String::from_utf8_lossy(a).into_owned()).collect())
 }
 
 /// How much older than the TUI's start a session may be and still count as created by it.
-const START_SLACK_MS: i64 = 2_000;
+pub(crate) const START_SLACK_MS: i64 = 2_000;
 
 /// Pair each TUI with its session.
 /// - A TUI started with `--session <id>` has that session: it is looked up by id in the listing of
@@ -647,18 +648,18 @@ fn match_tuis(tuis: &[Tui], listed: impl Fn(&str) -> Vec<ListedSession>) -> Vec<
     out
 }
 
-fn now_ms() -> i64 {
+pub(crate) fn now_ms() -> i64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64)
 }
 
 /// Longest a discovery subprocess (`ps`, `lsof`, `opencode session list`) may run.
-const PROBE_TIMEOUT: Duration = Duration::from_secs(3);
+pub(crate) const PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 /// How long a directory's session listing is reused.
 const LIST_TTL: Duration = Duration::from_secs(8);
 
 /// Run `cmd` and collect its stdout, killing it after `timeout`. `None` on a spawn failure, a
 /// non-zero exit or a timeout.
-fn run_with_timeout(cmd: &mut Command, timeout: Duration) -> Option<String> {
+pub(crate) fn run_with_timeout(cmd: &mut Command, timeout: Duration) -> Option<String> {
     use std::io::Read as _;
     let mut child = cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().ok()?;
     let mut stdout = child.stdout.take()?;
@@ -684,7 +685,7 @@ fn run_with_timeout(cmd: &mut Command, timeout: Duration) -> Option<String> {
     status.filter(|st| st.success()).map(|_| String::from_utf8_lossy(&buf).into_owned())
 }
 
-fn proc_cwd(pid: i64) -> Option<String> {
+pub(crate) fn proc_cwd(pid: i64) -> Option<String> {
     if let Ok(p) = std::fs::read_link(format!("/proc/{pid}/cwd")) {
         return Some(p.to_string_lossy().into_owned());
     }

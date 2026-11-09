@@ -12,6 +12,7 @@ static GH: OnceLock<Option<String>> = OnceLock::new();
 static CURL: OnceLock<Option<String>> = OnceLock::new();
 static CLAUDE: OnceLock<Option<String>> = OnceLock::new();
 static OPENCODE: OnceLock<Option<String>> = OnceLock::new();
+static CODEX: OnceLock<Option<String>> = OnceLock::new();
 static TMUX: OnceLock<Option<String>> = OnceLock::new();
 
 fn resolve(name: &str) -> Option<String> {
@@ -28,6 +29,7 @@ pub fn init() {
     let _ = CURL.set(resolve("curl"));
     let _ = CLAUDE.set(resolve("claude"));
     let _ = OPENCODE.set(resolve("opencode"));
+    let _ = CODEX.set(resolve("codex"));
     let _ = TMUX.set(resolve("tmux"));
 }
 
@@ -74,6 +76,14 @@ pub fn opencode_path() -> Option<String> {
 
 pub fn opencode_bin() -> String {
     opencode_path().unwrap_or_else(|| "opencode".to_string())
+}
+
+pub fn codex_path() -> Option<String> {
+    CODEX.get().cloned().flatten()
+}
+
+pub fn codex_bin() -> String {
+    codex_path().unwrap_or_else(|| "codex".to_string())
 }
 
 pub fn tmux_path() -> Option<String> {

@@ -412,6 +412,9 @@ pub async fn chat_send(
         &text,
     )?;
 
+    // A harness that assigns its own session ids (Codex) names the one to resume next turn.
+    let session_id = turn.session_id.clone().unwrap_or(session_id);
+
     // --- Phase 4: persist results under DB lock ---
     {
         let conn = db.0.lock().unwrap();

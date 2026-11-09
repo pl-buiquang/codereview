@@ -88,7 +88,7 @@ mod tests {
         let oc = infos.iter().find(|i| i.id == "opencode").unwrap();
         assert_eq!(oc.name, "opencode");
         assert!(!oc.caps.tool_allowlist && !oc.caps.fork && oc.caps.pins_session_id);
-        assert_eq!(infos.iter().map(|i| i.id).collect::<Vec<_>>(), ["claude", "opencode"]);
+        assert_eq!(infos.iter().map(|i| i.id).collect::<Vec<_>>(), ["claude", "opencode", "codex"]);
     }
 
     #[test]

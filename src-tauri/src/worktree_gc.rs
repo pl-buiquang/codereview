@@ -444,7 +444,7 @@ impl InUse {
         // (that may fail or time out) must not decide GC safety.
         let sessions = session_paths(
             crate::commands::sessions::all_live_sessions().into_iter().map(|s| s.cwd),
-            crate::ai::opencode::live_tui_cwds(),
+            crate::ai::opencode::live_tui_cwds().into_iter().chain(crate::ai::codex::live_tui_cwds()),
         );
         let panes = std::process::Command::new("tmux")
             .args(["list-panes", "-a", "-F", "#{pane_current_path}"])

@@ -641,7 +641,7 @@ mod tests {
             if req.prompt == "fail" {
                 return Err(AppError::Other("the harness failed".into()));
             }
-            Ok(TurnResult { text: format!("echo:{}@{}", req.prompt, req.cwd.display()), input_tokens: 3, output_tokens: 4, cost_usd: 0.5 })
+            Ok(TurnResult { text: format!("echo:{}@{}", req.prompt, req.cwd.display()), input_tokens: 3, output_tokens: 4, cost_usd: 0.5, session_id: None })
         }
         fn spawn(&self, run: StreamRun<'_>) -> AppResult<Child> {
             use std::os::unix::process::CommandExt;

@@ -22,12 +22,14 @@ use crate::run_usage::{RunTag, RunUsage};
 use crate::error::{AppError, AppResult};
 
 pub mod claude;
+pub mod codex;
 pub mod models;
 pub mod opencode;
 pub mod profiles;
 pub mod session;
 
 pub use claude::ClaudeCode;
+pub use codex::Codex;
 pub use opencode::OpenCode;
 pub use session::AgentSession;
 
@@ -243,6 +245,9 @@ pub struct FinalResult {
 /// The outcome of a one-shot run.
 #[derive(Debug)]
 pub struct TurnResult {
+    /// The session id the harness assigned itself, when it can't be pinned (`None` for the id the
+    /// request named); the caller stores it for the next turn.
+    pub session_id: Option<String>,
     pub text: String,
     pub input_tokens: i64,
     pub output_tokens: i64,
@@ -317,6 +322,11 @@ pub trait Harness: Send + Sync {
     fn step_usage(&self, _line: &str) -> Option<RunUsage> {
         None
     }
+    /// The session id one stream line announces, for a harness that assigns its own ids (Codex): the
+    /// run engine folds it into the final usage's `session_id` ([`RunAcc`]).
+    fn session_of_line(&self, _line: &str) -> Option<String> {
+        None
+    }
 }
 
 /// Folds the lines of a run into the final text and total usage of a harness that
@@ -327,6 +337,7 @@ pub struct RunAcc {
     usage: RunUsage,
     steps: i64,
     any: bool,
+    session_id: Option<String>,
 }
 
 impl RunAcc {
@@ -334,6 +345,9 @@ impl RunAcc {
     pub fn push(&mut self, harness: &dyn Harness, line: &str, events: &[Event]) {
         if !harness.accumulates() {
             return;
+        }
+        if self.session_id.is_none() {
+            self.session_id = harness.session_of_line(line);
         }
         for e in events {
             if let Event::Text(t) = e {
@@ -354,13 +368,13 @@ impl RunAcc {
     /// `fin` completed with what the run produced: a final without text gets the last text, and
     /// the usage is the total over all steps.
     pub fn complete(&self, mut fin: FinalResult) -> FinalResult {
-        if !self.any && self.text.is_empty() {
+        if !self.any && self.text.is_empty() && self.session_id.is_none() {
             return fin;
         }
         if fin.text.as_deref().is_none_or(str::is_empty) {
             fin.text = Some(self.text.clone());
         }
-        let session_id = fin.usage.session_id.take();
+        let session_id = fin.usage.session_id.take().or_else(|| self.session_id.clone());
         fin.usage = RunUsage { num_turns: self.steps, session_id, ..self.usage.clone() };
         fin
     }
@@ -371,10 +385,11 @@ const _: Option<&dyn Harness> = None;
 
 static CLAUDE: ClaudeCode = ClaudeCode;
 static OPENCODE: OpenCode = OpenCode;
+static CODEX: Codex = Codex;
 
 /// Every harness the app knows, in display order.
-pub fn harnesses() -> [&'static dyn Harness; 2] {
-    [&CLAUDE, &OPENCODE]
+pub fn harnesses() -> [&'static dyn Harness; 3] {
+    [&CLAUDE, &OPENCODE, &CODEX]
 }
 
 /// Live sessions of every available harness except `skip` (Claude has a richer dedicated source),
