@@ -321,9 +321,24 @@ fn create_run_blocking(s: &Shared, req: RunRequest) -> Result<(StatusCode, Value
     if req.prompt.trim().is_empty() {
         return Err(ApiError::bad_request("prompt is empty"));
     }
-    let existing = |id: i64| (StatusCode::OK, json!({ "id": id, "created": false }));
+    // The attachment bytes are written to disk, never stored in the row (nor compared on a retry).
+    let stored = RunRequest { attachments: Vec::new(), ..req.clone() };
+    let stored_json = serde_json::to_string(&stored).map_err(ApiError::internal)?;
+    // A retry of the same request returns the first run; the same key with another body is a client bug.
+    let existing = |id: i64| -> Result<(StatusCode, Value), ApiError> {
+        if s.db.status(id).as_deref() == Some("preparing") {
+            return Err(ApiError::new(ErrorCode::Conflict, "this request is still being prepared; retry shortly"));
+        }
+        if s.db.request_json(id)?.as_deref() != Some(stored_json.as_str()) {
+            return Err(ApiError::new(
+                ErrorCode::Conflict,
+                format!("idempotency key `{}` was already used for a different request (run {id})", req.idempotency_key),
+            ));
+        }
+        Ok((StatusCode::OK, json!({ "id": id, "created": false })))
+    };
     if let Some(id) = s.db.run_by_key(&req.idempotency_key) {
-        return Ok(existing(id));
+        return existing(id);
     }
     let h = s.harness(&req.harness)?;
     validate_args(&req.model, &req.allowed_tools)?;
@@ -335,14 +350,12 @@ fn create_run_blocking(s: &Shared, req: RunRequest) -> Result<(StatusCode, Value
     }
     let files = workspace::decode_attachments(&req.attachments)?;
     let cwd = s.resolve_workspace(&req.workspace, read_only_of(req.access, req.tools))?;
-    // The attachment bytes are written to disk, never stored in the row.
-    let stored = RunRequest { attachments: Vec::new(), ..req.clone() };
     let (id, created) = s
         .db
-        .insert_run(&req.idempotency_key, h.id(), &req.model, &serde_json::to_string(&stored).map_err(ApiError::internal)?, &cwd, req.timeout_secs.max(1))
+        .insert_run(&req.idempotency_key, h.id(), &req.model, &stored_json, &cwd, req.timeout_secs.max(1))
         .map_err(ApiError::from)?;
     if !created {
-        return Ok(existing(id));
+        return existing(id);
     }
     // The row is `preparing` until the attachments are on disk, so a concurrent pump cannot start
     // the run without them.
@@ -840,13 +853,16 @@ mod tests {
     async fn create_is_idempotent_on_the_key() {
         let srv = server(2).await;
         let (s1, a) = req(&srv, "POST", "/v1/runs", Some(&run_body("same", OK_RUN))).await;
-        let (s2, b) = req(&srv, "POST", "/v1/runs", Some(&run_body("same", "echo different"))).await;
+        let (s2, b) = req(&srv, "POST", "/v1/runs", Some(&run_body("same", OK_RUN))).await;
         assert_eq!((s1, s2), (201, 200));
         assert_eq!(a["id"], b["id"]);
         assert_eq!((a["created"].clone(), b["created"].clone()), (json!(true), json!(false)));
         wait_done(&srv, a["id"].as_i64().unwrap()).await;
         let (_, list) = req(&srv, "GET", "/v1/runs", None).await;
         assert_eq!(list["runs"].as_array().unwrap().len(), 1);
+        // the same key with another body is refused instead of silently returning the first run
+        let (s3, c) = req(&srv, "POST", "/v1/runs", Some(&run_body("same", "echo different"))).await;
+        assert_eq!((s3, c["error"]["code"].as_str()), (409, Some("conflict")), "{c}");
     }
 
     #[tokio::test(flavor = "multi_thread")]
