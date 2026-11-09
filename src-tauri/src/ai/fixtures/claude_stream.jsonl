@@ -1,0 +1,8 @@
+{"type":"system","subtype":"init","session_id":"s-1","model":"claude-sonnet-4-5","tools":["Bash","Read"]}
+{"type":"assistant","message":{"id":"m1","role":"assistant","content":[{"type":"text","text":"Checking CI."},{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"gh pr checks 1"}}]},"session_id":"s-1"}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"all green","is_error":false}]},"session_id":"s-1"}
+{"type":"assistant","message":{"id":"m2","role":"assistant","content":[{"type":"tool_use","id":"toolu_2","name":"Read","input":{"file_path":"/nope"}}]},"session_id":"s-1"}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_2","content":[{"type":"text","text":"File does not exist."},{"type":"text","text":"Try again."}],"is_error":true}]},"session_id":"s-1"}
+{"type":"assistant","message":{"id":"m3","role":"assistant","content":[{"type":"thinking","thinking":"hmm"}]},"session_id":"s-1"}
+not json at all
+{"type":"result","subtype":"success","is_error":false,"result":"All checks pass.","num_turns":3,"session_id":"s-1","total_cost_usd":0.5,"usage":{"input_tokens":10,"output_tokens":20,"cache_read_input_tokens":30,"cache_creation_input_tokens":40},"modelUsage":{"claude-sonnet-4-5":{"inputTokens":10,"outputTokens":20,"cacheReadInputTokens":30,"cacheCreationInputTokens":40,"costUSD":0.5}}}

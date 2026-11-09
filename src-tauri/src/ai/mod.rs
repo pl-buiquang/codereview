@@ -133,15 +133,99 @@ pub struct StreamRun<'a> {
     pub timeout: Duration,
 }
 
-/// A normalized stream event. Defined here, produced from S04; until then `parse_line` hands back
-/// the raw kind and JSON.
+/// A harness-neutral stream event. One raw line can yield several (an assistant message with text
+/// and tool calls). Stored as the `norm` column next to the raw line, see [`Event::to_json`].
 #[derive(Debug, Clone)]
 pub enum Event {
     Text(String),
-    ToolCall { name: String, input: Value },
-    ToolResult { ok: bool, text: String },
+    /// `id` pairs the call with its [`Event::ToolResult`]; empty when the harness has none.
+    ToolCall { id: String, name: String, input: Value },
+    ToolResult { id: String, ok: bool, text: String },
     Final { ok: bool, text: String, usage: RunUsage },
-    Other(Value),
+    /// Anything else (system lines, unknown types, unparseable lines as kind `raw`).
+    Other { kind: String, raw: Value },
+}
+
+/// Version of the normalized shape (`{"v":1,"events":[..]}`); bump on an incompatible change.
+pub const NORM_VERSION: u32 = 1;
+
+/// `s` cut to at most `max` bytes on a char boundary.
+fn clip(s: &str, max: usize) -> (&str, bool) {
+    if s.len() <= max {
+        return (s, false);
+    }
+    let mut end = max;
+    while !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    (&s[..end], true)
+}
+
+impl Event {
+    /// The stored form: `{"type": ..}` with every large payload cut to `max_bytes` (and then
+    /// `"truncated": true`). The in-memory event is never truncated.
+    pub fn to_json(&self, max_bytes: usize) -> Value {
+        use serde_json::json;
+        let text = |t: &str| {
+            let (t, cut) = clip(t, max_bytes);
+            (Value::String(t.to_string()), cut)
+        };
+        let mut v = match self {
+            Event::Text(t) => {
+                let (t, cut) = text(t);
+                json!({ "type": "text", "text": t, "truncated": cut })
+            }
+            Event::ToolCall { id, name, input } => {
+                let raw = input.to_string();
+                let (input, cut) = if raw.len() > max_bytes { (text(&raw).0, true) } else { (input.clone(), false) };
+                json!({ "type": "tool_call", "id": id, "name": name, "input": input, "truncated": cut })
+            }
+            Event::ToolResult { id, ok, text: t } => {
+                let (t, cut) = text(t);
+                json!({ "type": "tool_result", "id": id, "ok": ok, "text": t, "truncated": cut })
+            }
+            Event::Final { ok, text: t, usage } => {
+                let (t, cut) = text(t);
+                json!({
+                    "type": "final", "ok": ok, "text": t, "truncated": cut,
+                    "usage": {
+                        "num_turns": usage.num_turns,
+                        "input_tokens": usage.input_tokens,
+                        "output_tokens": usage.output_tokens,
+                        "cache_read_tokens": usage.cache_read_tokens,
+                        "cache_creation_tokens": usage.cache_creation_tokens,
+                        "cost_usd": usage.cost_usd,
+                    }
+                })
+            }
+            Event::Other { kind, raw } => {
+                let s = raw.to_string();
+                let (raw, cut) = if s.len() > max_bytes { (text(&s).0, true) } else { (raw.clone(), false) };
+                json!({ "type": "other", "kind": kind, "raw": raw, "truncated": cut })
+            }
+        };
+        // Keep the shape minimal: the flag only appears when something was cut.
+        if v["truncated"] == Value::Bool(false) {
+            v.as_object_mut().map(|o| o.remove("truncated"));
+        }
+        v
+    }
+
+    /// The final status, text and usage, when this is the final event.
+    pub fn as_final(&self) -> Option<FinalResult> {
+        match self {
+            Event::Final { ok, text, usage } => {
+                Some(FinalResult { is_error: !ok, text: Some(text.clone()), usage: usage.clone() })
+            }
+            _ => None,
+        }
+    }
+}
+
+/// The stored `norm` value of one raw line: `{"v":1,"events":[..]}`.
+pub fn norm_json(events: &[Event], max_bytes: usize) -> String {
+    serde_json::json!({ "v": NORM_VERSION, "events": events.iter().map(|e| e.to_json(max_bytes)).collect::<Vec<_>>() })
+        .to_string()
 }
 
 /// The final status, text and usage a harness reports for a streamed run.
@@ -189,10 +273,12 @@ pub trait Harness: Send + Sync {
     /// Spec deviation: returns the [`Child`] rather than a bare pid, because the run engine still
     /// writes the prompt to its stdin, polls and reaps it.
     fn spawn(&self, run: StreamRun<'_>) -> AppResult<Child>;
-    /// `(kind, parsed line)` of one stream line; unparseable lines are kept as kind `raw`.
+    /// `(kind, parsed line)` of one stream line (the `kind` column); unparseable lines are kept as kind `raw`.
     fn parse_line(&self, line: &str) -> (String, Option<Value>);
-    /// Status, text and usage out of the last (`result`) event of a stream.
-    fn final_result(&self, event: &Value) -> FinalResult;
+    /// The neutral events of one raw stream line (see [`Event`]); never fails: what is not
+    /// understood becomes [`Event::Other`]. The engine takes a run's status, text and usage from
+    /// the [`Event::Final`] among them.
+    fn normalize(&self, line: &str) -> Vec<Event>;
     /// Whether `pid` is still this harness' streaming process (of that session, when known):
     /// guards re-adoption after a restart against pid reuse.
     fn is_own_process(&self, pid: i32, session_id: Option<&str>) -> bool;
@@ -333,7 +419,7 @@ mod tests {
         fn parse_line(&self, _: &str) -> (String, Option<Value>) {
             unimplemented!()
         }
-        fn final_result(&self, _: &Value) -> FinalResult {
+        fn normalize(&self, _: &str) -> Vec<Event> {
             unimplemented!()
         }
         fn is_own_process(&self, _: i32, _: Option<&str>) -> bool {

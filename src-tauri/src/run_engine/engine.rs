@@ -375,7 +375,7 @@ impl RunEngine {
             (inner.stops.remove(&run_id), inner.shutting_down)
         };
         self.discard_run_files(run_id);
-        let result = outcome.result.as_ref().map(|v| self.harness.final_result(v));
+        let result = outcome.result.clone();
         let text = result.as_ref().and_then(|r| r.text.clone()).unwrap_or_default();
         let status = final_status(stop, result.as_ref(), &text);
         let error = match status {
@@ -415,7 +415,7 @@ impl RunEngine {
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
-    use crate::ai::{Caps, FinalResult, Interactive, OneShot, TurnResult};
+    use crate::ai::{Caps, Event, Interactive, OneShot, TurnResult};
     use crate::ai::{Access, SystemPromptMode, ToolPolicy};
     use crate::ai_usage::RunTag;
     use serde_json::Value;
@@ -469,11 +469,15 @@ mod tests {
                 Err(_) => ("raw".to_string(), None),
             }
         }
-        fn final_result(&self, event: &Value) -> FinalResult {
-            FinalResult {
-                is_error: event.get("is_error").and_then(Value::as_bool).unwrap_or(false),
-                text: event.get("result").and_then(Value::as_str).map(str::to_string),
-                usage: Default::default(),
+        fn normalize(&self, line: &str) -> Vec<Event> {
+            match serde_json::from_str::<Value>(line) {
+                Ok(v) if v.get("type").and_then(Value::as_str) == Some("result") => vec![Event::Final {
+                    ok: !v.get("is_error").and_then(Value::as_bool).unwrap_or(false),
+                    text: v.get("result").and_then(Value::as_str).unwrap_or_default().to_string(),
+                    usage: Default::default(),
+                }],
+                Ok(v) => vec![Event::Other { kind: "x".into(), raw: v }],
+                Err(_) => vec![Event::Other { kind: "raw".into(), raw: Value::Null }],
             }
         }
         fn is_own_process(&self, _: i32, _: Option<&str>) -> bool {

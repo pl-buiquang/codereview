@@ -5,17 +5,16 @@ use std::io::{BufRead, BufReader};
 use std::path::Path;
 use std::time::Duration;
 
-use serde_json::Value;
 
-use crate::ai::Harness;
+use crate::ai::{FinalResult, Harness};
 
 pub const TAIL_POLL: Duration = Duration::from_millis(200);
 /// Lines longer than this are stored as a stub (`truncated`, `bytes`) instead of verbatim.
 pub const MAX_EVENT_BYTES: usize = 100_000;
 
 pub enum Tail {
-    /// The process ended and the file is drained: the `result` line, if there was one.
-    Done(Option<Value>),
+    /// The process ended and the file is drained: the last final event, if there was one.
+    Done(Option<FinalResult>),
     /// The host is quitting with the run left alive.
     Detached,
 }
@@ -42,20 +41,21 @@ pub fn tail_events(
 ) -> Tail {
     let Ok(file) = File::open(path) else { return Tail::Done(None) };
     let mut reader = BufReader::new(file);
-    let mut result: Option<Value> = None;
+    let mut result: Option<FinalResult> = None;
     let mut seq = 0i64;
     let mut pending = String::new();
-    let mut handle = |line: &str, result: &mut Option<Value>| {
+    let mut handle = |line: &str, result: &mut Option<FinalResult>| {
         if line.trim().is_empty() {
             return;
         }
-        let (kind, value) = harness.parse_line(line);
+        let (kind, _) = harness.parse_line(line);
         seq += 1;
         if seq > skip {
             record(seq, &kind, line);
         }
-        if kind == "result" {
-            *result = value;
+        // Also for the lines recorded by an earlier session: the final may be among them.
+        if let Some(fin) = harness.normalize(line).iter().find_map(|e| e.as_final()) {
+            *result = Some(fin);
         }
     };
     loop {
@@ -86,6 +86,7 @@ pub fn tail_events(
 mod tests {
     use super::*;
     use crate::ai::ClaudeCode;
+    use serde_json::Value;
 
     fn tmp(name: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!("cr_tail_{name}_{}.jsonl", std::process::id()))
@@ -105,7 +106,7 @@ mod tests {
         // last line is still drained once the process is gone
         assert_eq!(seen, vec![(3, "raw".to_string()), (4, "result".to_string())]);
         let Tail::Done(Some(r)) = tail else { panic!("expected a result") };
-        assert_eq!(r["result"], "x");
+        assert_eq!(r.text.as_deref(), Some("x"));
         let _ = std::fs::remove_file(&path);
     }
 

@@ -10,7 +10,7 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use super::{
-    Access, Caps, FinalResult, Harness, Interactive, OneShot, SessionMode, StreamRun, SystemPrompt, SystemPromptMode,
+    Access, Caps, Event, Harness, Interactive, OneShot, SessionMode, StreamRun, SystemPrompt, SystemPromptMode,
     ToolPolicy, TurnResult,
 };
 use crate::ai_usage::{self, ModelTokens, RunTag, RunUsage};
@@ -83,18 +83,61 @@ impl Harness for ClaudeCode {
         }
     }
 
-    fn final_result(&self, event: &Value) -> FinalResult {
-        FinalResult {
-            is_error: event.get("is_error").and_then(Value::as_bool).unwrap_or(false),
-            text: match event.get("result") {
-                Some(Value::String(s)) => Some(s.clone()),
-                Some(Value::Null) | None => None,
-                Some(other) => Some(other.to_string()),
-            },
-            usage: serde_json::from_value::<ClaudeEnvelope>(event.clone())
-                .map(|e| e.run_usage())
-                .unwrap_or_default(),
+    fn normalize(&self, line: &str) -> Vec<Event> {
+        let Ok(v) = serde_json::from_str::<Value>(line) else {
+            return vec![Event::Other { kind: "raw".into(), raw: Value::String(line.trim_end().to_string()) }];
+        };
+        let kind = v.get("type").and_then(Value::as_str).unwrap_or("unknown");
+        let mut events = Vec::new();
+        match kind {
+            "assistant" => {
+                for block in v.pointer("/message/content").and_then(Value::as_array).into_iter().flatten() {
+                    match block.get("type").and_then(Value::as_str) {
+                        Some("text") => {
+                            let text = block.get("text").and_then(Value::as_str).unwrap_or_default();
+                            if !text.trim().is_empty() {
+                                events.push(Event::Text(text.to_string()));
+                            }
+                        }
+                        Some("tool_use") => events.push(Event::ToolCall {
+                            id: str_field(block, "id"),
+                            name: str_field(block, "name"),
+                            input: block.get("input").cloned().unwrap_or_else(|| Value::Object(Default::default())),
+                        }),
+                        _ => {}
+                    }
+                }
+            }
+            "user" => {
+                for block in v.pointer("/message/content").and_then(Value::as_array).into_iter().flatten() {
+                    if block.get("type").and_then(Value::as_str) == Some("tool_result") {
+                        events.push(Event::ToolResult {
+                            id: str_field(block, "tool_use_id"),
+                            ok: !block.get("is_error").and_then(Value::as_bool).unwrap_or(false),
+                            text: tool_result_text(block.get("content")),
+                        });
+                    }
+                }
+            }
+            "result" => {
+                let usage = serde_json::from_value::<ClaudeEnvelope>(v.clone()).map(|e| e.run_usage()).unwrap_or_default();
+                events.push(Event::Final {
+                    ok: !v.get("is_error").and_then(Value::as_bool).unwrap_or(false),
+                    text: match v.get("result") {
+                        Some(Value::String(s)) => s.clone(),
+                        Some(Value::Null) | None => String::new(),
+                        Some(other) => other.to_string(),
+                    },
+                    usage,
+                });
+            }
+            _ => {}
         }
+        // Lines with nothing to show (system, thinking-only messages, unknown types) stay as `other`.
+        if events.is_empty() {
+            events.push(Event::Other { kind: kind.to_string(), raw: v });
+        }
+        events
     }
 
     #[cfg(unix)]
@@ -124,6 +167,24 @@ impl Harness for ClaudeCode {
             argv.extend([system_prompt_flag(opts.system_prompt_mode).to_string(), file.to_string_lossy().into_owned()]);
         }
         Some(argv)
+    }
+}
+
+fn str_field(block: &Value, key: &str) -> String {
+    block.get(key).and_then(Value::as_str).unwrap_or_default().to_string()
+}
+
+/// A `tool_result` block's content: a string, or the `text` of each part.
+fn tool_result_text(content: Option<&Value>) -> String {
+    match content {
+        Some(Value::String(s)) => s.clone(),
+        Some(Value::Array(parts)) => parts
+            .iter()
+            .map(|p| p.get("text").map(|t| t.as_str().map_or_else(|| t.to_string(), str::to_string)).unwrap_or_default())
+            .collect::<Vec<_>>()
+            .join("\n"),
+        Some(Value::Null) | None => String::new(),
+        Some(other) => other.to_string(),
     }
 }
 
@@ -496,16 +557,86 @@ mod tests {
         assert_eq!(argv(SessionMode::Fork("s1"), None, append), None);
     }
 
+    const STREAM: &str = include_str!("fixtures/claude_stream.jsonl");
+    const RESULT_ERROR: &str = include_str!("fixtures/claude_result_error.jsonl");
+
+    /// The stored `norm` of every line of `fixture`.
+    fn norms(fixture: &str) -> Vec<Value> {
+        fixture
+            .lines()
+            .map(|l| serde_json::from_str(&crate::ai::norm_json(&ClaudeCode.normalize(l), 100_000)).unwrap())
+            .collect()
+    }
+
     #[test]
-    fn final_result_reads_status_text_and_usage() {
-        let ok = ClaudeCode.final_result(&serde_json::from_str(OK).unwrap());
-        assert!(!ok.is_error);
-        assert_eq!(ok.text.as_deref(), Some("hi"));
-        assert_eq!((ok.usage.num_turns, ok.usage.cost_usd), (2, 1.5));
-        let err = ClaudeCode.final_result(&serde_json::json!({"is_error": true, "result": null}));
-        assert!(err.is_error && err.text.is_none());
-        let structured = ClaudeCode.final_result(&serde_json::json!({"result": {"a": 1}}));
-        assert_eq!(structured.text.as_deref(), Some("{\"a\":1}"));
+    fn normalizes_a_claude_stream() {
+        use serde_json::json;
+        let n = norms(STREAM);
+        let ev = |i: usize| n[i]["events"].clone();
+        assert!(n.iter().all(|v| v["v"] == 1));
+        // system init: kept as other
+        assert_eq!(ev(0)[0]["type"], "other");
+        assert_eq!(ev(0)[0]["kind"], "system");
+        assert_eq!(ev(0)[0]["raw"]["session_id"], "s-1");
+        // assistant text + tool_use
+        assert_eq!(
+            ev(1),
+            json!([
+                { "type": "text", "text": "Checking CI." },
+                { "type": "tool_call", "id": "toolu_1", "name": "Bash", "input": { "command": "gh pr checks 1" } }
+            ])
+        );
+        // tool_result, string content
+        assert_eq!(ev(2), json!([{ "type": "tool_result", "id": "toolu_1", "ok": true, "text": "all green" }]));
+        // tool_result, block content, is_error
+        assert_eq!(ev(4), json!([{ "type": "tool_result", "id": "toolu_2", "ok": false, "text": "File does not exist.\nTry again." }]));
+        // thinking-only message: nothing to show, kept as other
+        assert_eq!(ev(5)[0]["type"], "other");
+        assert_eq!(ev(5)[0]["kind"], "assistant");
+        // malformed line
+        assert_eq!(ev(6), json!([{ "type": "other", "kind": "raw", "raw": "not json at all" }]));
+        // result ok, with usage
+        assert_eq!(
+            ev(7),
+            json!([{
+                "type": "final", "ok": true, "text": "All checks pass.",
+                "usage": { "num_turns": 3, "input_tokens": 10, "output_tokens": 20, "cache_read_tokens": 30,
+                           "cache_creation_tokens": 40, "cost_usd": 0.5 }
+            }])
+        );
+    }
+
+    #[test]
+    fn normalizes_an_error_result() {
+        let events = ClaudeCode.normalize(RESULT_ERROR.trim());
+        let fin = events[0].as_final().expect("final event");
+        assert!(fin.is_error);
+        assert_eq!(fin.text.as_deref(), Some("Reached the turn limit"));
+        assert_eq!((fin.usage.num_turns, fin.usage.cost_usd), (9, 0.25));
+    }
+
+    #[test]
+    fn final_event_keeps_the_full_text_in_memory_and_truncates_when_stored() {
+        let big = "é".repeat(60);
+        let line = serde_json::json!({ "type": "result", "is_error": false, "result": big }).to_string();
+        let events = ClaudeCode.normalize(&line);
+        assert_eq!(events[0].as_final().unwrap().text.unwrap().len(), 120);
+        let stored = events[0].to_json(11);
+        assert_eq!(stored["text"].as_str().unwrap().len(), 10); // cut on a char boundary
+        assert_eq!(stored["truncated"], true);
+        // an oversized tool input is stored as a clipped string
+        let call = Event::ToolCall { id: "i".into(), name: "Bash".into(), input: serde_json::json!({ "c": "x".repeat(50) }) };
+        let j = call.to_json(20);
+        assert!(j["input"].is_string() && j["truncated"] == true);
+    }
+
+    #[test]
+    fn unknown_and_untyped_lines_never_fail() {
+        for line in [r#"{"x":1}"#, r#"{"type":"stream_event"}"#, "", "{", r#"{"type":"assistant"}"#, r#"{"type":"user","message":{"content":"hi"}}"#] {
+            let events = ClaudeCode.normalize(line);
+            assert_eq!(events.len(), 1, "{line}");
+            assert!(matches!(events[0], Event::Other { .. }), "{line}");
+        }
     }
 
     #[test]

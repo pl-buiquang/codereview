@@ -1,0 +1,1 @@
+{"type":"result","subtype":"error_max_turns","is_error":true,"result":"Reached the turn limit","num_turns":9,"session_id":"s-2","total_cost_usd":0.25,"usage":{"input_tokens":1,"output_tokens":2}}
