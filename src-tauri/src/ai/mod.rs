@@ -1,7 +1,7 @@
 //! The AI harness seam: one object-safe, synchronous trait under every AI call of the app (chat,
 //! theme suggestions, session summaries, routine runs, interactive sessions).
 //!
-//! Same shape as `provider.rs`: a trait, a resolver ([`harness_for`]), a compile-time
+//! Same shape as `provider.rs`: a trait, a registry ([`harness_by_id`]) and profile resolvers ([`profiles`]), a compile-time
 //! object-safety assertion and a recipe for adding an implementation (bottom of this file).
 //! Requests are neutral (tool policy, session mode, access level, system prompt mode); each
 //! harness translates them to its own CLI. Capabilities are data ([`Caps`]) so callers can refuse
@@ -168,7 +168,7 @@ pub struct Interactive<'a> {
     pub system_prompt_mode: SystemPromptMode,
 }
 
-/// A way of running an AI agent or model. Synchronous and object-safe; see [`harness_for`].
+/// A way of running an AI agent or model. Synchronous and object-safe; see [`harness_by_id`].
 pub trait Harness: Send + Sync {
     /// Stable id (`"claude"`).
     fn id(&self) -> &'static str;
@@ -226,12 +226,55 @@ pub fn harness_for() -> &'static dyn Harness {
     &CLAUDE
 }
 
-/// The argv of an interactive session of the current harness.
-pub fn interactive_argv(opts: &Interactive<'_>) -> AppResult<Vec<String>> {
-    let harness = harness_for();
+/// The argv of an interactive session of the harness the `sessions` feature profile selects.
+pub fn interactive_argv(db: &crate::db::Db, opts: &Interactive<'_>) -> AppResult<Vec<String>> {
+    let resolved = profiles::resolve_feature(&db.0.lock().unwrap(), profiles::Feature::Sessions);
+    let harness = resolved.harness;
     harness
         .interactive_argv(opts)
         .ok_or_else(|| AppError::Other(format!("{} cannot open an interactive session like this", harness.name())))
+}
+
+/// What a run needs from its harness.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Needs {
+    pub access: Access,
+    /// The run uses tools (edits a worktree, runs commands).
+    pub tools: bool,
+    /// The run restricts tools to an allowlist.
+    pub tool_allowlist: bool,
+}
+
+/// Refuse a launch the harness cannot honour, naming the missing capability. `what` names the run
+/// for the message.
+pub fn check_caps(harness: &dyn Harness, what: &str, needs: &Needs) -> AppResult<()> {
+    let caps = harness.caps();
+    let missing = if needs.access != Access::Default
+        && !matches!(needs.access, Access::Native(_))
+        && !caps.access_levels.contains(&needs.access)
+    {
+        Some(format!("{} access", access_label(&needs.access)))
+    } else if needs.tools && !caps.tools {
+        Some("tools".to_string())
+    } else if needs.tool_allowlist && !caps.tool_allowlist {
+        Some("a tool allowlist".to_string())
+    } else {
+        None
+    };
+    match missing {
+        Some(missing) => Err(AppError::Other(format!("{} can't run {what}: it does not support {missing}", harness.name()))),
+        None => Ok(()),
+    }
+}
+
+fn access_label(access: &Access) -> &'static str {
+    match access {
+        Access::Default => "default",
+        Access::ReadOnly => "read-only",
+        Access::Edit => "edit",
+        Access::Full => "full",
+        Access::Native(_) => "native",
+    }
 }
 
 // Adding a harness
@@ -242,7 +285,7 @@ pub fn interactive_argv(opts: &Interactive<'_>) -> AppResult<Vec<String>> {
 //    flags, `SessionMode` to its session flags, `SystemPromptMode` to its prompt flags. Anything it
 //    cannot express must be reflected in `caps()` rather than silently dropped.
 // 3. Write argv/env snapshot tests and stream-line fixtures before wiring it (see `claude.rs`).
-// 4. Extend `harness_for` to pick it. No caller builds a command line itself.
+// 4. Add it to `harnesses()` so profiles can select it. No caller builds a command line itself.
 // 5. Auth stays in the CLI; never store a token in the app.
 
 #[cfg(test)]
@@ -263,5 +306,67 @@ mod tests {
             h.name()
         }
         assert_eq!(name(&ClaudeCode), "Claude Code");
+    }
+
+    /// A harness with chosen capabilities, for the launch checks.
+    struct Limited(Caps);
+
+    impl Harness for Limited {
+        fn id(&self) -> &'static str {
+            "limited"
+        }
+        fn name(&self) -> &'static str {
+            "Limited"
+        }
+        fn caps(&self) -> Caps {
+            self.0.clone()
+        }
+        fn available(&self) -> bool {
+            true
+        }
+        fn one_shot(&self, _: &OneShot<'_>) -> AppResult<TurnResult> {
+            unimplemented!()
+        }
+        fn spawn(&self, _: StreamRun<'_>) -> AppResult<Child> {
+            unimplemented!()
+        }
+        fn parse_line(&self, _: &str) -> (String, Option<Value>) {
+            unimplemented!()
+        }
+        fn final_result(&self, _: &Value) -> FinalResult {
+            unimplemented!()
+        }
+        fn is_own_process(&self, _: i32, _: Option<&str>) -> bool {
+            false
+        }
+        fn interactive_argv(&self, _: &Interactive<'_>) -> Option<Vec<String>> {
+            None
+        }
+    }
+
+    fn limited(access_levels: Vec<Access>, tools: bool, tool_allowlist: bool) -> Limited {
+        Limited(Caps { tools, tool_allowlist, access_levels, ..ClaudeCode.caps() })
+    }
+
+    fn needs(access: Access, tools: bool, tool_allowlist: bool) -> Needs {
+        Needs { access, tools, tool_allowlist }
+    }
+
+    #[test]
+    fn claude_satisfies_every_neutral_need() {
+        for access in [Access::ReadOnly, Access::Edit, Access::Full, Access::Native("plan".into())] {
+            check_caps(&ClaudeCode, "r", &needs(access, true, true)).unwrap();
+        }
+    }
+
+    #[test]
+    fn insufficient_caps_are_refused_naming_the_capability() {
+        let h = limited(vec![Access::ReadOnly], false, false);
+        let err = |n: Needs| check_caps(&h, "“Babysit”", &n).unwrap_err().to_string();
+        assert!(err(needs(Access::Full, false, false)).contains("full access"));
+        assert!(err(needs(Access::ReadOnly, true, false)).contains("tools"));
+        let e = err(needs(Access::ReadOnly, false, true));
+        assert!(e.contains("a tool allowlist") && e.contains("Limited") && e.contains("“Babysit”"), "{e}");
+        check_caps(&h, "r", &needs(Access::ReadOnly, false, false)).unwrap();
     }
 }

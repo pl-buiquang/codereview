@@ -6,7 +6,7 @@ use rusqlite::{params, Connection, OptionalExtension, Row};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use super::harness_by_id;
+use super::{harness_by_id, harness_for, Harness};
 use crate::error::{AppError, AppResult};
 
 /// A configured way of running an AI harness.
@@ -247,6 +247,94 @@ pub fn set_feature_profiles(conn: &mut Connection, map: &FeatureProfiles) -> App
     Ok(())
 }
 
+/// What a feature or routine runs with: the harness plus the profile's model and settings.
+pub struct Resolved {
+    /// The profile it came from; `None` when none exists (Claude Code with the legacy resolution).
+    pub profile_id: Option<i64>,
+    pub harness: &'static dyn Harness,
+    /// The profile's model; empty means the harness' own default.
+    pub model: String,
+    pub settings: Value,
+    pub host_id: Option<i64>,
+    /// Picked by a routine or a feature mapping rather than the global default.
+    pub explicit: bool,
+}
+
+impl Resolved {
+    /// No profile at all: Claude Code, empty model.
+    fn legacy() -> Self {
+        Self { profile_id: None, harness: harness_for(), model: String::new(), settings: json!({}), host_id: None, explicit: false }
+    }
+
+    fn from_profile(p: AiProfile, harness: &'static dyn Harness, explicit: bool) -> Self {
+        Self { profile_id: Some(p.id), harness, model: p.model, settings: p.settings, host_id: p.host_id, explicit }
+    }
+
+    /// The model of a request: `requested` (a launch override) wins, then the profile's. Claude
+    /// Code keeps its env-based fallback so Bedrock setups that rely on it still work.
+    pub fn model_for(&self, requested: &str) -> String {
+        let requested = requested.trim();
+        let model = if requested.is_empty() { self.model.as_str() } else { requested };
+        if self.harness.id() == "claude" {
+            resolve_model(Some(model.to_string()))
+        } else {
+            model.to_string()
+        }
+    }
+
+    /// The model of a feature that ships its own cheap default (`builtin`, a Claude model name): used
+    /// unless the feature was mapped to a profile that sets a model. The global default profile does
+    /// not apply, so choosing an expensive default for chat never makes summaries expensive.
+    pub fn model_or_builtin(&self, builtin: &str) -> String {
+        if self.explicit && !self.model.is_empty() {
+            self.model.clone()
+        } else if self.harness.id() == "claude" {
+            builtin.to_string()
+        } else {
+            String::new()
+        }
+    }
+}
+
+/// The model of a Claude run when nothing else names one:
+/// 1. the explicit model (profile, routine or launch override)
+/// 2. `CODEREVIEW_CHAT_MODEL` (manual override)
+/// 3. `ANTHROPIC_DEFAULT_OPUS_MODEL` (Bedrock ARN etc.)
+/// 4. empty: no `--model` flag, `claude` uses its own configured default
+pub fn resolve_model(model: Option<String>) -> String {
+    model
+        .filter(|m| !m.is_empty())
+        .or_else(|| std::env::var("CODEREVIEW_CHAT_MODEL").ok())
+        .or_else(|| std::env::var("ANTHROPIC_DEFAULT_OPUS_MODEL").ok())
+        .unwrap_or_default()
+}
+
+/// The first usable profile among `candidates` (earlier wins), else the default profile, else
+/// Claude Code with the legacy resolution. A missing or deleted profile, or one whose harness this
+/// build doesn't know, is skipped.
+pub fn resolve(conn: &Connection, candidates: &[Option<i64>]) -> Resolved {
+    let usable = |p: AiProfile| harness_by_id(&p.harness).map(|h| (p, h));
+    for id in candidates.iter().flatten() {
+        if let Some((p, h)) = get(conn, *id).ok().flatten().and_then(usable) {
+            return Resolved::from_profile(p, h, true);
+        }
+    }
+    match default_profile(conn).ok().flatten().and_then(usable) {
+        Some((p, h)) => Resolved::from_profile(p, h, false),
+        None => Resolved::legacy(),
+    }
+}
+
+/// A feature's profile: its mapping, else the default.
+pub fn resolve_feature(conn: &Connection, feature: Feature) -> Resolved {
+    resolve(conn, &[feature_profiles(conn).get(feature)])
+}
+
+/// A routine's profile: its own, else the default.
+pub fn resolve_routine(conn: &Connection, profile_id: Option<i64>) -> Resolved {
+    resolve(conn, &[profile_id])
+}
+
 const LEGACY_IMPORTED: &str = "ai_legacy_models_imported";
 
 /// One-time import of the chat and board-overview model fields that used to live in the frontend
@@ -423,5 +511,83 @@ mod tests {
         import_legacy_models(&mut conn, "", "").unwrap();
         assert_eq!(list(&conn).unwrap().len(), 1);
         assert_eq!(default_profile(&conn).unwrap().unwrap().model, "");
+    }
+
+    fn named(conn: &mut Connection, name: &str, model: &str) -> i64 {
+        let mut i = input(name);
+        i.model = model.into();
+        save(conn, i).unwrap().id
+    }
+
+    #[test]
+    fn resolution_order_is_routine_then_feature_then_default() {
+        let mut conn = open_memory();
+        let default = default_profile(&conn).unwrap().unwrap().id;
+        let routine = named(&mut conn, "R", "haiku");
+        let chat = named(&mut conn, "C", "opus");
+        set_feature_profiles(&mut conn, &FeatureProfiles { chat: Some(chat), ..Default::default() }).unwrap();
+
+        // The routine's own profile beats the feature's, which beats the default.
+        let r = resolve(&conn, &[Some(routine), Some(chat)]);
+        assert_eq!((r.profile_id, r.model.as_str(), r.explicit), (Some(routine), "haiku", true));
+        assert_eq!(resolve_feature(&conn, Feature::Chat).profile_id, Some(chat));
+        // A feature with no mapping, and a routine with no profile, get the default.
+        let t = resolve_feature(&conn, Feature::Theme);
+        assert_eq!((t.profile_id, t.explicit), (Some(default), false));
+        assert_eq!(resolve_routine(&conn, None).profile_id, Some(default));
+    }
+
+    #[test]
+    fn a_deleted_or_missing_profile_falls_back_to_the_default() {
+        let mut conn = open_memory();
+        let default = default_profile(&conn).unwrap().unwrap().id;
+        assert_eq!(resolve_routine(&conn, Some(999)).profile_id, Some(default));
+        let gone = named(&mut conn, "Gone", "haiku");
+        conn.execute("DELETE FROM ai_profile WHERE id = ?1", [gone]).unwrap();
+        assert_eq!(resolve(&conn, &[Some(gone), None]).profile_id, Some(default));
+    }
+
+    #[test]
+    fn a_profile_of_an_unknown_harness_is_skipped() {
+        let conn = open_memory();
+        let default = default_profile(&conn).unwrap().unwrap().id;
+        conn.execute("INSERT INTO ai_profile (name, harness, created_at, updated_at) VALUES ('Future', 'zed', 'n', 'n')", []).unwrap();
+        let future = conn.last_insert_rowid();
+        assert_eq!(resolve_routine(&conn, Some(future)).profile_id, Some(default));
+    }
+
+    #[test]
+    fn no_default_profile_means_claude_with_the_legacy_resolution() {
+        let conn = open_memory();
+        conn.execute("DELETE FROM ai_profile", []).unwrap();
+        let r = resolve_routine(&conn, None);
+        assert_eq!((r.profile_id, r.harness.id(), r.model.as_str(), r.explicit), (None, "claude", "", false));
+    }
+
+    #[test]
+    fn model_for_prefers_the_request_then_the_profile_then_the_env_fallback() {
+        let mut conn = open_memory();
+        let id = named(&mut conn, "M", "sonnet");
+        let r = resolve_routine(&conn, Some(id));
+        assert_eq!(r.model_for("opus"), "opus");
+        assert_eq!(r.model_for("  "), "sonnet");
+        // No model anywhere: the legacy env variables (this test doesn't set them, so it is empty
+        // unless the machine does).
+        let empty = resolve_routine(&conn, None);
+        assert_eq!(empty.model_for(""), resolve_model(None));
+    }
+
+    #[test]
+    fn builtin_models_apply_unless_the_feature_profile_sets_one() {
+        let mut conn = open_memory();
+        // The default profile's model never leaks into a feature with a cheap built-in model.
+        conn.execute("UPDATE ai_profile SET model = 'opus' WHERE is_default = 1", []).unwrap();
+        assert_eq!(resolve_feature(&conn, Feature::Summaries).model_or_builtin("haiku"), "haiku");
+        // A feature mapped to a profile with a model uses it; without a model, the built-in.
+        let with = named(&mut conn, "With", "sonnet");
+        let without = named(&mut conn, "Without", "");
+        set_feature_profiles(&mut conn, &FeatureProfiles { summaries: Some(with), theme: Some(without), ..Default::default() }).unwrap();
+        assert_eq!(resolve_feature(&conn, Feature::Summaries).model_or_builtin("haiku"), "sonnet");
+        assert_eq!(resolve_feature(&conn, Feature::Theme).model_or_builtin("sonnet"), "sonnet");
     }
 }

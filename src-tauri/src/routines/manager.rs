@@ -19,7 +19,8 @@ use tauri_plugin_notification::NotificationExt;
 use super::context::{self, ContextRef, Light};
 use super::handlers;
 use super::{get as get_routine, Routine};
-use crate::ai::{self, Access, SystemPromptMode, ToolPolicy};
+use crate::ai::profiles;
+use crate::ai::{self, ToolPolicy};
 use crate::ai_usage::{self, RunTag};
 use crate::commands::chat::new_session_id;
 use crate::commands::focus::child_path;
@@ -634,7 +635,11 @@ impl EventSink for AppSink {
         if !run.note.trim().is_empty() {
             system.push_str(&format!("\n\n## Extra instructions for this run\n{}", run.note.trim()));
         }
-        let model = handlers::effective_model(&run, &routine);
+        let (model, harness) = {
+            let db = app.state::<Db>();
+            let conn = db.0.lock().unwrap();
+            (handlers::effective_model(&conn, &run, &routine), profiles::resolve_routine(&conn, routine.profile_id).harness.id())
+        };
         log::info!(target: "routines", "run {}: starting {} on {}", run.id, routine.key, run.context_label);
         Ok(Some(build_prepared(
             &routine,
@@ -645,7 +650,7 @@ impl EventSink for AppSink {
             system,
             prompt,
             &app.state::<DbPath>().0,
-            handlers::usage_tag(&routine, &run),
+            handlers::usage_tag(&routine, &run, harness),
         )))
     }
 
@@ -673,7 +678,12 @@ impl EventSink for AppSink {
             }
         }
         if let Some((run, routine)) = &loaded {
-            let mut tag = handlers::usage_tag(routine, run);
+            let harness = {
+                let db = app.state::<Db>();
+                let conn = db.0.lock().unwrap();
+                profiles::resolve_routine(&conn, routine.profile_id).harness.id()
+            };
+            let mut tag = handlers::usage_tag(routine, run, harness);
             tag.model = if run.model.is_empty() { routine.model.clone() } else { run.model.clone() };
             ai_usage::record(&tag, &fin.started_at, fin.elapsed.as_millis() as i64, &fin.usage, fin.usage_error.as_deref());
         }
@@ -693,6 +703,7 @@ fn build_prepared(
     db_path: &Path,
     usage_tag: RunTag,
 ) -> Prepared {
+    let opts = routine.run_options(usage_tag.harness);
     let mut env: Vec<(String, std::ffi::OsString)> = vec![("CODEREVIEW_DB".into(), db_path.into())];
     if let Some(path) = child_path() {
         env.push(("PATH".into(), path));
@@ -700,19 +711,15 @@ fn build_prepared(
     Prepared {
         model,
         system_prompt,
-        system_prompt_mode: if routine.system_prompt_mode == "replace" {
-            SystemPromptMode::Replace
-        } else {
-            SystemPromptMode::Append
-        },
+        system_prompt_mode: opts.system_prompt_mode,
         prompt,
         cwd,
         extra_dirs: prep.extra_dirs.clone(),
-        tools: ToolPolicy::Allowlist(routine.allowed_tools.iter().chain(&prep.extra_tools).cloned().collect()),
-        access: Access::Native(routine.permission_mode.clone()),
+        tools: ToolPolicy::Allowlist(opts.allowed_tools.iter().chain(&prep.extra_tools).cloned().collect()),
+        access: opts.access,
         session_id,
         env,
-        extra_args: routine.extra_args.clone(),
+        extra_args: opts.extra_args,
         usage_tag,
         timeout: Duration::from_secs(routine.timeout_min.max(1) as u64 * 60),
         cleanup: prep.cleanup.clone(),
@@ -844,11 +851,16 @@ mod tests {
             context_type: "pr".into(),
             prompt_template: String::new(),
             system_prompt: String::new(),
-            system_prompt_mode: mode.into(),
+            kind: "plain".into(),
             needs_worktree: false,
-            permission_mode: "acceptEdits".into(),
-            allowed_tools: vec!["Bash(git:*)".into(), "Read".into()],
-            extra_args: vec!["--effort".into(), "high".into()],
+            access: "edit".into(),
+            harness_overrides: serde_json::json!({ "claude": {
+                "permission_mode": "acceptEdits",
+                "allowed_tools": ["Bash(git:*)", "Read"],
+                "extra_args": ["--effort", "high"],
+                "system_prompt_mode": mode,
+            }}),
+            profile_id: None,
             model: String::new(),
             timeout_min: 1,
             builtin: false,
@@ -896,8 +908,7 @@ mod tests {
     fn stream_command_omits_empty_tools_and_model() {
         use crate::test_support::{argv, strs};
         let mut routine = test_routine("append");
-        routine.allowed_tools.clear();
-        routine.extra_args.clear();
+        routine.harness_overrides = serde_json::json!({ "claude": { "permission_mode": "acceptEdits" } });
         let prep = handlers::Prep::default();
         let p = build_prepared(&routine, &prep, "/r".into(), String::new(), "s".into(), String::new(), "p".into(), Path::new("/d"), RunTag::new("t"));
         let cmd = crate::ai::claude::command(&p.request(Path::new("/p")), true, Some(Path::new("/p")));

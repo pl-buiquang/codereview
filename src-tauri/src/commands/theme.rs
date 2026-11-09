@@ -3,7 +3,8 @@
 use tauri::State;
 
 use crate::ai_usage::RunTag;
-use crate::ai::{self, Access, OneShot, SessionMode, SystemPrompt, SystemPromptMode, ToolPolicy};
+use crate::ai::profiles::{self, Feature};
+use crate::ai::{Access, OneShot, SessionMode, SystemPrompt, SystemPromptMode, ToolPolicy};
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
 
@@ -25,9 +26,11 @@ fn suggest_request<'a>(
     prompt: &'a str,
     scope: &'a str,
     inspiration: &str,
+    model: &'a str,
+    harness: &'static str,
 ) -> OneShot<'a> {
     OneShot {
-        model: MODEL,
+        model,
         system_prompt: Some(SystemPrompt::Text(system)),
         system_prompt_mode: SystemPromptMode::Replace,
         file_tag: "theme_suggest",
@@ -41,7 +44,7 @@ fn suggest_request<'a>(
         effort: Some("medium"),
         env: vec![("CLAUDE_SUMMARY_RUNNING".into(), "1".into())],
         extra_args: Vec::new(),
-        usage_tag: RunTag::new("theme_suggest").variant(scope).label(inspiration.to_string()),
+        usage_tag: RunTag::new("theme_suggest").variant(scope).label(inspiration.to_string()).harness(harness),
     }
 }
 
@@ -56,9 +59,12 @@ pub async fn theme_suggest(
     db: State<'_, Db>,
 ) -> AppResult<String> {
     crate::ai_gate::ensure_enabled()?;
-    if !ai::harness_for().available() {
-        return Err(AppError::Other("the `claude` CLI was not found on PATH".into()));
+    let resolved = profiles::resolve_feature(&db.0.lock().unwrap(), Feature::Theme);
+    let harness = resolved.harness;
+    if !harness.available() {
+        return Err(AppError::Other(format!("the `{}` CLI was not found on PATH", harness.id())));
     }
+    let model = resolved.model_or_builtin(MODEL);
     if !SCOPES.contains(&scope.as_str()) {
         return Err(AppError::Other(format!("unknown theme scope: {scope}")));
     }
@@ -70,7 +76,7 @@ pub async fn theme_suggest(
     let turn = tauri::async_runtime::spawn_blocking(move || {
         let cwd = std::env::temp_dir().join("codereview_theme_suggest");
         std::fs::create_dir_all(&cwd)?;
-        ai::harness_for().one_shot(&suggest_request(&system, &cwd, &prompt, &scope, inspiration.trim()))
+        harness.one_shot(&suggest_request(&system, &cwd, &prompt, &scope, inspiration.trim(), &model, harness.id()))
     })
     .await
     .map_err(|e| AppError::Other(format!("theme task failed: {e}")))??;
@@ -101,7 +107,7 @@ mod tests {
     fn suggest_run_argv_and_env() {
         use crate::test_support::{argv, envs, strs};
         let cwd = std::path::Path::new("/tmp/codereview_theme_suggest");
-        let req = suggest_request("sys", cwd, "prompt", "syntax", "nordic");
+        let req = suggest_request("sys", cwd, "prompt", "syntax", "nordic", "sonnet", "claude");
         let cmd = crate::ai::claude::command(&req, false, Some(std::path::Path::new("/tmp/codereview_theme_suggest.txt")));
         assert_eq!(
             argv(&cmd),

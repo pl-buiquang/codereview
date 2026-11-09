@@ -1096,6 +1096,24 @@ export interface RoutineContextRef {
   base_paths: string[];
 }
 
+/** `plain` routines are editable; `system` ones have a Rust handler and expose four fields. */
+export type RoutineKind = "plain" | "system";
+
+/** The neutral permission level of a routine; each harness translates it. */
+export type RoutineAccess = "read_only" | "edit" | "full";
+
+/** Claude Code's own routine options (`harness_overrides.claude`). */
+export interface ClaudeOverrides {
+  /** A native `--permission-mode`; empty derives it from the access. */
+  permission_mode: string;
+  allowed_tools: string[];
+  extra_args: string[];
+  system_prompt_mode: "append" | "replace";
+}
+
+/** Per-harness details of a routine, keyed by harness id. */
+export type HarnessOverrides = { claude?: Partial<ClaudeOverrides> } & Record<string, unknown>;
+
 export interface Routine {
   id: number;
   key: string;
@@ -1104,11 +1122,12 @@ export interface Routine {
   context_type: RoutineContextKind;
   prompt_template: string;
   system_prompt: string;
-  system_prompt_mode: "append" | "replace";
+  kind: RoutineKind;
   needs_worktree: boolean;
-  permission_mode: string;
-  allowed_tools: string[];
-  extra_args: string[];
+  access: RoutineAccess;
+  harness_overrides: HarnessOverrides;
+  /** Null: the default profile. */
+  profile_id: number | null;
   model: string;
   timeout_min: number;
   builtin: boolean;
@@ -1116,7 +1135,7 @@ export interface Routine {
   enabled: boolean;
 }
 
-export type RoutineInput = Omit<Routine, "id" | "key" | "builtin" | "handler"> & { id: number | null };
+export type RoutineInput = Omit<Routine, "id" | "key" | "builtin" | "handler" | "kind"> & { id: number | null };
 
 export type RoutineRunStatus =
   | "queued"

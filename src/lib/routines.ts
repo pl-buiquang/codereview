@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { listen } from "@tauri-apps/api/event";
 import { api } from "./api";
-import type { BoardCard, RoutineRun, RoutineRunStatus } from "./types";
+import type { BoardCard, ClaudeOverrides, HarnessOverrides, RoutineRun, RoutineRunStatus } from "./types";
 
 export const ROUTINE_RUN_UPDATED_EVENT = "routine-run-updated";
 export const ROUTINE_RUN_EVENT = "routine-run-event";
@@ -174,4 +174,31 @@ export function buildTranscript(lines: string[]): TranscriptItem[] {
     }
   }
   return items;
+}
+
+/** The Claude Code options of a routine, with defaults for what is missing. */
+export function claudeOptions(overrides: HarnessOverrides): ClaudeOverrides {
+  const c = overrides.claude ?? {};
+  return {
+    permission_mode: c.permission_mode ?? "",
+    allowed_tools: c.allowed_tools ?? [],
+    extra_args: c.extra_args ?? [],
+    system_prompt_mode: c.system_prompt_mode ?? "append",
+  };
+}
+
+/** `overrides` with the Claude options patched; other harnesses' entries are kept. */
+export function withClaudeOptions(overrides: HarnessOverrides, patch: Partial<ClaudeOverrides>): HarnessOverrides {
+  return { ...overrides, claude: { ...claudeOptions(overrides), ...patch } };
+}
+
+export const ACCESS_LABEL = { read_only: "Read only", edit: "Edit files", full: "Full access" } as const;
+
+/** The harness a profile choice resolves to: the chosen profile's, else the default profile's. */
+export function resolvedHarness(
+  profileId: number | null,
+  profiles: { id: number; harness: string; is_default: boolean }[],
+): string {
+  const chosen = profiles.find((p) => p.id === profileId) ?? profiles.find((p) => p.is_default);
+  return chosen?.harness ?? "claude";
 }

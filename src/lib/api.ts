@@ -202,8 +202,9 @@ export const api = {
   setAiEnabled: (enabled: boolean) => invoke<void>("set_ai_enabled", { enabled }),
   readAppLog: (maxLines: number) => invoke<string>("read_app_log", { maxLines }),
 
-  chatSend: (reviewId: number, text: string, model?: string) =>
-    invoke<ChatTurnResult>("chat_send", { reviewId, text, model: model || null }),
+  chatSend: (reviewId: number, text: string, profileId?: number | null) =>
+    invoke<ChatTurnResult>("chat_send", { reviewId, text, profileId: profileId ?? null }),
+  chatProfileId: (reviewId: number) => invoke<number | null>("chat_profile_id", { reviewId }),
   chatMessages: (reviewId: number) =>
     invoke<ChatMessage[]>("chat_messages", { reviewId }),
   chatClear: (reviewId: number) =>

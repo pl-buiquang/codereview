@@ -4,6 +4,7 @@
 use serde::Serialize;
 use tauri::{AppHandle, Manager, State};
 
+use crate::ai::profiles;
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
 use crate::routines::context::{self, ContextRef};
@@ -64,10 +65,12 @@ pub fn launch(
     model: &str,
 ) -> AppResult<RoutineRun> {
     crate::ai_gate::ensure_enabled()?;
-    if !crate::ai::harness_for().available() {
-        return Err(AppError::Other("the `claude` CLI was not found on PATH".into()));
-    }
     let db = app.state::<Db>();
+    let harness = profiles::resolve_routine(&db.0.lock().unwrap(), routine.profile_id).harness;
+    if !harness.available() {
+        return Err(AppError::Other(format!("the `{}` CLI was not found on PATH", harness.id())));
+    }
+    crate::ai::check_caps(harness, &format!("“{}”", routine.name), &routines::launch_needs(routine, harness.id()))?;
     let light = context::light(&db, context)?;
     if !context::eligible(routine, &light) {
         return Err(AppError::Other(format!("“{}” can't run on {}", routine.name, light.label)));

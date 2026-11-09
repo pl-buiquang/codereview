@@ -52,7 +52,7 @@ export function ChatPanel({
   });
 
   const sendMutation = useMutation({
-    mutationFn: (text: string) => api.chatSend(reviewId, text, chatModel || undefined),
+    mutationFn: (text: string) => api.chatSend(reviewId, text),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["chat-messages", reviewId] });
       queryClient.invalidateQueries({ queryKey: ["chat-branch", reviewId] });

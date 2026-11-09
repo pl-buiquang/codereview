@@ -6,7 +6,8 @@ use tauri::State;
 
 use std::path::Path;
 
-use crate::ai::{self, Access, OneShot, SessionMode, SystemPrompt, SystemPromptMode, ToolPolicy, TurnResult};
+use crate::ai::profiles::{self, Feature};
+use crate::ai::{self, Access, Harness, OneShot, SessionMode, SystemPrompt, SystemPromptMode, ToolPolicy, TurnResult};
 use crate::claude_sessions::{self, ClaudeSession};
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
@@ -69,7 +70,7 @@ fn session_tag(variant: &str, session: &ClaudeSession) -> crate::ai_usage::RunTa
     crate::ai_usage::RunTag::new("session_summary").variant(variant).label(format!("{project} ({short})"))
 }
 
-fn fork_request<'a>(session: &'a ClaudeSession, prompt: &'a str) -> OneShot<'a> {
+fn fork_request<'a>(session: &'a ClaudeSession, prompt: &'a str, harness: &'static str) -> OneShot<'a> {
     OneShot {
         model: "",
         system_prompt: None,
@@ -85,13 +86,13 @@ fn fork_request<'a>(session: &'a ClaudeSession, prompt: &'a str) -> OneShot<'a> 
         effort: None,
         env: vec![("CLAUDE_SUMMARY_RUNNING".into(), "1".into())],
         extra_args: Vec::new(),
-        usage_tag: session_tag("fork", session),
+        usage_tag: session_tag("fork", session).harness(harness),
     }
 }
 
-fn run_fork_summary(session: &ClaudeSession, instructions: &str) -> AppResult<TurnResult> {
+fn run_fork_summary(harness: &dyn Harness, session: &ClaudeSession, instructions: &str) -> AppResult<TurnResult> {
     let prompt = format!("{instructions}\n\nSummarize this conversation so far. Do not call any tools.");
-    ai::harness_for().one_shot(&fork_request(session, &prompt))
+    harness.one_shot(&fork_request(session, &prompt, harness.id()))
 }
 
 fn extract_request<'a>(
@@ -100,9 +101,11 @@ fn extract_request<'a>(
     file_tag: &'a str,
     cwd: &'a Path,
     prompt: &'a str,
+    model: &'a str,
+    harness: &'static str,
 ) -> OneShot<'a> {
     OneShot {
-        model: EXTRACT_MODEL,
+        model,
         system_prompt: Some(SystemPrompt::Text(instructions)),
         system_prompt_mode: SystemPromptMode::Replace,
         file_tag,
@@ -116,11 +119,11 @@ fn extract_request<'a>(
         effort: Some("low"),
         env: vec![("CLAUDE_SUMMARY_RUNNING".into(), "1".into())],
         extra_args: Vec::new(),
-        usage_tag: session_tag("extract", session),
+        usage_tag: session_tag("extract", session).harness(harness),
     }
 }
 
-fn run_extract_summary(session: &ClaudeSession, instructions: &str) -> AppResult<TurnResult> {
+fn run_extract_summary(harness: &dyn Harness, session: &ClaudeSession, instructions: &str, model: &str) -> AppResult<TurnResult> {
     let transcript = claude_sessions::transcript_path(&session.session_id)
         .and_then(|p| session_summaries::transcript_extract(&p, EXTRACT_MAX_BYTES))
         .ok_or_else(|| AppError::Other("no conversation to summarize yet".into()))?;
@@ -128,7 +131,7 @@ fn run_extract_summary(session: &ClaudeSession, instructions: &str) -> AppResult
     std::fs::create_dir_all(&cwd)?;
     let prompt = format!("<transcript>\n{transcript}</transcript>\nSummarize the transcript above.");
     let file_tag = format!("live_summary_{}", session.session_id);
-    ai::harness_for().one_shot(&extract_request(session, instructions, &file_tag, &cwd, &prompt))
+    harness.one_shot(&extract_request(session, instructions, &file_tag, &cwd, &prompt, model, harness.id()))
 }
 
 /// Summarize a running session and store it apart from the hook-written summaries. By default a
@@ -142,13 +145,19 @@ pub async fn generate_live_session_summary(
     db: State<'_, Db>,
 ) -> AppResult<SessionSummary> {
     crate::ai_gate::ensure_enabled()?;
-    if !ai::harness_for().available() {
-        return Err(AppError::Other("the `claude` CLI was not found on PATH".into()));
-    }
-    let instructions = {
+    let (instructions, resolved) = {
         let conn = db.0.lock().unwrap();
-        crate::prompts::resolve(&conn, crate::prompts::SESSION_LIVE_SUMMARY)?
+        (
+            crate::prompts::resolve(&conn, crate::prompts::SESSION_LIVE_SUMMARY)?,
+            profiles::resolve_feature(&conn, Feature::Summaries),
+        )
     };
+    let harness = resolved.harness;
+    if !harness.available() {
+        return Err(AppError::Other(format!("the `{}` CLI was not found on PATH", harness.id())));
+    }
+    let extract_model = resolved.model_or_builtin(EXTRACT_MODEL);
+    let stored_model = extract_model.clone();
     let (turn, mode, session_id) = tauri::async_runtime::spawn_blocking(move || {
         let session = claude_sessions::live_sessions()
             .into_iter()
@@ -156,17 +165,17 @@ pub async fn generate_live_session_summary(
             .ok_or_else(|| AppError::Other("this session is not running".into()))?;
         let warm = chrono::Utc::now().timestamp_millis() - session.updated_at < FORK_MAX_AGE_MS;
         if fork && warm {
-            if let Ok(turn) = run_fork_summary(&session, &instructions) {
+            if let Ok(turn) = run_fork_summary(harness, &session, &instructions) {
                 return Ok((turn, "fork", session.session_id));
             }
         }
-        run_extract_summary(&session, &instructions).map(|turn| (turn, "extract", session.session_id))
+        run_extract_summary(harness, &session, &instructions, &extract_model).map(|turn| (turn, "extract", session.session_id))
     })
     .await
     .map_err(|e| AppError::Other(format!("summary task failed: {e}")))??;
     let (title, body) = session_summaries::split_title(&turn.text);
     let generated_at = chrono::Utc::now().to_rfc3339();
-    let model = (mode == "extract").then(|| EXTRACT_MODEL.to_string());
+    let model = (mode == "extract" && !stored_model.is_empty()).then_some(stored_model);
     let conn = db.0.lock().unwrap();
     conn.execute(
         "INSERT INTO live_session_summary (session_id, title, body, generated_at, model, mode, input_tokens, output_tokens, cost_usd)
@@ -197,6 +206,7 @@ pub async fn resume_claude_session(
     host: terminal::TerminalHost,
     tmux_target: terminal::TmuxTarget,
     tmux_session: String,
+    db: State<'_, Db>,
 ) -> AppResult<()> {
     if claude_sessions::live_sessions().iter().any(|s| s.session_id == session_id) {
         return Err(AppError::Other("this session is already running — focus it instead".into()));
@@ -206,7 +216,7 @@ pub async fn resume_claude_session(
     }
     let repo = repo.unwrap_or_else(|| cwd.trim_end_matches('/').rsplit('/').next().unwrap_or(&cwd).to_string());
     let window_name: String = session_id.chars().take(8).collect();
-    let argv = ai::interactive_argv(&ai::Interactive {
+    let argv = ai::interactive_argv(&db, &ai::Interactive {
         session: SessionMode::Resume(&session_id),
         system_prompt_file: None,
         system_prompt_mode: SystemPromptMode::Append,
@@ -404,7 +414,7 @@ pub async fn review_open_agent(
         Some(n) => format!("#{n}"),
         None => target.head_ref.clone(),
     };
-    let argv = ai::interactive_argv(&ai::Interactive {
+    let argv = ai::interactive_argv(&db, &ai::Interactive {
         session: resume.as_deref().map_or(SessionMode::Ephemeral, SessionMode::Resume),
         system_prompt_file: None,
         system_prompt_mode: SystemPromptMode::Append,
@@ -528,7 +538,7 @@ mod tests {
         use crate::test_support::{argv, envs, strs};
         let sess = session("abcdef123456", None, None);
         let cwd = std::path::Path::new("/tmp/codereview_live_summary");
-        let req = extract_request(&sess, "instr", "live_summary_abcdef123456", cwd, "p");
+        let req = extract_request(&sess, "instr", "live_summary_abcdef123456", cwd, "p", "haiku", "claude");
         let cmd = crate::ai::claude::command(&req, false, Some(std::path::Path::new("/tmp/codereview_live_summary_abcdef123456.txt")));
         assert_eq!(
             argv(&cmd),
@@ -546,7 +556,7 @@ mod tests {
     fn fork_summary_argv_and_env() {
         use crate::test_support::{argv, envs, strs};
         let sess = session("sid-1", None, None);
-        let req = fork_request(&sess, "p");
+        let req = fork_request(&sess, "p", "claude");
         let cmd = crate::ai::claude::command(&req, false, None);
         assert_eq!(
             argv(&cmd),

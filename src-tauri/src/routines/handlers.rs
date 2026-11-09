@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use chrono::Utc;
-use rusqlite::params;
+use rusqlite::{params, Connection};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -16,7 +16,7 @@ use super::context::{ContextRef, Light};
 use super::manager::{get_run, routine_settings, RoutineRun};
 use super::Routine;
 use crate::ai_usage::{RunTag, RunUsage};
-use crate::commands::chat::resolve_model;
+use crate::ai::profiles;
 use crate::commands::focus::{begin_generation, finish_generation, review_local_path};
 use crate::commands::{board::board_list_impl, overview, review::ensure_draft};
 use crate::db::{Db, DbPath};
@@ -71,9 +71,16 @@ fn emit_report(app: &AppHandle, review_id: i64, status: &'static str, error: Opt
 /// Open-card ids each overview run was generated from, until the run ends.
 static OVERVIEW_IDS: Mutex<Option<HashMap<i64, Vec<String>>>> = Mutex::new(None);
 
-/// The model a run asks for: the launch override, else the routine's, else the app-wide default.
-pub fn effective_model(run: &RoutineRun, routine: &Routine) -> String {
-    resolve_model(Some(if run.model.is_empty() { routine.model.clone() } else { run.model.clone() }))
+/// The model a launch asks for: the launch override, else the routine's own, else its profile's
+/// (the routine's, else the default profile), with the legacy env fallback for Claude Code.
+pub fn launch_model(conn: &Connection, routine: &Routine, requested: &str) -> String {
+    let requested = if requested.trim().is_empty() { routine.model.as_str() } else { requested };
+    profiles::resolve_routine(conn, routine.profile_id).model_for(requested)
+}
+
+/// The model a run asks for.
+pub fn effective_model(conn: &Connection, run: &RoutineRun, routine: &Routine) -> String {
+    launch_model(conn, routine, &run.model)
 }
 
 fn review_id(ctx: &ContextRef) -> AppResult<i64> {
@@ -85,7 +92,7 @@ fn layer(routine: &Routine) -> String {
 }
 
 /// Usage-log tag: converted jobs keep the feature names they had before they ran as routines.
-pub fn usage_tag(routine: &Routine, run: &RoutineRun) -> RunTag {
+pub fn usage_tag(routine: &Routine, run: &RoutineRun, harness: &'static str) -> RunTag {
     let review = review_id(&run.context).ok();
     let tag = match routine.handler.as_deref() {
         Some("overview") => RunTag::new("board_overview").label("Board overview"),
@@ -96,8 +103,10 @@ pub fn usage_tag(routine: &Routine, run: &RoutineRun) -> RunTag {
             return RunTag::new("routine")
                 .variant(routine.key.clone())
                 .label(format!("{} · {}", routine.name, run.context_label))
+                .harness(harness)
         }
     };
+    let tag = tag.harness(harness);
     match review {
         Some(id) if routine.handler.as_deref() != Some("overview") => tag.review(id),
         _ => tag,
@@ -118,8 +127,10 @@ pub fn pre_launch(app: &AppHandle, routine: &Routine, ctx: &ContextRef, light: &
         }
         Some("focus") => {
             let id = review_id(ctx)?;
-            let model = resolve_model(Some(if model.is_empty() { routine.model.clone() } else { model.to_string() }));
-            begin_generation(&db.0.lock().unwrap(), id, &model)?;
+            let conn = db.0.lock().unwrap();
+            let model = launch_model(&conn, routine, model);
+            begin_generation(&conn, id, &model)?;
+            drop(conn);
             let _ = app.emit("focus-updated", FocusUpdated { review_id: id });
         }
         Some("ai_review") => {
@@ -301,9 +312,9 @@ pub fn finish(app: &AppHandle, routine: &Routine, run: &RoutineRun, status: &str
         Some("overview") => {
             let ids = OVERVIEW_IDS.lock().unwrap().as_mut().and_then(|m| m.remove(&run.id)).unwrap_or_default();
             if succeeded && !text.trim().is_empty() {
-                let model = effective_model(run, routine);
                 let db = app.state::<Db>();
                 let conn = db.0.lock().unwrap();
+                let model = effective_model(&conn, run, routine);
                 let saved = conn.execute(
                     "INSERT INTO board_overview (id, markdown, generated_at, model, card_count, input_tokens, output_tokens, cost_usd, card_ids)
                      VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
@@ -398,4 +409,56 @@ pub fn active_ai_review_layer(conn: &rusqlite::Connection, review_id: i64) -> Op
     )
     .ok()
     .map(|k| k.strip_prefix(AI_REVIEW_PREFIX).unwrap_or(&k).to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ai::profiles::{save, AiProfileInput};
+    use crate::db::open_memory;
+
+    fn profile(conn: &mut Connection, model: &str) -> i64 {
+        let input = AiProfileInput {
+            id: None,
+            name: format!("p-{model}"),
+            harness: "claude".into(),
+            model: model.into(),
+            settings: serde_json::json!({}),
+            host_id: None,
+            is_default: false,
+        };
+        save(conn, input).unwrap().id
+    }
+
+    fn routine(conn: &Connection, key: &str) -> Routine {
+        crate::routines::seed(conn).unwrap();
+        crate::routines::list(conn).unwrap().into_iter().find(|r| r.key == key).unwrap()
+    }
+
+    #[test]
+    fn launch_model_order_is_launch_then_routine_then_profile_then_default_profile() {
+        let mut conn = open_memory();
+        let mut r = routine(&conn, "focus");
+        conn.execute("UPDATE ai_profile SET model = 'opus' WHERE is_default = 1", []).unwrap();
+
+        // No profile of its own: the default profile's model.
+        assert_eq!(launch_model(&conn, &r, ""), "opus");
+        // Its own profile.
+        r.profile_id = Some(profile(&mut conn, "haiku"));
+        assert_eq!(launch_model(&conn, &r, ""), "haiku");
+        // The routine's own model, then the launch override.
+        r.model = "sonnet".into();
+        assert_eq!(launch_model(&conn, &r, ""), "sonnet");
+        assert_eq!(launch_model(&conn, &r, "fable"), "fable");
+    }
+
+    #[test]
+    fn a_deleted_routine_profile_falls_back_to_the_default_profile() {
+        let mut conn = open_memory();
+        let mut r = routine(&conn, "focus");
+        conn.execute("UPDATE ai_profile SET model = 'opus' WHERE is_default = 1", []).unwrap();
+        r.profile_id = Some(profile(&mut conn, "haiku"));
+        conn.execute("DELETE FROM ai_profile WHERE id = ?1", [r.profile_id.unwrap()]).unwrap();
+        assert_eq!(launch_model(&conn, &r, ""), "opus");
+    }
 }

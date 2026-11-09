@@ -8,10 +8,21 @@ pub mod manager;
 
 use rusqlite::{params, Connection, OptionalExtension, Row};
 use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+
+use crate::ai::{Access, Needs, SystemPromptMode};
 
 use crate::error::{AppError, AppResult};
 
 pub const BABYSIT_KEY: &str = "babysit";
+
+/// `plain` routines are editable and may run anywhere; `system` ones have a Rust handler, run
+/// locally and only expose their profile, model, timeout and enabled flag.
+pub const KIND_PLAIN: &str = "plain";
+pub const KIND_SYSTEM: &str = "system";
+
+/// The neutral access levels of a routine, least to most.
+pub const ACCESS_LEVELS: &[&str] = &["read_only", "edit", "full"];
 
 /// A routine definition, as stored and as edited in the Config tab.
 #[derive(Debug, Clone, Serialize)]
@@ -23,11 +34,14 @@ pub struct Routine {
     pub context_type: String,
     pub prompt_template: String,
     pub system_prompt: String,
-    pub system_prompt_mode: String,
+    pub kind: String,
     pub needs_worktree: bool,
-    pub permission_mode: String,
-    pub allowed_tools: Vec<String>,
-    pub extra_args: Vec<String>,
+    /// `read_only`, `edit` or `full`; each harness translates it.
+    pub access: String,
+    /// Per-harness details keyed by harness id (`{"claude": {permission_mode, allowed_tools,
+    /// extra_args, system_prompt_mode}}`).
+    pub harness_overrides: Value,
+    pub profile_id: Option<i64>,
     pub model: String,
     pub timeout_min: i64,
     pub builtin: bool,
@@ -35,12 +49,54 @@ pub struct Routine {
     pub enabled: bool,
 }
 
+/// The Claude Code part of a routine's `harness_overrides`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClaudeOptions {
+    /// A native `--permission-mode`; `None` derives it from the routine's access.
+    pub permission_mode: Option<String>,
+    pub allowed_tools: Vec<String>,
+    pub extra_args: Vec<String>,
+    pub system_prompt_mode: SystemPromptMode,
+}
+
+impl ClaudeOptions {
+    fn from_overrides(overrides: &Value) -> Self {
+        let claude = overrides.get("claude").unwrap_or(&Value::Null);
+        let list = |key: &str| -> Vec<String> {
+            claude
+                .get(key)
+                .and_then(Value::as_array)
+                .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+                .unwrap_or_default()
+        };
+        Self {
+            permission_mode: claude
+                .get("permission_mode")
+                .and_then(Value::as_str)
+                .filter(|m| !m.is_empty())
+                .map(str::to_string),
+            allowed_tools: list("allowed_tools"),
+            extra_args: list("extra_args"),
+            system_prompt_mode: match claude.get("system_prompt_mode").and_then(Value::as_str) {
+                Some("replace") => SystemPromptMode::Replace,
+                _ => SystemPromptMode::Append,
+            },
+        }
+    }
+}
+
+/// What a harness gets from a routine's definition.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RunOptions {
+    pub system_prompt_mode: SystemPromptMode,
+    pub allowed_tools: Vec<String>,
+    pub extra_args: Vec<String>,
+    pub access: Access,
+}
+
 impl Routine {
     pub fn from_row(row: &Row) -> rusqlite::Result<Self> {
-        let json_list = |col: &str| -> rusqlite::Result<Vec<String>> {
-            let raw: String = row.get(col)?;
-            Ok(serde_json::from_str(&raw).unwrap_or_default())
-        };
+        let overrides: String = row.get("harness_overrides")?;
         Ok(Self {
             id: row.get("id")?,
             key: row.get("key")?,
@@ -49,11 +105,11 @@ impl Routine {
             context_type: row.get("context_type")?,
             prompt_template: row.get("prompt_template")?,
             system_prompt: row.get("system_prompt")?,
-            system_prompt_mode: row.get("system_prompt_mode")?,
+            kind: row.get("kind")?,
             needs_worktree: row.get::<_, i64>("needs_worktree")? != 0,
-            permission_mode: row.get("permission_mode")?,
-            allowed_tools: json_list("allowed_tools")?,
-            extra_args: json_list("extra_args")?,
+            access: row.get("access")?,
+            harness_overrides: serde_json::from_str(&overrides).unwrap_or_else(|_| json!({})),
+            profile_id: row.get("profile_id")?,
             model: row.get("model")?,
             timeout_min: row.get("timeout_min")?,
             builtin: row.get::<_, i64>("builtin")? != 0,
@@ -61,6 +117,77 @@ impl Routine {
             enabled: row.get::<_, i64>("enabled")? != 0,
         })
     }
+
+    pub fn is_system(&self) -> bool {
+        self.kind == KIND_SYSTEM
+    }
+
+    pub fn claude(&self) -> ClaudeOptions {
+        ClaudeOptions::from_overrides(&self.harness_overrides)
+    }
+
+    /// The neutral access level of the routine.
+    pub fn neutral_access(&self) -> Access {
+        neutral_access(&self.access)
+    }
+
+    /// The options a run of `harness_id` gets: Claude reads its own overrides (a native permission
+    /// mode wins over the neutral access), other harnesses use the neutral access only.
+    pub fn run_options(&self, harness_id: &str) -> RunOptions {
+        if harness_id == "claude" {
+            let c = self.claude();
+            RunOptions {
+                system_prompt_mode: c.system_prompt_mode,
+                allowed_tools: c.allowed_tools,
+                extra_args: c.extra_args,
+                access: c.permission_mode.map_or_else(|| self.neutral_access(), Access::Native),
+            }
+        } else {
+            RunOptions {
+                system_prompt_mode: SystemPromptMode::Append,
+                allowed_tools: Vec::new(),
+                extra_args: Vec::new(),
+                access: self.neutral_access(),
+            }
+        }
+    }
+}
+
+/// What a run of `routine` needs from `harness_id`, for the capability check at launch.
+pub fn launch_needs(routine: &Routine, harness_id: &str) -> Needs {
+    let opts = routine.run_options(harness_id);
+    let allowlist = !opts.allowed_tools.is_empty();
+    Needs {
+        access: routine.neutral_access(),
+        tools: routine.needs_worktree || allowlist || routine.access != "read_only",
+        tool_allowlist: allowlist,
+    }
+}
+
+fn neutral_access(access: &str) -> Access {
+    match access {
+        "full" => Access::Full,
+        "edit" => Access::Edit,
+        _ => Access::ReadOnly,
+    }
+}
+
+/// The neutral access a Claude `--permission-mode` stands for (same mapping as migration 0043).
+pub fn access_for_permission_mode(mode: &str) -> &'static str {
+    match mode {
+        "bypassPermissions" => "full",
+        "acceptEdits" => "edit",
+        _ => "read_only",
+    }
+}
+
+fn claude_overrides(permission_mode: &str, tools: &[&str], args: &[&str], system_prompt_mode: &str) -> Value {
+    json!({ "claude": {
+        "permission_mode": permission_mode,
+        "allowed_tools": tools,
+        "extra_args": args,
+        "system_prompt_mode": system_prompt_mode,
+    }})
 }
 
 pub fn get(conn: &Connection, id: i64) -> AppResult<Routine> {
@@ -323,16 +450,31 @@ pub const DEFAULTS: &[Defaults] = &[
     ai_review("ai_review_codex", "AI review: codex", "Headless `/local-review --codex` (Codex adversarial review).", "/local-review {{review_id}} --codex"),
 ];
 
+impl Defaults {
+    fn kind(&self) -> &'static str {
+        if self.handler.is_some() {
+            KIND_SYSTEM
+        } else {
+            KIND_PLAIN
+        }
+    }
+
+    fn overrides_json(&self) -> String {
+        claude_overrides(self.permission_mode, self.allowed_tools, self.extra_args, self.system_prompt_mode).to_string()
+    }
+}
+
 /// Insert the built-in routines that don't exist yet. Existing rows (possibly edited) are left alone.
 pub fn seed(conn: &Connection) -> AppResult<()> {
     let now = chrono::Utc::now().to_rfc3339();
     for d in DEFAULTS {
+        // The old Claude columns are still written (not read) so a rollback keeps working.
         conn.execute(
             "INSERT OR IGNORE INTO routine
                (key, name, description, context_type, prompt_template, system_prompt, system_prompt_mode,
                 needs_worktree, permission_mode, allowed_tools, extra_args, timeout_min, handler, builtin,
-                created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 1, ?14, ?14)",
+                kind, access, harness_overrides, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 1, ?14, ?15, ?16, ?17, ?17)",
             params![
                 d.key,
                 d.name,
@@ -347,6 +489,9 @@ pub fn seed(conn: &Connection) -> AppResult<()> {
                 serde_json::to_string(d.extra_args).unwrap_or_else(|_| "[]".into()),
                 d.timeout_min,
                 d.handler,
+                d.kind(),
+                access_for_permission_mode(d.permission_mode),
+                d.overrides_json(),
                 now
             ],
         )?;
@@ -364,7 +509,7 @@ pub fn adopt_builtin_keys(conn: &Connection) -> AppResult<()> {
         let id: Option<i64> =
             conn.query_row("SELECT id FROM routine WHERE key = ?1 AND builtin = 0", params![d.key], |r| r.get(0)).optional()?;
         if let Some(id) = id {
-            conn.execute("UPDATE routine SET builtin = 1, handler = ?2 WHERE id = ?1", params![id, d.handler])?;
+            conn.execute("UPDATE routine SET builtin = 1, handler = ?2, kind = ?3 WHERE id = ?1", params![id, d.handler, d.kind()])?;
             reset(conn, id)?;
         }
     }
@@ -392,7 +537,7 @@ pub fn adopt_prompt_overrides(conn: &Connection) -> AppResult<()> {
     Ok(())
 }
 
-/// Put a built-in back to its shipped prompts, permissions, tools, arguments and timeout.
+/// Put a built-in back to its shipped prompts, access, tools, arguments, profile and timeout.
 pub fn reset(conn: &Connection, id: i64) -> AppResult<Routine> {
     let routine = get(conn, id)?;
     let d = DEFAULTS
@@ -402,7 +547,8 @@ pub fn reset(conn: &Connection, id: i64) -> AppResult<Routine> {
     conn.execute(
         "UPDATE routine SET name = ?2, description = ?3, prompt_template = ?4, system_prompt = ?5,
                 system_prompt_mode = ?6, needs_worktree = ?7, permission_mode = ?8, allowed_tools = ?9,
-                extra_args = ?10, model = '', timeout_min = ?11, enabled = 1, updated_at = ?12
+                extra_args = ?10, model = '', timeout_min = ?11, enabled = 1, updated_at = ?12,
+                kind = ?13, access = ?14, harness_overrides = ?15, profile_id = NULL
          WHERE id = ?1",
         params![
             id,
@@ -416,13 +562,17 @@ pub fn reset(conn: &Connection, id: i64) -> AppResult<Routine> {
             serde_json::to_string(d.allowed_tools).unwrap_or_else(|_| "[]".into()),
             serde_json::to_string(d.extra_args).unwrap_or_else(|_| "[]".into()),
             d.timeout_min,
-            chrono::Utc::now().to_rfc3339()
+            chrono::Utc::now().to_rfc3339(),
+            d.kind(),
+            access_for_permission_mode(d.permission_mode),
+            d.overrides_json(),
         ],
     )?;
     get(conn, id)
 }
 
-/// What the Config tab sends. `id: None` creates a user routine.
+/// What the Config tab sends. `id: None` creates a user routine. On a system routine only
+/// `profile_id`, `model`, `timeout_min` and `enabled` are applied.
 #[derive(Debug, Deserialize)]
 pub struct RoutineInput {
     pub id: Option<i64>,
@@ -433,16 +583,14 @@ pub struct RoutineInput {
     pub prompt_template: String,
     #[serde(default)]
     pub system_prompt: String,
-    #[serde(default = "default_mode")]
-    pub system_prompt_mode: String,
     #[serde(default)]
     pub needs_worktree: bool,
-    #[serde(default = "default_permission")]
-    pub permission_mode: String,
+    #[serde(default = "default_access")]
+    pub access: String,
+    #[serde(default = "empty_object")]
+    pub harness_overrides: Value,
     #[serde(default)]
-    pub allowed_tools: Vec<String>,
-    #[serde(default)]
-    pub extra_args: Vec<String>,
+    pub profile_id: Option<i64>,
     #[serde(default)]
     pub model: String,
     #[serde(default = "default_timeout")]
@@ -451,11 +599,11 @@ pub struct RoutineInput {
     pub enabled: bool,
 }
 
-fn default_mode() -> String {
-    "append".into()
+fn default_access() -> String {
+    "full".into()
 }
-fn default_permission() -> String {
-    "bypassPermissions".into()
+fn empty_object() -> Value {
+    json!({})
 }
 fn default_timeout() -> i64 {
     240
@@ -480,7 +628,83 @@ fn slug(name: &str) -> String {
     }
 }
 
+/// Validate the overrides and rewrite the Claude entry in its canonical shape; entries of other
+/// harnesses are kept as sent.
+fn normalize_overrides(raw: &Value) -> AppResult<Value> {
+    let Value::Object(map) = raw else {
+        return Err(AppError::Other("harness overrides must be a JSON object".into()));
+    };
+    let mut out = map.clone();
+    if let Some(claude) = map.get("claude") {
+        let opts = ClaudeOptions::from_overrides(raw);
+        if let Some(mode) = &opts.permission_mode {
+            if !PERMISSION_MODES.contains(&mode.as_str()) {
+                return Err(AppError::Other(format!("unknown permission mode `{mode}`")));
+            }
+        }
+        if let Some(mode) = claude.get("system_prompt_mode").and_then(Value::as_str) {
+            if !["append", "replace"].contains(&mode) {
+                return Err(AppError::Other("system prompt mode must be append or replace".into()));
+            }
+        }
+        out.insert(
+            "claude".into(),
+            json!({
+                "permission_mode": opts.permission_mode.unwrap_or_default(),
+                "allowed_tools": opts.allowed_tools,
+                "extra_args": opts.extra_args,
+                "system_prompt_mode": if opts.system_prompt_mode == SystemPromptMode::Replace { "replace" } else { "append" },
+            }),
+        );
+    }
+    Ok(Value::Object(out))
+}
+
+/// The old Claude columns, kept in step with the overrides for one release (rollback safety).
+fn legacy_columns(access: &str, overrides: &Value) -> (String, String, String, String) {
+    let c = ClaudeOptions::from_overrides(overrides);
+    let mode = c.permission_mode.unwrap_or_else(|| {
+        match access {
+            "full" => "bypassPermissions",
+            "edit" => "acceptEdits",
+            _ => "plan",
+        }
+        .to_string()
+    });
+    (
+        mode,
+        serde_json::to_string(&c.allowed_tools).unwrap_or_else(|_| "[]".into()),
+        serde_json::to_string(&c.extra_args).unwrap_or_else(|_| "[]".into()),
+        if c.system_prompt_mode == SystemPromptMode::Replace { "replace" } else { "append" }.to_string(),
+    )
+}
+
+fn check_profile(conn: &Connection, profile_id: Option<i64>) -> AppResult<()> {
+    if let Some(id) = profile_id {
+        let exists: bool = conn.query_row("SELECT COUNT(*) FROM ai_profile WHERE id = ?1", params![id], |r| r.get::<_, i64>(0))? > 0;
+        if !exists {
+            return Err(AppError::Other(format!("profile {id} not found")));
+        }
+    }
+    Ok(())
+}
+
 pub fn save(conn: &Connection, input: RoutineInput) -> AppResult<Routine> {
+    check_profile(conn, input.profile_id)?;
+    let timeout = input.timeout_min.clamp(1, 24 * 60);
+    let now = chrono::Utc::now().to_rfc3339();
+
+    // System routines: the handler owns everything but the profile, model, timeout and enabled flag.
+    if let Some(id) = input.id {
+        if get(conn, id)?.is_system() {
+            conn.execute(
+                "UPDATE routine SET profile_id = ?2, model = ?3, timeout_min = ?4, enabled = ?5, updated_at = ?6 WHERE id = ?1",
+                params![id, input.profile_id, input.model.trim(), timeout, input.enabled as i64, now],
+            )?;
+            return get(conn, id);
+        }
+    }
+
     let name = input.name.trim().to_string();
     if name.is_empty() {
         return Err(AppError::Other("a routine needs a name".into()));
@@ -491,27 +715,31 @@ pub fn save(conn: &Connection, input: RoutineInput) -> AppResult<Routine> {
     if !["pr", "review", "issue", "board"].contains(&input.context_type.as_str()) {
         return Err(AppError::Other(format!("unknown context type `{}`", input.context_type)));
     }
-    if !["append", "replace"].contains(&input.system_prompt_mode.as_str()) {
-        return Err(AppError::Other("system prompt mode must be append or replace".into()));
+    if !ACCESS_LEVELS.contains(&input.access.as_str()) {
+        return Err(AppError::Other(format!("unknown access level `{}`", input.access)));
     }
-    if !PERMISSION_MODES.contains(&input.permission_mode.as_str()) {
-        return Err(AppError::Other(format!("unknown permission mode `{}`", input.permission_mode)));
-    }
-    let timeout = input.timeout_min.clamp(1, 24 * 60);
-    let tools = serde_json::to_string(&input.allowed_tools).unwrap_or_else(|_| "[]".into());
-    let args = serde_json::to_string(&input.extra_args).unwrap_or_else(|_| "[]".into());
-    let now = chrono::Utc::now().to_rfc3339();
+    let mut overrides = normalize_overrides(&input.harness_overrides)?;
 
     match input.id {
         Some(id) => {
             // Built-ins keep their key and context type: the board, review and handlers rely on them.
             let existing = get(conn, id)?;
+            // A native permission mode wins over the access, so changing the access alone would
+            // look like it did nothing: drop the mode that still stands for the old access.
+            if input.access != existing.access
+                && ClaudeOptions::from_overrides(&overrides).permission_mode == existing.claude().permission_mode
+            {
+                if let Some(claude) = overrides.get_mut("claude").and_then(Value::as_object_mut) {
+                    claude.insert("permission_mode".into(), json!(""));
+                }
+            }
             let context_type = if existing.builtin { existing.context_type.clone() } else { input.context_type };
+            let (mode, tools, args, prompt_mode) = legacy_columns(&input.access, &overrides);
             conn.execute(
                 "UPDATE routine SET name = ?2, description = ?3, context_type = ?4, prompt_template = ?5,
-                        system_prompt = ?6, system_prompt_mode = ?7, needs_worktree = ?8, permission_mode = ?9,
-                        allowed_tools = ?10, extra_args = ?11, model = ?12, timeout_min = ?13, enabled = ?14,
-                        updated_at = ?15
+                        system_prompt = ?6, needs_worktree = ?7, access = ?8, harness_overrides = ?9,
+                        profile_id = ?10, model = ?11, timeout_min = ?12, enabled = ?13, updated_at = ?14,
+                        permission_mode = ?15, allowed_tools = ?16, extra_args = ?17, system_prompt_mode = ?18
                  WHERE id = ?1",
                 params![
                     id,
@@ -520,15 +748,18 @@ pub fn save(conn: &Connection, input: RoutineInput) -> AppResult<Routine> {
                     context_type,
                     input.prompt_template,
                     input.system_prompt,
-                    input.system_prompt_mode,
                     input.needs_worktree as i64,
-                    input.permission_mode,
-                    tools,
-                    args,
-                    input.model,
+                    input.access,
+                    overrides.to_string(),
+                    input.profile_id,
+                    input.model.trim(),
                     timeout,
                     input.enabled as i64,
-                    now
+                    now,
+                    mode,
+                    tools,
+                    args,
+                    prompt_mode
                 ],
             )?;
             get(conn, id)
@@ -544,12 +775,13 @@ pub fn save(conn: &Connection, input: RoutineInput) -> AppResult<Routine> {
                 key = format!("{base}-{n}");
                 n += 1;
             }
+            let (mode, tools, args, prompt_mode) = legacy_columns(&input.access, &overrides);
             conn.execute(
                 "INSERT INTO routine
-                   (key, name, description, context_type, prompt_template, system_prompt, system_prompt_mode,
-                    needs_worktree, permission_mode, allowed_tools, extra_args, model, timeout_min, enabled,
-                    builtin, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, 0, ?15, ?15)",
+                   (key, name, description, context_type, prompt_template, system_prompt, needs_worktree, access,
+                    harness_overrides, profile_id, model, timeout_min, enabled, builtin, kind, created_at, updated_at,
+                    permission_mode, allowed_tools, extra_args, system_prompt_mode)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 0, 'plain', ?14, ?14, ?15, ?16, ?17, ?18)",
                 params![
                     key,
                     name,
@@ -557,15 +789,18 @@ pub fn save(conn: &Connection, input: RoutineInput) -> AppResult<Routine> {
                     input.context_type,
                     input.prompt_template,
                     input.system_prompt,
-                    input.system_prompt_mode,
                     input.needs_worktree as i64,
-                    input.permission_mode,
-                    tools,
-                    args,
-                    input.model,
+                    input.access,
+                    overrides.to_string(),
+                    input.profile_id,
+                    input.model.trim(),
                     timeout,
                     input.enabled as i64,
-                    now
+                    now,
+                    mode,
+                    tools,
+                    args,
+                    prompt_mode
                 ],
             )?;
             get(conn, conn.last_insert_rowid())
@@ -605,11 +840,10 @@ mod tests {
             context_type: "pr".into(),
             prompt_template: "hi {{number}}".into(),
             system_prompt: String::new(),
-            system_prompt_mode: "append".into(),
             needs_worktree: false,
-            permission_mode: "bypassPermissions".into(),
-            allowed_tools: vec![],
-            extra_args: vec![],
+            access: "full".into(),
+            harness_overrides: json!({}),
+            profile_id: None,
             model: String::new(),
             timeout_min: 30,
             enabled: true,
@@ -697,7 +931,8 @@ mod tests {
         let conn = open_memory();
         seed(&conn).unwrap();
         let babysit = list(&conn).unwrap().into_iter().find(|r| r.key == BABYSIT_KEY).unwrap();
-        assert!(babysit.builtin && babysit.needs_worktree && babysit.permission_mode == "bypassPermissions");
+        assert!(babysit.builtin && babysit.needs_worktree && babysit.claude().permission_mode.as_deref() == Some("bypassPermissions"));
+        assert_eq!((babysit.kind.as_str(), babysit.access.as_str()), ("plain", "full"));
         assert!(babysit.prompt_template.starts_with("/goal "));
 
         conn.execute("UPDATE routine SET timeout_min = 5 WHERE id = ?1", params![babysit.id]).unwrap();
@@ -714,17 +949,25 @@ mod tests {
         let get_key = |k: &str| all.iter().find(|r| r.key == k).unwrap();
         let overview = get_key("board_overview");
         assert_eq!((overview.handler.as_deref(), overview.context_type.as_str()), (Some("overview"), "board"));
-        assert_eq!(overview.system_prompt_mode, "replace");
-        assert_eq!(overview.extra_args, ["--tools", "", "--effort", "low"]);
+        assert_eq!(overview.claude().system_prompt_mode, SystemPromptMode::Replace);
+        assert_eq!(overview.claude().extra_args, ["--tools", "", "--effort", "low"]);
+        assert_eq!((overview.kind.as_str(), overview.access.as_str()), ("system", "read_only"));
         let focus = get_key("focus");
-        assert_eq!((focus.permission_mode.as_str(), focus.allowed_tools.len()), ("default", 8));
+        assert_eq!((focus.claude().permission_mode.as_deref(), focus.claude().allowed_tools.len()), (Some("default"), 8));
         let codex = get_key("ai_review_codex");
         assert_eq!(codex.prompt_template, "/local-review {{review_id}} --codex");
-        assert_eq!(codex.permission_mode, "acceptEdits");
-        assert!(codex.allowed_tools.contains(&"Bash(cr:*)".to_string()));
+        assert_eq!(codex.claude().permission_mode.as_deref(), Some("acceptEdits"));
+        assert_eq!((codex.kind.as_str(), codex.access.as_str()), ("system", "edit"));
+        assert!(codex.claude().allowed_tools.contains(&"Bash(cr:*)".to_string()));
         // Reset restores the shipped tools and arguments.
-        conn.execute("UPDATE routine SET allowed_tools = '[]' WHERE id = ?1", params![codex.id]).unwrap();
-        assert!(!reset(&conn, codex.id).unwrap().allowed_tools.is_empty());
+        conn.execute(
+            "UPDATE routine SET harness_overrides = '{}', access = 'full', profile_id = NULL WHERE id = ?1",
+            params![codex.id],
+        )
+        .unwrap();
+        let reset = reset(&conn, codex.id).unwrap();
+        assert!(!reset.claude().allowed_tools.is_empty());
+        assert_eq!(reset.access, "edit");
     }
 
     #[test]
@@ -754,10 +997,147 @@ mod tests {
     fn rejects_bad_input() {
         let conn = open_memory();
         let mut bad = input("x");
-        bad.permission_mode = "yolo".into();
+        bad.harness_overrides = json!({ "claude": { "permission_mode": "yolo" } });
+        assert!(save(&conn, bad).is_err());
+        let mut bad = input("x");
+        bad.access = "root".into();
+        assert!(save(&conn, bad).is_err());
+        let mut bad = input("x");
+        bad.profile_id = Some(999);
+        assert!(save(&conn, bad).is_err());
+        let mut bad = input("x");
+        bad.harness_overrides = json!({ "claude": { "system_prompt_mode": "weird" } });
         assert!(save(&conn, bad).is_err());
         let mut empty = input("  ");
         empty.name = "  ".into();
         assert!(save(&conn, empty).is_err());
+    }
+
+    fn plain_by_key(conn: &Connection, key: &str) -> Routine {
+        list(conn).unwrap().into_iter().find(|r| r.key == key).unwrap()
+    }
+
+    #[test]
+    fn every_seeded_handler_routine_is_system_and_the_rest_plain() {
+        let conn = open_memory();
+        seed(&conn).unwrap();
+        for r in list(&conn).unwrap() {
+            assert_eq!(r.is_system(), r.handler.is_some(), "{}", r.key);
+        }
+        for key in [BABYSIT_KEY, "issue_implement", SMALL_ISSUE_KEY] {
+            assert_eq!(plain_by_key(&conn, key).kind, "plain", "{key}");
+        }
+    }
+
+    #[test]
+    fn seeded_access_matches_the_migration_mapping() {
+        let conn = open_memory();
+        seed(&conn).unwrap();
+        for d in DEFAULTS {
+            let r = plain_by_key(&conn, d.key);
+            assert_eq!(r.access, access_for_permission_mode(d.permission_mode), "{}", d.key);
+            assert_eq!(r.claude().permission_mode.as_deref(), Some(d.permission_mode), "{}", d.key);
+        }
+    }
+
+    #[test]
+    fn system_routines_only_take_profile_model_timeout_and_enabled() {
+        let conn = open_memory();
+        seed(&conn).unwrap();
+        let focus = plain_by_key(&conn, "focus");
+        let profile: i64 = conn.query_row("SELECT id FROM ai_profile", [], |r| r.get(0)).unwrap();
+        let mut edit = input("Hacked");
+        edit.id = Some(focus.id);
+        edit.prompt_template = "evil".into();
+        edit.access = "full".into();
+        edit.profile_id = Some(profile);
+        edit.model = "haiku".into();
+        edit.timeout_min = 7;
+        edit.enabled = false;
+        let saved = save(&conn, edit).unwrap();
+        assert_eq!(
+            (saved.profile_id, saved.model.as_str(), saved.timeout_min, saved.enabled),
+            (Some(profile), "haiku", 7, false)
+        );
+        assert_eq!(saved.name, focus.name);
+        assert_eq!(saved.prompt_template, focus.prompt_template);
+        assert_eq!(saved.access, focus.access);
+        assert_eq!(saved.harness_overrides, focus.harness_overrides);
+    }
+
+    #[test]
+    fn saving_a_plain_routine_keeps_the_legacy_columns_in_step() {
+        let conn = open_memory();
+        let mut new = input("Mirror");
+        new.harness_overrides = json!({ "claude": {
+            "permission_mode": "acceptEdits", "allowed_tools": ["Read"], "extra_args": ["--effort", "low"], "system_prompt_mode": "replace"
+        }});
+        new.access = "edit".into();
+        let r = save(&conn, new).unwrap();
+        assert_eq!(r.kind, "plain");
+        let (mode, tools, args, spm): (String, String, String, String) = conn
+            .query_row("SELECT permission_mode, allowed_tools, extra_args, system_prompt_mode FROM routine WHERE id = ?1", [r.id], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+            })
+            .unwrap();
+        assert_eq!((mode.as_str(), tools.as_str(), args.as_str(), spm.as_str()), ("acceptEdits", "[\"Read\"]", "[\"--effort\",\"low\"]", "replace"));
+    }
+
+    #[test]
+    fn changing_only_the_access_drops_the_stale_native_permission_mode() {
+        let conn = open_memory();
+        let mut new = input("Access");
+        new.access = "edit".into();
+        new.harness_overrides = json!({ "claude": { "permission_mode": "acceptEdits" } });
+        let r = save(&conn, new).unwrap();
+        assert_eq!(r.run_options("claude").access, Access::Native("acceptEdits".into()));
+
+        let mut edit = input("Access");
+        edit.id = Some(r.id);
+        edit.access = "full".into();
+        edit.harness_overrides = r.harness_overrides.clone();
+        let r = save(&conn, edit).unwrap();
+        assert_eq!(r.claude().permission_mode, None);
+        assert_eq!(r.run_options("claude").access, Access::Full);
+
+        // An explicit new mode alongside the new access is kept.
+        let mut both = input("Access");
+        both.id = Some(r.id);
+        both.access = "read_only".into();
+        both.harness_overrides = json!({ "claude": { "permission_mode": "plan" } });
+        assert_eq!(save(&conn, both).unwrap().claude().permission_mode.as_deref(), Some("plan"));
+    }
+
+    #[test]
+    fn run_options_are_native_for_claude_and_neutral_elsewhere() {
+        let conn = open_memory();
+        seed(&conn).unwrap();
+        let focus = plain_by_key(&conn, "focus");
+        let claude = focus.run_options("claude");
+        assert_eq!(claude.access, Access::Native("default".into()));
+        assert_eq!(claude.allowed_tools.len(), 8);
+        let other = focus.run_options("opencode");
+        assert_eq!(other.access, Access::ReadOnly);
+        assert!(other.allowed_tools.is_empty() && other.extra_args.is_empty());
+        assert_eq!(plain_by_key(&conn, BABYSIT_KEY).run_options("other").access, Access::Full);
+    }
+
+    #[test]
+    fn launch_needs_reflect_access_tools_and_the_worktree() {
+        let conn = open_memory();
+        seed(&conn).unwrap();
+        let babysit = plain_by_key(&conn, BABYSIT_KEY);
+        let n = launch_needs(&babysit, "claude");
+        assert_eq!((n.access, n.tools, n.tool_allowlist), (Access::Full, true, false));
+        // Claude's allowlist is Claude's detail: another harness gets none.
+        let focus = plain_by_key(&conn, "focus");
+        let claude = launch_needs(&focus, "claude");
+        assert_eq!((claude.access.clone(), claude.tools, claude.tool_allowlist), (Access::ReadOnly, true, true));
+        let other = launch_needs(&focus, "other");
+        assert_eq!((other.tools, other.tool_allowlist), (false, false));
+        // The caps check passes on Claude for all of them.
+        for r in list(&conn).unwrap() {
+            crate::ai::check_caps(&crate::ai::ClaudeCode, &r.name, &launch_needs(&r, "claude")).unwrap();
+        }
     }
 }

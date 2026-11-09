@@ -695,7 +695,7 @@ pub async fn board_open_agent(
         let conn = db.0.lock().unwrap();
         crate::commands::sessions::resumable_card_session(&conn, &card_id, &live)?
     };
-    let argv = crate::ai::interactive_argv(&crate::ai::Interactive {
+    let argv = crate::ai::interactive_argv(&db, &crate::ai::Interactive {
         session: resume.as_deref().map_or(crate::ai::SessionMode::Ephemeral, crate::ai::SessionMode::Resume),
         system_prompt_file: None,
         system_prompt_mode: crate::ai::SystemPromptMode::Append,

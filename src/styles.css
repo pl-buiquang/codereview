@@ -6595,6 +6595,54 @@ button.board-overview-ref {
 .routines-cap {
   margin-top: 12px;
 }
+.routines-config-heading {
+  margin: 10px 0 2px;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-2);
+}
+.routines-config-note {
+  margin: 0 0 4px;
+  font-size: 12px;
+}
+.routine-system-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.routine-system-desc {
+  margin: 0;
+  font-size: 12px;
+}
+.routine-system-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.routine-system-controls label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.routines-claude-options {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.routines-claude-options legend {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 0 4px;
+}
 .input.mono {
   font-family: var(--font-mono);
   font-size: 12px;

@@ -31,11 +31,13 @@ pub struct RunTag {
     pub label: String,
     /// Model requested with `--model`; empty when claude picked its own default.
     pub model: String,
+    /// Id of the harness that ran it.
+    pub harness: &'static str,
 }
 
 impl RunTag {
     pub fn new(feature: &'static str) -> Self {
-        Self { feature, variant: None, review_id: None, target_id: None, label: String::new(), model: String::new() }
+        Self { feature, variant: None, review_id: None, target_id: None, label: String::new(), model: String::new(), harness: "claude" }
     }
 
     pub fn variant(mut self, variant: impl Into<String>) -> Self {
@@ -45,6 +47,11 @@ impl RunTag {
 
     pub fn review(mut self, review_id: i64) -> Self {
         self.review_id = Some(review_id);
+        self
+    }
+
+    pub fn harness(mut self, harness: &'static str) -> Self {
+        self.harness = harness;
         self
     }
 
@@ -99,8 +106,8 @@ pub fn insert_run(
     tx.execute(
         "INSERT INTO ai_run (started_at, duration_ms, feature, variant, review_id, target_id, label,
            requested_model, status, error, num_turns, input_tokens, output_tokens, cache_read_tokens,
-           cache_creation_tokens, cost_usd, session_id)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+           cache_creation_tokens, cost_usd, session_id, harness)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
         params![
             started_at,
             duration_ms,
@@ -119,6 +126,7 @@ pub fn insert_run(
             usage.cache_creation_tokens,
             usage.cost_usd,
             usage.session_id,
+            tag.harness,
         ],
     )?;
     let run_id = tx.last_insert_rowid();
@@ -560,5 +568,15 @@ mod tests {
         let since = NaiveDateTime::parse_from_str("2026-10-15 00:00", "%Y-%m-%d %H:%M").unwrap();
         let recent = session_summary(&sessions, Some(since));
         assert_eq!((recent.totals.runs, recent.totals.cost_usd, recent.by_model.len()), (1, 3.0, 1));
+    }
+
+    #[test]
+    fn runs_record_the_harness_that_ran_them() {
+        let mut conn = crate::db::open_memory();
+        insert_run(&mut conn, &RunTag::new("chat"), "2026-10-20T10:00:00.000Z", 1, &usage(0.1, vec![]), None).unwrap();
+        insert_run(&mut conn, &RunTag::new("chat").harness("codex"), "2026-10-20T10:01:00.000Z", 1, &usage(0.1, vec![]), None).unwrap();
+        let harnesses: Vec<String> =
+            conn.prepare("SELECT harness FROM ai_run ORDER BY id").unwrap().query_map([], |r| r.get(0)).unwrap().map(Result::unwrap).collect();
+        assert_eq!(harnesses, ["claude", "codex"]);
     }
 }

@@ -47,5 +47,5 @@ UPDATE routine SET harness_overrides = json_object('claude', json_object(
 -- A chat pins the profile it started its session with.
 ALTER TABLE chat ADD COLUMN profile_id INTEGER REFERENCES ai_profile(id) ON DELETE SET NULL;
 
--- Which harness ran (the usage log groups by it).
+-- Which harness ran.
 ALTER TABLE ai_run ADD COLUMN harness TEXT NOT NULL DEFAULT 'claude';

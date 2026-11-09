@@ -129,7 +129,7 @@ pub async fn board_open_issue_agent(
             crate::ai::SessionMode::New(&new_id)
         }
     };
-    let argv = crate::ai::interactive_argv(&crate::ai::Interactive {
+    let argv = crate::ai::interactive_argv(&db, &crate::ai::Interactive {
         session,
         system_prompt_file: Some(&context_file),
         system_prompt_mode: crate::ai::SystemPromptMode::Append,

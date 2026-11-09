@@ -6,7 +6,8 @@ use rusqlite::{params, OptionalExtension};
 use serde::Serialize;
 use tauri::State;
 
-use crate::ai::{self, Access, OneShot, SessionMode, SystemPrompt, SystemPromptMode, ToolPolicy, TurnResult};
+use crate::ai::profiles::{self, Feature, Resolved};
+use crate::ai::{Access, OneShot, SessionMode, SystemPrompt, SystemPromptMode, ToolPolicy, TurnResult};
 use crate::ai_usage::RunTag;
 use crate::db::models::{Chat, ChatMessage, Target};
 use crate::db::Db;
@@ -45,10 +46,11 @@ pub struct ChatTurnResult {
     pub cost_usd: f64,
 }
 
-/// Call `claude -p` for one conversation turn. On the first turn (no session)
-/// establishes a new session with `--session-id`; on subsequent turns resumes
-/// with `--resume`. The system prompt is only sent on the first turn.
-fn call_claude_turn(
+/// Run one conversation turn on the chat's harness. On the first turn (no session) establishes a
+/// new session; on subsequent turns resumes it. The system prompt is only sent on the first turn.
+#[allow(clippy::too_many_arguments)]
+fn call_turn(
+    resolved: &Resolved,
     review_id: i64,
     session_id: &str,
     is_first_turn: bool,
@@ -58,8 +60,9 @@ fn call_claude_turn(
     text: &str,
 ) -> AppResult<TurnResult> {
     let file_tag = format!("chat_{session_id}");
-    let req = turn_request(review_id, session_id, &file_tag, is_first_turn, model, system_prompt, worktree_path, text);
-    ai::harness_for().one_shot(&req)
+    let mut req = turn_request(review_id, session_id, &file_tag, is_first_turn, model, system_prompt, worktree_path, text);
+    req.usage_tag = req.usage_tag.harness(resolved.harness.id());
+    resolved.harness.one_shot(&req)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -92,19 +95,6 @@ fn turn_request<'a>(
         extra_args: Vec::new(),
         usage_tag: RunTag::new("chat").review(review_id),
     }
-}
-
-/// Model resolution priority:
-/// 1. Explicit setting from the app (passed by the frontend)
-/// 2. CODEREVIEW_CHAT_MODEL env var (manual override)
-/// 3. ANTHROPIC_DEFAULT_OPUS_MODEL env var (Bedrock ARN etc.)
-/// 4. Empty → no --model flag; claude uses its own configured default
-pub(crate) fn resolve_model(model: Option<String>) -> String {
-    model
-        .filter(|m| !m.is_empty())
-        .or_else(|| std::env::var("CODEREVIEW_CHAT_MODEL").ok())
-        .or_else(|| std::env::var("ANTHROPIC_DEFAULT_OPUS_MODEL").ok())
-        .unwrap_or_default()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -232,6 +222,29 @@ fn diff_file_summary(diff: &str) -> String {
     }
 }
 
+/// The profile a chat turn runs on and whether this turn switches profile. `requested` is the
+/// profile picked in the chat pane. Order: the request, the profile the chat is pinned to, the chat
+/// feature profile, the default. A switch is a request for a profile other than the one the chat
+/// currently runs on (a chat that was never pinned counts as running on the one it would resolve to).
+fn chat_profile(conn: &rusqlite::Connection, chat: Option<&Chat>, requested: Option<i64>) -> (Resolved, bool) {
+    let feature = profiles::feature_profiles(conn).chat;
+    let pinned = chat.and_then(|c| c.profile_id);
+    let resolved = profiles::resolve(conn, &[requested, pinned, feature]);
+    let current = profiles::resolve(conn, &[pinned, feature]).profile_id;
+    let switched = chat.is_some_and(|c| c.session_id.is_some()) && requested.is_some() && resolved.profile_id != current;
+    (resolved, switched)
+}
+
+/// The profile the chat pane shows: the one the review's chat runs on.
+#[tauri::command]
+pub fn chat_profile_id(review_id: i64, db: State<Db>) -> AppResult<Option<i64>> {
+    let conn = db.0.lock().unwrap();
+    let chat: Option<Chat> = conn
+        .query_row("SELECT * FROM chat WHERE review_id = ?1", params![review_id], Chat::from_row)
+        .optional()?;
+    Ok(chat_profile(&conn, chat.as_ref(), None).0.profile_id)
+}
+
 /// Send a message in the review chat. Creates the chat row on first call.
 /// Uses the split-lock pattern: gathers context under DB lock, drops it for
 /// the slow claude CLI subprocess, then re-locks to write results.
@@ -239,12 +252,12 @@ fn diff_file_summary(diff: &str) -> String {
 pub async fn chat_send(
     review_id: i64,
     text: String,
-    model: Option<String>,
+    profile_id: Option<i64>,
     db: State<'_, Db>,
 ) -> AppResult<ChatTurnResult> {
     crate::ai_gate::ensure_enabled()?;
     // --- Phase 1: gather context under DB lock ---
-    let (detail, existing_chat, diff_source, chat_template) = {
+    let (detail, existing_chat, diff_source, chat_template, resolved, switched) = {
         let conn = db.0.lock().unwrap();
         let chat_template = crate::prompts::resolve(&conn, crate::prompts::CHAT_SYSTEM)?;
 
@@ -260,7 +273,9 @@ pub async fn chat_send(
 
         let diff_source = crate::commands::review::diff_source(&conn, review_id).ok();
 
-        (detail, existing_chat, diff_source, chat_template)
+        let (resolved, switched) = chat_profile(&conn, existing_chat.as_ref(), profile_id);
+
+        (detail, existing_chat, diff_source, chat_template, resolved, switched)
     };
     let diff = diff_source.and_then(|s| s.load().ok()).unwrap_or_default();
 
@@ -280,14 +295,15 @@ pub async fn chat_send(
     let moved = stored_path
         .as_deref()
         .is_some_and(|p| Path::new(p) != worktree_path);
+    // A profile switch starts a fresh session on the new profile.
     let existing_session = existing_chat
         .as_ref()
         .and_then(|c| c.session_id.clone())
-        .filter(|_| !moved);
+        .filter(|_| !moved && !switched);
     let is_first_turn = existing_session.is_none();
     let session_id = existing_session.unwrap_or_else(new_session_id);
 
-    let model = resolve_model(model);
+    let model = resolved.model_for("");
 
     let system_prompt = if is_first_turn {
         let diff_summary = diff_file_summary(&diff);
@@ -310,7 +326,8 @@ pub async fn chat_send(
     };
 
     // --- Phase 3: call claude CLI (no DB lock) ---
-    let turn = call_claude_turn(
+    let turn = call_turn(
+        &resolved,
         review_id,
         &session_id,
         is_first_turn,
@@ -329,8 +346,8 @@ pub async fn chat_send(
             None => {
                 conn.execute(
                     "INSERT INTO chat (review_id, model, session_id, total_input_tokens,
-                      total_output_tokens, total_cost_usd, worktree_path, created_at, updated_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)",
+                      total_output_tokens, total_cost_usd, worktree_path, profile_id, created_at, updated_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)",
                     params![
                         review_id,
                         model,
@@ -339,6 +356,7 @@ pub async fn chat_send(
                         turn.output_tokens,
                         turn.cost_usd,
                         worktree_path.to_str(),
+                        resolved.profile_id,
                         ts,
                     ],
                 )?;
@@ -352,14 +370,18 @@ pub async fn chat_send(
                         total_output_tokens = total_output_tokens + ?3,
                         total_cost_usd = total_cost_usd + ?4,
                         worktree_path = ?5,
-                        updated_at = ?6
-                     WHERE id = ?7",
+                        profile_id = ?6,
+                        model = ?7,
+                        updated_at = ?8
+                     WHERE id = ?9",
                     params![
                         session_id,
                         turn.input_tokens,
                         turn.output_tokens,
                         turn.cost_usd,
                         worktree_path.to_str(),
+                        resolved.profile_id,
+                        model,
                         ts,
                         existing.id,
                     ],
@@ -480,6 +502,7 @@ pub async fn ensure_chat_worktree(review_id: i64, db: State<'_, Db>) -> AppResul
 
     if stored.as_deref() != Some(path_str.as_str()) {
         let conn = db.0.lock().unwrap();
+        let model = profiles::resolve_feature(&conn, Feature::Chat).model_for("");
         let ts = now();
         conn.execute(
             "INSERT INTO chat (review_id, model, worktree_path, created_at, updated_at)
@@ -488,7 +511,7 @@ pub async fn ensure_chat_worktree(review_id: i64, db: State<'_, Db>) -> AppResul
                worktree_path = excluded.worktree_path,
                session_id = CASE WHEN chat.worktree_path IS NULL THEN chat.session_id END,
                updated_at = excluded.updated_at",
-            params![review_id, resolve_model(None), path_str, ts],
+            params![review_id, model, path_str, ts],
         )?;
     }
     Ok(path_str)
@@ -595,5 +618,89 @@ mod tests {
         let a = argv(&cmd);
         assert_eq!(&a[6..10], &strs(&["--add-dir", WORKTREE, "--add-dir", "/other"])[..]);
         assert_eq!(&a[a.len() - 2..], &strs(&["--system-prompt-file", "/p.txt"])[..]);
+    }
+
+    fn chat_row(conn: &rusqlite::Connection, session: Option<&str>, profile: Option<i64>) -> Chat {
+        conn.execute("INSERT INTO repository (local_path, default_branch, added_at) VALUES ('/r', 'main', 'n')", []).unwrap();
+        conn.execute("INSERT INTO target (repo_id, kind, title, base_ref, head_ref, created_at) VALUES (1, 'local', 't', 'a', 'b', 'n')", []).unwrap();
+        conn.execute("INSERT INTO review (target_id, body, status, created_at, updated_at) VALUES (1, '', 'draft', 'n', 'n')", []).unwrap();
+        conn.execute(
+            "INSERT INTO chat (review_id, model, session_id, profile_id, created_at, updated_at) VALUES (1, '', ?1, ?2, 'n', 'n')",
+            params![session, profile],
+        )
+        .unwrap();
+        conn.query_row("SELECT * FROM chat", [], Chat::from_row).unwrap()
+    }
+
+    fn profile(conn: &mut rusqlite::Connection, name: &str) -> i64 {
+        let input = profiles::AiProfileInput {
+            id: None,
+            name: name.into(),
+            harness: "claude".into(),
+            model: String::new(),
+            settings: serde_json::json!({}),
+            host_id: None,
+            is_default: false,
+        };
+        profiles::save(conn, input).unwrap().id
+    }
+
+    #[test]
+    fn a_new_chat_runs_on_the_chat_feature_profile_else_the_default() {
+        let mut conn = crate::db::open_memory();
+        let default = profiles::default_profile(&conn).unwrap().unwrap().id;
+        assert_eq!(chat_profile(&conn, None, None).0.profile_id, Some(default));
+        let mapped = profile(&mut conn, "Chat");
+        profiles::set_feature_profiles(&mut conn, &profiles::FeatureProfiles { chat: Some(mapped), ..Default::default() }).unwrap();
+        let (r, switched) = chat_profile(&conn, None, None);
+        assert_eq!((r.profile_id, switched), (Some(mapped), false));
+    }
+
+    #[test]
+    fn a_pinned_chat_keeps_its_profile_when_the_default_changes() {
+        let mut conn = crate::db::open_memory();
+        let pinned = profile(&mut conn, "Pinned");
+        let chat = chat_row(&conn, Some("sid"), Some(pinned));
+        let other = profile(&mut conn, "Other");
+        profiles::save(
+            &mut conn,
+            profiles::AiProfileInput {
+                id: Some(other),
+                name: "Other".into(),
+                harness: "claude".into(),
+                model: String::new(),
+                settings: serde_json::json!({}),
+                host_id: None,
+                is_default: true,
+            },
+        )
+        .unwrap();
+        let (r, switched) = chat_profile(&conn, Some(&chat), None);
+        assert_eq!((r.profile_id, switched), (Some(pinned), false));
+    }
+
+    #[test]
+    fn requesting_another_profile_switches_only_a_chat_that_has_a_session() {
+        let mut conn = crate::db::open_memory();
+        let a = profile(&mut conn, "A");
+        let b = profile(&mut conn, "B");
+        let chat = chat_row(&conn, Some("sid"), Some(a));
+        let (r, switched) = chat_profile(&conn, Some(&chat), Some(b));
+        assert_eq!((r.profile_id, switched), (Some(b), true));
+        // The same profile again is not a switch.
+        assert!(!chat_profile(&conn, Some(&chat), Some(a)).1);
+
+        conn.execute("UPDATE chat SET session_id = NULL", []).unwrap();
+        let fresh: Chat = conn.query_row("SELECT * FROM chat", [], Chat::from_row).unwrap();
+        assert!(!chat_profile(&conn, Some(&fresh), Some(b)).1, "nothing to restart");
+    }
+
+    #[test]
+    fn requesting_the_profile_an_unpinned_chat_already_runs_on_is_not_a_switch() {
+        let mut conn = crate::db::open_memory();
+        let default = profiles::default_profile(&conn).unwrap().unwrap().id;
+        let chat = chat_row(&conn, Some("sid"), None);
+        assert!(!chat_profile(&conn, Some(&chat), Some(default)).1);
+        let _ = &mut conn;
     }
 }

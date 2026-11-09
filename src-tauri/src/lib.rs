@@ -438,6 +438,7 @@ pub fn run() {
             commands::prompts::prompt_reset,
             commands::chat::chat_send,
             commands::chat::chat_messages,
+            commands::chat::chat_profile_id,
             commands::chat::chat_clear,
             commands::chat::chat_worktree,
             commands::worktree::worktree_gc_run,
