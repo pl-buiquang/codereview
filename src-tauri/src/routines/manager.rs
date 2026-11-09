@@ -609,6 +609,10 @@ impl EventSink for AppSink {
     }
 
     fn status_changed(&self, id: i64, status: &str) {
+        // An interrupted run never reaches `finished`, so drop what `adopt` loaded for it here.
+        if status == "interrupted" {
+            self.loaded.lock().unwrap().remove(&id);
+        }
         emit_updated(&self.app, id, status);
     }
 
