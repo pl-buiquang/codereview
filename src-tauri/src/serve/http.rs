@@ -31,6 +31,9 @@ use crate::run_usage::RunTag;
 
 pub type PrHeadFn = Box<dyn Fn(&Path, i64) -> AppResult<(String, String)> + Send + Sync>;
 
+/// How long `/v1/oneshot` waits for the harness before answering `timeout`.
+pub const ONESHOT_TIMEOUT: Duration = Duration::from_secs(600);
+
 /// Queued plus running runs beyond which new ones are refused with `queue_full`.
 pub const MAX_QUEUE: i64 = 100;
 
@@ -49,6 +52,9 @@ pub struct Shared {
     pub max_queue: AtomicI64,
     /// Serialises workspace resolution: two requests for the same branch must not both run `git worktree add`.
     /// There is no lock on the worktree itself: a queued run does not hold its worktree (ADR 0007).
+    /// Bounds concurrent one-shot calls (they run outside the run engine).
+    pub oneshot_slots: Arc<tokio::sync::Semaphore>,
+    pub oneshot_timeout: Duration,
     pub workspace_lock: std::sync::Mutex<()>,
     /// `<data_dir>/serve_runs`: the run directories (`<id>`) and the attachment scratch dirs (`scratch/<id>`).
     pub runs_base: PathBuf,
@@ -62,6 +68,7 @@ pub struct Settings {
     /// Runs, scratch dirs and the like live under `<data_dir>/serve_runs`.
     pub data_dir: PathBuf,
     pub max_concurrency: i64,
+    pub oneshot_timeout: Duration,
     pub worktree_base: PathBuf,
     pub pr_head: PrHeadFn,
 }
@@ -98,6 +105,8 @@ pub fn build(settings: Settings, harnesses: Vec<&'static dyn Harness>) -> AppRes
         worktree_base: settings.worktree_base,
         pr_head: settings.pr_head,
         max_queue: AtomicI64::new(MAX_QUEUE),
+        oneshot_slots: Arc::new(tokio::sync::Semaphore::new(settings.max_concurrency.max(1) as usize)),
+        oneshot_timeout: settings.oneshot_timeout,
         workspace_lock: std::sync::Mutex::new(()),
         runs_base: settings.data_dir.join("serve_runs"),
     }))
@@ -273,9 +282,31 @@ fn caps_check(h: &dyn Harness, what: &str, needs: &Needs) -> Result<(), ApiError
     check_caps(h, what, needs).map_err(|e| ApiError::new(ErrorCode::CapabilityMissing, e.to_string()))
 }
 
+/// A one-shot runs outside the run engine, so it has its own bound: at most `max_concurrency` at a
+/// time (`queue_full` beyond) and `oneshot_timeout` of waiting. The harness call itself cannot be
+/// cancelled from here, so a timed-out call keeps its slot until the harness returns: stuck calls
+/// can never exceed the cap.
 async fn oneshot(State(s): State<SharedState>, body: Bytes) -> HttpResult<Json<OneShotResponse>> {
     let req: OneShotRequest = parse(&body)?;
-    blocking(move || {
+    let permit = s
+        .oneshot_slots
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| ApiError::new(ErrorCode::QueueFull, "too many one-shot calls are already running"))?;
+    let timeout = s.oneshot_timeout;
+    let task = tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        oneshot_blocking(&s, req)
+    });
+    match tokio::time::timeout(timeout, task).await {
+        Ok(Ok(r)) => Ok(Json(r.map_err(HttpError)?)),
+        Ok(Err(e)) => Err(HttpError(ApiError::internal(e))),
+        Err(_) => Err(HttpError(ApiError::new(ErrorCode::Timeout, format!("the harness did not answer within {}s", timeout.as_secs())))),
+    }
+}
+
+fn oneshot_blocking(s: &Shared, req: OneShotRequest) -> Result<OneShotResponse, ApiError> {
+    {
         static COUNTER: AtomicU64 = AtomicU64::new(0);
         let h = s.harness(&req.harness)?;
         validate_args(&req.model, &req.allowed_tools)?;
@@ -302,16 +333,15 @@ async fn oneshot(State(s): State<SharedState>, body: Bytes) -> HttpResult<Json<O
             extra_args: Vec::new(),
             usage_tag: RunTag::new("remote_oneshot").harness(h.id()),
         };
-        Ok(Json(match h.one_shot(&one) {
+        Ok(match h.one_shot(&one) {
             Ok(t) => OneShotResponse {
                 text: t.text,
                 usage: Some(OneShotUsage { input_tokens: t.input_tokens, output_tokens: t.output_tokens, cost_usd: t.cost_usd }),
                 error: None,
             },
             Err(e) => OneShotResponse { text: String::new(), usage: None, error: Some(e.to_string()) },
-        }))
-    })
-    .await
+        })
+    }
 }
 
 fn create_run_blocking(s: &Shared, req: RunRequest) -> Result<(StatusCode, Value), ApiError> {
@@ -549,6 +579,9 @@ mod tests {
             true
         }
         fn one_shot(&self, req: &OneShot<'_>) -> AppResult<TurnResult> {
+            if req.prompt == "slow" {
+                std::thread::sleep(Duration::from_millis(1500));
+            }
             if req.prompt == "fail" {
                 return Err(AppError::Other("the harness failed".into()));
             }
@@ -606,6 +639,10 @@ mod tests {
     }
 
     async fn server(max_concurrency: i64) -> Server {
+        server_with(max_concurrency, ONESHOT_TIMEOUT).await
+    }
+
+    async fn server_with(max_concurrency: i64, oneshot_timeout: Duration) -> Server {
         let dir = tempfile::tempdir().unwrap();
         let repo = dir.path().join("widgets");
         std::fs::create_dir_all(&repo).unwrap();
@@ -627,6 +664,7 @@ mod tests {
                 serve_db_path: dir.path().join("serve.db"),
                 data_dir: dir.path().to_path_buf(),
                 max_concurrency,
+                oneshot_timeout,
                 worktree_base: dir.path().join("wt"),
                 pr_head: Box::new(|_, _| Err(crate::error::AppError::Other("no gh in tests".into()))),
             },
@@ -935,6 +973,30 @@ mod tests {
             dirs.insert(done["text"].as_str().unwrap().to_string());
         }
         assert_eq!(dirs.len(), 1, "{dirs:?}");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn oneshots_are_capped_and_time_out() {
+        let srv = Arc::new(server_with(1, Duration::from_millis(300)).await);
+        let slow = json!({"harness": "fake", "prompt": "slow"}).to_string();
+        let quick = json!({"harness": "fake", "prompt": "hi"}).to_string();
+        let first = {
+            let srv = srv.clone();
+            tokio::spawn(async move { req(&srv, "POST", "/v1/oneshot", Some(&slow)).await })
+        };
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        // the one slot is taken: refused at once instead of piling up
+        let (status, v) = req(&srv, "POST", "/v1/oneshot", Some(&quick)).await;
+        assert_eq!((status, v["error"]["code"].as_str()), (429, Some("queue_full")), "{v}");
+        // the slow call times out for its client ...
+        let (status, v) = first.await.unwrap();
+        assert_eq!((status, v["error"]["code"].as_str()), (504, Some("timeout")), "{v}");
+        // ... but keeps its slot until the harness returns
+        let (status, _) = req(&srv, "POST", "/v1/oneshot", Some(&quick)).await;
+        assert_eq!(status, 429);
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+        let (status, v) = req(&srv, "POST", "/v1/oneshot", Some(&quick)).await;
+        assert_eq!(status, 200, "{v}");
     }
 
     #[tokio::test(flavor = "multi_thread")]

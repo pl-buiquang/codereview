@@ -40,6 +40,7 @@ pub enum ErrorCode {
     CapabilityMissing,
     QueueFull,
     Conflict,
+    Timeout,
     BadRequest,
     NotFound,
     Internal,
@@ -54,6 +55,7 @@ impl ErrorCode {
             ErrorCode::CapabilityMissing => "capability_missing",
             ErrorCode::QueueFull => "queue_full",
             ErrorCode::Conflict => "conflict",
+            ErrorCode::Timeout => "timeout",
             ErrorCode::BadRequest => "bad_request",
             ErrorCode::NotFound => "not_found",
             ErrorCode::Internal => "internal",
@@ -67,6 +69,7 @@ impl ErrorCode {
             ErrorCode::UnknownRepo | ErrorCode::NoWorktree | ErrorCode::HarnessUnavailable | ErrorCode::CapabilityMissing => 422,
             ErrorCode::QueueFull => 429,
             ErrorCode::Conflict => 409,
+            ErrorCode::Timeout => 504,
             ErrorCode::Internal => 500,
         }
     }

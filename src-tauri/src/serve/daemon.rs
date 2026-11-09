@@ -134,6 +134,7 @@ pub fn run(cfg: Config) -> AppResult<()> {
             serve_db_path: cfg.serve_db.clone(),
             data_dir,
             max_concurrency: cfg.max_concurrency,
+            oneshot_timeout: http::ONESHOT_TIMEOUT,
             worktree_base: crate::worktree::worktrees_base(),
             pr_head: Box::new(super::workspace::gh_pr_head),
         },
