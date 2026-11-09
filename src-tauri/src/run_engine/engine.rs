@@ -50,8 +50,17 @@ impl RunEngine {
         Arc::new(Self { store, sink, harness, inner: Mutex::new(Inner::default()) })
     }
 
+    /// The harness used for what names none (the default of the host).
     pub fn harness(&self) -> &'static dyn Harness {
         self.harness
+    }
+
+    /// The harness a stored run was started on; an id this build doesn't know falls back to the default.
+    fn harness_by_id(&self, id: &str) -> &'static dyn Harness {
+        if id == self.harness.id() {
+            return self.harness;
+        }
+        crate::ai::harness_by_id(id).unwrap_or(self.harness)
     }
 
     /// Spawn the timeout watcher. Call once.
@@ -257,7 +266,8 @@ impl RunEngine {
                 return Outcome::failed(format!("failed to prepare the run directory: {e}"));
             }
         };
-        let spawned = self.harness.spawn(StreamRun {
+        let harness = p.harness;
+        let spawned = harness.spawn(StreamRun {
             req: p.request(&prompt_path),
             stdout: stdout_file,
             stderr: stderr_file,
@@ -285,7 +295,7 @@ impl RunEngine {
         if let Some(mut stdin) = child.stdin.take() {
             let _ = stdin.write_all(p.prompt.as_bytes());
         }
-        let tail = self.tail(run_id, &dir.join(STDOUT_FILE), 0, &mut || matches!(child.try_wait(), Ok(None)));
+        let tail = self.tail(harness, run_id, &dir.join(STDOUT_FILE), 0, &mut || matches!(child.try_wait(), Ok(None)));
         let result = match tail {
             Tail::Detached => {
                 // Dropping `child` neither kills nor reaps it; the next start adopts the run.
@@ -298,12 +308,12 @@ impl RunEngine {
         self.inner.lock().unwrap().live.remove(&run_id);
         let _ = std::fs::remove_file(&prompt_path);
         cleanup();
-        outcome_from(self.harness, result, read_stderr(&dir), status)
+        outcome_from(harness, result, read_stderr(&dir), status)
     }
 
-    fn tail(&self, run_id: i64, path: &std::path::Path, skip: i64, alive: &mut dyn FnMut() -> bool) -> Tail {
+    fn tail(&self, harness: &dyn Harness, run_id: i64, path: &std::path::Path, skip: i64, alive: &mut dyn FnMut() -> bool) -> Tail {
         tail_events(
-            self.harness,
+            harness,
             path,
             skip,
             alive,
@@ -329,9 +339,10 @@ impl RunEngine {
         let dir = self.run_dir(id);
         let out = dir.join(STDOUT_FILE);
         let pid = run.pid;
-        let alive = pid > 0 && self.harness.is_own_process(pid, run.session_id.as_deref());
+        let harness = self.harness_by_id(&run.harness);
+        let alive = pid > 0 && harness.is_own_process(pid, run.session_id.as_deref());
         // Gone without a result: it died with the app, or was killed meanwhile.
-        if !alive && !file_has_result(self.harness, &out) {
+        if !alive && !file_has_result(harness, &out) {
             return self.settle_lost(id);
         }
         log::info!(target: "routines", "run {id}: adopted (process {})", if alive { "alive" } else { "finished" });
@@ -346,10 +357,10 @@ impl RunEngine {
             self.inner.lock().unwrap().live.insert(id, Live { pgid: pid, deadline: Instant::now() + left });
         }
         let skip = self.store.last_seq(id);
-        let tail = self.tail(id, &out, skip, &mut || alive && process_alive(pid));
+        let tail = self.tail(harness, id, &out, skip, &mut || alive && process_alive(pid));
         self.inner.lock().unwrap().live.remove(&id);
         let Tail::Done(result) = tail else { return };
-        let outcome = outcome_from(self.harness, result, read_stderr(&dir), Ok("an unknown status".into()));
+        let outcome = outcome_from(harness, result, read_stderr(&dir), Ok("an unknown status".into()));
         self.settle(id, &outcome, started, &started_at);
     }
 
@@ -425,11 +436,13 @@ mod tests {
     /// Spawns `sh -c <prompt-independent script>` taken from the model field, as a group leader.
     struct FakeHarness {
         own: bool,
+        /// Put in front of the final text, to tell harnesses apart.
+        prefix: &'static str,
     }
 
     impl Harness for FakeHarness {
         fn id(&self) -> &'static str {
-            "fake"
+            if self.prefix.is_empty() { "fake" } else { "alt" }
         }
         fn name(&self) -> &'static str {
             "Fake"
@@ -473,7 +486,7 @@ mod tests {
             match serde_json::from_str::<Value>(line) {
                 Ok(v) if v.get("type").and_then(Value::as_str) == Some("result") => vec![Event::Final {
                     ok: !v.get("is_error").and_then(Value::as_bool).unwrap_or(false),
-                    text: v.get("result").and_then(Value::as_str).unwrap_or_default().to_string(),
+                    text: format!("{}{}", self.prefix, v.get("result").and_then(Value::as_str).unwrap_or_default()),
                     usage: Default::default(),
                 }],
                 Ok(v) => vec![Event::Other { kind: "x".into(), raw: v }],
@@ -491,6 +504,8 @@ mod tests {
     #[derive(Clone, Debug, Default)]
     struct Row {
         status: String,
+        /// Id of the harness the run was started on (empty: the default).
+        harness: String,
         pid: i32,
         session_id: Option<String>,
         started_at: Option<String>,
@@ -606,6 +621,7 @@ mod tests {
                 .map(|(id, r)| RunningRun {
                     id: *id,
                     pid: r.pid,
+                    harness: r.harness.clone(),
                     session_id: r.session_id.clone(),
                     started_at: r.started_at.clone(),
                 })
@@ -640,6 +656,9 @@ mod tests {
         log: Mutex<Vec<String>>,
         finished: Mutex<Vec<(i64, Finished)>>,
         adopt_timeout: Option<Duration>,
+        /// What runs are prepared with (set by `engine`), and per run id an alternative.
+        harness: std::sync::OnceLock<&'static dyn Harness>,
+        alt: Mutex<HashMap<i64, &'static dyn Harness>>,
     }
 
     impl FakeSink {
@@ -650,6 +669,8 @@ mod tests {
                 log: Default::default(),
                 finished: Default::default(),
                 adopt_timeout: Some(Duration::from_secs(60)),
+                harness: Default::default(),
+                alt: Default::default(),
             })
         }
         fn script(&self, id: i64, s: &str) {
@@ -683,7 +704,9 @@ mod tests {
             if stopped() {
                 return Ok(None);
             }
+            let harness = self.alt.lock().unwrap().get(&id).copied().unwrap_or_else(|| *self.harness.get().unwrap());
             Ok(Some(Prepared {
+                harness,
                 model: script,
                 system_prompt: "sys".into(),
                 system_prompt_mode: SystemPromptMode::Append,
@@ -719,8 +742,26 @@ mod tests {
     const RESULT_OK: &str = r#"printf '%s\n' '{"type":"assistant"}' '{"type":"result","is_error":false,"result":"done"}'"#;
 
     fn engine(store: &Arc<FakeStore>, sink: &Arc<FakeSink>, own: bool) -> Arc<RunEngine> {
-        let harness: &'static FakeHarness = Box::leak(Box::new(FakeHarness { own }));
+        let harness: &'static FakeHarness = Box::leak(Box::new(FakeHarness { own, prefix: "" }));
+        let _ = sink.harness.set(harness);
         RunEngine::new(store.clone(), sink.clone(), harness)
+    }
+
+    #[test]
+    fn each_run_goes_through_the_harness_it_was_prepared_with() {
+        let store = FakeStore::new("per_run", 2);
+        let sink = FakeSink::new(Duration::from_secs(60));
+        let alt: &'static FakeHarness = Box::leak(Box::new(FakeHarness { own: false, prefix: "alt:" }));
+        for id in 1..=2 {
+            store.add(id, "queued");
+            sink.script(id, RESULT_OK);
+        }
+        sink.alt.lock().unwrap().insert(2, alt);
+        let e = engine(&store, &sink, false);
+        e.pump();
+        wait_for("both done", || store.status(1) == "ok" && store.status(2) == "ok");
+        assert_eq!(store.row(1).text, "done");
+        assert_eq!(store.row(2).text, "alt:done");
     }
 
     #[test]

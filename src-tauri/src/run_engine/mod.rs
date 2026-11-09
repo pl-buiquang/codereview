@@ -14,7 +14,7 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use crate::ai::{Access, OneShot, SystemPrompt, SystemPromptMode, ToolPolicy};
+use crate::ai::{Access, Harness, OneShot, SystemPrompt, SystemPromptMode, ToolPolicy};
 use crate::ai::SessionMode;
 use crate::ai_usage::{RunTag, RunUsage};
 use crate::error::AppResult;
@@ -26,6 +26,8 @@ pub mod tail;
 
 /// Everything the engine needs to start a run's process, owned. Built by [`EventSink::prepare`].
 pub struct Prepared {
+    /// The harness that runs it (a run is not tied to the engine's default).
+    pub harness: &'static dyn Harness,
     pub model: String,
     /// Written to the run directory and handed to the harness as a file.
     pub system_prompt: String,
@@ -71,6 +73,8 @@ impl Prepared {
 #[derive(Debug, Clone)]
 pub struct RunningRun {
     pub id: i64,
+    /// Id of the harness the run was started on.
+    pub harness: String,
     pub pid: i32,
     pub session_id: Option<String>,
     pub started_at: Option<String>,

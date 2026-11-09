@@ -20,7 +20,7 @@ use super::context::{self, ContextRef, Light};
 use super::handlers;
 use super::{get as get_routine, Routine};
 use crate::ai::profiles;
-use crate::ai::{self, ToolPolicy};
+use crate::ai::{self, Harness, ToolPolicy};
 use crate::ai_usage::{self, RunTag};
 use crate::commands::chat::new_session_id;
 use crate::commands::focus::child_path;
@@ -271,7 +271,10 @@ pub fn mark_interrupted(conn: &Connection, db_path: &Path) -> AppResult<usize> {
             continue;
         }
         if let Some(pid) = pid {
-            proc::kill_leftover(ai::harness_for(), pid as i32);
+            // Whichever harness it was, it only dies if it still looks like that harness' own process.
+            for harness in ai::harnesses() {
+                proc::kill_leftover(harness, pid as i32);
+            }
         }
         n += conn.execute(
             "UPDATE routine_run SET status = 'interrupted', ended_at = ?2 WHERE id = ?1",
@@ -512,7 +515,7 @@ impl RunStore for SqliteRunStore {
 
     fn running_runs(&self) -> AppResult<Vec<RunningRun>> {
         self.with_conn(|c| {
-            let mut stmt = c.prepare("SELECT id, pid, session_id, started_at FROM routine_run WHERE status = 'running'")?;
+            let mut stmt = c.prepare("SELECT id, pid, session_id, started_at, harness FROM routine_run WHERE status = 'running'")?;
             let rows = stmt
                 .query_map([], |r| {
                     Ok(RunningRun {
@@ -520,6 +523,7 @@ impl RunStore for SqliteRunStore {
                         pid: r.get::<_, Option<i64>>(1)?.unwrap_or(0) as i32,
                         session_id: r.get(2)?,
                         started_at: r.get(3)?,
+                        harness: r.get(4)?,
                     })
                 })?
                 .collect::<rusqlite::Result<_>>()?;
@@ -640,16 +644,19 @@ impl EventSink for AppSink {
         if !run.note.trim().is_empty() {
             system.push_str(&format!("\n\n## Extra instructions for this run\n{}", run.note.trim()));
         }
-        let (model, harness) = {
+        let (model, harness, profile_args) = {
             let db = app.state::<Db>();
             let conn = db.0.lock().unwrap();
-            let harness = profiles::resolve_routine(&conn, routine.profile_id).harness.id();
-            let _ = conn.execute("UPDATE routine_run SET harness = ?1 WHERE id = ?2", params![harness, run.id]);
-            (handlers::effective_model(&conn, &run, &routine), harness)
+            let resolved = profiles::resolve_routine(&conn, routine.profile_id);
+            let harness = resolved.harness;
+            let _ = conn.execute("UPDATE routine_run SET harness = ?1 WHERE id = ?2", params![harness.id(), run.id]);
+            (handlers::effective_model(&conn, &run, &routine), harness, harness.settings_args(&resolved.settings))
         };
 
         log::info!(target: "routines", "run {}: starting {} on {}", run.id, routine.key, run.context_label);
         Ok(Some(build_prepared(
+            harness,
+            profile_args,
             &routine,
             &prep,
             cwd,
@@ -658,7 +665,7 @@ impl EventSink for AppSink {
             system,
             prompt,
             &app.state::<DbPath>().0,
-            handlers::usage_tag(&routine, &run, harness),
+            handlers::usage_tag(&routine, &run, harness.id()),
         )))
     }
 
@@ -701,6 +708,8 @@ impl EventSink for AppSink {
 /// The process request of a run.
 #[allow(clippy::too_many_arguments)]
 fn build_prepared(
+    harness: &'static dyn Harness,
+    profile_args: Vec<String>,
     routine: &Routine,
     prep: &handlers::Prep,
     cwd: PathBuf,
@@ -711,12 +720,15 @@ fn build_prepared(
     db_path: &Path,
     usage_tag: RunTag,
 ) -> Prepared {
-    let opts = routine.run_options(usage_tag.harness);
+    let mut opts = routine.run_options(usage_tag.harness);
+    // The profile's own flags (an opencode agent) come after the routine's.
+    opts.extra_args.extend(profile_args);
     let mut env: Vec<(String, std::ffi::OsString)> = vec![("CODEREVIEW_DB".into(), db_path.into())];
     if let Some(path) = child_path() {
         env.push(("PATH".into(), path));
     }
     Prepared {
+        harness,
         model,
         system_prompt,
         system_prompt_mode: opts.system_prompt_mode,
@@ -909,7 +921,7 @@ mod tests {
         let db = Path::new("/data/cr.db");
         for (mode, flag) in [("append", "--append-system-prompt-file"), ("replace", "--system-prompt-file")] {
             let routine = test_routine(mode);
-            let p = build_prepared(&routine, &prep, cwd.into(), "opus".into(), "sid".into(), String::new(), "p".into(), db, RunTag::new("t"));
+            let p = build_prepared(ai::harness_for(), Vec::new(), &routine, &prep, cwd.into(), "opus".into(), "sid".into(), String::new(), "p".into(), db, RunTag::new("t"));
             let cmd = crate::ai::claude::command(&p.request(prompt), true, Some(prompt));
             assert_eq!(
                 argv(&cmd),
@@ -937,7 +949,7 @@ mod tests {
         let mut routine = test_routine("append");
         routine.harness_overrides = serde_json::json!({ "claude": { "permission_mode": "acceptEdits" } });
         let prep = handlers::Prep::default();
-        let p = build_prepared(&routine, &prep, "/r".into(), String::new(), "s".into(), String::new(), "p".into(), Path::new("/d"), RunTag::new("t"));
+        let p = build_prepared(ai::harness_for(), Vec::new(), &routine, &prep, "/r".into(), String::new(), "s".into(), String::new(), "p".into(), Path::new("/d"), RunTag::new("t"));
         let cmd = crate::ai::claude::command(&p.request(Path::new("/p")), true, Some(Path::new("/p")));
         assert_eq!(
             argv(&cmd),
