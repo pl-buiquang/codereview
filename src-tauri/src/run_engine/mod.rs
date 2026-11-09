@@ -20,6 +20,7 @@ use crate::ai::SessionMode;
 use crate::ai_usage::{RunTag, RunUsage};
 use crate::error::AppResult;
 
+pub mod engine;
 pub mod outcome;
 pub mod proc;
 pub mod tail;
