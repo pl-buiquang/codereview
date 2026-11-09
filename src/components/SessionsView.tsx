@@ -12,7 +12,7 @@ import { useAiDisabledReason, useSettingsStore } from "../lib/settings";
 import { useUIStore, type SessionsTab } from "../store";
 import type { CardSession, AgentSession, RemoteSession, SessionCost, SessionFocusState } from "../lib/types";
 import { attachCommand, resumeCommand } from "../lib/sessionCommands";
-import { HOST_STATUS_LABEL, hostFilterMatches, isRemote, mergeRemoteSessions, remoteKey, sshAttachCommand, type HostFilter } from "../lib/remoteSessions";
+import { HOST_STATUS_LABEL, hostFilterMatches, isRemote, mergeRemoteSessions, remoteKey, sshAttach, type HostFilter } from "../lib/remoteSessions";
 import { Icon } from "./icons";
 import { Markdown } from "./Markdown";
 import { RoutinesConfigTab } from "./routines/RoutinesConfigTab";
@@ -314,15 +314,20 @@ function TerminalSessions() {
 
 /** The only action of a remote session: copy the ssh command that reaches it. */
 function CopySshButton({ session: s, onCopy }: { session: RemoteSession; onCopy: (command: string, what: string) => void }) {
-  const cmd = sshAttachCommand(s);
+  const attach = sshAttach(s);
+  const resume = attach.command !== null && attach.kind === "resume";
   return (
     <button
       className="btn btn-sm"
-      disabled={cmd === null}
-      title={cmd === null ? `No attach command known for harness ${s.harness}` : `Copy: ${cmd}`}
-      onClick={() => cmd && onCopy(cmd, "ssh attach")}
+      disabled={attach.command === null}
+      title={
+        attach.command === null
+          ? `Cannot build an ssh command: ${attach.reason}`
+          : `${resume ? "Starts a second client on this session. " : ""}Copy: ${attach.command}`
+      }
+      onClick={() => attach.command && onCopy(attach.command, "ssh attach")}
     >
-      <Icon name="copy" size={13} /> Copy ssh
+      <Icon name="copy" size={13} /> {resume ? "Resume (new client)" : "Copy ssh"}
     </button>
   );
 }

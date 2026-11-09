@@ -892,7 +892,7 @@ export interface RemoteSession extends AgentSession {
   host_ssh_target: string;
 }
 
-export type HostSessionsStatus = "ok" | "connecting" | "unreachable" | "protocol_mismatch" | "disabled" | "error";
+export type HostSessionsStatus = "ok" | "unreachable" | "protocol_mismatch" | "disabled" | "error";
 
 /** One host's answer to the sessions lookup; a host that is down has a status and no sessions. */
 export interface HostSessions {

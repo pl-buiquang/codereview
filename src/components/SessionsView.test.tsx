@@ -252,14 +252,14 @@ describe("SessionsView", () => {
       await screen.findByText("remote one");
       expect(screen.getByTitle("Host: koza")).toBeInTheDocument();
       const copy = screen.getByRole("button", { name: /Copy ssh/ });
-      expect(copy).toHaveAttribute("title", expect.stringContaining("ssh -t koza"));
+      expect(copy).toHaveAttribute("title", expect.stringContaining("ssh -t -- koza"));
       expect(copy).toHaveAttribute("title", expect.stringContaining("select-pane -t %7"));
       // the local actions stay on the local rows only
       expect(screen.getAllByRole("button", { name: /Focus/ })).toHaveLength(3);
       const writeText = vi.fn().mockResolvedValue(undefined);
       Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
       await userEvent.click(copy);
-      await waitFor(() => expect(writeText).toHaveBeenCalledWith(expect.stringMatching(/^ssh -t koza /)));
+      await waitFor(() => expect(writeText).toHaveBeenCalledWith(expect.stringMatching(/^ssh -t -- koza /)));
     });
 
     it("a remote row cannot be expanded to generate a summary", async () => {
@@ -302,9 +302,10 @@ describe("SessionsView", () => {
     it("builds the ssh attach command per case", () => {
       const base = { host_ssh_target: "koza", harness: "claude", session_id: "abc", cwd: "/home/x/my app", job_id: null, tmux: null };
       expect(sshAttachCommand({ ...base, tmux: { session: "main", window: "@2", pane: "%7", label: null } })).toBe(
-        String.raw`ssh -t koza '$SHELL -lc '\''tmux attach -t main \; select-window -t @2 \; select-pane -t %7'\'''`,
+        String.raw`ssh -t -- koza '$SHELL -lc '\''tmux attach -t =main \; select-window -t @2 \; select-pane -t %7'\'''`,
       );
       expect(sshAttachCommand({ ...base, job_id: "job1" })).toContain("claude attach job1");
+      expect(sshAttachCommand(base)).toContain("cd -- ");
       expect(sshAttachCommand(base)).toContain("claude --resume abc");
       expect(sshAttachCommand({ ...base, harness: "mystery" })).toBeNull();
     });

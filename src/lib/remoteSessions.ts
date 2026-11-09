@@ -1,9 +1,8 @@
 import type { AgentSession, HostSessions, HostSessionsStatus, RemoteSession } from "./types";
-import { attachCommand, resumeCommand, shellQuote } from "./sessionCommands";
+import { attachCommand, resumeInvocation, shellQuote } from "./sessionCommands";
 
 export const HOST_STATUS_LABEL: Record<HostSessionsStatus, string> = {
   ok: "connected",
-  connecting: "connecting…",
   unreachable: "unreachable",
   protocol_mismatch: "protocol mismatch",
   disabled: "disabled",
@@ -28,25 +27,48 @@ export function isRemote(s: AgentSession | RemoteSession): s is RemoteSession {
   return "host_id" in s && (s as RemoteSession).host_id != null;
 }
 
+const CONTROL = /[\x00-\x1f\x7f]/;
+
+type SshFields = Pick<RemoteSession, "host_ssh_target" | "harness" | "session_id" | "cwd" | "job_id" | "tmux">;
+
 /**
- * The command to paste in a terminal to reach a remote session, or `null` when none is known.
- * Runs through the remote's login shell, because harness binaries are often on its PATH only.
- * With a tmux pane known the command attaches to it; a background Claude job gets `claude attach`;
- * anything else resumes the session in its folder (best effort).
+ * The command to paste in a terminal to reach a remote session, or why there is none.
+ *
+ * Everything the remote reports is untrusted: a control character (a bracketed-paste escape, a newline)
+ * would run on paste, so such a session gets no command; so does an id or target starting with `-`.
+ * The command runs through the remote's login shell (`$SHELL -lc`, best effort for fish/csh), because
+ * harness binaries are often on its PATH only. With a tmux pane known it attaches to it (an exact
+ * session match); a background Claude job gets `claude attach`; anything else resumes the session in
+ * its folder, which starts a second client on it.
  */
-export function sshAttachCommand(s: Pick<RemoteSession, "host_ssh_target" | "harness" | "session_id" | "cwd" | "job_id" | "tmux">): string | null {
+export function sshAttach(s: SshFields): { command: string; kind: "tmux" | "attach" | "resume" } | { command: null; reason: string } {
+  const fields = [s.host_ssh_target, s.session_id, s.cwd, s.job_id, s.tmux?.session, s.tmux?.window, s.tmux?.pane];
+  if (fields.some((f) => f != null && CONTROL.test(f))) return { command: null, reason: "unsupported characters in the session's details" };
+  if (s.host_ssh_target === "" || s.host_ssh_target.startsWith("-")) return { command: null, reason: "unsupported SSH target" };
+  if (s.session_id.startsWith("-") || s.job_id?.startsWith("-") || s.tmux?.session.startsWith("-")) {
+    return { command: null, reason: "unsupported characters in the session's details" };
+  }
   let inner: string | null;
+  let kind: "tmux" | "attach" | "resume";
   if (s.tmux) {
     const { session, window, pane } = s.tmux;
-    // `\;` is tmux's command separator as the remote shell must hand it over.
-    inner = String.raw`tmux attach -t ${shellQuote(session)} \; select-window -t ${shellQuote(window)} \; select-pane -t ${shellQuote(pane)}`;
+    if (!/^@\d+$/.test(window) || !/^%\d+$/.test(pane) || session === "") return { command: null, reason: "unsupported tmux location" };
+    kind = "tmux";
+    inner = String.raw`tmux attach -t ${shellQuote(`=${session}`)} \; select-window -t ${window} \; select-pane -t ${pane}`;
   } else if (s.harness === "claude" && s.job_id) {
+    kind = "attach";
     inner = attachCommand(s);
   } else {
-    inner = resumeCommand(s);
+    kind = "resume";
+    const resume = resumeInvocation(s.harness, s.session_id);
+    inner = resume === null ? null : `cd -- ${shellQuote(s.cwd)} && ${resume}`;
   }
-  if (inner === null) return null;
-  return `ssh -t ${shellQuote(s.host_ssh_target)} ${shellQuote(`$SHELL -lc ${shellQuote(inner)}`)}`;
+  if (inner === null) return { command: null, reason: `no attach command known for harness ${s.harness}` };
+  return { command: `ssh -t -- ${shellQuote(s.host_ssh_target)} ${shellQuote(`$SHELL -lc ${shellQuote(inner)}`)}`, kind };
+}
+
+export function sshAttachCommand(s: SshFields): string | null {
+  return sshAttach(s).command;
 }
 
 export interface MergedSessions {
