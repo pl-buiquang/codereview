@@ -86,9 +86,31 @@ reached when you launch fails the run at once with `host_unreachable`; use **Run
 
 Contexts without a GitHub repository (the board, a local virtual-PR review) cannot run remotely.
 
+## Remote sessions
+
+Home → Sessions also lists the sessions running on each enabled host, read-only: the daemon's
+`GET /v1/sessions` returns what its harnesses report (`Harness::live_sessions`, the same discovery the
+local list uses), so a session started in a terminal on the host is listed whether or not the app
+started anything there. Each row shows the host badge, the harness, status, working directory, repository,
+branch, and last activity; the header gets a host filter.
+
+- **Copy ssh** is the only action. It copies `ssh -t <alias> '$SHELL -lc "..."'`, run through the host's
+  login shell because harness binaries are often on its PATH only. A session in a tmux pane gets
+  `tmux attach` selecting that pane (Claude reports the pane; opencode and Codex do not, so they
+  get a resume command: `cd <cwd>; opencode --session <id>` or `codex resume <id>`, best effort, and it starts a second
+  client on the session rather than attaching to the running one). A background Claude job gets `claude attach <job>`.
+- **No local actions**: focus, resume in a local terminal, stop, summaries and board-card links are not
+  offered for a remote row. Only metadata crosses the wire: no transcripts and no summaries.
+- **A host that cannot be asked** shows a muted row (*unreachable*, *protocol mismatch*, *connecting...*,
+  *disabled*, or the error) instead of failing the list. Looking at Sessions opens the tunnel to
+  every enabled host on demand, like a launch does; a host the tunnel monitor is already retrying is not
+  dialled again by the poll. Disabled hosts are skipped.
+- History is not available for remote sessions (the API lists live sessions only), and the
+  counts in the sidebar and on board cards stay local.
+
 ## Limits of protocol 1
 
-- Remote chats and interactive sessions do not exist yet (the API has no session endpoints).
+- Remote chats and interactive sessions do not exist yet. `GET /v1/sessions` only lists live sessions (read-only, see above); there is no endpoint to start, stop or stream one.
 - Harness-native routine settings that have no neutral form are not sent: Claude's `extra_args`
   (the allowed-tool list and the permission mode, mapped to its neutral access level, are). A warning is logged.
 - A one-shot on a host runs in a scratch directory; it cannot see this machine's files.

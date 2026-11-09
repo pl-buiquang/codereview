@@ -109,7 +109,7 @@ not in the Tauri-bound `ai_usage.rs`.
 `host_disabled`), `harness.rs` (`RemoteHarness`, one-shots only; `for_host` caches one instance per host and
 harness), `runtime.rs` (the global tunnels + cached `/v1/info`), `launch.rs` (the run request of a plain routine),
 `mirror.rs` (follows a remote run into `routine_run` / `routine_run_event`, resuming `after_seq`; Tauri-free,
-plugged in through `MirrorHooks`) and `outbox.rs` (applies the run's outbox ops once, `remote_applied_op`).
+plugged in through `MirrorHooks`) and `outbox.rs` (applies the run's outbox ops once, `remote_applied_op`) and `sessions.rs` (the read-only sessions of every enabled host for the Sessions view, via `commands::hosts::list_remote_sessions`; kept out of `list_claude_sessions` so local counts and GC never see them; the UI is `SessionsView` with `lib/remoteSessions.ts`).
 `routines/remote_run.rs` is the app's glue: a profile with a `host_id` makes `commands::routines::launch` take
 `launch_remote` instead of the local engine, and every local-engine query ignores rows with a `host_id`. Local-only
 work (chat, interactive sessions, system routines) calls `Resolved::ensure_local`; a new feature that cannot run

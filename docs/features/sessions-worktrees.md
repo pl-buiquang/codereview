@@ -47,6 +47,14 @@ Other harnesses (see the README table) report their live sessions through `Harne
 last activity, live or not, title. With more than one harness listed, rows get a harness badge and
 a filter appears in the header. Focus, attach, stop, history and summaries are Claude-only.
 
+### Remote sessions
+
+Sessions running on a [remote host](remote-hosts.md#remote-sessions) appear in the same list, read-only.
+They are asked for separately from the local scan (every 5 seconds while Home is visible), so a slow
+host never delays the local rows, and the counts elsewhere (sidebar badge, board cards, Worktrees)
+stay local. Rows carry a host badge, the header gets a host filter ("This machine" or one host), and
+the only action is **Copy ssh**, which copies a command to paste in a terminal.
+
 ### Rows
 
 - Status dot (busy, idle, waiting, ended), badges (`background` / `attached` for background

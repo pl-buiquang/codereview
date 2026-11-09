@@ -64,6 +64,8 @@ Glossary of domain terms used in this app.
 - **Run mirror** — the local copy of a remote run: its `routine_run` row (with `host_id` and
   `remote_run_id`) and its events, copied by sequence number and resumed after a dropped connection, an
   app restart or a run that ended while the app was closed. Not to be confused with the GitHub mirror below.
+- **Remote session** — a live agent session on a host, listed read-only in Sessions from the daemon's
+  `/v1/sessions` (host badge, copy-ssh action; identity is host + harness + session id). Not a remote run.
 - **Outbox** — the structured, idempotent ops (`board_meta_add`, `focus_set`, `notify`, ...) that `cr`
   records inside a remote run instead of writing to a database; the client applies them when it
   mirrors the run and acknowledges them. Reads inside a remote run come from the run's context snapshot.
