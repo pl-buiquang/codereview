@@ -296,6 +296,17 @@ impl Harness for Codex {
         Ok(parse_models(&String::from_utf8_lossy(&out.stdout)))
     }
 
+    fn validate_settings(&self, settings: &Value) -> AppResult<()> {
+        let extra: Vec<String> = settings
+            .get("extra_args")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|a| a.as_str().map(String::from))
+            .collect();
+        check_extra(&extra)
+    }
+
     fn settings_args(&self, settings: &Value) -> Vec<String> {
         let mut args = Vec::new();
         if let Some(mode) = settings.get("sandbox").and_then(Value::as_str).map(str::trim).filter(|m| SANDBOXES.contains(m)) {
@@ -388,12 +399,61 @@ const FORBIDDEN_FLAGS: &[(&str, &str)] = &[
     ("--ask-for-approval", "--ask-for-approval"),
     ("-p", "--profile"),
     ("--profile", "--profile"),
+    // `--cd` moves the workspace root (the writable root) anywhere; the app sets the directory.
+    ("-C", "--cd"),
+    ("--cd", "--cd"),
+    // Feature flags can turn on approval and permission machinery; no harmless subset is known.
+    ("--enable", "--enable"),
+    ("--disable", "--disable"),
 ];
 
-/// Config keys (`-c key=value`) that change the sandbox or approvals.
+/// The only `-c` keys `extra_args` may set: model tuning and display, none of which touch the
+/// sandbox, the approvals, permissions, profiles or features. Everything else is refused (an
+/// allowlist, because `codex -c` takes quoted, dotted and aliased keys: `"sandbox_mode"`,
+/// `default_permissions`, `permissions.*`, `profiles.*`, `features.*`, ... all widen access).
+pub(crate) const ALLOWED_CONFIG_KEYS: &[&str] = &[
+    "model",
+    "model_reasoning_effort",
+    "model_reasoning_summary",
+    "model_verbosity",
+    "hide_agent_reasoning",
+    "show_raw_agent_reasoning",
+    "personality",
+];
+
+/// The dotted segments of the key of a `-c key=value` override, with quotes and whitespace
+/// stripped from each (TOML allows `"a" . 'b'`). `None` when it has no `=` or a quote is open.
+fn config_key(kv: &str) -> Option<Vec<String>> {
+    let mut segs = Vec::new();
+    let mut cur = String::new();
+    let mut chars = kv.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '=' => {
+                segs.push(cur.trim().to_string());
+                return Some(segs);
+            }
+            '.' => segs.push(std::mem::take(&mut cur).trim().to_string()),
+            q @ ('"' | '\'') => loop {
+                match chars.next()? {
+                    '\\' if q == '"' => cur.push(chars.next()?),
+                    c if c == q => break,
+                    c => cur.push(c),
+                }
+            },
+            c => cur.push(c),
+        }
+    }
+    None
+}
+
+/// Whether a `-c` override is outside the allowlist: a single-segment, allowlisted key. The value
+/// is never looked at, so inline tables and arrays cannot smuggle a key in.
 fn forbidden_config(kv: &str) -> bool {
-    let key = kv.split('=').next().unwrap_or("").trim();
-    key == "sandbox_mode" || key == "approval_policy" || key == "profile" || key.starts_with("sandbox_workspace_write")
+    match config_key(kv) {
+        Some(segs) => !(segs.len() == 1 && ALLOWED_CONFIG_KEYS.contains(&segs[0].as_str())),
+        None => true,
+    }
 }
 
 /// The first flag of `extra_args` that could change the sandbox or the approvals, if any.
@@ -423,11 +483,25 @@ fn forbidden_extra(args: &[String]) -> Option<String> {
                 _ => it.next(),
             };
             if kv.is_some_and(forbidden_config) {
-                return Some(format!("{flag} {}", kv.unwrap_or_default().split('=').next().unwrap_or("").trim()));
+                return Some(format!(
+                    "{flag} {} (only these -c keys are allowed: {})",
+                    kv.unwrap_or_default().split('=').next().unwrap_or("").trim(),
+                    ALLOWED_CONFIG_KEYS.join(", ")
+                ));
             }
         }
     }
     None
+}
+
+/// Refuses `extra_args` that could change the sandbox or the approvals (at run time and on save).
+fn check_extra(args: &[String]) -> AppResult<()> {
+    match forbidden_extra(args) {
+        Some(flag) => Err(AppError::Other(format!(
+            "Codex extra_args may not contain {flag}: the sandbox and approvals come from the run's access level and the profile's \"sandbox\" and \"allow_full\" settings"
+        ))),
+        None => Ok(()),
+    }
 }
 
 fn rank(mode: &str) -> usize {
@@ -452,11 +526,7 @@ fn plan(req: &OneShot<'_>) -> AppResult<(&'static str, Vec<String>)> {
             rest.push(a.clone());
         }
     }
-    if let Some(flag) = forbidden_extra(&rest) {
-        return Err(AppError::Other(format!(
-            "Codex extra_args may not contain {flag}: the sandbox and approvals come from the run's access level and the profile's \"sandbox\" and \"allow_full\" settings"
-        )));
-    }
+    check_extra(&rest)?;
     let derived = match &req.access {
         Access::Edit => "workspace-write",
         Access::Full => "danger-full-access",
@@ -1217,6 +1287,30 @@ mod tests {
             &["-c", "approval_policy=\"on-request\""],
             &["-c", "sandbox_workspace_write.network_access=true"],
             &["-csandbox_mode=\"danger-full-access\""],
+            &["-c=sandbox_mode=\"danger-full-access\""],
+            &["-c", "\"sandbox_mode\"=\"danger-full-access\""],
+            &["-c", "'sandbox_mode'='danger-full-access'"],
+            &["-c", " sandbox_mode = \"danger-full-access\""],
+            &["-c", "\"approval_policy\"=\"never\""],
+            &["--config=\"approval_policy\"=\"never\""],
+            &["-c", "\"sandbox_workspace_write\".network_access=true"],
+            &["-c", "sandbox_workspace_write . 'network_access'=true"],
+            &["-c", "profiles.x.sandbox_mode=\"danger-full-access\""],
+            &["-c", "profiles.\"x\".\"sandbox_mode\"=\"danger-full-access\""],
+            &["-c", "profile=\"x\""],
+            &["-c", "default_permissions=\":workspace\""],
+            &["-c", "permissions.x.filesystem.\":root\"=\"write\""],
+            &["-c", "features.guardian_approval=false"],
+            &["-c", "shell_environment_policy.inherit=all"],
+            &["-c", "model.sandbox_mode=\"danger-full-access\""],
+            &["-c", "tools.web_search=true"],
+            &["-c", "x={sandbox_mode=\"danger-full-access\"}"],
+            &["-c", "\"unterminated=1"],
+            &["-c", "no_equals"],
+            &["--enable", "guardian_approval"],
+            &["--disable=hooks"],
+            &["-C", "/"],
+            &["--cd=/"],
             &["--cr-allow-full"],
             &["--cr-allow-full=guess"],
             &["--cr-sandbox=danger-full-access"],
@@ -1231,9 +1325,37 @@ mod tests {
             }
         }
         // harmless flags and other config keys still pass
-        let mut req = request(cwd);
-        req.extra_args = strs(&["--color", "never", "-c", "model_verbosity=\"low\"", "-c", "shell_environment_policy.inherit=all"]);
-        assert!(command(&req).is_ok());
+        for ok in [
+            &["--color", "never", "-c", "model_verbosity=\"low\""][..],
+            &["-c", "\"model\"=\"o3\"", "--config", " model_reasoning_summary = \"auto\"", "-cmodel_reasoning_effort=\"low\""],
+            &["--config=personality=\"friendly\"", "--add-dir", "/x"],
+        ] {
+            for session in [SessionMode::Ephemeral, SessionMode::New("s"), SessionMode::Resume("01a1c0c8-adaa-7f93-b946-36ec1d2c8260")] {
+                let mut req = request(cwd);
+                req.session = session;
+                req.extra_args = strs(ok);
+                assert!(command(&req).is_ok(), "{ok:?} was refused");
+            }
+        }
+    }
+
+    #[test]
+    fn the_config_key_parser_strips_quotes_and_whitespace_per_segment() {
+        let k = |s: &str| config_key(s);
+        let v = |a: &[&str]| Some(a.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+        assert_eq!(k("model=\"o3\""), v(&["model"]));
+        assert_eq!(k(" \"sandbox_mode\" = 1"), v(&["sandbox_mode"]));
+        assert_eq!(k("'sandbox_mode'=1"), v(&["sandbox_mode"]));
+        assert_eq!(k("a . \"b.c\" . 'd' = 1"), v(&["a", "b.c", "d"]));
+        assert_eq!(k("\"a\\\"b\"=1"), v(&["a\"b"]));
+        // only the first `=` ends the key; inline tables and arrays in the value are not read
+        assert_eq!(k("x={sandbox_mode=\"y\"}"), v(&["x"]));
+        assert_eq!(k("x=[\"a=b\"]"), v(&["x"]));
+        assert_eq!(k("no_equals"), None);
+        assert_eq!(k("\"open=1"), None);
+        assert!(!forbidden_config("model = \"o3\""));
+        assert!(forbidden_config("model.x = 1"));
+        assert!(forbidden_config("\"sandbox_mode\"=1"));
     }
 
     #[test]

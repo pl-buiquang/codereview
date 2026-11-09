@@ -160,6 +160,9 @@ pub fn save(conn: &mut Connection, input: AiProfileInput) -> AppResult<AiProfile
         return Err(AppError::Other("profile settings must be a JSON object".into()));
     }
     reject_secrets(&input.settings)?;
+    if let Some(h) = harness_by_id(&input.harness) {
+        h.validate_settings(&input.settings)?;
+    }
     let settings = serde_json::to_string(&input.settings).unwrap_or_else(|_| "{}".into());
     let model = input.model.trim().to_string();
     let now = chrono::Utc::now().to_rfc3339();
@@ -433,6 +436,10 @@ mod tests {
         let mut secret = input("x");
         secret.settings = json!({ "env": { "OPENAI_API_KEY": "sk-1" } });
         assert!(save(&mut conn, secret).unwrap_err().to_string().contains("secret"));
+        let mut unsafe_args = input("x");
+        unsafe_args.harness = "codex".into();
+        unsafe_args.settings = json!({ "extra_args": ["-c", "\"sandbox_mode\"=\"danger-full-access\""] });
+        assert!(save(&mut conn, unsafe_args).unwrap_err().to_string().contains("extra_args may not contain"));
         let mut missing = input("x");
         missing.id = Some(999);
         assert!(save(&mut conn, missing).is_err());

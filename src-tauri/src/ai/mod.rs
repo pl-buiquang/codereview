@@ -308,6 +308,10 @@ pub trait Harness: Send + Sync {
     fn models(&self) -> AppResult<Vec<String>> {
         Ok(Vec::new())
     }
+    /// Refuses profile `settings` the harness would refuse at run time (called when a profile is saved).
+    fn validate_settings(&self, _settings: &Value) -> AppResult<()> {
+        Ok(())
+    }
     /// The command-line flags a profile's `settings` stand for (an opencode agent, extra args),
     /// appended to a request's `extra_args`. Settings the harness doesn't know are ignored.
     fn settings_args(&self, _settings: &Value) -> Vec<String> {
