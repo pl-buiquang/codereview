@@ -12,7 +12,9 @@
 //! On Linux the login shell is deliberately NOT sourced (the macOS heuristic
 //! below would always see `/usr/local/bin` and skip it anyway). Instead we
 //! prepend well-known per-user bin dirs (`~/.local/bin`, …) when they exist,
-//! which is where `claude` is typically installed.
+//! which is where `claude` (`~/.local/bin`) and `opencode` (`~/.opencode/bin`) are typically installed. This
+//! matters most for `cr serve` under systemd or over a non-interactive ssh, whose PATH never includes
+//! what a login/interactive shell adds.
 
 pub fn ensure_login_path() {
     // Kept for compatibility; the real work is in ensure_login_env.
@@ -43,7 +45,7 @@ pub fn ensure_login_env() {
     let Some(home) = std::env::var_os("HOME").map(std::path::PathBuf::from) else {
         return;
     };
-    let dirs: Vec<std::path::PathBuf> = [".local/bin", "bin", ".cargo/bin", ".claude/local"]
+    let dirs: Vec<std::path::PathBuf> = [".local/bin", "bin", ".cargo/bin", ".claude/local", ".opencode/bin"]
         .iter()
         .map(|d| home.join(d))
         .filter(|p| p.is_dir())
