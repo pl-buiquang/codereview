@@ -5,6 +5,8 @@ import { confirmDialog } from "../lib/confirm";
 import { toast } from "../lib/toast";
 import { timeAgo } from "../lib/timeAgo";
 import { useDebouncedCallback } from "../lib/useDebouncedCallback";
+import { useAiDisabledReason } from "../lib/settings";
+import { formatThreadForChat } from "../lib/threads";
 import { Icon } from "./icons";
 import { Markdown } from "./Markdown";
 import { Reactions } from "./Reactions";
@@ -27,6 +29,7 @@ export function GithubThread({
   readOnly,
   onCommentsChanged,
   onChanged,
+  onSendToChat,
 }: {
   thread: PrThread;
   ctx?: PrThreadCtx | null;
@@ -37,7 +40,10 @@ export function GithubThread({
   /** Called after a reply or resolve landed on GitHub, for views that don't
    *  watch ["pr-threads"] (the Inbox conversations). */
   onChanged?: () => void;
+  /** Prefill the review chat with a reference to this thread. */
+  onSendToChat?: (text: string) => void;
 }) {
+  const aiOff = useAiDisabledReason();
   const collapsible = thread.isResolved && thread.isCollapsed;
   const [expanded, setExpanded] = useState(!collapsible);
   const [replying, setReplying] = useState(false);
@@ -87,6 +93,18 @@ export function GithubThread({
     },
     onError: (e) => toast.error(`Draft reply failed:\n${String(e)}`),
   });
+
+  const canReply = !!ctx && rootId != null && !readOnly;
+  const sendToChatButton = onSendToChat && thread.comments.length > 0 && (
+    <button
+      className="github-thread-action"
+      disabled={aiOff != null}
+      title={aiOff ?? "Put a reference to this thread in the chat input"}
+      onClick={() => onSendToChat(formatThreadForChat(thread))}
+    >
+      Send to chat
+    </button>
+  );
 
   return (
     <div className="github-thread" data-thread-id={thread.id}>
@@ -139,16 +157,22 @@ export function GithubThread({
           ))}
         </div>
       )}
-      {expanded && ctx && rootId != null && !readOnly && (
+      {expanded && !replying && (canReply || sendToChatButton) && (
         <div className="github-thread-reply">
-          {!replying ? (
+          {canReply && (
             <button
               className="github-thread-action"
               onClick={() => setReplying(true)}
             >
               Reply…
             </button>
-          ) : canDraft ? (
+          )}
+          {sendToChatButton}
+        </div>
+      )}
+      {expanded && canReply && replying && (
+        <div className="github-thread-reply">
+          {canDraft ? (
             <Composer
               submitLabel="Add draft reply"
               onSubmit={async (text) => {

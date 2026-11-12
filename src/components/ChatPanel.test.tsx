@@ -44,11 +44,19 @@ const message = (role: "user" | "assistant", content: string): ChatMessage => ({
   created_at: "2026-01-01T00:00:00Z",
 });
 
-function renderPanel() {
+function renderPanel(draftMessage: string | null = null, onDraftConsumed = () => {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
-      <ChatPanel reviewId={7} paneCollapsed={false} onToggle={() => {}} pendingMessage={null} onPendingConsumed={() => {}} />
+      <ChatPanel
+        reviewId={7}
+        paneCollapsed={false}
+        onToggle={() => {}}
+        pendingMessage={null}
+        onPendingConsumed={() => {}}
+        draftMessage={draftMessage}
+        onDraftConsumed={onDraftConsumed}
+      />
     </QueryClientProvider>,
   );
 }
@@ -89,5 +97,17 @@ describe("ChatPanel profile selector", () => {
     await user.click(screen.getByRole("button", { name: "Send" }));
     await waitFor(() => expect(chatSend).toHaveBeenCalled());
     expect(chatSend.mock.calls[0].slice(0, 3)).toEqual([7, "again", 2]);
+  });
+});
+
+describe("ChatPanel draft message", () => {
+  it("prefills the input without sending", async () => {
+    const consumed = vi.fn();
+    renderPanel("Regarding thread X:\n\n", consumed);
+    await waitFor(() =>
+      expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("Regarding thread X:\n\n"),
+    );
+    expect(consumed).toHaveBeenCalled();
+    expect(chatSend).not.toHaveBeenCalled();
   });
 });

@@ -1848,6 +1848,9 @@ td.diff-code {
 .github-thread-reply {
   margin-top: 8px;
 }
+.github-thread-reply > .github-thread-action + .github-thread-action {
+  margin-left: 6px;
+}
 .github-thread-comment + .github-thread-comment {
   margin-top: 8px;
   padding-top: 8px;

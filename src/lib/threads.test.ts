@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { groupThreads } from "./threads";
-import type { Comment } from "./types";
+import { formatThreadForChat, groupThreads } from "./threads";
+import type { Comment, PrThread } from "./types";
 
 function comment(over: Partial<Comment> & { id: number }): Comment {
   return {
@@ -67,5 +67,57 @@ describe("groupThreads", () => {
     const threads = groupThreads(flat);
     expect(threads).toHaveLength(3);
     expect(threads.every((t) => t.replies.length === 0)).toBe(true);
+  });
+});
+
+describe("formatThreadForChat", () => {
+  const prThread = (over: Partial<PrThread> = {}): PrThread => ({
+    id: "T1",
+    isResolved: false,
+    isOutdated: false,
+    isCollapsed: false,
+    path: "src/a.ts",
+    line: 12,
+    startLine: null,
+    originalLine: 12,
+    diffSide: "RIGHT",
+    startDiffSide: null,
+    subjectType: "LINE",
+    comments: [
+      {
+        id: "C1",
+        databaseId: 1,
+        author: { login: "alice", avatarUrl: null },
+        body: "First line\nsecond line",
+        createdAt: "2024-01-01T00:00:00Z",
+        url: "https://gh/r1",
+        diffHunk: null,
+        outdated: false,
+      },
+      {
+        id: "C2",
+        databaseId: 2,
+        author: null,
+        body: "ok",
+        createdAt: "2024-01-02T00:00:00Z",
+        url: "https://gh/r2",
+        diffHunk: null,
+        outdated: false,
+      },
+    ],
+    ...over,
+  });
+
+  it("quotes every comment under a line reference", () => {
+    expect(formatThreadForChat(prThread())).toBe(
+      "Regarding GitHub review thread on `src/a.ts` line 12 (RIGHT) — https://gh/r1:\n" +
+        "> **alice**: First line\n> second line\n>\n> **unknown**: ok\n\n",
+    );
+  });
+
+  it("labels ranges, outdated and file-level threads", () => {
+    expect(formatThreadForChat(prThread({ startLine: 10 }))).toMatch(/`src\/a.ts` lines 10–12 \(RIGHT\) —/);
+    expect(formatThreadForChat(prThread({ isOutdated: true }))).toMatch(/line 12 \(RIGHT\), outdated —/);
+    expect(formatThreadForChat(prThread({ line: null, diffSide: null }))).toMatch(/`src\/a.ts` \(file-level\) —/);
   });
 });

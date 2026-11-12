@@ -163,6 +163,7 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
   const [leftWidth, setLeftWidth] = useState(248);
   const [rightWidth, setRightWidth] = useState(360);
   const [pendingChatMessage, setPendingChatMessage] = useState<string | null>(null);
+  const [pendingChatDraft, setPendingChatDraft] = useState<string | null>(null);
   const [typeFilter, setTypeFilter] = useState<"all" | FileCategory>("all");
   const [commentFilter, setCommentFilter] = useState<CommentFilter>(DEFAULT_COMMENT_FILTER);
   const diffAreaRef = useRef<HTMLDivElement>(null);
@@ -311,8 +312,7 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
     [reviewId, leftWidth, rightWidth],
   );
 
-  const sendToChat = useCallback((formattedMsg: string) => {
-    setPendingChatMessage(formattedMsg);
+  const openChat = useCallback(() => {
     setChatCollapsed((prev) => {
       if (prev) {
         api.setChatCollapsed(reviewId, false);
@@ -321,6 +321,17 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
       return prev;
     });
   }, [reviewId]);
+
+  const sendToChat = useCallback((formattedMsg: string) => {
+    setPendingChatMessage(formattedMsg);
+    openChat();
+  }, [openChat]);
+
+  /** Prefill the chat input without sending (GitHub thread "Send to chat"). */
+  const draftToChat = useCallback((text: string) => {
+    setPendingChatDraft(text);
+    openChat();
+  }, [openChat]);
 
   const target = detailQuery.data?.target;
   const owner = detailQuery.data?.remote_owner ?? null;
@@ -1034,6 +1045,7 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
               onSaved={onDiffSaved}
               onCommentsChanged={onDiffCommentsChanged}
               onSendToChat={sendToChat}
+              onDraftToChat={draftToChat}
             />
           )}
         </div>
@@ -1044,6 +1056,8 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
           onToggle={toggleChat}
           pendingMessage={pendingChatMessage}
           onPendingConsumed={() => setPendingChatMessage(null)}
+          draftMessage={pendingChatDraft}
+          onDraftConsumed={() => setPendingChatDraft(null)}
         />
       </div>
 
@@ -2246,6 +2260,7 @@ const ReviewDiff = memo(function ReviewDiff({
   onSaved,
   onCommentsChanged,
   onSendToChat,
+  onDraftToChat,
 }: {
   files: FileData[];
   /** Indices to render; `null` means render everything (no type filter active). */
@@ -2267,6 +2282,7 @@ const ReviewDiff = memo(function ReviewDiff({
   onSaved: () => void;
   onCommentsChanged: () => void;
   onSendToChat?: (msg: string) => void;
+  onDraftToChat?: (text: string) => void;
 }) {
   return (
     <div className="diff-files">
@@ -2296,6 +2312,7 @@ const ReviewDiff = memo(function ReviewDiff({
             onSaved={onSaved}
             onCommentsChanged={onCommentsChanged}
             onSendToChat={onSendToChat}
+            onDraftToChat={onDraftToChat}
           />
         );
       })}
@@ -2330,6 +2347,7 @@ const FileReview = memo(function FileReview({
   onSaved,
   onCommentsChanged,
   onSendToChat,
+  onDraftToChat,
 }: {
   index: number;
   file: FileData;
@@ -2350,6 +2368,7 @@ const FileReview = memo(function FileReview({
   onSaved: () => void;
   onCommentsChanged: () => void;
   onSendToChat?: (msg: string) => void;
+  onDraftToChat?: (text: string) => void;
 }) {
   const queryClient = useQueryClient();
   const reviewId = detail.review.id;
@@ -2801,6 +2820,7 @@ const FileReview = memo(function FileReview({
             draftReplies={draftRepliesByRoot.get(t.comments[0]?.databaseId ?? -1)}
             readOnly={readOnly}
             onCommentsChanged={onCommentsChanged}
+            onSendToChat={onDraftToChat}
           />
         ))}
       </>
@@ -2993,6 +3013,7 @@ const FileReview = memo(function FileReview({
           onSaving={onSaving}
           onSaved={onSaved}
           onCommentsChanged={onCommentsChanged}
+          onDraftToChat={onDraftToChat}
         />
       )}
     </div>
@@ -3030,6 +3051,7 @@ function FileBody({
   onSaving,
   onSaved,
   onCommentsChanged,
+  onDraftToChat,
 }: {
   file: FileData;
   hunks: HunkData[];
@@ -3064,6 +3086,7 @@ function FileBody({
   onSaving: () => void;
   onSaved: () => void;
   onCommentsChanged: () => void;
+  onDraftToChat?: (text: string) => void;
 }) {
   return (
     <>
@@ -3104,6 +3127,7 @@ function FileBody({
               draftReplies={draftRepliesByRoot.get(t.comments[0]?.databaseId ?? -1)}
               readOnly={readOnly}
               onCommentsChanged={onCommentsChanged}
+              onSendToChat={onDraftToChat}
             />
           ))}
         </div>

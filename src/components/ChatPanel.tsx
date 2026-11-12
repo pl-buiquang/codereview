@@ -22,6 +22,9 @@ interface ChatPanelProps {
   /** Message pre-filled from "Send to Chat" in the diff composer. */
   pendingMessage: string | null;
   onPendingConsumed: () => void;
+  /** Text to put in the input (not sent), e.g. a GitHub thread reference. */
+  draftMessage?: string | null;
+  onDraftConsumed?: () => void;
 }
 
 export function ChatPanel({
@@ -30,6 +33,8 @@ export function ChatPanel({
   onToggle,
   pendingMessage,
   onPendingConsumed,
+  draftMessage = null,
+  onDraftConsumed,
 }: ChatPanelProps) {
   const queryClient = useQueryClient();
   // The profile chosen in the pane; null keeps the one the chat runs on.
@@ -113,6 +118,21 @@ export function ChatPanel({
       ],
     );
   }, [pendingMessage]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Prefill the input from "Send to chat" on a GitHub thread, appending to any
+  // text already typed, and leave the caret at the end for the instruction.
+  useEffect(() => {
+    if (draftMessage === null) return;
+    onDraftConsumed?.();
+    setInput((prev) => (prev.trim() ? `${prev.trimEnd()}\n\n${draftMessage}` : draftMessage));
+    setTimeout(() => {
+      const ta = textareaRef.current;
+      if (!ta) return;
+      ta.focus();
+      ta.setSelectionRange(ta.value.length, ta.value.length);
+      ta.scrollTop = ta.scrollHeight;
+    }, 0);
+  }, [draftMessage]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSend = () => {
     const text = input.trim();

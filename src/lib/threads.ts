@@ -1,4 +1,4 @@
-import type { Comment } from "./types";
+import type { Comment, PrThread } from "./types";
 
 export interface CommentThread {
   root: Comment;
@@ -53,4 +53,28 @@ export function groupThreads(comments: Comment[]): CommentThread[] {
   }
 
   return threads;
+}
+
+/** Chat-input text referencing a GitHub review thread: where it sits, its
+ *  link, and every comment quoted, so the agent needn't fetch it. Ends with a
+ *  blank line for the user's own instruction. */
+export function formatThreadForChat(thread: PrThread): string {
+  let where: string;
+  if (thread.path == null) where = "the PR";
+  else if (thread.line == null) where = `\`${thread.path}\` (file-level)`;
+  else {
+    const lines =
+      thread.startLine != null && thread.startLine !== thread.line
+        ? `lines ${thread.startLine}–${thread.line}`
+        : `line ${thread.line}`;
+    where = `\`${thread.path}\` ${lines}${thread.diffSide ? ` (${thread.diffSide})` : ""}`;
+  }
+  if (thread.isOutdated) where += ", outdated";
+  const url = thread.comments[0]?.url;
+  const header = `Regarding GitHub review thread on ${where}${url ? ` — ${url}` : ""}:`;
+  const quoted = thread.comments.map((c) => {
+    const [first, ...rest] = c.body.trim().split("\n");
+    return [`> **${c.author?.login ?? "unknown"}**: ${first}`, ...rest.map((l) => `> ${l}`)].join("\n");
+  });
+  return `${header}\n${quoted.join("\n>\n")}\n\n`;
 }

@@ -25,6 +25,7 @@ vi.mock("../lib/api", () => ({
 }));
 
 import { GithubThread } from "./GithubThread";
+import { useSettingsStore } from "../lib/settings";
 import type { PrThread, PrThreadComment, PrThreadCtx } from "../lib/types";
 
 const ctx: PrThreadCtx = { owner: "acme", name: "widget", number: 42 };
@@ -97,6 +98,24 @@ describe("GithubThread", () => {
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Reply…" })).toBeInTheDocument(),
     );
+  });
+
+  it("prefills the chat with a thread reference, even when read-only", async () => {
+    useSettingsStore.setState({ aiEnabled: true });
+    const onSendToChat = vi.fn();
+    renderThread({ thread: thread(), ctx, readOnly: true, onSendToChat });
+    expect(screen.queryByRole("button", { name: "Reply…" })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Send to chat" }));
+    expect(onSendToChat).toHaveBeenCalledWith(
+      "Regarding GitHub review thread on `src/a.rs` line 12 (RIGHT) — " +
+        "https://github.com/acme/widget/pull/42#discussion_r1001:\n" +
+        "> **rev1**: Looks good.\n\n",
+    );
+  });
+
+  it("hides Send to chat when no handler is given", () => {
+    renderThread({ thread: thread(), ctx });
+    expect(screen.queryByRole("button", { name: "Send to chat" })).not.toBeInTheDocument();
   });
 
   it("renders read-only when no ctx is provided", () => {
