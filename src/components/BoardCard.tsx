@@ -113,10 +113,13 @@ export function MetaRow({
     );
   };
   const del = async () => {
+    const what = meta.label || meta.value || meta.tag;
     if (
       await confirmDialog({
-        title: "Delete metadata",
-        message: `Delete "${meta.label || meta.value || meta.tag}"?`,
+        title: inherited ? "Delete issue metadata" : "Delete metadata",
+        message: inherited
+          ? `Delete "${what}" from the linked issue? It will also disappear from the issue card and every PR linked to it.`
+          : `Delete "${what}"?`,
         confirmLabel: "Delete",
         danger: true,
       })
@@ -147,11 +150,9 @@ export function MetaRow({
           <Icon name="copy" size={12} />
         </button>
       )}
-      {!inherited && (
-        <button className="btn-icon" title="Delete" onClick={del}>
-          <Icon name="x" size={12} />
-        </button>
-      )}
+      <button className="btn-icon" title={inherited ? "Delete from issue" : "Delete"} onClick={del}>
+        <Icon name="x" size={12} />
+      </button>
     </div>
   );
 }
