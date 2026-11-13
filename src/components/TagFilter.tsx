@@ -48,8 +48,10 @@ export function TagFilter({
   if (tags.length === 0 && selected.length === 0 && !untagged) return null;
 
   const q = query.trim().toLowerCase();
+  // Zero-count options would filter to nothing, so hide them (selected ones stay as chips).
   const options = tags.filter(
-    ([t]) => !selected.includes(t) && !unavailable?.includes(t) && (!q || label(t).toLowerCase().includes(q)),
+    ([t, n]) =>
+      n > 0 && !selected.includes(t) && !unavailable?.includes(t) && (!q || label(t).toLowerCase().includes(q)),
   );
   const activeHighlight = Math.min(highlight, Math.max(options.length - 1, 0));
 
