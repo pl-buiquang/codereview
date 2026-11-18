@@ -12,10 +12,23 @@ const listPrs = vi.fn();
 const createReviewForPr = vi.fn();
 const graphLog = vi.fn();
 const openUrl = vi.fn();
+const checkoutOpenClaude = vi.fn();
+const worktreeOpenTerminal = vi.fn();
 vi.mock("../lib/api", () => ({
   api: {
     openUrl: (url: string) => {
       openUrl(url);
+      return Promise.resolve();
+    },
+    listClaudeSessions: () => Promise.resolve({ sessions: [], card_sessions: [] }),
+    aiHarnesses: () => Promise.resolve([]),
+    focusClaudeSession: () => Promise.resolve(),
+    checkoutOpenClaude: (...args: unknown[]) => {
+      checkoutOpenClaude(...args);
+      return Promise.resolve();
+    },
+    worktreeOpenTerminal: (...args: unknown[]) => {
+      worktreeOpenTerminal(...args);
       return Promise.resolve();
     },
     listReviews: (id: number | null) => listReviews(id),
@@ -92,6 +105,28 @@ describe("RepoView GitHub link", () => {
   it("hides the link for a repo without a remote", () => {
     renderRepo({ ...repo, remote_owner: null, remote_name: null });
     expect(screen.queryByTitle(/on GitHub$/)).toBeNull();
+  });
+});
+
+describe("RepoView New menu", () => {
+  it("opens an agent session or a terminal in the main checkout", async () => {
+    const user = userEvent.setup();
+    renderRepo();
+    const menu = () => screen.getByTitle(/^New agent session or terminal/);
+    await user.click(menu());
+    await user.click(screen.getByRole("menuitem", { name: "New agent session" }));
+    await waitFor(() => expect(checkoutOpenClaude).toHaveBeenCalled());
+    expect(checkoutOpenClaude.mock.calls[0].slice(0, 2)).toEqual([1, null]);
+
+    await user.click(menu());
+    await user.click(screen.getByRole("menuitem", { name: "New terminal" }));
+    await waitFor(() => expect(worktreeOpenTerminal).toHaveBeenCalled());
+    expect(worktreeOpenTerminal.mock.calls[0].slice(0, 2)).toEqual([1, "/home/me/projects/widget"]);
+  });
+
+  it("is hidden without a local clone", () => {
+    renderRepo({ ...repo, local_path: null });
+    expect(screen.queryByTitle(/^New agent session or terminal/)).toBeNull();
   });
 });
 

@@ -10,12 +10,76 @@ import { repoLabel, repoDisplayName } from "../lib/repoLabel";
 import { GraphView } from "./graph/GraphView";
 import { OpenPrButton } from "./OpenPrButton";
 import { Icon } from "./icons";
+import { AgentSessionItems, KebabMenu } from "./KebabMenu";
 import { githubPrUrl } from "../lib/githubUrl";
 import { useUIStore } from "../store";
 import type { PrSummary, Repository, ReviewSummary } from "../lib/types";
 import { statusLabel, statusBadgeClass } from "../lib/status";
 
 type Tab = "graph" | "prs" | "reviews";
+
+/** "New ▾" in the repo header: an agent session or a plain terminal in the main checkout. */
+function NewSessionMenu({ repo, localPath }: { repo: Repository; localPath: string }) {
+  const defaultTerminal = useSettingsStore((s) => s.defaultTerminal);
+  const tmuxTarget = useSettingsStore((s) => s.tmuxTarget);
+  const tmuxSessionName = useSettingsStore((s) => s.tmuxSessionName);
+  const sessionsQuery = useQuery({
+    queryKey: ["claude-sessions-live"],
+    queryFn: () => api.listClaudeSessions(0, ""),
+    staleTime: 5_000,
+  });
+  const live = (sessionsQuery.data?.sessions ?? []).filter(
+    (s) => s.live && s.harness === "claude" && s.cwd === localPath,
+  );
+  const openAgent = useMutation({
+    mutationFn: (harness?: string) =>
+      api.checkoutOpenClaude(repo.id, null, defaultTerminal, tmuxTarget, tmuxSessionName, harness ?? null),
+    onError: (e) => toast.error(`Could not open agent session:\n${String(e)}`),
+  });
+  const openTerminal = useMutation({
+    mutationFn: () => api.worktreeOpenTerminal(repo.id, localPath, defaultTerminal, tmuxTarget, tmuxSessionName),
+    onError: (e) => toast.error(`Could not open terminal:\n${String(e)}`),
+  });
+  const focusSession = useMutation({
+    mutationFn: (id: string) => api.focusClaudeSession(id),
+    onError: (e) => toast.error(`Could not focus session:\n${String(e)}`),
+  });
+  return (
+    <KebabMenu
+      className="repo-new-menu"
+      title={`New agent session or terminal in ${localPath}`}
+      label={
+        <>
+          <Icon name="plus" size={13} /> New ▾
+        </>
+      }
+    >
+      {(close) => (
+        <>
+          <AgentSessionItems
+            sessions={live}
+            busy={openAgent.isPending || focusSession.isPending}
+            close={close}
+            onFocus={(id) => focusSession.mutate(id)}
+            onOpenNew={(harness) => openAgent.mutate(harness)}
+          />
+          <hr className="btn-split-menu-separator" />
+          <button
+            role="menuitem"
+            disabled={openTerminal.isPending}
+            title={`Open a terminal in ${localPath}`}
+            onClick={() => {
+              close();
+              openTerminal.mutate();
+            }}
+          >
+            New terminal
+          </button>
+        </>
+      )}
+    </KebabMenu>
+  );
+}
 
 export function RepoView({ repo }: { repo: Repository }) {
   const openReview = useUIStore((s) => s.openReview);
@@ -111,6 +175,7 @@ export function RepoView({ repo }: { repo: Repository }) {
             <Icon name="code" size={13} /> VSCode
           </button>
         )}
+        {repo.local_path && <NewSessionMenu repo={repo} localPath={repo.local_path} />}
       </header>
 
       <div className="cr-tabs">

@@ -4391,6 +4391,17 @@ input[type="range"] {
   color: var(--accent);
   background: var(--surface-2);
 }
+.repo-new-menu .btn-split-menu {
+  left: 0;
+  right: auto;
+}
+.repo-new-menu > .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  font-size: 12px;
+}
 .repo-title-input {
   font-family: var(--font-ui);
   font-size: 15px;
