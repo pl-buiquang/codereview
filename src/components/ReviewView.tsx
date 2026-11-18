@@ -295,7 +295,7 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
           finalLeft = Math.max(160, Math.min(500, startLeft + delta));
           setLeftWidth(finalLeft);
         } else {
-          finalRight = Math.max(200, Math.min(600, startRight - delta));
+          finalRight = Math.max(200, Math.min(Math.round(window.innerWidth * 0.6), startRight - delta));
           setRightWidth(finalRight);
         }
       };

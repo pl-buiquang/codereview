@@ -3120,6 +3120,7 @@ tr.search-current {
 /* ── Chat panel ──────────────────────────────────── */
 .chat-panel {
   flex: 0 0 var(--right-panel-width, 360px);
+  max-width: 60vw;
   min-height: 0;
   overflow: hidden;
   display: flex;

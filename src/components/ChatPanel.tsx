@@ -180,6 +180,13 @@ export function ChatPanel({
     <div className="chat-panel">
       <div className="chat-header">
         <span className="chat-title">
+          <button
+            className="btn btn-sm btn-ghost sidebar-toggle"
+            title="Hide chat (')"
+            onClick={onToggle}
+          >
+            <Icon name="x" size={12} />
+          </button>
           <Icon name="bot" size={13} />
           Chat
           {worktreeQuery.data?.branch && (
@@ -205,13 +212,6 @@ export function ChatPanel({
               Clear
             </button>
           )}
-          <button
-            className="btn btn-sm btn-ghost sidebar-toggle"
-            title="Hide chat (')"
-            onClick={onToggle}
-          >
-            <Icon name="x" size={12} />
-          </button>
         </div>
       </div>
 
