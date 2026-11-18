@@ -113,7 +113,7 @@ import { prContextKey, useActiveRoutineRuns } from "../lib/routines";
 import { RoutineLaunchModal } from "./routines/RoutineLaunchModal";
 import { ImageDiffLink } from "./ImageDiffLink";
 import { ImageDiffPane } from "./ImageDiffPane";
-import { imageDiffAction, isImagePath, openImageDiffs, useImageDiffStatus, useImageDiffUi } from "../lib/imageDiff";
+import { imageDiffAction, isImagePath, isRasterImagePath, openImageDiffs, useImageDiffStatus, useImageDiffUi } from "../lib/imageDiff";
 import { AI_SUBTAGS, isAiTag, tagLabel, tagTitle, type CommentTag } from "../lib/commentTag";
 import type {
   AiReviewLayer,
@@ -2396,6 +2396,9 @@ const FileReview = memo(function FileReview({
   }, [detail.comments]);
 
   const isDeleted = file.type === "delete";
+  const isRaster = isRasterImagePath(path);
+  const isBinary = file.isBinary || isRaster;
+  const imageDiffStatus = useImageDiffStatus(reviewId, isRaster);
   const [openingInVscode, setOpeningInVscode] = useState(false);
   const openInChatWorktree = async () => {
     if (isDeleted || openingInVscode) return;
@@ -2434,7 +2437,7 @@ const FileReview = memo(function FileReview({
   // side. For GitHub-PR targets LEFT is the merge-base blob, served via the
   // backend's base_sha (lazily backfilled) + contents-API fallback.
   const canExpand =
-    file.type !== "add" && file.type !== "delete" && !file.isBinary;
+    file.type !== "add" && file.type !== "delete" && !isBinary;
 
   const ensureSource = useCallback(async (): Promise<string | null> => {
     if (rawSource != null) return rawSource;
@@ -2881,14 +2884,18 @@ const FileReview = memo(function FileReview({
             title={
               isDeleted
                 ? "File was deleted; no head version to view"
-                : file.isBinary
-                  ? "Binary file; nothing to view"
-                  : tooLarge
-                    ? "File too large to view here; open it in VSCode"
-                    : "View the full file and comment on any line"
+                : isRaster
+                  ? "Open in the image diffs panel"
+                  : file.isBinary
+                    ? "Binary file; nothing to view"
+                    : tooLarge
+                      ? "File too large to view here; open it in VSCode"
+                      : "View the full file and comment on any line"
             }
-            disabled={isDeleted || file.isBinary || tooLarge}
-            onClick={() => onOpenFilePane(path)}
+            disabled={isDeleted || (isRaster ? imageDiffStatus.isLoading : file.isBinary || tooLarge)}
+            onClick={() =>
+              isRaster ? openImageDiffs(reviewId, imageDiffStatus.data?.state, path) : onOpenFilePane(path)
+            }
           >
             <Icon name="eye" size={12} /> View file
           </button>
@@ -3132,7 +3139,7 @@ function FileBody({
           ))}
         </div>
       )}
-      {file.isBinary ? (
+      {file.isBinary || isRasterImagePath(fileDisplayPath(file)) ? (
         <p className="muted binary-note">
           Binary file not shown.{" "}
           {isImagePath(fileDisplayPath(file)) && <ImageDiffLink reviewId={reviewId} path={fileDisplayPath(file)} />}

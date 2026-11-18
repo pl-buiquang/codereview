@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { cropRel, diffDim, hasImages, imageAssetRel, imageDiffAction, imageDiffUrl, isImagePath } from "./imageDiff";
+import { cropRel, diffDim, hasImages, imageAssetRel, imageDiffAction, imageDiffUrl, isImagePath, isRasterImagePath } from "./imageDiff";
 import type { ImageDiffFile, ImageDiffStatus } from "./types";
 
 const file = (over: Partial<ImageDiffFile> = {}): ImageDiffFile => ({
@@ -36,6 +36,13 @@ describe("isImagePath", () => {
   it("matches png, jpg, jpeg and svg whatever the case", () => {
     for (const p of ["a.png", "x/B.JPG", "c.jpeg", "d.SVG"]) expect(isImagePath(p)).toBe(true);
     for (const p of ["a.gif", "png", "a.png.txt", "svg/readme.md"]) expect(isImagePath(p)).toBe(false);
+  });
+});
+
+describe("isRasterImagePath", () => {
+  it("matches png, jpg and jpeg but not svg", () => {
+    for (const p of ["a.png", "x/B.JPG", "c.jpeg"]) expect(isRasterImagePath(p)).toBe(true);
+    for (const p of ["d.svg", "a.gif", "a.png.txt"]) expect(isRasterImagePath(p)).toBe(false);
   });
 });
 

@@ -8,7 +8,7 @@ import {
   type ViewType,
 } from "react-diff-view";
 import { api } from "../lib/api";
-import { isImagePath } from "../lib/imageDiff";
+import { isImagePath, isRasterImagePath } from "../lib/imageDiff";
 import { ImageDiffLink } from "./ImageDiffLink";
 import { headFileSourceQuery, reviewDiffQuery } from "../lib/reviewQueries";
 import {
@@ -112,7 +112,12 @@ export function FileViewPane({
     onLookup,
   });
 
-  const sourceQuery = useQuery(headFileSourceQuery(reviewId, filePath, detail.review.head_sha));
+  // A raster image has no text: fetching it as a string and rendering it as lines is very slow.
+  const raster = isRasterImagePath(filePath);
+  const sourceQuery = useQuery({
+    ...headFileSourceQuery(reviewId, filePath, detail.review.head_sha),
+    enabled: !raster,
+  });
 
   // The diff is already cached from the main view. We only need it to know
   // which head lines are added/modified.
@@ -322,12 +327,12 @@ export function FileViewPane({
           {sourceQuery.isError && (
             <p className="error">Could not load file: {String(sourceQuery.error)}</p>
           )}
-          {diffFile?.isBinary && (
+          {(diffFile?.isBinary || raster) && (
             <p className="muted binary-note">
               Binary file not shown. {isImagePath(filePath) && <ImageDiffLink reviewId={reviewId} path={filePath} />}
             </p>
           )}
-          {synthetic && !diffFile?.isBinary && (
+          {synthetic && !diffFile?.isBinary && !raster && (
             <>
               {orphans.length > 0 && (
                 <div className="orphan-comments">

@@ -18,6 +18,10 @@ export const IMAGE_DIFF_REPORT_EVENT = "image-diff-report-updated";
 
 export const isImagePath = (path: string) => /\.(png|jpe?g|svg)$/i.test(path);
 
+/** An image with no text to show. GitHub's diff can omit the `Binary files … differ` line, so the
+ *  parser's `isBinary` alone misses some of them. */
+export const isRasterImagePath = (path: string) => /\.(png|jpe?g)$/i.test(path);
+
 /** The `crimg://` scheme serves the generated PNGs; WebView2 and Android rewrite custom schemes to http. */
 export function imageDiffBase(): string {
   return /Windows|Android/i.test(navigator.userAgent) ? "http://crimg.localhost" : "crimg://localhost";
