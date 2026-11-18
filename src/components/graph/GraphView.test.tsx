@@ -185,6 +185,24 @@ describe("GraphView", () => {
     expect(toastError).not.toHaveBeenCalled();
   });
 
+  it("shows the tag or short sha in the context chip on a detached HEAD", async () => {
+    listRefs.mockResolvedValue([{ name: "v1.2.0", kind: "tag", sha: sha(0), is_head: false, updated_at: 0 }]);
+    const { unmount } = renderView();
+    expect(await screen.findByText("detached · v1.2.0")).toBeInTheDocument();
+    unmount();
+
+    listRefs.mockResolvedValue([]);
+    renderView();
+    expect(await screen.findByText(`detached · ${sha(0).slice(0, 7)}`)).toBeInTheDocument();
+  });
+
+  it("shows only the branch in the context chip when HEAD is on a branch", async () => {
+    listRefs.mockResolvedValue([{ name: "main", kind: "local", sha: sha(0), is_head: true, updated_at: 0 }]);
+    renderView();
+    await waitFor(() => expect(screen.getByText("subject 0")).toBeInTheDocument());
+    expect(screen.queryByText(/^detached ·/)).toBeNull();
+  });
+
   it("toasts when a ref tip is not in the exhausted graph", async () => {
     const user = userEvent.setup();
     listRefs.mockResolvedValue([{ name: "v9", kind: "tag", sha: sha(500), is_head: false, updated_at: 0 }]);

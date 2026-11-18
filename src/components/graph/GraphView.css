@@ -53,6 +53,10 @@
   white-space: nowrap;
 }
 
+.gv-ctx-detached {
+  color: var(--warning);
+}
+
 .gv-ctx-reset {
   padding: 0 2px;
 }

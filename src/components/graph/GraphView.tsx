@@ -485,6 +485,8 @@ export function GraphView({ repo }: { repo: Repository }) {
   const ctxWorktree = ctx ? worktrees.find((w) => w.path === ctx) : undefined;
   const ctxLabel = ctx ? ctxWorktree?.display_path ?? basename(ctx) : "main checkout";
   const ctxBranch = ctx ? ctxWorktree?.branch : refs.find((r) => r.kind === "local" && r.is_head)?.name;
+  const detachedTags = !ctxBranch && headSha ? refs.filter((r) => r.kind === "tag" && r.sha === headSha).map((r) => r.name) : [];
+  const detachedLabel = !ctxBranch && headSha ? (detachedTags.length ? detachedTags.join(", ") : headSha.slice(0, 7)) : null;
 
   let centerBody;
   if (graphQuery.isPending) {
@@ -597,6 +599,14 @@ export function GraphView({ repo }: { repo: Repository }) {
           <Icon name="branch" size={12} />
           <span className="gv-ctx-label">{ctxLabel}</span>
           {ctxBranch && <span className="gv-ctx-branch mono">{ctxBranch}</span>}
+          {detachedLabel && (
+            <span
+              className="gv-ctx-branch gv-ctx-detached mono"
+              title={`Detached HEAD at ${headSha}${detachedTags.length ? ` (tag ${detachedTags.join(", ")})` : ""}`}
+            >
+              detached · {detachedLabel}
+            </span>
+          )}
           {ctx && (
             <button
               className="btn-icon gv-ctx-reset"
