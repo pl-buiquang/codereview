@@ -77,6 +77,9 @@ impl Default for SyncConfig {
 struct BoardMonitorPayload {
     actions: Vec<crate::board_monitor::MonitorAction>,
     error: Option<String>,
+    /// The last watched PR is gone (merged, closed, auto-merge off): the
+    /// frontend turns the monitor off.
+    idle: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -119,6 +122,9 @@ struct State {
     retry_gave_up: bool,
     /// Where each reset restarted the cap; forgotten when the monitor is turned off.
     cap_floors: crate::board_monitor::CapFloors,
+    /// A round since the monitor was switched on watched at least one PR, so
+    /// a round with none means everything got merged.
+    monitor_had_work: bool,
     /// Notifications poll (triggers discovery); `healthy` turns false for the
     /// session when a poll fails, which restores the plain discovery timer.
     last_notif_poll: Option<Instant>,
@@ -214,6 +220,7 @@ impl SyncEngine {
                     monitoring: false,
                     retry_gave_up: false,
                     cap_floors: Default::default(),
+                    monitor_had_work: false,
                     last_notif_poll: None,
                     notif_interval: NOTIF_POLL_DEFAULT,
                     notif_polling: false,
@@ -246,6 +253,7 @@ impl SyncEngine {
         if !config.board_monitor {
             s.cap_floors.clear();
             s.retry_gave_up = false;
+            s.monitor_had_work = false;
         }
         s.config = config;
     }
@@ -414,16 +422,29 @@ impl SyncEngine {
                 (std::mem::take(&mut s.retry_gave_up), std::mem::take(&mut s.cap_floors))
             };
             let result = crate::board_monitor::run(&db, &mut floors, reset);
-            {
+            let idle = {
                 let mut s = self.state();
                 // Turned off mid-round: keep the cleared memory.
                 if s.config.board_monitor {
                     s.cap_floors = floors;
+                    match &result {
+                        Ok(round) if round.watched > 0 => {
+                            s.monitor_had_work = true;
+                            false
+                        }
+                        Ok(_) => std::mem::take(&mut s.monitor_had_work),
+                        Err(_) => false,
+                    }
+                } else {
+                    false
                 }
-            }
+            };
             match result {
-                Ok(actions) => {
-                    log::info!("[sync] monitor: {} actions", actions.len());
+                Ok(crate::board_monitor::Round { actions, watched }) => {
+                    log::info!("[sync] monitor: {} actions on {watched} PRs", actions.len());
+                    if idle {
+                        log::info!("[sync] monitor: no PR left to watch, turning off");
+                    }
                     if !actions.is_empty() {
                         let mut ids: Vec<String> = actions.iter().map(|a| a.card_id.clone()).collect();
                         ids.dedup();
@@ -431,7 +452,9 @@ impl SyncEngine {
                             .inner
                             .app
                             .emit(MIRROR_UPDATED_EVENT, &MirrorUpdated { scopes: vec![Scope::Board], ids });
-                        let _ = self.inner.app.emit(BOARD_MONITOR_EVENT, BoardMonitorPayload { actions, error: None });
+                    }
+                    if !actions.is_empty() || idle {
+                        let _ = self.inner.app.emit(BOARD_MONITOR_EVENT, BoardMonitorPayload { actions, error: None, idle });
                     }
                     return;
                 }
@@ -446,7 +469,7 @@ impl SyncEngine {
         let _ = self
             .inner
             .app
-            .emit(BOARD_MONITOR_EVENT, BoardMonitorPayload { actions: Vec::new(), error });
+            .emit(BOARD_MONITOR_EVENT, BoardMonitorPayload { actions: Vec::new(), error, idle: false });
     }
 
     /// Discovery covers every scope (it syncs Inbox + Board), so it replaces

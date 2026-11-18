@@ -33,6 +33,8 @@ pub struct Candidate {
     pub viewer_can_update_branch: bool,
     pub ci_status: Option<String>,
     pub stacked: bool,
+    /// A running babysit routine owns this PR's CI: count it, don't act on it.
+    pub babysat: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -77,10 +79,8 @@ pub fn candidates(conn: &Connection) -> AppResult<Vec<Candidate>> {
         .into_iter()
         .filter_map(|c| {
             let (owner, name) = c.repo.split_once('/')?;
-            // A running babysit routine already owns this PR's CI; don't race it on reruns.
-            if crate::routines::babysit_active(conn, &crate::routines::context::pr_key(owner, name, c.number)) {
-                return None;
-            }
+            let babysat =
+                crate::routines::babysit_active(conn, &crate::routines::context::pr_key(owner, name, c.number));
             Some(Candidate {
                 owner: owner.to_string(),
                 name: name.to_string(),
@@ -90,6 +90,7 @@ pub fn candidates(conn: &Connection) -> AppResult<Vec<Candidate>> {
                 viewer_can_update_branch: c.viewer_can_update_branch,
                 ci_status: c.ci_status,
                 stacked: c.stack_number.is_some(),
+                babysat,
             })
         })
         .collect())
@@ -191,14 +192,21 @@ fn check(c: &Candidate, floors: &mut CapFloors, reset: bool, actions: &mut Vec<M
     Ok(touched)
 }
 
+/// What one pass did, and how many PRs it watched (0 = nothing left to merge).
+pub struct Round {
+    pub actions: Vec<MonitorAction>,
+    pub watched: usize,
+}
+
 /// One pass over the candidates. `gh` calls run unlocked; a per-PR failure is
 /// recorded as an `Error` action and never aborts the pass. `reset` restarts
 /// the attempt cap for runs already given up on (the monitor was switched back
 /// on): they get `MAX_ATTEMPTS` more reruns, counted from `floors`.
-pub fn run(db: &Db, floors: &mut CapFloors, reset: bool) -> AppResult<Vec<MonitorAction>> {
+pub fn run(db: &Db, floors: &mut CapFloors, reset: bool) -> AppResult<Round> {
     let candidates = candidates(&db.0.lock().unwrap())?;
     let mut actions = Vec::new();
-    for c in &candidates {
+    // A running babysit routine already owns these PRs' CI; don't race it on reruns.
+    for c in candidates.iter().filter(|c| !c.babysat) {
         match check(c, floors, reset, &mut actions) {
             Ok(true) => {
                 if let Err(e) = refetch_card(db, &c.owner, &c.name, c.number) {
@@ -210,7 +218,7 @@ pub fn run(db: &Db, floors: &mut CapFloors, reset: bool) -> AppResult<Vec<Monito
         }
     }
     record(&db.0.lock().unwrap(), &actions)?;
-    Ok(actions)
+    Ok(Round { actions, watched: candidates.len() })
 }
 
 #[cfg(test)]

@@ -150,6 +150,10 @@ export function useSyncBridge() {
 
   useTauriListener<BoardMonitorPayload>(BOARD_MONITOR_EVENT, (payload) => {
     queryClient.invalidateQueries({ queryKey: ["board-monitor-log"] });
+    if (payload.idle && useSettingsStore.getState().boardMonitor) {
+      useSettingsStore.getState().setBoardMonitor(false);
+      toast.info("Auto-merge monitor turned off: no approved PRs with auto-merge left");
+    }
     const summary = monitorSummary(payload);
     if (!summary) return;
     if (summary.isError) toast.error(summary.text);
