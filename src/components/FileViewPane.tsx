@@ -287,83 +287,86 @@ export function FileViewPane({
   };
 
   return (
-    <aside className="file-view-pane">
-      <div className="file-view-pane-header">
-        <span className="file-path">{filePath}</span>
-        {!readOnly && (
-          <span className="muted file-view-hint">
-            Click a line to comment · folds into the review summary
-          </span>
+    <>
+      <div className="quick-view-backdrop" onClick={onClose} />
+      <aside className="file-view-pane">
+        <div className="file-view-pane-header">
+          <span className="file-path">{filePath}</span>
+          {!readOnly && (
+            <span className="muted file-view-hint">
+              Click a line to comment · folds into the review summary
+            </span>
+          )}
+          <button className="btn-icon" title="Close (Esc)" onClick={onClose}>
+            ✕
+          </button>
+        </div>
+        {searchOpen && (
+          <DiffSearchBar
+            inputRef={searchInputRef}
+            placeholder="Find in file…"
+            query={searchQuery}
+            count={matches.length}
+            index={matches.length ? wrapIndex(searchIdx, matches.length) : 0}
+            onChange={(v) => {
+              setSearchQuery(v);
+              setSearchIdx(0);
+            }}
+            onNext={() => setSearchIdx((i) => i + 1)}
+            onPrev={() => setSearchIdx((i) => i - 1)}
+            onClose={() => setSearchOpen(false)}
+          />
         )}
-        <button className="btn-icon" title="Close (Esc)" onClick={onClose}>
-          ✕
-        </button>
-      </div>
-      {searchOpen && (
-        <DiffSearchBar
-          inputRef={searchInputRef}
-          placeholder="Find in file…"
-          query={searchQuery}
-          count={matches.length}
-          index={matches.length ? wrapIndex(searchIdx, matches.length) : 0}
-          onChange={(v) => {
-            setSearchQuery(v);
-            setSearchIdx(0);
-          }}
-          onNext={() => setSearchIdx((i) => i + 1)}
-          onPrev={() => setSearchIdx((i) => i - 1)}
-          onClose={() => setSearchOpen(false)}
-        />
-      )}
-      <div className="file-view-pane-body" ref={bodyRef} data-file-path={filePath}>
-        {sourceQuery.isLoading && <p className="muted">Loading file…</p>}
-        {sourceQuery.isError && (
-          <p className="error">Could not load file: {String(sourceQuery.error)}</p>
-        )}
-        {diffFile?.isBinary && (
-          <p className="muted binary-note">
-            Binary file not shown. {isImagePath(filePath) && <ImageDiffLink reviewId={reviewId} path={filePath} />}
-          </p>
-        )}
-        {synthetic && !diffFile?.isBinary && (
-          <>
-            {orphans.length > 0 && (
-              <div className="orphan-comments">
-                <p className="muted">
-                  Comments not matching the current file (head may have changed):
-                </p>
-                {orphans.map((t) => (
-                  <ThreadItem
-                    key={t.root.id}
-                    thread={t}
-                    headSha={detail.review.head_sha}
-                    baseSha={detail.review.base_sha}
-                    readOnly={readOnly}
-                    showOrigin
-                    canReply={false}
-                    onSaving={onSaving}
-                    onSaved={onSaved}
-                    onCommentsChanged={onCommentsChanged}
-                  />
-                ))}
-              </div>
-            )}
-            <Diff
-              viewType={"unified" as ViewType}
-              diffType="modify"
-              hunks={synthetic.hunks}
-              tokens={tokens}
-              widgets={widgets}
-              selectedChanges={selectedChanges}
-              generateLineClassName={generateLineClassName}
-              gutterEvents={{ onClick: onLineClick }}
-              codeEvents={{ onClick: onLineClick }}
-            >
-              {(hunks) => hunks.map((h) => <Hunk key={h.content} hunk={h} />)}
-            </Diff>
-          </>
-        )}
-      </div>
-    </aside>
+        <div className="file-view-pane-body" ref={bodyRef} data-file-path={filePath}>
+          {sourceQuery.isLoading && <p className="muted">Loading file…</p>}
+          {sourceQuery.isError && (
+            <p className="error">Could not load file: {String(sourceQuery.error)}</p>
+          )}
+          {diffFile?.isBinary && (
+            <p className="muted binary-note">
+              Binary file not shown. {isImagePath(filePath) && <ImageDiffLink reviewId={reviewId} path={filePath} />}
+            </p>
+          )}
+          {synthetic && !diffFile?.isBinary && (
+            <>
+              {orphans.length > 0 && (
+                <div className="orphan-comments">
+                  <p className="muted">
+                    Comments not matching the current file (head may have changed):
+                  </p>
+                  {orphans.map((t) => (
+                    <ThreadItem
+                      key={t.root.id}
+                      thread={t}
+                      headSha={detail.review.head_sha}
+                      baseSha={detail.review.base_sha}
+                      readOnly={readOnly}
+                      showOrigin
+                      canReply={false}
+                      onSaving={onSaving}
+                      onSaved={onSaved}
+                      onCommentsChanged={onCommentsChanged}
+                    />
+                  ))}
+                </div>
+              )}
+              <Diff
+                viewType={"unified" as ViewType}
+                diffType="modify"
+                hunks={synthetic.hunks}
+                tokens={tokens}
+                widgets={widgets}
+                selectedChanges={selectedChanges}
+                generateLineClassName={generateLineClassName}
+                gutterEvents={{ onClick: onLineClick }}
+                codeEvents={{ onClick: onLineClick }}
+              >
+                {(hunks) => hunks.map((h) => <Hunk key={h.content} hunk={h} />)}
+              </Diff>
+            </>
+          )}
+        </div>
+      </aside>
+    </>
   );
 }
