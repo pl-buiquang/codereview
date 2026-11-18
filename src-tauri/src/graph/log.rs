@@ -70,7 +70,22 @@ pub fn range_log(checkout: &Path, base: &str, head: &str) -> AppResult<Vec<Graph
 
 /// Remote-tracking refs of local branches: each branch's upstream, plus any
 /// `<remote>/<name>` sharing a local branch's name.
+/// A configured upstream whose remote branch was deleted ("gone") is skipped: `git log` would
+/// otherwise fail the whole graph with "bad revision".
 fn tracked_remote_refs(checkout: &Path) -> AppResult<Vec<String>> {
+    let remotes = run_git(
+        checkout,
+        &["for-each-ref", "--format=%(refname)%09%(symref)", "refs/remotes"],
+    )?;
+    let existing: Vec<&str> = remotes
+        .lines()
+        .filter_map(|line| {
+            let (refname, symref) = line.split_once('\t').unwrap_or((line, ""));
+            symref.is_empty().then_some(refname)
+        })
+        .collect();
+    let existing_set: std::collections::HashSet<&str> = existing.iter().copied().collect();
+
     let heads = run_git(
         checkout,
         &["for-each-ref", "--format=%(refname:short)%09%(upstream)", "refs/heads"],
@@ -80,19 +95,11 @@ fn tracked_remote_refs(checkout: &Path) -> AppResult<Vec<String>> {
     for line in heads.lines() {
         let (name, upstream) = line.split_once('\t').unwrap_or((line, ""));
         names.insert(name.to_string());
-        if upstream.starts_with("refs/remotes/") {
+        if existing_set.contains(upstream) {
             refs.insert(upstream.to_string());
         }
     }
-    let remotes = run_git(
-        checkout,
-        &["for-each-ref", "--format=%(refname)%09%(symref)", "refs/remotes"],
-    )?;
-    for line in remotes.lines() {
-        let (refname, symref) = line.split_once('\t').unwrap_or((line, ""));
-        if !symref.is_empty() {
-            continue;
-        }
+    for refname in existing {
         let short = refname.strip_prefix("refs/remotes/").unwrap_or(refname);
         if short.split_once('/').is_some_and(|(_, branch)| names.contains(branch)) {
             refs.insert(refname.to_string());
@@ -409,6 +416,21 @@ mod tests {
         let tracked = shas(&graph_log(f.path(), Scope::Tracked, 0, 100).unwrap());
         assert!(tracked.contains(&ahead));
         assert!(!tracked.contains(&other));
+        assert_eq!(tracked.len(), 2);
+    }
+
+    #[test]
+    fn tracked_scope_skips_gone_upstreams() {
+        let f = Fixture::new();
+        let base = f.commit("a.txt", "base");
+        f.git(&["checkout", "-q", "-b", "pbq/gone"]);
+        let work = f.commit("g.txt", "gone work");
+        f.git(&["config", "branch.pbq/gone.remote", "origin"]);
+        f.git(&["config", "branch.pbq/gone.merge", "refs/heads/pbq/gone"]);
+        f.git(&["checkout", "-q", "main"]);
+
+        let tracked = shas(&graph_log(f.path(), Scope::Tracked, 0, 100).unwrap());
+        assert!(tracked.contains(&base) && tracked.contains(&work));
         assert_eq!(tracked.len(), 2);
     }
 

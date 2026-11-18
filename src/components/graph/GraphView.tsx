@@ -490,7 +490,22 @@ export function GraphView({ repo }: { repo: Repository }) {
   if (graphQuery.isPending) {
     centerBody = <p className="muted gv-msg">Loading history…</p>;
   } else if (graphQuery.isError) {
-    centerBody = <p className="error gv-msg">Could not load history: {String(graphQuery.error)}</p>;
+    const err = String(graphQuery.error);
+    const badRemoteRef = /bad revision 'refs\/remotes\//.test(err);
+    centerBody = (
+      <div className="gv-msg">
+        <p className="error">Could not load history: {err}</p>
+        {badRemoteRef && (
+          <p className="muted">
+            A local branch may track a remote branch that no longer exists. Use <b>Prune gone</b> in the sidebar,
+            or run <code>git branch --unset-upstream &lt;branch&gt;</code> in the checkout.
+          </p>
+        )}
+        <button className="btn btn-sm" onClick={() => graphQuery.refetch()}>
+          Retry
+        </button>
+      </div>
+    );
   } else if (commits.length === 0) {
     centerBody = <p className="muted gv-msg">No commits.</p>;
   } else {
