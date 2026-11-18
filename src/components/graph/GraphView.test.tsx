@@ -146,7 +146,7 @@ describe("GraphView", () => {
     renderView();
     await waitFor(() =>
       expect(graphLog).toHaveBeenCalledWith(
-        expect.objectContaining({ scope: "local", skip: 0, limit: GRAPH_PAGE_SIZE, worktreePath: null }),
+        expect.objectContaining({ scope: "tracked", skip: 0, limit: GRAPH_PAGE_SIZE, worktreePath: null }),
       ),
     );
     await user.selectOptions(screen.getByRole("combobox", { name: "Graph scope" }), "all");

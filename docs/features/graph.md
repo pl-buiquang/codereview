@@ -12,7 +12,7 @@ The **Graph** tab of a repo is a GitKraken-style view of its history with light 
 
 ## Scopes
 
-The code has two scopes: **Local** (default, local branches) and **All** (branches, remotes and tags). There is no "Current" scope. Jumping to a remote ref while on Local shows "Switch to All to see this branch".
+The code has three scopes: **Local** (local branches), **Local + remotes** (default: local branches plus their remote-tracking refs, skipping upstreams that are gone) and **All** (branches, remotes and tags). There is no "Current" scope. Jumping to a remote ref while on Local shows "Switch to All to see this branch".
 
 ## Commits and diffs
 

@@ -58,7 +58,7 @@ export function GraphView({ repo }: { repo: Repository }) {
   const queryClient = useQueryClient();
   const graphRef = useRef<CommitGraphHandle>(null);
 
-  const [scope, setScope] = useState<GraphScope>("local");
+  const [scope, setScope] = useState<GraphScope>("tracked");
   const [ctx, setCtx] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
