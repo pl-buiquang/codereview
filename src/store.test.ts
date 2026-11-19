@@ -79,6 +79,35 @@ describe("useUIStore", () => {
     expect(s.homeRepoId).toBe(5);
   });
 
+  it("replaceReview swaps the tab in place, keeping its parent repo", () => {
+    useUIStore.getState().openRepo(5);
+    useUIStore.getState().openReview(42);
+    useUIStore.getState().openSettingsTab();
+    useUIStore.getState().setActiveTab("review-42");
+    useUIStore.getState().replaceReview(42, 43);
+    const s = useUIStore.getState();
+    expect(s.tabs.map((t) => t.id)).toEqual(["home", "review-43", "settings"]);
+    expect(s.tabs[1]).toEqual({ id: "review-43", kind: "review", repoId: 5, reviewId: 43 });
+    expect(s.activeTabId).toBe("review-43");
+  });
+
+  it("replaceReview keeps focus elsewhere and drops a duplicate tab", () => {
+    useUIStore.getState().openReview(42);
+    useUIStore.getState().openReview(43);
+    useUIStore.getState().setActiveTab("home");
+    useUIStore.getState().replaceReview(42, 43);
+    const s = useUIStore.getState();
+    expect(s.tabs.map((t) => t.id)).toEqual(["home", "review-43"]);
+    expect(s.activeTabId).toBe("home");
+  });
+
+  it("replaceReview opens the new review when the old tab is gone", () => {
+    useUIStore.getState().replaceReview(42, 43);
+    const s = useUIStore.getState();
+    expect(s.tabs.map((t) => t.id)).toEqual(["home", "review-43"]);
+    expect(s.activeTabId).toBe("review-43");
+  });
+
   it("openRepo adds to the open list once, in open order", () => {
     const { openRepo } = useUIStore.getState();
     openRepo(2);

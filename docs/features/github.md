@@ -47,6 +47,7 @@ Only reviews on a GitHub PR can be published. Local virtual-PR reviews are expor
 - A Comment review with no comments and no summary is rejected. Approve and Request changes may be empty.
 - Comments are re-anchored to the review's pin before publishing. After a one-shot publish the app makes a best-effort capture of GitHub's comment ids.
 - Published reviews are locked: no edits, no second publish.
+- After publishing or submitting with **Comment** or **Request changes**, the app starts a fresh draft on the same PR (at its live head) and swaps it into the review's tab. After **Approve** the tab closes.
 
 ## Clean up closed PRs
 

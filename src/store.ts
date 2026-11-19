@@ -174,6 +174,8 @@ interface UIState {
   openSettingsTab: () => void;
   openReview: (reviewId: number, repoId?: number) => void;
   closeReview: () => void;
+  /** Swap a review's tab for another review in place (same position and parent repo). */
+  replaceReview: (oldReviewId: number, newReviewId: number) => void;
   closeSettings: () => void;
   closeTab: (id: string) => void;
   setActiveTab: (id: string) => void;
@@ -297,6 +299,19 @@ export const useUIStore = create<UIState>()(
             };
           }
           return result;
+        }),
+
+      replaceReview: (oldReviewId, newReviewId) =>
+        set((s) => {
+          const oldId = reviewTabId(oldReviewId);
+          const newId = reviewTabId(newReviewId);
+          const old = s.tabs.find((t) => t.id === oldId);
+          const next: Tab = { id: newId, kind: "review", repoId: old?.repoId, reviewId: newReviewId };
+          if (!old) return { tabs: upsertTab(s.tabs, next), activeTabId: newId };
+          const tabs = s.tabs
+            .filter((t) => t.id !== newId)
+            .map((t) => (t.id === oldId ? next : t));
+          return { tabs, activeTabId: s.activeTabId === oldId ? newId : s.activeTabId };
         }),
 
       closeSettings: () => set((s) => closeTabReducer(s, "settings")),

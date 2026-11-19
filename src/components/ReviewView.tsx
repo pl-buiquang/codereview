@@ -1261,6 +1261,7 @@ function ReviewHeader({
 }) {
   const queryClient = useQueryClient();
   const closeReview = useUIStore((s) => s.closeReview);
+  const replaceReview = useUIStore((s) => s.replaceReview);
   const openRepo = useUIStore((s) => s.openRepo);
   const focusGraph = useUIStore((s) => s.focusGraph);
   const showBoardCard = useUIStore((s) => s.showBoardCard);
@@ -1335,21 +1336,37 @@ function ReviewHeader({
       await api.updateReview(review.id, bodyRef.current ?? review.body, event);
       return api.publishReview(review.id);
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["review", review.id] });
-      queryClient.invalidateQueries({ queryKey: ["reviews"] });
-      queryClient.invalidateQueries({ queryKey: ["target-reviews", review.target_id] });
-      toast.success("Review published to GitHub.");
-      closeReview();
+    onSuccess: (_, event) => {
+      invalidateReview();
+      void afterPublish(event, "Review published to GitHub.");
     },
     onError: (e) => toast.error(`Publish failed:\n${String(e)}`),
   });
 
-  const invalidateReview = () => {
+  function invalidateReview() {
     queryClient.invalidateQueries({ queryKey: ["review", review.id] });
     queryClient.invalidateQueries({ queryKey: ["reviews"] });
     queryClient.invalidateQueries({ queryKey: ["target-reviews", review.target_id] });
-  };
+  }
+
+  // After an approval the review is done: close it. After a comment or a change
+  // request another round is coming, so swap a fresh draft into this tab.
+  async function afterPublish(event: ReviewEvent | null, message: string) {
+    if (event === "approve") {
+      toast.success(message);
+      closeReview();
+      return;
+    }
+    try {
+      const next = await api.newReviewOnTarget(target.id);
+      queryClient.invalidateQueries({ queryKey: ["target-reviews", target.id] });
+      queryClient.invalidateQueries({ queryKey: ["reviews"] });
+      toast.success(`${message} Started a new draft.`);
+      replaceReview(review.id, next.id);
+    } catch (e) {
+      toast.error(`${message} Could not start a new draft:\n${String(e)}`);
+    }
+  }
 
   const publishPending = useMutation({
     // Persist the verdict + summary first, same as a normal publish — the pending
@@ -1369,8 +1386,7 @@ function ReviewHeader({
     mutationFn: () => api.submitPendingReview(review.id),
     onSuccess: () => {
       invalidateReview();
-      toast.success("Pending review submitted.");
-      closeReview();
+      void afterPublish(review.event, "Pending review submitted.");
     },
     onError: (e) => toast.error(`Submit failed:\n${String(e)}`),
   });

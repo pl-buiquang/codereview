@@ -51,7 +51,8 @@ Each area has a page under [`docs/features/`](docs/features/).
   local branches (three-dot by default, two-dot toggle).
   → [GitHub](docs/features/github.md)
 - **Publish or export** — publish to GitHub (comment / approve / request-changes, or as a pending
-  draft you submit later), or export Markdown/JSON for an agent; import JSON back.
+  draft you submit later), or export Markdown/JSON for an agent; import JSON back. After a
+  comment or request-changes verdict, a fresh draft replaces the published review in its tab.
   → [GitHub](docs/features/github.md), [import & export](docs/features/import-export.md)
 - **Inbox & Board** — a triage queue for what GitHub says needs you, and a kanban of work in flight
   with an auto-merge monitor and card metadata (plans, links, Claude sessions).
