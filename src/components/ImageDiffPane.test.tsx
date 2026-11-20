@@ -10,8 +10,12 @@ const imageDiffCancel = vi.fn();
 const imageDiffReport = vi.fn();
 const imageDiffRunReport = vi.fn();
 const checkEnvironment = vi.fn();
+const imageDiffExportHtml = vi.fn();
+const pickSavePath = vi.fn();
 vi.mock("../lib/api", () => ({
+  pickSavePath: (...a: unknown[]) => pickSavePath(...a),
   api: {
+    imageDiffExportHtml: (...a: unknown[]) => imageDiffExportHtml(...a),
     imageDiffReport: (...a: unknown[]) => imageDiffReport(...a),
     imageDiffRunReport: (...a: unknown[]) => imageDiffRunReport(...a),
     checkEnvironment: () => checkEnvironment(),
@@ -85,6 +89,8 @@ beforeEach(() => {
   imageDiffReport.mockReset().mockResolvedValue(null);
   imageDiffRunReport.mockReset().mockResolvedValue(undefined);
   checkEnvironment.mockReset().mockResolvedValue({ claude: "/usr/bin/claude" });
+  imageDiffExportHtml.mockReset().mockResolvedValue(undefined);
+  pickSavePath.mockReset();
   useSettingsStore.setState({ aiEnabled: true });
 });
 
@@ -130,6 +136,27 @@ describe("ImageDiffPane", () => {
     imageDiffManifest.mockResolvedValue(manifest([entry({}), entry({ index: 1, path: "e2e/other.png" })]));
     setup("e2e/other.png");
     await waitFor(() => expect(document.querySelector(".image-diff-item.active")?.getAttribute("title")).toBe("e2e/other.png"));
+  });
+
+  it("exports to the HTML file picked, and does nothing when the dialog is cancelled", async () => {
+    imageDiffStatus.mockResolvedValue(ready);
+    imageDiffManifest.mockResolvedValue(manifest([entry({})]));
+    setup();
+    const button = await screen.findByRole("button", { name: "Export HTML" });
+    pickSavePath.mockResolvedValueOnce(null);
+    await userEvent.click(button);
+    expect(pickSavePath).toHaveBeenCalledWith("image-diffs-review-9.html", "html");
+    expect(imageDiffExportHtml).not.toHaveBeenCalled();
+    pickSavePath.mockResolvedValueOnce("/tmp/out.html");
+    await userEvent.click(button);
+    await waitFor(() => expect(imageDiffExportHtml).toHaveBeenCalledWith(9, "/tmp/out.html"));
+  });
+
+  it("offers no export while generating", async () => {
+    imageDiffStatus.mockResolvedValue({ ...ready, state: "running", done: 1, total: 3, generated_at: null });
+    setup();
+    await screen.findByText(/Generating… 1\/3/);
+    expect(screen.queryByRole("button", { name: "Export HTML" })).toBeNull();
   });
 
   it("offers to generate when there is nothing, and does it on click", async () => {

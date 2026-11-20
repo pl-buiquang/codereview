@@ -5,6 +5,7 @@
 //! close look, `job` runs a whole review's files and `blob` reads the image bytes.
 
 pub mod blob;
+pub mod html;
 pub mod job;
 pub mod pixelmatch;
 pub mod regions;

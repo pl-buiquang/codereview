@@ -18,7 +18,11 @@ Full width, `Esc` or a click outside closes it. Left: the changed images with a 
 - **Images.** Before | after | diff columns (red = changed, yellow = anti-aliasing, grey = unchanged), with the regions outlined on the diff and listed with their close-ups. Click a picture for a zoom/pan overlay (wheel, drag, `Esc`). Images of different sizes are compared on a white canvas, top-left aligned.
 - **Report.** The AI report (below).
 
-Header: progress with Cancel while running, Regenerate otherwise, and the AI report button. A cache generated for an older version of the review stays viewable with a notice.
+Header: progress with Cancel while running, Regenerate and Export HTML otherwise, and the AI report button. A cache generated for an older version of the review stays viewable with a notice.
+
+## Export HTML
+
+`Export HTML` saves one self-contained `.html` file: the AI report first (summary and each finding with its close-ups), when there is one, then every changed image as before / after / diff with the regions outlined and their crops. The PNGs are inlined as base64, previews for pictures wider than 1000 px, so the file opens offline and can be shared on its own. All text is HTML-escaped. `src-tauri/src/image_diff/html.rs` builds the page.
 
 ## AI report
 

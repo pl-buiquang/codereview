@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api } from "../lib/api";
+import { api, pickSavePath } from "../lib/api";
 import {
   cropRel,
   diffDim,
@@ -338,6 +338,17 @@ export function ImageDiffPane({
     },
     onError: (e) => toast.error(`Could not start the AI report:\n${String(e)}`),
   });
+  const exportHtml = useMutation({
+    mutationFn: async () => {
+      const dest = await pickSavePath(`image-diffs-review-${reviewId}.html`, "html");
+      if (dest) await api.imageDiffExportHtml(reviewId, dest);
+      return dest;
+    },
+    onSuccess: (dest) => {
+      if (dest) toast.info(`Exported to ${dest}`, { label: "Open", onClick: () => void api.openInDefaultApp(dest) });
+    },
+    onError: (e) => toast.error(`Could not export the image diffs:\n${String(e)}`),
+  });
   const cancel = useMutation({
     mutationFn: () => api.imageDiffCancel(reviewId),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["image-diff-status", reviewId] }),
@@ -395,6 +406,16 @@ export function ImageDiffPane({
               ) : (
                 "AI report"
               )}
+            </button>
+          )}
+          {showing && !running && (
+            <button
+              className="btn btn-sm"
+              disabled={exportHtml.isPending}
+              title="Save the report and every image as one self-contained HTML page"
+              onClick={() => exportHtml.mutate()}
+            >
+              Export HTML
             </button>
           )}
           {!running && status && status.state !== "none" && (

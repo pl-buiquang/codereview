@@ -162,6 +162,8 @@ export const api = {
   imageDiffGenerate: (reviewId: number) => invoke<void>("image_diff_generate", { reviewId }),
   imageDiffCancel: (reviewId: number) => invoke<void>("image_diff_cancel", { reviewId }),
   imageDiffReport: (reviewId: number) => invoke<ImageDiffReport | null>("image_diff_report", { reviewId }),
+  imageDiffExportHtml: (reviewId: number, destPath: string) =>
+    invoke<void>("image_diff_export_html", { reviewId, destPath }),
   imageDiffRunReport: (reviewId: number, model?: string) =>
     invoke<void>("image_diff_run_report", { reviewId, model: model || null }),
 

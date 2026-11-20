@@ -4,8 +4,9 @@
 use tauri::{AppHandle, State};
 
 use crate::db::{Db, DbPath};
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 use crate::commands::routines::{builtin, launch};
+use crate::image_diff::html;
 use crate::image_diff::report::{self, Report};
 use crate::image_diff::runner::{self, Status};
 use crate::image_diff::store::{self, Manifest};
@@ -51,5 +52,16 @@ pub fn image_diff_run_report(review_id: i64, model: Option<String>, app: AppHand
     let routine = builtin(&db, IMAGE_DIFF_REPORT_KEY)?;
     let ctx = ContextRef { kind: "review".into(), id: review_id.to_string(), base_paths: vec![] };
     launch(&app, &routine, &ctx, "", model.as_deref().unwrap_or(""))?;
+    Ok(())
+}
+
+/// Write the review's image diffs, and the AI report when there is one, to `dest_path` as one
+/// self-contained HTML page.
+#[tauri::command(async)]
+pub fn image_diff_export_html(review_id: i64, dest_path: String, path: State<DbPath>) -> AppResult<()> {
+    let dir = store::cache_dir(&path.0, review_id);
+    let manifest = store::read_manifest(&dir).ok_or_else(|| AppError::Other("no image diffs to export".into()))?;
+    let report = report::read_final(&dir);
+    std::fs::write(&dest_path, html::render(&dir, &manifest, report.as_ref()))?;
     Ok(())
 }

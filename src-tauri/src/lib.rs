@@ -319,6 +319,7 @@ pub fn run() {
             commands::image_diff::image_diff_generate,
             commands::image_diff::image_diff_cancel,
             commands::image_diff::image_diff_report,
+            commands::image_diff::image_diff_export_html,
             commands::image_diff::image_diff_run_report,
             commands::review::create_review,
             commands::review::list_reviews,

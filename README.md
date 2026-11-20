@@ -46,7 +46,7 @@ Each area has a page under [`docs/features/`](docs/features/).
   → [review](docs/features/review.md)
 - **Image diffs** — before / after / pixel diff of the PNG, JPEG and SVG files a review changes,
   generated in the background into a disk cache, with an optional AI report that describes each
-  change with close-ups. → [image diffs](docs/features/image-diffs.md)
+  change with close-ups, exportable as one self-contained HTML page. → [image diffs](docs/features/image-diffs.md)
 - **Two diff sources, one flow** — a real GitHub PR (via `gh`) or a *virtual PR* between any two
   local branches (three-dot by default, two-dot toggle).
   → [GitHub](docs/features/github.md)
