@@ -1537,6 +1537,22 @@ function ReviewHeader({
     onError: (e) => toast.error(`Auto-merge failed:\n${String(e)}`),
   });
 
+  // Bare GitHub approval: the local draft (comments + summary) is left untouched.
+  const approveOnly = useMutation({
+    mutationFn: async () => {
+      if (owner == null || name == null || prNumber == null) {
+        throw new Error("missing PR identity");
+      }
+      await api.approvePr(owner, name, prNumber);
+    },
+    onSuccess: () => {
+      toast.success("PR approved. Draft comments not published.");
+      queryClient.invalidateQueries({ queryKey: ["pr-meta", owner, name, prNumber] });
+      queryClient.invalidateQueries({ queryKey: ["board"] });
+    },
+    onError: (e) => toast.error(`Approve failed:\n${String(e)}`),
+  });
+
   // Approve first, then enable auto-merge: if the approval fails, nothing is merged.
   const approveAndMerge = useMutation({
     mutationFn: async () => {
@@ -1889,6 +1905,8 @@ function ReviewHeader({
             verdictLabel={verdictLabel}
             onPublish={(event) => publishReview.mutate(event)}
             onPublishDraft={(event) => publishPending.mutate(event)}
+            approvePending={approveOnly.isPending}
+            onApproveOnly={() => approveOnly.mutate()}
           />
         )}
         {isPr && pending && (

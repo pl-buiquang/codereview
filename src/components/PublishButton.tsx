@@ -11,7 +11,8 @@ const VERDICTS: { value: ReviewEvent; label: string }[] = [
 
 /** Split button that publishes a review to its GitHub PR. The primary action
  *  stages it as a pending (draft) review; the dropdown exposes all three
- *  verdicts for both draft and immediate publish. */
+ *  verdicts for both draft and immediate publish, plus a bare "approve only"
+ *  that approves the PR without posting this review's comments or summary. */
 export function PublishButton({
   published,
   pending,
@@ -19,6 +20,8 @@ export function PublishButton({
   verdictLabel,
   onPublish,
   onPublishDraft,
+  approvePending,
+  onApproveOnly,
 }: {
   published: boolean;
   pending: boolean;
@@ -26,6 +29,8 @@ export function PublishButton({
   verdictLabel?: string | null;
   onPublish: (event: ReviewEvent) => void;
   onPublishDraft: (event: ReviewEvent) => void;
+  approvePending: boolean;
+  onApproveOnly: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -54,7 +59,7 @@ export function PublishButton({
       </button>
     );
 
-  const busy = pending || draftPending;
+  const busy = pending || draftPending || approvePending;
 
   const publishDraftAs = async (event: ReviewEvent, label: string) => {
     setMenuOpen(false);
@@ -79,6 +84,19 @@ export function PublishButton({
       })
     )
       onPublish(event);
+  };
+
+  const approveOnly = async () => {
+    setMenuOpen(false);
+    if (
+      await confirmDialog({
+        title: "Approve PR",
+        message:
+          "Approve the PR on GitHub without posting this review's comments or summary? The draft stays here, unpublished.",
+        confirmLabel: "Approve",
+      })
+    )
+      onApproveOnly();
   };
 
   return (
@@ -121,6 +139,10 @@ export function PublishButton({
               Publish now: {o.label}
             </button>
           ))}
+          <hr className="btn-split-menu-separator" />
+          <button role="menuitem" onClick={approveOnly}>
+            Approve only (skip comments)
+          </button>
         </div>
       )}
     </div>
