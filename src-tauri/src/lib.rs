@@ -214,7 +214,9 @@ pub fn run() {
             }
             let conn = db::open(&db_path)?;
             commands::focus::fail_interrupted(&conn)?;
+            routines::migrate_builtin_keys(&conn)?;
             routines::seed(&conn)?;
+            routines::refresh_ai_review_builtins(&conn)?;
             routines::adopt_builtin_keys(&conn)?;
             routines::adopt_prompt_overrides(&conn)?;
             routines::manager::mark_interrupted(&conn, &db_path)?;

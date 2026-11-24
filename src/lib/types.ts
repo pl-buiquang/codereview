@@ -30,7 +30,7 @@ export interface DefinitionHit {
   /** ~20 source lines starting at `line`. */
   snippet: string;
 }
-export type AiReviewLayer = "explain" | "critique" | "codex" | "coverage";
+export type AiReviewLayer = "explain" | "normal" | "advanced";
 export interface AiReviewUpdated {
   review_id: number;
   layer: AiReviewLayer;

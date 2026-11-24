@@ -1315,10 +1315,9 @@ function ReviewHeader({
     onError: (e) => toast.error(`Could not start AI review:\n${String(e)}`),
   });
   const aiReviewItems: { layer: AiReviewLayer; label: string; hint: string; needsClone?: boolean }[] = [
-    { layer: "explain", label: "AI review: explain changes", hint: "Add an explanatory comment per change" },
-    { layer: "critique", label: "AI review: critique (Standards + Spec)", hint: "Check coding standards and the originating spec" },
-    { layer: "codex", label: "AI review: Codex adversarial", hint: "Challenge the approach with the Codex reviewer", needsClone: true },
-    { layer: "coverage", label: "AI review: test coverage", hint: "Score unit/e2e coverage of the change, comment the gaps and raise untested hunks", needsClone: true },
+    { layer: "explain", label: "Explain changes", hint: "Add an explanatory comment per change (a reading aid, not a review; replaces the previous explanations)" },
+    { layer: "normal", label: "AI review", hint: "Standards + Spec critique and static test coverage. Findings replace the previous run's and raise the focus tiers of hidden hunks (a tiers-only focus is generated when none is fresh)" },
+    { layer: "advanced", label: "AI review: advanced", hint: "The AI review plus Codex adversarial review and a measured test coverage run", needsClone: true },
   ];
 
   const deleteReview = useMutation({

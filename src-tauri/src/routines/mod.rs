@@ -447,10 +447,9 @@ pub const DEFAULTS: &[Defaults] = &[
         timeout_min: 30,
         handler: Some("image_diff_report"),
     },
-    ai_review("ai_review_explain", "AI review: explain", "Headless `/local-review`: one explanatory comment per change.", "/local-review {{review_id}}", crate::commands::ai_review::TOOLS),
-    ai_review("ai_review_critique", "AI review: critique", "Headless `/local-review --critique` (Standards + Spec sub-agents).", "/local-review {{review_id}} --critique", crate::commands::ai_review::TOOLS),
-    ai_review("ai_review_codex", "AI review: codex", "Headless `/local-review --codex` (Codex adversarial review).", "/local-review {{review_id}} --codex", crate::commands::ai_review::TOOLS),
-    ai_review("ai_review_coverage", "AI review: test coverage", "Headless `/local-review --coverage`: scores unit/e2e coverage of the change, comments the gaps and raises focus tiers.", "/local-review {{review_id}} --coverage", crate::commands::ai_review::COVERAGE_TOOLS),
+    ai_review("ai_review_explain", "Explain changes", "Headless `/local-review --explain`: one explanatory comment per change. A reading aid, not a review; never touches the focus.", "/local-review {{review_id}} --explain", crate::commands::ai_review::TOOLS),
+    ai_review("ai_review_normal", "AI review", "Headless `/local-review --depth normal`: Standards + Spec critique and static test coverage. Findings get a severity, replace the previous run's and raise focus tiers.", "/local-review {{review_id}} --depth normal", crate::commands::ai_review::TOOLS),
+    ai_review("ai_review_advanced", "AI review: advanced", "Headless `/local-review --depth advanced`: the normal review plus Codex adversarial review and measured test coverage.", "/local-review {{review_id}} --depth advanced", crate::commands::ai_review::COVERAGE_TOOLS),
 ];
 
 impl Defaults {
@@ -496,6 +495,69 @@ pub fn seed(conn: &Connection) -> AppResult<()> {
                 access_for_permission_mode(d.permission_mode),
                 d.overrides_json(),
                 now
+            ],
+        )?;
+    }
+    Ok(())
+}
+
+/// Built-in keys that were renamed: `(old, new)`. The row keeps its id, run history, profile, model,
+/// timeout and enabled flag; `refresh_ai_review_builtins` then brings its shipped fields up to date.
+const RENAMED_KEYS: &[(&str, &str)] = &[("ai_review_critique", "ai_review_normal"), ("ai_review_codex", "ai_review_advanced")];
+
+/// Built-in keys folded into another one: `(old, into)`. Their runs move over and the row goes.
+const MERGED_KEYS: &[(&str, &str)] = &[("ai_review_coverage", "ai_review_advanced")];
+
+/// Run before `seed`, so a renamed row is reused instead of a fresh one being seeded. Idempotent.
+pub fn migrate_builtin_keys(conn: &Connection) -> AppResult<()> {
+    let id_of = |key: &str| -> AppResult<Option<i64>> {
+        Ok(conn.query_row("SELECT id FROM routine WHERE key = ?1", params![key], |r| r.get(0)).optional()?)
+    };
+    for (old, new) in RENAMED_KEYS {
+        if let (Some(id), None) = (id_of(old)?, id_of(new)?) {
+            conn.execute("UPDATE routine SET key = ?2 WHERE id = ?1", params![id, new])?;
+        }
+    }
+    for (old, into) in MERGED_KEYS {
+        let Some(old_id) = id_of(old)? else { continue };
+        match id_of(into)? {
+            Some(into_id) => {
+                conn.execute("UPDATE routine_run SET routine_id = ?2 WHERE routine_id = ?1", params![old_id, into_id])?;
+                conn.execute("DELETE FROM routine WHERE id = ?1", params![old_id])?;
+            }
+            None => {
+                conn.execute("UPDATE routine SET key = ?2 WHERE id = ?1", params![old_id, into])?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The AI review routines' prompt and tools belong to the skill they launch, not to the user (the
+/// Config tab only edits their profile, model, timeout and enabled flag), so every start brings those
+/// shipped fields back in line with `DEFAULTS`. Run after `seed`.
+pub fn refresh_ai_review_builtins(conn: &Connection) -> AppResult<()> {
+    for d in DEFAULTS.iter().filter(|d| d.handler == Some("ai_review")) {
+        conn.execute(
+            "UPDATE routine SET name = ?2, description = ?3, prompt_template = ?4, system_prompt = ?5,
+                    system_prompt_mode = ?6, needs_worktree = ?7, permission_mode = ?8, allowed_tools = ?9,
+                    extra_args = ?10, handler = ?11, kind = ?12, access = ?13, harness_overrides = ?14
+              WHERE key = ?1 AND builtin = 1",
+            params![
+                d.key,
+                d.name,
+                d.description,
+                d.prompt_template,
+                d.system_prompt,
+                d.system_prompt_mode,
+                d.needs_worktree as i64,
+                d.permission_mode,
+                serde_json::to_string(d.allowed_tools).unwrap_or_else(|_| "[]".into()),
+                serde_json::to_string(d.extra_args).unwrap_or_else(|_| "[]".into()),
+                d.handler,
+                d.kind(),
+                access_for_permission_mode(d.permission_mode),
+                d.overrides_json(),
             ],
         )?;
     }
@@ -890,6 +952,45 @@ mod tests {
     }
 
     #[test]
+    fn old_ai_review_routines_migrate_to_the_levels() {
+        let conn = open_memory();
+        // A database from before the levels: the four layer routines, one with a chosen model, all with runs.
+        for (key, model) in [("ai_review_explain", ""), ("ai_review_critique", "opus"), ("ai_review_codex", ""), ("ai_review_coverage", "")] {
+            conn.execute(
+                "INSERT INTO routine (key, name, context_type, prompt_template, handler, builtin, kind, model, created_at, updated_at)
+                 VALUES (?1, ?1, 'review', '/local-review old', 'ai_review', 1, 'system', ?2, 'now', 'now')",
+                params![key, model],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO routine_run (routine_id, context_type, context_key, context_json, status, queued_at)
+                 VALUES (?1, 'review', '1', '{}', 'ok', 'now')",
+                params![conn.last_insert_rowid()],
+            )
+            .unwrap();
+        }
+        let id_of = |key: &str| conn.query_row("SELECT id FROM routine WHERE key = ?1", params![key], |r| r.get::<_, i64>(0)).ok();
+        let (critique, codex) = (id_of("ai_review_critique").unwrap(), id_of("ai_review_codex").unwrap());
+        for _ in 0..2 {
+            migrate_builtin_keys(&conn).unwrap();
+            seed(&conn).unwrap();
+            refresh_ai_review_builtins(&conn).unwrap();
+        }
+        assert_eq!(id_of("ai_review_normal"), Some(critique), "row kept");
+        assert_eq!(id_of("ai_review_advanced"), Some(codex));
+        assert_eq!(id_of("ai_review_coverage"), None);
+        let normal = get(&conn, critique).unwrap();
+        assert_eq!(normal.prompt_template, "/local-review {{review_id}} --depth normal");
+        assert_eq!(normal.model, "opus", "user model kept");
+        let explain = get(&conn, id_of("ai_review_explain").unwrap()).unwrap();
+        assert_eq!(explain.prompt_template, "/local-review {{review_id}} --explain");
+        let runs = |id: i64| conn.query_row("SELECT COUNT(*) FROM routine_run WHERE routine_id = ?1", params![id], |r| r.get::<_, i64>(0)).unwrap();
+        assert_eq!(runs(codex), 2, "coverage runs moved to advanced");
+        let ai: i64 = conn.query_row("SELECT COUNT(*) FROM routine WHERE handler = 'ai_review'", [], |r| r.get(0)).unwrap();
+        assert_eq!(ai, 3);
+    }
+
+    #[test]
     fn shipped_issue_prompts_have_no_unknown_placeholders() {
         let known = ["repo", "number", "url", "title", "plans_dir", "head_ref", "base_ref", "worktree", "review_id"];
         for d in DEFAULTS.iter().filter(|d| d.context_type == "issue") {
@@ -966,8 +1067,8 @@ mod tests {
         assert_eq!((overview.kind.as_str(), overview.access.as_str()), ("system", "read_only"));
         let focus = get_key("focus");
         assert_eq!((focus.claude().permission_mode.as_deref(), focus.claude().allowed_tools.len()), (Some("default"), 8));
-        let codex = get_key("ai_review_codex");
-        assert_eq!(codex.prompt_template, "/local-review {{review_id}} --codex");
+        let codex = get_key("ai_review_advanced");
+        assert_eq!(codex.prompt_template, "/local-review {{review_id}} --depth advanced");
         assert_eq!(codex.claude().permission_mode.as_deref(), Some("acceptEdits"));
         assert_eq!((codex.kind.as_str(), codex.access.as_str()), ("system", "edit"));
         assert!(codex.claude().allowed_tools.contains(&"Bash(cr:*)".to_string()));
