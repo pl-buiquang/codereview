@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { listen } from "@tauri-apps/api/event";
 import { api } from "./api";
@@ -74,36 +74,36 @@ export function useActiveRoutineRuns(): Map<string, RoutineRun[]> {
   }, [query.data]);
 }
 
-const SEEN_KEY = "routines_problems_seen_at";
+/** True for runs that ended badly enough to be shown in red (not just "needs attention"). */
+export const isFailedRun = (status: RoutineRunStatus) => status === "error" || status === "timeout";
 
-/** When the Routines tab was last looked at; first use starts from now, so old failures don't flood the badge. */
-function readSeenAt(): number {
-  const stored = Number(localStorage.getItem(SEEN_KEY));
-  if (stored > 0) return stored;
-  const now = Date.now();
-  localStorage.setItem(SEEN_KEY, String(now));
-  return now;
-}
-
-/** Runs that ended needing attention, failed or timed out since the Routines tab was last open (badge source). */
-export function useUnseenRoutineProblems(): { unseen: RoutineRun[]; markSeen: () => void } {
-  const [seenAt, setSeenAt] = useState(readSeenAt);
+/**
+ * Finished runs that notify until seen (sidebar and Routines tab badges): every routine's failed,
+ * timed-out or needs-attention runs, plus successful AI review runs. A run is seen once it is
+ * selected in Sessions → Routines, or with "Mark all seen".
+ */
+export function useUnseenRoutineRuns(): { unseen: RoutineRun[]; markSeen: (runId: number | null) => void } {
+  const queryClient = useQueryClient();
   const query = useQuery({
-    queryKey: ["routine-runs", "problems"],
-    queryFn: () => api.routineRunList({ statuses: PROBLEM_STATUSES, limit: 50 }),
+    queryKey: ["routine-runs", "unseen"],
+    queryFn: api.routineRunUnseen,
     refetchInterval: 15_000,
   });
-  const unseen = useMemo(
-    () => (query.data ?? []).filter((r) => r.ended_at != null && Date.parse(r.ended_at) > seenAt),
-    [query.data, seenAt],
+  const markSeen = useCallback(
+    (runId: number | null) => {
+      api
+        .routineRunMarkSeen(runId)
+        .then(() => queryClient.invalidateQueries({ queryKey: ["routine-runs"] }))
+        .catch((e) => console.warn("Could not mark routine runs seen", e));
+    },
+    [queryClient],
   );
-  const markSeen = useCallback(() => {
-    const now = Date.now();
-    localStorage.setItem(SEEN_KEY, String(now));
-    setSeenAt(now);
-  }, []);
-  return { unseen, markSeen };
+  return { unseen: query.data ?? [], markSeen };
 }
+
+/** One line per unseen run, for badge tooltips. */
+export const unseenRunLines = (runs: RoutineRun[]) =>
+  runs.map((r) => `${r.routine_name} · ${r.context_label}: ${STATUS_LABEL[r.status]}`).join("\n");
 
 export function formatDuration(startIso: string | null, endIso: string | null): string {
   if (!startIso) return "";

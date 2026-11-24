@@ -8,12 +8,14 @@ const listRepositories = vi.fn();
 const listClaudeSessions = vi.fn();
 const boardList = vi.fn();
 const listInbox = vi.fn();
+const routineRunUnseen = vi.fn();
 vi.mock("../lib/api", () => ({
   api: {
     listRepositories: () => listRepositories(),
     listClaudeSessions: () => listClaudeSessions(),
     boardList: () => boardList(),
     listInbox: () => listInbox(),
+    routineRunUnseen: () => routineRunUnseen(),
     listConversations: () => Promise.resolve({ items: [], total: 0, facets: { unread: 0 } }),
   },
 }));
@@ -47,6 +49,7 @@ beforeEach(() => {
   listClaudeSessions.mockResolvedValue({ sessions: [], card_sessions: [] });
   boardList.mockResolvedValue([]);
   listInbox.mockResolvedValue([]);
+  routineRunUnseen.mockResolvedValue([]);
 });
 
 describe("HomeNav", () => {
@@ -111,6 +114,23 @@ describe("HomeNav", () => {
     renderNav(false);
 
     expect(await screen.findByTitle(/Waiting for input/)).toHaveTextContent("1");
+  });
+
+  it("adds unseen routine runs to the Sessions badge", async () => {
+    listClaudeSessions.mockResolvedValue({
+      sessions: [{ live: true, status: "busy", waiting_for: "input needed", session_id: "s1", name: "fixer" }],
+      card_sessions: [],
+    });
+    routineRunUnseen.mockResolvedValue([
+      { id: 1, routine_name: "AI review", context_label: "acme/one#4", status: "ok" },
+      { id: 2, routine_name: "Babysit", context_label: "acme/one#5", status: "error" },
+    ]);
+    renderNav(false);
+
+    const badge = await screen.findByTitle(/Routine runs not seen yet/);
+    expect(badge).toHaveTextContent("3");
+    expect(badge.getAttribute("title")).toContain("AI review · acme/one#4: Done");
+    expect(badge.getAttribute("title")).toContain("Waiting for input");
   });
 
   it("badges Inbox with the New items not viewed yet", async () => {

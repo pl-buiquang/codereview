@@ -6543,6 +6543,15 @@ button.board-overview-ref {
   border-color: var(--accent);
   background: var(--accent-soft);
 }
+.routine-run-unseen-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  vertical-align: middle;
+}
 .routine-run-meta {
   display: flex;
   align-items: center;

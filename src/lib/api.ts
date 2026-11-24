@@ -195,6 +195,10 @@ export const api = {
   routineLaunch: (routineId: number, context: RoutineContextRef, note?: string, model?: string) =>
     invoke<RoutineRun>("routine_launch", { routineId, context, note: note || null, model: model || null }),
   routineRunList: (filter?: RoutineRunFilter) => invoke<RoutineRun[]>("routine_run_list", { filter: filter ?? null }),
+  /** Finished runs that notify until seen: problems of any routine, plus successful AI review runs. */
+  routineRunUnseen: () => invoke<RoutineRun[]>("routine_run_unseen"),
+  /** Mark one finished run seen, or all of them (`null`). */
+  routineRunMarkSeen: (runId: number | null) => invoke<void>("routine_run_mark_seen", { runId }),
   routineRunEvents: (runId: number, afterSeq = 0) => invoke<RoutineRunEvent[]>("routine_run_events", { runId, afterSeq }),
   routineRunStop: (runId: number) => invoke<void>("routine_run_stop", { runId }),
   routineRunRelaunch: (runId: number) => invoke<RoutineRun>("routine_run_relaunch", { runId }),

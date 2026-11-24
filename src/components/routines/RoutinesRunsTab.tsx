@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import { toast } from "../../lib/toast";
 import { timeAgo } from "../../lib/timeAgo";
-import { formatDuration, isActiveRun, STATUS_LABEL } from "../../lib/routines";
+import { formatDuration, isActiveRun, STATUS_LABEL, useUnseenRoutineRuns } from "../../lib/routines";
 import { useAiDisabledReason, useSettingsStore } from "../../lib/settings";
 import { useUIStore } from "../../store";
 import type { RoutineRun, RoutineRunStatus } from "../../lib/types";
@@ -80,6 +80,13 @@ export function RoutinesRunsTab() {
 
   const list = runs.data ?? [];
   const selected = list.find((r) => r.id === selectedId) ?? null;
+  const { unseen, markSeen } = useUnseenRoutineRuns();
+  const unseenIds = new Set(unseen.map((r) => r.id));
+  // Looking at a finished run is what clears it from the badges.
+  const selectedUnseen = selected != null && selected.ended_at != null && selected.seen_at == null;
+  useEffect(() => {
+    if (selectedUnseen && selectedId != null) markSeen(selectedId);
+  }, [selectedUnseen, selectedId, markSeen]);
 
   const openContext = (run: RoutineRun) => {
     if (run.context.kind === "review") openReview(Number(run.context.id));
@@ -111,6 +118,11 @@ export function RoutinesRunsTab() {
               </option>
             ))}
           </select>
+          {unseen.length > 0 && (
+            <button type="button" className="btn btn-sm" onClick={() => markSeen(null)} title="Clear every unseen run from the badges">
+              Mark all seen ({unseen.length})
+            </button>
+          )}
         </div>
         {runs.isLoading && <p className="muted">Loading…</p>}
         {runs.isError && <p className="form-warning">{String(runs.error)}</p>}
@@ -123,10 +135,11 @@ export function RoutinesRunsTab() {
           <button
             key={run.id}
             type="button"
-            className={`routine-run-row${run.id === selectedId ? " selected" : ""}`}
+            className={`routine-run-row${run.id === selectedId ? " selected" : ""}${unseenIds.has(run.id) ? " unseen" : ""}`}
             onClick={() => setSelectedId(run.id)}
           >
             <span className="routine-run-title">
+              {unseenIds.has(run.id) && <span className="routine-run-unseen-dot" aria-label="Not seen yet" />}
               <strong>{run.routine_name}</strong>
               <span className="muted"> · {run.context_label}</span>
             </span>

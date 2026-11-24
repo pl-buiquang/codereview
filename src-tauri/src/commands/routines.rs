@@ -2,7 +2,7 @@
 //! run list / transcript (Routines tab).
 
 use serde::Serialize;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::ai::profiles;
 use crate::db::Db;
@@ -127,6 +127,22 @@ pub fn routine_launch(
 #[tauri::command]
 pub fn routine_run_list(filter: Option<RunFilter>, db: State<Db>) -> AppResult<Vec<RoutineRun>> {
     manager::list_runs(&db.0.lock().unwrap(), &filter.unwrap_or_default())
+}
+
+/// Finished runs the sidebar badge shows until they are seen.
+#[tauri::command]
+pub fn routine_run_unseen(db: State<Db>) -> AppResult<Vec<RoutineRun>> {
+    manager::unseen_runs(&db.0.lock().unwrap())
+}
+
+/// Mark one finished run seen, or every one when `run_id` is `None`.
+#[tauri::command]
+pub fn routine_run_mark_seen(run_id: Option<i64>, app: AppHandle, db: State<Db>) -> AppResult<()> {
+    let n = manager::mark_runs_seen(&db.0.lock().unwrap(), run_id)?;
+    if n > 0 {
+        let _ = app.emit("routine-run-updated", serde_json::json!({ "run_id": run_id, "status": "seen" }));
+    }
+    Ok(())
 }
 
 #[tauri::command]

@@ -1208,6 +1208,8 @@ export interface RoutineRun {
   queued_at: string;
   started_at: string | null;
   ended_at: string | null;
+  /** When the user looked at the finished run; null while unseen. */
+  seen_at: string | null;
 }
 
 export interface RoutineOption {

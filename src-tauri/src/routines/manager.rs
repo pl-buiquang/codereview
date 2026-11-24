@@ -77,6 +77,8 @@ pub struct RoutineRun {
     pub queued_at: String,
     pub started_at: Option<String>,
     pub ended_at: Option<String>,
+    /// When the user looked at the finished run; `None` while it is unseen.
+    pub seen_at: Option<String>,
 }
 
 const RUN_SELECT: &str =
@@ -109,6 +111,7 @@ impl RoutineRun {
             queued_at: row.get("queued_at")?,
             started_at: row.get("started_at")?,
             ended_at: row.get("ended_at")?,
+            seen_at: row.get("seen_at")?,
         })
     }
 }
@@ -176,6 +179,28 @@ pub struct RunEvent {
     pub json: String,
     /// Harness-neutral form of the line (`{"v":1,"events":[..]}`); `None` for runs recorded before it existed.
     pub norm: Option<String>,
+}
+
+/// Finished runs that notify until seen: every routine's failed, timed-out or needs-attention runs,
+/// plus successful AI review runs. Newest first.
+const UNSEEN_WHERE: &str = "r.seen_at IS NULL AND r.ended_at IS NOT NULL
+     AND (r.status IN ('needs_attention', 'error', 'timeout') OR (r.status = 'ok' AND ro.handler = 'ai_review'))";
+
+pub fn unseen_runs(conn: &Connection) -> AppResult<Vec<RoutineRun>> {
+    let mut stmt = conn.prepare(&format!("{RUN_SELECT} WHERE {UNSEEN_WHERE} ORDER BY r.id DESC LIMIT 100"))?;
+    let rows = stmt.query_map([], RoutineRun::from_row)?.collect::<rusqlite::Result<_>>()?;
+    Ok(rows)
+}
+
+/// Mark finished runs seen: one run, or (`None`) every run. Idempotent; active runs are left alone.
+pub fn mark_runs_seen(conn: &Connection, run_id: Option<i64>) -> AppResult<usize> {
+    let now = chrono::Utc::now().to_rfc3339();
+    let n = conn.execute(
+        "UPDATE routine_run SET seen_at = ?1
+          WHERE seen_at IS NULL AND ended_at IS NOT NULL AND (?2 IS NULL OR id = ?2)",
+        params![now, run_id],
+    )?;
+    Ok(n)
 }
 
 pub fn run_events(conn: &Connection, run_id: i64, after_seq: i64) -> AppResult<Vec<RunEvent>> {
@@ -997,4 +1022,38 @@ mod tests {
         );
     }
 
+
+    #[test]
+    fn unseen_runs_are_problems_and_ai_review_successes_until_seen() {
+        let conn = open_memory();
+        crate::routines::seed(&conn).unwrap();
+        let rid = |key: &str| conn.query_row("SELECT id FROM routine WHERE key = ?1", params![key], |r| r.get::<_, i64>(0)).unwrap();
+        let (review, overview) = (rid("ai_review_normal"), rid("board_overview"));
+        let run = |routine: i64, status: &str, ended: bool| {
+            conn.execute(
+                "INSERT INTO routine_run (routine_id, context_type, context_key, context_json, status, queued_at, ended_at)
+                 VALUES (?1, 'review', '1', '{}', ?2, 'now', ?3)",
+                params![routine, status, ended.then_some("later")],
+            )
+            .unwrap();
+            conn.last_insert_rowid()
+        };
+        let review_ok = run(review, "ok", true);
+        let overview_ok = run(overview, "ok", true);
+        let overview_failed = run(overview, "error", true);
+        let attention = run(overview, "needs_attention", true);
+        let _running = run(review, "running", false);
+        let _killed = run(review, "killed", true);
+        let ids = |conn: &Connection| unseen_runs(conn).unwrap().iter().map(|r| r.id).collect::<Vec<_>>();
+        assert_eq!(ids(&conn), vec![attention, overview_failed, review_ok]);
+        assert!(!ids(&conn).contains(&overview_ok));
+
+        assert_eq!(mark_runs_seen(&conn, Some(review_ok)).unwrap(), 1);
+        assert_eq!(ids(&conn), vec![attention, overview_failed]);
+        mark_runs_seen(&conn, None).unwrap();
+        assert!(ids(&conn).is_empty());
+        let running_seen: Option<String> =
+            conn.query_row("SELECT seen_at FROM routine_run WHERE status = 'running'", [], |r| r.get(0)).unwrap();
+        assert!(running_seen.is_none(), "active runs are never marked seen");
+    }
 }

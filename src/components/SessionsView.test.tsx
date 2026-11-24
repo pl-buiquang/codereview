@@ -9,6 +9,8 @@ const focusClaudeSession = vi.fn();
 const resumeClaudeSession = vi.fn();
 const generateLiveSessionSummary = vi.fn();
 const routineRunList = vi.fn();
+const routineRunUnseen = vi.fn();
+const routineRunMarkSeen = vi.fn();
 const listRemoteSessions = vi.fn();
 vi.mock("../lib/api", () => ({
   api: {
@@ -17,6 +19,8 @@ vi.mock("../lib/api", () => ({
     resumeClaudeSession: (...args: unknown[]) => resumeClaudeSession(...args),
     generateLiveSessionSummary: (id: string, fork: boolean) => generateLiveSessionSummary(id, fork),
     routineRunList: (filter: unknown) => routineRunList(filter),
+    routineRunUnseen: () => routineRunUnseen(),
+    routineRunMarkSeen: (id: number | null) => routineRunMarkSeen(id),
     listRemoteSessions: () => listRemoteSessions(),
   },
 }));
@@ -325,6 +329,8 @@ describe("SessionsView tab badges", () => {
     vi.clearAllMocks();
     localStorage.clear();
     useUIStore.setState({ sessionsTab: "terminal" });
+    routineRunUnseen.mockResolvedValue([]);
+    routineRunMarkSeen.mockResolvedValue(undefined);
     listClaudeSessions.mockResolvedValue(snapshot([session({ session_id: "w1", name: "waiting one", waiting_for: "input needed" })]));
   });
 
@@ -336,22 +342,16 @@ describe("SessionsView tab badges", () => {
     expect(screen.getByRole("tab", { name: /^Routines$/ })).toBeInTheDocument();
   });
 
-  it("counts runs that failed or need attention since the Routines tab was last open, until it is opened", async () => {
-    localStorage.setItem("routines_problems_seen_at", "1000");
-    const runs = [
-      run(1, "needs_attention", new Date().toISOString()),
-      run(2, "error", new Date().toISOString()),
-      run(3, "error", new Date(500).toISOString()),
-    ];
-    routineRunList.mockImplementation(async (f: { statuses?: string[] }) =>
-      runs.filter((r) => !f?.statuses || f.statuses.includes(r.status)),
-    );
+  it("counts unseen runs on the Routines tab, and opening the tab alone doesn't clear them", async () => {
+    routineRunList.mockResolvedValue([]);
+    routineRunUnseen.mockResolvedValue([run(1, "needs_attention", new Date().toISOString()), run(2, "error", new Date().toISOString())]);
     renderView();
     const tab = screen.getByRole("tab", { name: /Routines/ });
     await waitFor(() => expect(tab).toHaveTextContent("2"));
     expect(tab.querySelector(".n-error")).not.toBeNull();
     await userEvent.click(tab);
-    await waitFor(() => expect(tab.querySelector(".n")).toBeNull());
+    expect(tab).toHaveTextContent("2");
+    expect(routineRunMarkSeen).not.toHaveBeenCalled();
   });
 
   it("shows the number of active routine runs on the Routines tab", async () => {

@@ -59,8 +59,11 @@ to it instead of opening another; it is tied to the card by the session id the a
 session you started by hand in the clone needs `cr board meta add <url> --kind claude_session --value <id>`.
 
 The Sessions tabs carry a count: **Terminal sessions** shows sessions waiting for input, **Routines**
-shows runs that ended needing attention, failed or timed out since you last opened that tab (red when
-one failed or timed out, amber when they only need attention).
+shows runs you haven't seen yet: every routine's runs that failed, timed out or need attention, plus
+successful AI review runs (Explain changes, AI review, AI review: advanced). It is red when one failed or
+timed out, amber when they only need attention. The sidebar's **Sessions** badge adds these unseen runs to
+the waiting sessions (its tooltip lists both). A run stays unseen until you select it in the Routines tab
+(unseen rows carry a dot), or until **Mark all seen**; opening the tab alone clears nothing.
 
 ### Settings (Sessions → Config)
 

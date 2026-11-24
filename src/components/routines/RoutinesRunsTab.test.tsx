@@ -1,14 +1,18 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { RoutineRun } from "../../lib/types";
 
 const routineRunList = vi.fn();
 const hostStates = vi.fn();
+const routineRunUnseen = vi.fn(() => Promise.resolve([] as RoutineRun[]));
+const routineRunMarkSeen = vi.fn((_id: number | null) => Promise.resolve());
 vi.mock("../../lib/api", () => ({
   api: {
     routineRunList: (...a: unknown[]) => routineRunList(...a),
+    routineRunUnseen: () => routineRunUnseen(),
+    routineRunMarkSeen: (id: number | null) => routineRunMarkSeen(id),
     routineList: () => Promise.resolve([]),
     aiHarnesses: () => Promise.resolve([{ id: "claude", name: "Claude Code", available: true, caps: {} }]),
     routineRunEvents: () => Promise.resolve([]),
@@ -45,6 +49,7 @@ const run = (over: Partial<RoutineRun> = {}): RoutineRun => ({
   queued_at: new Date().toISOString(),
   started_at: new Date().toISOString(),
   ended_at: null,
+  seen_at: null,
   ...over,
 });
 
@@ -85,5 +90,21 @@ describe("RoutinesRunsTab remote runs", () => {
     const warn = await screen.findByText(/The host could not be reached/);
     expect(warn.textContent).toBe("The host could not be reached: ssh: Connection refused");
     expect(within(document.body).queryByRole("button", { name: /Resume/ })).toBeNull();
+  });
+});
+
+describe("RoutinesRunsTab unseen runs", () => {
+  it("marks a finished unseen run seen when it is selected, and offers Mark all seen", async () => {
+    const user = userEvent.setup();
+    const done = run({ id: 3, routine_name: "AI review", status: "ok", ended_at: new Date().toISOString() });
+    routineRunList.mockResolvedValue([done]);
+    routineRunUnseen.mockResolvedValue([done]);
+    renderTab();
+    expect(await screen.findByLabelText("Not seen yet")).toBeTruthy();
+    await user.click(await screen.findByRole("button", { name: /Mark all seen \(1\)/ }));
+    expect(routineRunMarkSeen).toHaveBeenCalledWith(null);
+    routineRunMarkSeen.mockClear();
+    await user.click(screen.getByRole("button", { name: /AI review/ }));
+    await waitFor(() => expect(routineRunMarkSeen).toHaveBeenCalledWith(3));
   });
 });

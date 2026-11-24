@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { useRefetchOnActivate } from "../lib/useRefetchOnActivate";
@@ -7,7 +7,7 @@ import { confirmDialog } from "../lib/confirm";
 import { timeAgo } from "../lib/timeAgo";
 import { formatCost, shortModel } from "../lib/usage";
 import { isWaiting, useWaitingSessions } from "../lib/sessionCounts";
-import { STATUS_LABEL, useActiveRoutineRuns, useUnseenRoutineProblems } from "../lib/routines";
+import { isFailedRun, unseenRunLines, useActiveRoutineRuns, useUnseenRoutineRuns } from "../lib/routines";
 import { useAiDisabledReason, useSettingsStore } from "../lib/settings";
 import { useUIStore, type SessionsTab } from "../store";
 import type { CardSession, AgentSession, RemoteSession, SessionCost, SessionFocusState } from "../lib/types";
@@ -534,25 +534,25 @@ export function SessionsView() {
   const tab = useUIStore((s) => s.sessionsTab);
   const setTab = useUIStore((s) => s.setSessionsTab);
   const waiting = useWaitingSessions();
-  const { unseen, markSeen } = useUnseenRoutineProblems();
+  const { unseen } = useUnseenRoutineRuns();
   const activeRuns = [...useActiveRoutineRuns().values()].flat();
-  // Looking at the runs is what clears the badge.
-  useEffect(() => {
-    if (tab === "routines" && unseen.length > 0) markSeen();
-  }, [tab, unseen.length, markSeen]);
   const badges: Partial<Record<SessionsTab, { count: number; tone: "attention" | "error" | "info"; title: string }>> = {
     terminal: {
       count: waiting.length,
       tone: "attention",
       title: `Waiting for input:\n${waiting.map((s) => s.name ?? s.session_id.slice(0, 8)).join("\n")}`,
     },
-    // Problems you haven't seen outrank the plain count of runs still going.
+    // Runs you haven't seen outrank the plain count of runs still going.
     routines:
       unseen.length > 0
         ? {
             count: unseen.length,
-            tone: unseen.some((r) => r.status !== "needs_attention") ? "error" : "attention",
-            title: `Since you last looked:\n${unseen.map((r) => `${r.routine_name} · ${r.context_label}: ${STATUS_LABEL[r.status]}`).join("\n")}`,
+            tone: unseen.some((r) => isFailedRun(r.status))
+              ? "error"
+              : unseen.some((r) => r.status === "needs_attention")
+                ? "attention"
+                : "info",
+            title: `Not seen yet:\n${unseenRunLines(unseen)}`,
           }
         : {
             count: activeRuns.length,

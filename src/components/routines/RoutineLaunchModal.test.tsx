@@ -63,6 +63,7 @@ const run = (over: Partial<RoutineRun> = {}): RoutineRun => ({
   queued_at: new Date().toISOString(),
   started_at: new Date().toISOString(),
   ended_at: null,
+  seen_at: null,
   ...over,
 });
 

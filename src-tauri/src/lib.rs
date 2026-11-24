@@ -309,6 +309,8 @@ pub fn run() {
             commands::routines::routine_list_for_context,
             commands::routines::routine_launch,
             commands::routines::routine_run_list,
+            commands::routines::routine_run_unseen,
+            commands::routines::routine_run_mark_seen,
             commands::routines::routine_run_events,
             commands::routines::routine_run_stop,
             commands::routines::routine_run_relaunch,

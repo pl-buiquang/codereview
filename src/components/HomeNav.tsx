@@ -5,6 +5,7 @@ import { identicon } from "../lib/avatar";
 import { useBoardActionCount } from "../lib/boardCounts";
 import { useInboxCounts } from "../lib/inboxCounts";
 import { useWaitingSessions } from "../lib/sessionCounts";
+import { unseenRunLines, useUnseenRoutineRuns } from "../lib/routines";
 import { repoLabel, repoShortName } from "../lib/repoLabel";
 import { useUIStore, type HomeSection } from "../store";
 import { Icon, type IconName } from "./icons";
@@ -45,6 +46,7 @@ export function HomeNav({
   const onHome = activeTabId === "home";
   const inboxCounts = useInboxCounts();
   const waitingSessions = useWaitingSessions();
+  const { unseen: unseenRuns } = useUnseenRoutineRuns();
   const boardActions = useBoardActionCount();
   const plural = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`;
   const badges: Partial<Record<HomeSection, { count: number; title: string; attention?: boolean }>> = {
@@ -53,10 +55,16 @@ export function HomeNav({
       title: `${plural(inboxCounts.newItems, "new item")}, ${plural(inboxCounts.unreadConversations, "unread conversation")}`,
     },
     sessions: {
-      count: waitingSessions.length,
-      title: `Waiting for input:\n${waitingSessions
-        .map((s) => `${s.name ?? s.session_id.slice(0, 8)} (${s.waiting_for ?? "input needed"})`)
-        .join("\n")}`,
+      count: waitingSessions.length + unseenRuns.length,
+      title: [
+        waitingSessions.length > 0 &&
+          `Waiting for input:\n${waitingSessions
+            .map((s) => `${s.name ?? s.session_id.slice(0, 8)} (${s.waiting_for ?? "input needed"})`)
+            .join("\n")}`,
+        unseenRuns.length > 0 && `Routine runs not seen yet:\n${unseenRunLines(unseenRuns)}`,
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
       attention: true,
     },
     board: { count: boardActions, title: `${plural(boardActions, "card")} ${boardActions === 1 ? "needs" : "need"} your action` },
