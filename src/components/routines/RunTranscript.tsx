@@ -20,9 +20,11 @@ export function RunTranscript({ runId, active, harness }: { runId: number; activ
 
   if (events.isLoading) return <p className="muted">Loading transcript…</p>;
   if (items.length === 0) return <p className="muted faint">{active ? "Waiting for output…" : "No transcript."}</p>;
+  // The final result goes first so a finished run reads without scrolling past every step.
+  const ordered = [...items.filter((it) => it.kind === "result"), ...items.filter((it) => it.kind !== "result")];
   return (
     <div className="routine-transcript">
-      {items.map((item, i) => {
+      {ordered.map((item, i) => {
         if (item.kind === "text") return <Markdown key={i} source={item.text} />;
         if (item.kind === "tool")
           return (

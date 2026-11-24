@@ -6599,6 +6599,7 @@ button.board-overview-ref {
 .routine-result {
   border-left: 3px solid var(--accent);
   padding-left: 10px;
+  margin-bottom: 8px;
 }
 .routine-result.error {
   border-left-color: var(--danger);
