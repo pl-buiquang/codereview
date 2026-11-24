@@ -734,6 +734,124 @@ pub fn set_focus_plan_from(
         .ok_or_else(|| AppError::Other("focus vanished after write".into()))
 }
 
+#[derive(Debug, Deserialize)]
+pub struct Raise {
+    /// Replaces the summary line starting with the same `Label:` prefix, else is appended.
+    pub summary_line: Option<String>,
+    #[serde(default)]
+    pub hunks: Vec<RaiseHunk>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RaiseHunk {
+    pub id: String,
+    pub tier: String,
+}
+
+fn tier_rank(tier: &str) -> usize {
+    TIERS.iter().position(|t| *t == tier).unwrap_or(2)
+}
+
+/// `summary` with `line` replacing the line sharing its `Label:` prefix (or appended).
+fn with_summary_line(summary: Option<&str>, line: &str) -> String {
+    let line = line.trim();
+    let prefix = line.split_once(':').map(|(p, _)| format!("{}:", p.trim()));
+    let mut lines: Vec<&str> = summary.unwrap_or("").lines().collect();
+    match prefix
+        .as_deref()
+        .and_then(|p| lines.iter().position(|l| l.trim_start().starts_with(p)))
+    {
+        Some(i) => lines[i] = line,
+        None => {
+            while lines.last().is_some_and(|l| l.trim().is_empty()) {
+                lines.pop();
+            }
+            if !lines.is_empty() {
+                lines.push("");
+            }
+            lines.push(line);
+        }
+    }
+    lines.join("\n")
+}
+
+/// Raise hunk tiers on an existing, fresh focus without re-planning it: tiers only go up,
+/// and overrides, notes (and their comments), level and `planned_at` are left untouched.
+/// A hunk moved from a hidden tier (`trivial`/`skim`) to a visible one drops its reason.
+pub fn raise_focus_from(
+    conn: &Connection,
+    review_id: i64,
+    hunks: &[DiffHunk],
+    raise: Raise,
+) -> AppResult<FocusView> {
+    let view = get_focus_from(conn, review_id, hunks)?
+        .ok_or_else(|| AppError::Other(format!("review {review_id} has no focus")))?;
+    if view.focus.planned_at.is_none() {
+        return Err(AppError::Other(format!("review {review_id} has no planned focus")));
+    }
+    if view.stale {
+        return Err(AppError::Other(
+            "focus is stale (head or base moved): regenerate it instead of raising".into(),
+        ));
+    }
+    let current: HashMap<&str, &FocusEntry> =
+        view.hunks.iter().map(|e| (e.hunk_id.as_str(), e)).collect();
+    let mut unknown = Vec::new();
+    for r in &raise.hunks {
+        if !TIERS.contains(&r.tier.as_str()) {
+            return Err(AppError::Other(format!(
+                "hunk {}: invalid tier '{}' (expected one of {})",
+                r.id,
+                r.tier,
+                TIERS.join(", ")
+            )));
+        }
+        if !current.contains_key(r.id.as_str()) {
+            unknown.push(r.id.clone());
+        }
+    }
+    if !unknown.is_empty() {
+        return Err(AppError::Other(format!(
+            "unknown hunk ids (nothing written): {}",
+            unknown.join(", ")
+        )));
+    }
+
+    let by_id: HashMap<&str, &DiffHunk> = hunks.iter().map(|h| (h.hunk_id.as_str(), h)).collect();
+    let tx = conn.unchecked_transaction()?;
+    let fid = view.focus.id;
+    for r in &raise.hunks {
+        let entry = current[r.id.as_str()];
+        if tier_rank(&r.tier) <= tier_rank(&entry.tier) {
+            continue;
+        }
+        let visible = tier_rank(&r.tier) >= tier_rank("review");
+        let was_hidden = tier_rank(&entry.tier) < tier_rank("review");
+        let reason = if visible && was_hidden { None } else { entry.reason.clone() };
+        let h = by_id[r.id.as_str()];
+        tx.execute(
+            "INSERT INTO focus_hunk
+               (focus_id, hunk_id, file_path, old_start, new_start, tier, source, reason)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'ai', ?7)
+             ON CONFLICT(focus_id, hunk_id) DO UPDATE SET
+               tier = excluded.tier, source = 'ai', reason = excluded.reason",
+            params![fid, h.hunk_id, h.file_path, h.old_start, h.new_start, r.tier, reason],
+        )?;
+    }
+    if let Some(line) = raise.summary_line.as_deref().filter(|l| !l.trim().is_empty()) {
+        let summary = with_summary_line(view.focus.summary.as_deref(), line);
+        tx.execute("UPDATE focus SET summary = ?1 WHERE id = ?2", params![summary, fid])?;
+    }
+    tx.commit()?;
+    get_focus_from(conn, review_id, hunks)?
+        .ok_or_else(|| AppError::Other("focus vanished after write".into()))
+}
+
+pub fn raise_focus_impl(conn: &Connection, review_id: i64, raise: Raise) -> AppResult<FocusView> {
+    let hunks = current_hunks(conn, review_id)?;
+    raise_focus_from(conn, review_id, &hunks, raise)
+}
+
 pub fn set_focus_level_impl(conn: &Connection, review_id: i64, level: &str) -> AppResult<()> {
     validate_level(level)?;
     let fid = focus_id(conn, review_id)?;
@@ -1167,6 +1285,66 @@ mod tests {
         serde_json::from_str(json).unwrap()
     }
 
+    fn raise(json: &str) -> Raise {
+        serde_json::from_str(json).unwrap()
+    }
+
+    #[test]
+    fn raise_only_goes_up_and_keeps_notes_overrides_and_reasons() {
+        let conn = open_memory();
+        let rid = seed_review(&conn, "head1");
+        let hunks = parse_diff_hunks(DIFF);
+        let app = by_file(&hunks, "src/app.rs");
+        let (a, b) = (app[0].hunk_id.clone(), app[1].hunk_id.clone());
+        let gone = by_file(&hunks, "gone.txt")[0].hunk_id.clone();
+        let p = format!(
+            r#"{{"summary":"Does X.","hunks":[
+              {{"id":"{a}","tier":"critical","note":"check"}},
+              {{"id":"{b}","tier":"skim","reason":"glue"}},
+              {{"id":"{gone}","tier":"skim","reason":"cleanup"}}]}}"#
+        );
+        set_focus_plan_from(&conn, rid, &hunks, plan(&p), None).unwrap();
+        set_hunk_override_impl(&conn, rid, &b, Some("hide")).unwrap();
+        let notes_before = focus_comments_impl(&conn, rid).unwrap();
+
+        let r = format!(
+            r#"{{"summary_line":"Coverage: 40/100","hunks":[
+              {{"id":"{a}","tier":"review"}},
+              {{"id":"{b}","tier":"critical"}},
+              {{"id":"{gone}","tier":"trivial"}}]}}"#
+        );
+        let view = raise_focus_from(&conn, rid, &hunks, raise(&r)).unwrap();
+        let tier = |id: &str| view.hunks.iter().find(|h| h.hunk_id == id).unwrap();
+        assert_eq!(tier(&a).tier, "critical", "never lowered");
+        assert_eq!(tier(&b).tier, "critical");
+        assert!(tier(&b).reason.is_none(), "hidden → visible drops the reason");
+        assert_eq!(tier(&b).override_.as_deref(), Some("hide"), "override kept");
+        assert_eq!(tier(&gone).tier, "skim", "never lowered");
+        assert_eq!(tier(&gone).reason.as_deref(), Some("cleanup"));
+        assert_eq!(view.focus.summary.as_deref(), Some("Does X.\n\nCoverage: 40/100"));
+        let notes_after = focus_comments_impl(&conn, rid).unwrap();
+        assert_eq!(
+            notes_before.iter().map(|c| c.id).collect::<Vec<_>>(),
+            notes_after.iter().map(|c| c.id).collect::<Vec<_>>(),
+            "note comments untouched"
+        );
+
+        let view = raise_focus_from(&conn, rid, &hunks, raise(r#"{"summary_line":"Coverage: 85/100"}"#))
+            .unwrap();
+        assert_eq!(view.focus.summary.as_deref(), Some("Does X.\n\nCoverage: 85/100"), "line replaced");
+
+        assert!(raise_focus_from(&conn, rid, &hunks, raise(r#"{"hunks":[{"id":"nope","tier":"review"}]}"#)).is_err());
+        assert!(raise_focus_from(&conn, rid, &hunks, raise(&format!(r#"{{"hunks":[{{"id":"{a}","tier":"loud"}}]}}"#))).is_err());
+    }
+
+    #[test]
+    fn raise_needs_a_planned_focus() {
+        let conn = open_memory();
+        let rid = seed_review(&conn, "head1");
+        let hunks = parse_diff_hunks(DIFF);
+        assert!(raise_focus_from(&conn, rid, &hunks, raise("{}")).is_err());
+    }
+
     #[test]
     fn set_plan_validates_and_fills_defaults() {
         let conn = open_memory();
@@ -1229,6 +1407,11 @@ mod tests {
         let fresh = view.hunks.last().unwrap();
         assert!(fresh.is_new);
         assert_eq!(fresh.tier, "review");
+
+        assert!(
+            raise_focus_from(&conn, rid, &hunks, raise(r#"{"hunks":[]}"#)).is_err(),
+            "a stale focus is regenerated, not raised"
+        );
 
         set_hunk_override_impl(&conn, rid, &first, None).unwrap();
         let view = get_focus_from(&conn, rid, &hunks).unwrap().unwrap();

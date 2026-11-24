@@ -299,6 +299,15 @@ enum FocusAction {
         #[arg(long)]
         level: Option<String>,
     },
+    /// Raise hunk tiers on the existing (fresh) focus without re-planning: tiers only go up;
+    /// overrides, notes and level are kept. Fails on a stale focus.
+    Raise {
+        review_id: i64,
+        /// JSON file ({"summary_line": "Coverage: …", "hunks": [{"id","tier"}]}); "-" for stdin.
+        /// `summary_line` replaces the summary line with the same `Label:` prefix, else is appended.
+        #[arg(long)]
+        file: String,
+    },
     /// Show the review's focus
     Show { review_id: i64 },
     /// Delete the review's focus
@@ -755,6 +764,7 @@ fn run_remote(remote: &RemoteRun, name: &str, cmd: Cmd, json: bool) -> AppResult
             FocusAction::Show { review_id } => show(&remote.focus(review_id)?),
             FocusAction::Hunks { .. } => Err(remote::unsupported("focus hunks")),
             FocusAction::Hunk { .. } => Err(remote::unsupported("focus hunk")),
+            FocusAction::Raise { .. } => Err(remote::unsupported("focus raise")),
         },
         _ => Err(remote::unsupported(name)),
     }
@@ -1621,6 +1631,21 @@ fn run_focus(action: FocusAction, json: bool, db: &Db) -> AppResult<()> {
                     view.hunks.len(),
                     view.focus.level
                 );
+                print_tier_counts(&view.hunks);
+            }
+        }
+        FocusAction::Raise { review_id, file } => {
+            let raw = if file == "-" {
+                std::io::read_to_string(std::io::stdin())?
+            } else {
+                std::fs::read_to_string(&file)?
+            };
+            let raise: focus::Raise = serde_json::from_str(&raw)?;
+            let view = focus::raise_focus_impl(&conn, review_id, raise)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&view)?);
+            } else {
+                println!("Focus raised on review #{review_id}: {} hunks", view.hunks.len());
                 print_tier_counts(&view.hunks);
             }
         }
