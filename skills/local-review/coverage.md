@@ -22,7 +22,7 @@ cr focus hunk RID <hunk_id>              # full text, for every hunk without a r
 ```
 
 **Tiers.** If `cr focus show` returns a focus with `stale: false` and `planned_at` set, use its `tier`
-per hunk. Otherwise (the Explain agent is generating the focus in parallel) tier each hunk yourself with
+per hunk. Otherwise (the Focus agent is generating the focus in parallel, or the PR is small and has none) tier each hunk yourself with
 the rubric in `<skill dir>/focus.md` §2. Rule-tiered hunks (lockfiles, generated, renames) are `trivial`.
 
 **Change kind.** `refactor` when any of: the PR title or most commit headers have type `refactor`
@@ -88,7 +88,9 @@ Each red flag is a `refactor-risk` (or `test-changed` for the first two) finding
 
 ## 4. Optional measured run (unit tests only)
 
-Only when **all** hold: dependencies are already installed in `WT` (`node_modules/`, `.venv/`,
+The brief says `Coverage mode: static` or `Coverage mode: measured`. In **static** mode (depth `normal`),
+skip this section: record `measured: {"skipped": "static mode"}` and score from §2 only. In **measured**
+mode (depth `advanced`, or an explicit `--coverage`), attempt the run only when **all** hold: dependencies are already installed in `WT` (`node_modules/`, `.venv/`,
 `vendor/bundle`, or a `uv`-managed project where `uv run` syncs itself), a command below fits the repo, and
 it finishes in under 10 minutes. **Never install anything, never run e2e, never run the full suite of a
 big monorepo.** Limit the run to tests related to the changed files.

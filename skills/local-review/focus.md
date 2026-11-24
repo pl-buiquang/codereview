@@ -41,6 +41,19 @@ For very large diffs (hundreds of hunks), tier whole files from the listing
 and previews first, then fetch full text only for hunks that may be `critical`
 or `review`.
 
+### Existing findings
+
+Earlier AI review runs may have left finding comments on this review. They must not end up hidden:
+
+```bash
+cr show RID --json
+```
+
+Take the root comments whose `tag` is `ai:review`, `ai:codex` or `ai:coverage` and whose body starts with
+a severity prefix `**[<severity> · `. Map each one to the hunk that holds its `file_path`/`line` (see the
+hunk's `header`). That hunk's tier is **at least**: `critical` for `critical`/`high`, `review` for
+`medium`. `low` sets no floor. A floored hunk gets no `reason`.
+
 ## Step 2: Tier rubric
 
 - `critical`: security/auth, data loss or migrations, concurrency, public
@@ -52,6 +65,8 @@ or `review`.
   bumps, generated output, fixtures, lockfiles.
 
 **When in doubt, tier up.** Hiding something important is far worse than showing noise.
+
+Apply the floor from "Existing findings" after the rubric: never tier a hunk below it.
 
 ## Step 3: Write the plan
 
@@ -70,7 +85,8 @@ or `review`.
   hunks by reason, so **reuse the exact same wording** for the same kind of noise
   (e.g. always `mechanical rename`, `import reordering`, `test fixture update`).
   Keep it short and lowercase, without hunk-specific details.
-- `note`: only on visible tiers (`critical`/`review`), and only when it says something concrete to
+- `note`: skip entirely when the caller said "Notes: none" (an AI review run wants tiers only; the
+  explain helper is separate). Otherwise only on visible tiers (`critical`/`review`), and only when it says something concrete to
   check ("`timeout` is now seconds, callers pass ms"). Skip generic praise or restating the diff. Most hunks need no note.
   `cr focus set` turns each one into an `ai:explain`-tagged draft comment on that hunk — you never call
   `cr comment add` yourself for this.
