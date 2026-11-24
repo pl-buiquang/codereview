@@ -4,7 +4,7 @@ Everything AI in CodeReview runs through a harness, the [`claude` CLI](https://d
 
 - **Auth** is whatever your `claude` install already uses (Claude subscription, API key, Bedrock, ...). The app does not pass `--bare` or an empty `--setting-sources`, so Claude reads its own auth and settings from `~/.claude/`. It does pass `--strict-mcp-config` (no MCP servers) and an explicit `--permission-mode acceptEdits`, so your own default permission mode never leaks in.
 - If `claude` is not on `PATH`, the AI actions are disabled (Settings → General → Environment shows what was found).
-- AI-written content is **local only**: focus tiers, the focus summary and comments tagged `ai`, `ai:explain`, `ai:review` or `ai:codex` are never published to GitHub (see [AI notes and tags](#ai-notes-and-tags)).
+- AI-written content is **local only**: focus tiers, the focus summary and comments tagged `ai`, `ai:explain`, `ai:review`, `ai:codex` or `ai:coverage` are never published to GitHub (see [AI notes and tags](#ai-notes-and-tags)).
 
 ## Focus review
 
@@ -44,7 +44,7 @@ The **Focus** digest above the diff lists what is hidden at the current level, g
 
 ### AI notes and tags
 
-The AI can attach a short note to a hunk. Notes are ordinary **draft comments tagged `ai:explain`**. Each comment's tag menu offers `None`, `AI`, `Explain`, `Review`, `Codex` and `Local`. Tagged comments show a pill and are skipped when publishing. To keep a note as your own comment, set its tag to **None**; it is then published with the review like any other comment.
+The AI can attach a short note to a hunk. Notes are ordinary **draft comments tagged `ai:explain`**. Each comment's tag menu offers `None`, `AI`, `Explain`, `Review`, `Codex`, `Coverage` and `Local`. Tagged comments show a pill and are skipped when publishing. To keep a note as your own comment, set its tag to **None**; it is then published with the review like any other comment.
 
 ## The `/local-review` skill
 
@@ -66,11 +66,13 @@ It also needs `cr` on `PATH` (see [cli.md](cli.md#installing-cr)). Usage:
 | `--focus [--level focus\|thorough\|critical]` | Tier every hunk ([`focus.md`](../../skills/local-review/focus.md)) |
 | `--critique` | Standards and Spec sub-agents ([`critique.md`](../../skills/local-review/critique.md)), with a code-smell baseline |
 | `--codex[=adversarial\|native] ["focus text"]` | The Codex plugin's review of the PR checkout, via `cr worktree` ([`codex.md`](../../skills/local-review/codex.md)) |
+| `--coverage` | How well unit and e2e tests cover the change ([`coverage.md`](../../skills/local-review/coverage.md)): a 0–100 score with unit/e2e sub-scores, focus areas, an `ai:coverage` comment per gap on `review`/`critical` hunks, and raised tiers on refactor red flags. Reuses a fresh focus (`cr focus raise`) or implies `--focus` |
 | `--plain` | One explanatory comment per change ([`explain.md`](../../skills/local-review/explain.md)) |
 | `--with-replies` | Also draft replies to existing GitHub review threads ([`reply.md`](../../skills/local-review/reply.md)) |
 
-- **No layer flag means auto mode**, chosen by effective size: small (< 150 lines and <= 5 files) is plain; medium is `--focus`; large (> 600 lines or > 20 files) is `--focus`, plus `--codex` if the PR is yours and `--critique` if it closes an issue.
-- Comments are tagged `ai:explain` / `ai:review` / `ai:codex`; the verdict is always `comment`.
+- **No layer flag means auto mode**, chosen by effective size: small (< 150 lines and <= 5 files) is plain; medium is `--focus`; large (> 600 lines or > 20 files) is `--focus`, plus `--codex` if the PR is yours and `--critique` if it closes an issue. Medium and large refactors (title type `refactor`, a `refactor` label, or mostly `refactor` commits) also get `--coverage`.
+- Comments are tagged `ai:explain` / `ai:review` / `ai:codex` / `ai:coverage`; the verdict is always `comment`.
+- The coverage score is stored as a `Coverage: …` line at the end of the focus summary (shown in the digest card). A rerun replaces that line.
 - The app embeds its own copy of `focus.md` at build time; it is the default of the editable "Focus mode" prompt.
 - `reply` mode drafts local replies to GitHub threads. Publish them with "Publish N draft replies" in the app or `cr comment publish-replies`.
 
@@ -83,13 +85,14 @@ The review actions menu can launch the same skill headlessly in the background, 
 | AI review: explain changes | `/local-review <id>` |
 | AI review: critique (Standards + Spec) | `/local-review <id> --critique` |
 | AI review: Codex adversarial | `/local-review <id> --codex` (needs a local clone) |
+| AI review: test coverage | `/local-review <id> --coverage` (needs a local clone). Its allow-list adds test runners (`ubt`, `uv run`, `npx jest`/`vitest`, `pnpm exec`, `cargo llvm-cov`, `bundle exec rspec`) for the optional measured run, which never installs dependencies |
 
 Behavior ([`ai_review.rs`](../../src-tauri/src/commands/ai_review.rs)):
 
 - Needs `claude` and the skill installed at `~/.claude/skills/local-review`.
 - Disabled on published reviews and while another AI review runs on the same review.
 - Uses the Settings → AI chat model. Runs in the repo checkout (a temp dir without a clone) with a restricted tool allow-list (`Read`, `Grep`, `Bash(cr:*)`, `Bash(git:*)`, `Bash(gh pr view:*)`, ...). `CODEREVIEW_DB` is set so its `cr` calls hit the same database as the app.
-- The header shows a spinner while it runs; results appear as tagged comments. There is no in-app `--focus` layer here: use **Generate focus**.
+- The header shows a spinner while it runs; results appear as tagged comments. There is no in-app `--focus` layer here: use **Generate focus** (the coverage run generates one itself when none is fresh).
 
 ## Chat panel
 
@@ -139,6 +142,7 @@ Every run the app spawns through a harness is recorded in the local `ai_run` tab
 cr focus hunks 12 --json           # hunk ids, files, +/- counts, rule tier, preview
 cr focus hunk 12 <hunk-id>         # one hunk's full text
 cr focus set 12 --file plan.json   # write a plan ("-" = stdin); manual overrides are kept
+cr focus raise 12 --file raises.json  # only raise tiers + set a `Label:` summary line; notes/overrides kept
 cr focus show 12                   # status, level, model, stale flag, summary, tier counts, notes
 cr focus clear 12
 ```

@@ -56,7 +56,7 @@ cr export 12 --format json -o review.json
 
 ## Comments
 
-`cr comment <action>`. Tagged comments are never published; `--tag` takes `ai`, `ai:explain`, `ai:review`, `ai:codex`, `local` or `none`, and **defaults to `local`**, so CLI comments stay off GitHub until you untag them (`cr comment tag <id> --tag none`) or edit them in the app.
+`cr comment <action>`. Tagged comments are never published; `--tag` takes `ai`, `ai:explain`, `ai:review`, `ai:codex`, `ai:coverage`, `local` or `none`, and **defaults to `local`**, so CLI comments stay off GitHub until you untag them (`cr comment tag <id> --tag none`) or edit them in the app.
 
 | Command | Description |
 |---|---|
@@ -128,6 +128,7 @@ See [`skills/board/SKILL.md`](../../skills/board/SKILL.md) for the agent workflo
 | `cr focus hunks <id>` | The review's hunks: id, file, header, +/- counts, rule tier, preview |
 | `cr focus hunk <id> <hunk-id>` | One hunk's full text |
 | `cr focus set <id> --file <plan.json\|-> [--level off\|thorough\|focus\|critical]` | Write a focus plan, replacing the previous one (manual overrides are kept) |
+| `cr focus raise <id> --file <raises.json\|->` | Raise tiers on a fresh focus without re-planning (`{"summary_line", "hunks": [{"id","tier"}]}`): tiers only go up, notes/overrides/level are kept, `summary_line` replaces the summary line with the same `Label:` prefix. Fails on a stale focus; not available in remote runs |
 | `cr focus show <id>` | Status, level, model, stale marker, summary, tier counts, AI notes |
 | `cr focus clear <id>` | Delete the focus |
 
