@@ -200,7 +200,9 @@ beforeEach(() => {
 
 describe("ReviewView focus overlay", () => {
   it("collapses a trivial hunk into a bar inside its file, hides a fully-trivial file entirely", async () => {
+    const user = userEvent.setup();
     renderReview();
+    await user.click(await screen.findByTitle("Show the focus digest"));
     expect(await screen.findByText("Bumps b.")).toBeInTheDocument();
     expect(screen.getByText("critical")).toBeInTheDocument();
     // The in-file hunk stays inside src/a.ts, collapsed.
@@ -236,9 +238,24 @@ describe("ReviewView focus overlay", () => {
     expect(handlers.setHunkOverride).toHaveBeenCalledWith(7, "a2", "show");
   });
 
+  it("folds the digest by default; the header toggles it, its actions don't", async () => {
+    const user = userEvent.setup();
+    renderReview();
+    const toggle = await screen.findByTitle("Show the focus digest");
+    expect(screen.queryByText("Bumps b.")).not.toBeInTheDocument();
+    const head = toggle.closest(".focus-digest-head") as HTMLElement;
+    await user.click(head);
+    expect(await screen.findByText("Bumps b.")).toBeInTheDocument();
+    await user.click(within(head).getByRole("button", { name: "Copy into summary" }));
+    expect(screen.getByText("Bumps b.")).toBeInTheDocument();
+    await user.click(screen.getByTitle("Hide the focus digest"));
+    expect(screen.queryByText("Bumps b.")).not.toBeInTheDocument();
+  });
+
   it("reveals a fully-hidden file from the digest", async () => {
     const user = userEvent.setup();
     renderReview();
+    await user.click(await screen.findByTitle("Show the focus digest"));
     const group = (await screen.findByText("lockfile")).closest("li") as HTMLElement;
     await user.click(within(group).getByRole("button", { name: "show" }));
     await waitFor(() => expect(screen.getByText("lockline_new")).toBeInTheDocument());

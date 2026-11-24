@@ -15,6 +15,7 @@ import type { FocusLevel, FocusOverride, FocusView } from "../lib/types";
 import { useAiDisabledReason } from "../lib/settings";
 import { Markdown } from "./Markdown";
 import { MODEL_OPTIONS } from "./ChatPanel";
+import { Icon } from "./icons";
 
 export type GenerateFocus = UseMutationResult<void, Error, { model?: string }>;
 
@@ -217,7 +218,7 @@ export function FocusDigest({
   onRegenerate?: () => void;
 }) {
   const aiOff = useAiDisabledReason();
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(true);
   const { focus } = view;
   const planned = focus.planned_at != null;
   const groups = model ? digestGroups(model) : [];
@@ -225,13 +226,15 @@ export function FocusDigest({
   const allHidden = model != null && model.length > 0 && model.every((f) => f.fullyHidden);
 
   return (
-    <div className="focus-digest">
-      <div className="focus-digest-head">
+    <div className={`focus-digest${collapsed ? "" : " open"}`}>
+      <div className="focus-digest-head" onClick={() => setCollapsed((c) => !c)}>
+        {/* No onClick: the click bubbles to the header, which toggles. */}
         <button
           className="focus-digest-toggle"
-          onClick={() => setCollapsed((c) => !c)}
+          aria-expanded={!collapsed}
           title={collapsed ? "Show the focus digest" : "Hide the focus digest"}
         >
+          <Icon name="chev" size={12} className="focus-digest-chev" />
           <span className="ai-pill">AI</span>
           <span className="focus-digest-title">Focus</span>
           {planned && model && (
@@ -252,7 +255,7 @@ export function FocusDigest({
           </span>
         )}
         {view.stale && (
-          <span className="focus-stale">
+          <span className="focus-stale" onClick={(e) => e.stopPropagation()}>
             Focus generated at <code>{shortSha(focus.head_sha)}</code>; the review is now on{" "}
             <code>{shortSha(headSha)}</code>
             {onRegenerate && (
@@ -267,7 +270,7 @@ export function FocusDigest({
             )}
           </span>
         )}
-        <span className="focus-digest-actions">
+        <span className="focus-digest-actions" onClick={(e) => e.stopPropagation()}>
           {planned && model && (
             <button
               className="btn btn-sm btn-ghost"
