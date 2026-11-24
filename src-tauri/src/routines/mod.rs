@@ -319,6 +319,7 @@ const fn ai_review(
     name: &'static str,
     description: &'static str,
     prompt_template: &'static str,
+    allowed_tools: &'static [&'static str],
 ) -> Defaults {
     Defaults {
         key,
@@ -331,7 +332,7 @@ const fn ai_review(
         needs_worktree: false,
         // Explicit so the user's own settings (e.g. `defaultMode: plan`) never leak in.
         permission_mode: "acceptEdits",
-        allowed_tools: crate::commands::ai_review::TOOLS,
+        allowed_tools,
         extra_args: &[],
         timeout_min: 90,
         handler: Some("ai_review"),
@@ -446,9 +447,10 @@ pub const DEFAULTS: &[Defaults] = &[
         timeout_min: 30,
         handler: Some("image_diff_report"),
     },
-    ai_review("ai_review_explain", "AI review: explain", "Headless `/local-review`: one explanatory comment per change.", "/local-review {{review_id}}"),
-    ai_review("ai_review_critique", "AI review: critique", "Headless `/local-review --critique` (Standards + Spec sub-agents).", "/local-review {{review_id}} --critique"),
-    ai_review("ai_review_codex", "AI review: codex", "Headless `/local-review --codex` (Codex adversarial review).", "/local-review {{review_id}} --codex"),
+    ai_review("ai_review_explain", "AI review: explain", "Headless `/local-review`: one explanatory comment per change.", "/local-review {{review_id}}", crate::commands::ai_review::TOOLS),
+    ai_review("ai_review_critique", "AI review: critique", "Headless `/local-review --critique` (Standards + Spec sub-agents).", "/local-review {{review_id}} --critique", crate::commands::ai_review::TOOLS),
+    ai_review("ai_review_codex", "AI review: codex", "Headless `/local-review --codex` (Codex adversarial review).", "/local-review {{review_id}} --codex", crate::commands::ai_review::TOOLS),
+    ai_review("ai_review_coverage", "AI review: test coverage", "Headless `/local-review --coverage`: scores unit/e2e coverage of the change, comments the gaps and raises focus tiers.", "/local-review {{review_id}} --coverage", crate::commands::ai_review::COVERAGE_TOOLS),
 ];
 
 impl Defaults {

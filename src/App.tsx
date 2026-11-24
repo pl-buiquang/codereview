@@ -95,6 +95,7 @@ function App() {
       queryClient.invalidateQueries({ queryKey: ["ai-review-status", payload.review_id] });
       if (payload.status === "running") return;
       queryClient.invalidateQueries({ queryKey: ["review", payload.review_id] });
+      queryClient.invalidateQueries({ queryKey: ["focus", payload.review_id] });
       queryClient.invalidateQueries({ queryKey: ["reviews"] });
       if (payload.status === "failed") {
         toast.error(`AI review (${payload.layer}) failed:\n${payload.error ?? "unknown error"}`);

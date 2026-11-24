@@ -1318,6 +1318,7 @@ function ReviewHeader({
     { layer: "explain", label: "AI review: explain changes", hint: "Add an explanatory comment per change" },
     { layer: "critique", label: "AI review: critique (Standards + Spec)", hint: "Check coding standards and the originating spec" },
     { layer: "codex", label: "AI review: Codex adversarial", hint: "Challenge the approach with the Codex reviewer", needsClone: true },
+    { layer: "coverage", label: "AI review: test coverage", hint: "Score unit/e2e coverage of the change, comment the gaps and raise untested hunks", needsClone: true },
   ];
 
   const deleteReview = useMutation({

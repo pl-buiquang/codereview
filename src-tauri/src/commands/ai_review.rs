@@ -31,9 +31,39 @@ pub(crate) const TOOLS: &[&str] = &[
     "Bash(gh api:*)",
 ];
 
+/// `TOOLS` plus the test runners the coverage layer's optional measured run may call. It never
+/// installs dependencies, so package managers only get their run/exec forms.
+pub(crate) const COVERAGE_TOOLS: &[&str] = &[
+    "Agent",
+    "Skill",
+    "Read",
+    "Glob",
+    "Grep",
+    "Write",
+    "Edit",
+    "Bash(cr:*)",
+    "Bash(git:*)",
+    "Bash(jq:*)",
+    "Bash(node:*)",
+    "Bash(ls:*)",
+    "Bash(mkdir:*)",
+    "Bash(test:*)",
+    "Bash(gh pr view:*)",
+    "Bash(gh pr diff:*)",
+    "Bash(gh issue view:*)",
+    "Bash(gh api:*)",
+    "Bash(ubt:*)",
+    "Bash(uv run:*)",
+    "Bash(npx jest:*)",
+    "Bash(npx vitest:*)",
+    "Bash(pnpm exec:*)",
+    "Bash(cargo llvm-cov:*)",
+    "Bash(bundle exec rspec:*)",
+];
+
 fn routine_key(layer: &str) -> AppResult<String> {
     match layer {
-        "explain" | "critique" | "codex" => Ok(format!("ai_review_{layer}")),
+        "explain" | "critique" | "codex" | "coverage" => Ok(format!("ai_review_{layer}")),
         other => Err(AppError::Other(format!("unknown AI review layer `{other}`"))),
     }
 }
@@ -66,6 +96,12 @@ mod tests {
     #[test]
     fn layer_maps_to_routine_key() {
         assert_eq!(routine_key("critique").unwrap(), "ai_review_critique");
+        assert_eq!(routine_key("coverage").unwrap(), "ai_review_coverage");
         assert!(routine_key("nope").is_err());
+    }
+
+    #[test]
+    fn coverage_tools_extend_the_review_tools() {
+        assert_eq!(&COVERAGE_TOOLS[..TOOLS.len()], TOOLS);
     }
 }
