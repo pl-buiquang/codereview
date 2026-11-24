@@ -631,9 +631,17 @@ query PrMeta($owner: String!, $name: String!, $number: Int!) {
           }
         }
       }
+      timelineItems(last: 5, itemTypes: [ISSUE_COMMENT, PULL_REQUEST_REVIEW]) {
+        nodes {
+          __typename
+          ... on IssueComment { createdAt author { login avatarUrl } }
+          ... on PullRequestReview { state submittedAt createdAt author { login avatarUrl } }
+        }
+      }
       commits(last: 1) {
         nodes {
           commit {
+            committedDate
             statusCheckRollup {
               state
               contexts(first: 100) {
@@ -684,6 +692,19 @@ pub struct PrMeta {
     pub checks: Vec<PrCheck>,
     /// The base branch, when it isn't the repo's default (a stacked PR). Live fetch only.
     pub base: Option<PrBase>,
+    /// When the PR was opened.
+    pub created_at: Option<String>,
+    /// `committedDate` of the head commit (moves on rebase). Live fetch only.
+    pub last_commit_at: Option<String>,
+    /// Latest conversation comment or submitted review. Live fetch only.
+    pub last_comment: Option<PrActivity>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrActivity {
+    pub at: String,
+    pub author: Option<PrActor>,
 }
 
 #[derive(Debug, Serialize)]
@@ -808,6 +829,30 @@ struct PrMetaPr {
     base_ref_oid: Option<String>,
     #[serde(default)]
     base_ref: Option<BaseRefNode>,
+    #[serde(default)]
+    created_at: Option<String>,
+    #[serde(default)]
+    timeline_items: TimelineConn,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct TimelineConn {
+    #[serde(default)]
+    nodes: Vec<TimelineNode>,
+}
+
+/// An `IssueComment` or `PullRequestReview` from `timelineItems`.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TimelineNode {
+    #[serde(default)]
+    state: Option<String>,
+    #[serde(default)]
+    submitted_at: Option<String>,
+    #[serde(default)]
+    created_at: Option<String>,
+    #[serde(default)]
+    author: Option<PrActor>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -889,6 +934,8 @@ struct CommitMetaNode {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CommitMetaInner {
+    #[serde(default)]
+    committed_date: Option<String>,
     #[serde(default)]
     status_check_rollup: Option<RollupNode>,
 }
@@ -993,12 +1040,20 @@ fn map_pr_meta(pr: PrMetaPr, default_branch: Option<&str>) -> PrMeta {
             Some(PrReviewRequest { login, avatar_url: r.avatar_url, is_team })
         })
         .collect();
-    let rollup = pr
-        .commits
+    // A pending (unsubmitted) review isn't activity yet.
+    let last_comment = pr
+        .timeline_items
         .nodes
         .into_iter()
-        .next()
-        .and_then(|c| c.commit.status_check_rollup);
+        .rev()
+        .filter(|n| n.state.as_deref() != Some("PENDING"))
+        .find_map(|n| {
+            let at = n.submitted_at.or(n.created_at)?;
+            Some(PrActivity { at, author: n.author })
+        });
+    let last_commit = pr.commits.nodes.into_iter().next().map(|c| c.commit);
+    let last_commit_at = last_commit.as_ref().and_then(|c| c.committed_date.clone());
+    let rollup = last_commit.and_then(|c| c.status_check_rollup);
     let ci_state = rollup.as_ref().and_then(|r| r.state.clone());
     let checks = rollup
         .map(|r| {
@@ -1049,6 +1104,9 @@ fn map_pr_meta(pr: PrMetaPr, default_branch: Option<&str>) -> PrMeta {
         ci_state,
         checks,
         base,
+        created_at: pr.created_at,
+        last_commit_at,
+        last_comment,
     }
 }
 
@@ -2540,6 +2598,32 @@ mod tests {
         assert_eq!(base.ref_name, "feat/parent");
         assert_eq!(base.oid.as_deref(), Some("abcdef1234567890"));
         assert_eq!(base.pr.map(|p| p.number), Some(41));
+    }
+
+    #[test]
+    fn pr_meta_reads_dates_and_skips_pending_reviews() {
+        let json = r#"{
+          "repository": {
+            "pullRequest": {
+              "number": 1, "title": "t", "url": "u", "state": "OPEN",
+              "additions": 0, "deletions": 0, "changedFiles": 0,
+              "createdAt": "2026-01-01T00:00:00Z",
+              "timelineItems": { "nodes": [
+                { "__typename": "IssueComment", "createdAt": "2026-01-02T00:00:00Z", "author": { "login": "a" } },
+                { "__typename": "PullRequestReview", "state": "COMMENTED", "submittedAt": "2026-01-03T00:00:00Z", "createdAt": "2026-01-02T12:00:00Z", "author": { "login": "b" } },
+                { "__typename": "PullRequestReview", "state": "PENDING", "submittedAt": null, "createdAt": "2026-01-04T00:00:00Z", "author": { "login": "me" } }
+              ] },
+              "commits": { "nodes": [ { "commit": { "committedDate": "2026-01-05T00:00:00Z", "statusCheckRollup": null } } ] }
+            }
+          }
+        }"#;
+        let data: PrMetaData = serde_json::from_str(json).expect("parses");
+        let meta = map_pr_meta(data.repository.unwrap().pull_request.unwrap(), None);
+        assert_eq!(meta.created_at.as_deref(), Some("2026-01-01T00:00:00Z"));
+        assert_eq!(meta.last_commit_at.as_deref(), Some("2026-01-05T00:00:00Z"));
+        let c = meta.last_comment.unwrap();
+        assert_eq!(c.at, "2026-01-03T00:00:00Z");
+        assert_eq!(c.author.and_then(|a| a.login).as_deref(), Some("b"));
     }
 
     #[test]

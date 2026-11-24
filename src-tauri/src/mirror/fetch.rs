@@ -33,7 +33,7 @@ macro_rules! pr_core {
     () => {
         r#"
 fragment PrCore on PullRequest {
-  id number title url bodyText state isDraft merged updatedAt closedAt
+  id number title url bodyText state isDraft merged createdAt updatedAt closedAt
   baseRefName headRefName headRefOid
   author { __typename login avatarUrl }
   repository { nameWithOwner }
@@ -191,6 +191,9 @@ pub struct Node {
     pub is_draft: bool,
     #[serde(default)]
     pub merged: bool,
+    /// PRs only (`IssueCore` doesn't select it).
+    #[serde(default)]
+    pub created_at: Option<String>,
     pub updated_at: String,
     #[serde(default)]
     pub closed_at: Option<String>,

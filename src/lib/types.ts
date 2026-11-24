@@ -382,6 +382,12 @@ export interface PrMeta {
   checks: PrCheck[];
   /** Set only when the base isn't the repo's default branch (stacked PR); live fetch only. */
   base: PrBase | null;
+  /** When the PR was opened; null until the mirror row is re-synced. */
+  createdAt: string | null;
+  /** Head commit's `committedDate` (moves on rebase); live fetch only. */
+  lastCommitAt: string | null;
+  /** Latest conversation comment or submitted review; live fetch only. */
+  lastComment: { at: string; author: PrActor | null } | null;
 }
 
 export interface PrBase {

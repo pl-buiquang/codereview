@@ -126,10 +126,11 @@ pub fn upsert_node(conn: &Connection, node: &Node, ts: &str) -> AppResult<()> {
         "INSERT INTO gh_pr (node_id, repo_id, number, title, url, author_login, state, is_draft,
             body_snippet, base_ref, head_ref, head_sha, review_decision, review_count,
             additions, deletions, changed_files, latest_comment, latest_actor,
-            gh_updated_at, closed_at, fetched_at, closing_issue_ids)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23)
+            gh_updated_at, closed_at, fetched_at, closing_issue_ids, created_at)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24)
          ON CONFLICT(node_id) DO UPDATE SET
             closing_issue_ids = COALESCE(excluded.closing_issue_ids, gh_pr.closing_issue_ids),
+            created_at = COALESCE(excluded.created_at, gh_pr.created_at),
             repo_id = excluded.repo_id, number = excluded.number, title = excluded.title,
             url = excluded.url, author_login = excluded.author_login, state = excluded.state,
             is_draft = excluded.is_draft, body_snippet = excluded.body_snippet,
@@ -163,6 +164,7 @@ pub fn upsert_node(conn: &Connection, node: &Node, ts: &str) -> AppResult<()> {
             node.closed_at,
             ts,
             closing_ids,
+            node.created_at,
         ],
     )?;
     let auto_merge_by = node
@@ -291,7 +293,7 @@ pub fn read_pr_meta(conn: &Connection, owner: &str, name: &str, number: i64) -> 
                 s.mergeable, s.merge_state_status, s.viewer_can_update_branch, p.review_decision,
                 s.auto_merge_method, s.auto_merge_by, p.additions, p.deletions, p.changed_files,
                 p.author_login, u.avatar_url, s.labels_json, s.latest_reviews_json, s.ci_state,
-                s.checks_json
+                s.checks_json, p.created_at
          FROM gh_pr p
          LEFT JOIN gh_pr_status s ON s.pr_id = p.node_id
          LEFT JOIN gh_user u ON u.login = p.author_login
@@ -328,6 +330,9 @@ pub fn read_pr_meta(conn: &Connection, owner: &str, name: &str, number: i64) -> 
                 ci_state: r.get(20)?,
                 checks: parse_json(r.get(21)?),
                 base: None,
+                created_at: r.get(22)?,
+                last_commit_at: None,
+                last_comment: None,
             })
         },
     )

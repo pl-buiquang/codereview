@@ -6,6 +6,7 @@ import { autoSyncRefetch } from "../lib/sync";
 import { useUIStore } from "../store";
 import { Icon } from "./icons";
 import { Markdown } from "./Markdown";
+import { timeAgo } from "../lib/timeAgo";
 import { toast } from "../lib/toast";
 import { useDebouncedCallback } from "../lib/useDebouncedCallback";
 import type { PrActor, PrBase, PrCheck, PrLabel, PrMeta, PrReviewRequest } from "../lib/types";
@@ -74,6 +75,12 @@ export function PrMetaPanel({
         <div className="pr-meta-val">
           <Person login={meta.author?.login ?? "unknown"} avatarUrl={meta.author?.avatarUrl ?? null} />
         </div>
+        {(meta.createdAt || meta.lastCommitAt || meta.lastComment) && (
+          <>
+            <span className="pr-meta-key">Activity</span>
+            <ActivityField meta={meta} />
+          </>
+        )}
         <span className="pr-meta-key">Reviewers</span>
         <ReviewersField pr={pr} meta={meta} />
         <span className="pr-meta-key">Labels</span>
@@ -101,6 +108,35 @@ export function PrMetaPanel({
       {meta.checks.length > 0 && <ChecksList checks={meta.checks} />}
 
       {meta.body.trim() && <Description body={meta.body} imageUrls={meta.bodyImages} />}
+    </div>
+  );
+}
+
+function When({ label, at, by }: { label: string; at: string; by?: string | null }) {
+  return (
+    <span className="pr-meta-when" title={new Date(at).toLocaleString()}>
+      {label} {timeAgo(at)}
+      {by && <span className="muted"> by {by}</span>}
+    </span>
+  );
+}
+
+function ActivityField({ meta }: { meta: PrMeta }) {
+  const parts = [
+    meta.createdAt && <When key="o" label="opened" at={meta.createdAt} />,
+    meta.lastCommitAt && <When key="c" label="last commit" at={meta.lastCommitAt} />,
+    meta.lastComment && (
+      <When
+        key="m"
+        label="last comment"
+        at={meta.lastComment.at}
+        by={meta.lastComment.author?.login}
+      />
+    ),
+  ].filter(Boolean);
+  return (
+    <div className="pr-meta-val pr-meta-activity">
+      {parts.flatMap((p, i) => (i ? [<span key={`s${i}`} className="muted"> · </span>, p] : [p]))}
     </div>
   );
 }

@@ -64,6 +64,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("migrations/0045_chat_session_harness.sql"),
     include_str!("migrations/0046_board_meta_ai_session.sql"),
     include_str!("migrations/0047_remote_hosts.sql"),
+    include_str!("migrations/0048_gh_pr_created_at.sql"),
 ];
 
 pub fn open(path: &Path) -> AppResult<Connection> {

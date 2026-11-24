@@ -47,6 +47,9 @@ const meta = (over: Partial<PrMeta> = {}): PrMeta => ({
   ciState: null,
   checks: [],
   base: null,
+  createdAt: null,
+  lastCommitAt: null,
+  lastComment: null,
   ...over,
 });
 
@@ -138,6 +141,32 @@ describe("PrMetaPanel", () => {
 
     await screen.findByText(/5 files/);
     expect(screen.queryByText("Base")).not.toBeInTheDocument();
+  });
+
+  it("shows opened / last commit / last comment dates", async () => {
+    const ago = (h: number) => new Date(Date.now() - h * 3600_000).toISOString();
+    prMeta.mockResolvedValue(
+      meta({
+        createdAt: ago(24 * 10),
+        lastCommitAt: ago(48),
+        lastComment: { at: ago(5), author: { login: "alice", avatarUrl: null } },
+      }),
+    );
+    renderPanel();
+
+    expect(await screen.findByText("Activity")).toBeInTheDocument();
+    expect(screen.getByText(/opened 10d ago/)).toBeInTheDocument();
+    expect(screen.getByText(/last commit 2d ago/)).toBeInTheDocument();
+    expect(screen.getByText(/last comment 5h ago/)).toBeInTheDocument();
+    expect(screen.getByText(/by alice/)).toBeInTheDocument();
+  });
+
+  it("hides the activity row when no date is known", async () => {
+    prMeta.mockResolvedValue(meta());
+    renderPanel();
+
+    await screen.findByText(/5 files/);
+    expect(screen.queryByText("Activity")).not.toBeInTheDocument();
   });
 
   it("shows a neutral Checking… state for unknown mergeability", async () => {
