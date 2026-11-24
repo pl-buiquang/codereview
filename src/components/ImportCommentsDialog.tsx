@@ -6,7 +6,7 @@ import { timeAgo } from "../lib/timeAgo";
 import { statusLabel } from "../lib/status";
 import { tagLabel, type CommentTag } from "../lib/commentTag";
 
-const TYPE_ORDER = ["mine", "ai", "ai:explain", "ai:review", "ai:codex", "local"] as const;
+const TYPE_ORDER = ["mine", "ai", "ai:explain", "ai:review", "ai:codex", "ai:coverage", "local"] as const;
 
 function typeLabel(t: string): string {
   return t === "mine" ? "Mine" : tagLabel(t as CommentTag);

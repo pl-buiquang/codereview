@@ -156,13 +156,13 @@ pub(crate) fn ensure_draft(conn: &Connection, review_id: i64) -> AppResult<()> {
     }
 }
 
-/// `ai`, `ai:explain`, `ai:review`, `ai:codex` or `local`, or none. Tagged comments are never published and don't pin
+/// `ai`, `ai:explain`, `ai:review`, `ai:codex`, `ai:coverage` or `local`, or none. Tagged comments are never published and don't pin
 /// a focus-hidden hunk/file visible.
 fn validate_tag(tag: Option<&str>) -> AppResult<()> {
     match tag {
-        None | Some("ai" | "ai:explain" | "ai:review" | "ai:codex" | "local") => Ok(()),
+        None | Some("ai" | "ai:explain" | "ai:review" | "ai:codex" | "ai:coverage" | "local") => Ok(()),
         Some(t) => Err(AppError::Other(format!(
-            "invalid tag '{t}' (expected ai, ai:explain, ai:review, ai:codex or local)"
+            "invalid tag '{t}' (expected ai, ai:explain, ai:review, ai:codex, ai:coverage or local)"
         ))),
     }
 }
@@ -3331,7 +3331,7 @@ mod tests {
             get_or_create_local_target(&conn, repo, "/nope", "main", "feature", true).unwrap().0;
         let review = new_review_for_target(&conn, target.id, &LiveShas::default()).unwrap();
 
-        for tag in ["ai", "ai:explain", "ai:review", "ai:codex"] {
+        for tag in ["ai", "ai:explain", "ai:review", "ai:codex", "ai:coverage"] {
             let id = seed_comment(&conn, review.id, "a.rs", "RIGHT", 1, None, "x");
             set_comment_tag_impl(&conn, id, Some(tag)).unwrap();
             assert_eq!(get_comment(&conn, id).unwrap().tag.as_deref(), Some(tag));

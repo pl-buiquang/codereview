@@ -339,7 +339,7 @@ enum CommentAction {
         /// Comment body text
         #[arg(long)]
         body: String,
-        /// ai, ai:explain, ai:review, ai:codex, local, or none. Tagged comments are never published. Defaults
+        /// ai, ai:explain, ai:review, ai:codex, ai:coverage, local, or none. Tagged comments are never published. Defaults
         /// to local: a comment made from the CLI stays off GitHub until you
         /// untag it or edit it in the app.
         #[arg(long, default_value = "local")]
@@ -354,7 +354,7 @@ enum CommentAction {
         /// Comment body text
         #[arg(long)]
         body: String,
-        /// ai, ai:explain, ai:review, ai:codex, local, or none. See `comment add --tag`.
+        /// ai, ai:explain, ai:review, ai:codex, ai:coverage, local, or none. See `comment add --tag`.
         #[arg(long, default_value = "local")]
         tag: String,
     },
@@ -368,7 +368,7 @@ enum CommentAction {
     /// Set or clear a comment's tag
     Tag {
         comment_id: i64,
-        /// ai, ai:explain, ai:review, ai:codex, local, or none
+        /// ai, ai:explain, ai:review, ai:codex, ai:coverage, local, or none
         #[arg(long)]
         tag: String,
     },
@@ -393,7 +393,7 @@ enum CommentAction {
         /// Reply body text
         #[arg(long)]
         body: String,
-        /// ai, ai:explain, ai:review, ai:codex, local, or none. See `comment add --tag`.
+        /// ai, ai:explain, ai:review, ai:codex, ai:coverage, local, or none. See `comment add --tag`.
         #[arg(long, default_value = "local")]
         tag: String,
     },
