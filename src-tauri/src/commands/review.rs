@@ -2681,6 +2681,37 @@ pub fn delete_comment_impl(conn: &Connection, comment_id: i64) -> AppResult<()> 
     Ok(())
 }
 
+/// Delete the AI comments a rerun replaces: root, unpublished, unresolved, unedited
+/// (`updated_at = created_at`), reply-less comments still carrying one of `tags`, minus the notes a
+/// focus owns (`focus_comment`). Anything the user touched is theirs and stays. Returns the count.
+pub fn prune_ai_comments_impl(conn: &Connection, review_id: i64, tags: &[String]) -> AppResult<usize> {
+    ensure_draft(conn, review_id)?;
+    if tags.is_empty() {
+        return Err(AppError::Other("prune needs at least one --tag".into()));
+    }
+    for t in tags {
+        if !t.starts_with("ai") {
+            return Err(AppError::Other(format!("prune only removes AI comments, not '{t}'")));
+        }
+        validate_tag(Some(t))?;
+    }
+    let tags_json = serde_json::to_string(tags)?;
+    let n = conn.execute(
+        "DELETE FROM comment
+          WHERE review_id = ?1
+            AND parent_id IS NULL
+            AND github_comment_id IS NULL
+            AND github_thread_root_id IS NULL
+            AND resolved_at IS NULL
+            AND updated_at = created_at
+            AND tag IN (SELECT value FROM json_each(?2))
+            AND NOT EXISTS (SELECT 1 FROM comment r WHERE r.parent_id = comment.id)
+            AND NOT EXISTS (SELECT 1 FROM focus_comment fc WHERE fc.comment_id = comment.id)",
+        params![review_id, tags_json],
+    )?;
+    Ok(n)
+}
+
 #[tauri::command]
 pub fn delete_comment(comment_id: i64, db: State<Db>) -> AppResult<()> {
     let conn = db.0.lock().unwrap();
@@ -5343,6 +5374,68 @@ mod tests {
         assert_eq!(reply.line, 3);
         assert_eq!(root.anchored_base_sha.as_deref(), Some(b2.as_str()));
         assert_eq!(reply.anchored_base_sha.as_deref(), Some(b2.as_str()));
+    }
+
+    #[test]
+    fn prune_ai_comments_keeps_what_the_user_touched() {
+        let conn = open_memory();
+        let repo = seed_repo(&conn, Some("o"), Some("n"));
+        conn.execute(
+            "INSERT INTO target (repo_id, kind, github_pr_number, title, base_ref, head_ref, created_at)
+             VALUES (?1, 'github_pr', 1, 't', 'main', 'feat', 'now')",
+            params![repo],
+        )
+        .unwrap();
+        let rid = new_review_for_target(&conn, conn.last_insert_rowid(), &LiveShas::default()).unwrap().id;
+        let add = |tag: Option<&str>| {
+            let id = seed_comment(&conn, rid, "a.rs", "RIGHT", 1, None, "x");
+            conn.execute("UPDATE comment SET tag = ?1 WHERE id = ?2", params![tag, id]).unwrap();
+            id
+        };
+        let owned = add(Some("ai:review"));
+        let codex = add(Some("ai:codex"));
+        let other_tag = add(Some("ai:coverage"));
+        let untagged = add(None);
+        let edited = add(Some("ai:review"));
+        conn.execute("UPDATE comment SET updated_at = 'later' WHERE id = ?1", params![edited]).unwrap();
+        let resolved = add(Some("ai:review"));
+        conn.execute("UPDATE comment SET resolved_at = 'later' WHERE id = ?1", params![resolved]).unwrap();
+        let replied = add(Some("ai:review"));
+        conn.execute(
+            "INSERT INTO comment (review_id, file_path, side, line, body, parent_id, created_at, updated_at)
+             VALUES (?1, 'a.rs', 'RIGHT', 1, 'reply', ?2, 'now', 'now')",
+            params![rid, replied],
+        )
+        .unwrap();
+        let published = add(Some("ai:review"));
+        conn.execute("UPDATE comment SET github_comment_id = 9 WHERE id = ?1", params![published]).unwrap();
+        let noted = add(Some("ai:review"));
+        conn.execute(
+            "INSERT INTO focus (review_id, status, level, created_at) VALUES (?1, 'ready', 'focus', 'now')",
+            params![rid],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO focus_comment (focus_id, comment_id) VALUES (?1, ?2)",
+            params![conn.last_insert_rowid(), noted],
+        )
+        .unwrap();
+
+        let tags = vec!["ai:review".to_string(), "ai:codex".to_string()];
+        assert_eq!(prune_ai_comments_impl(&conn, rid, &tags).unwrap(), 2);
+        let left: Vec<i64> = conn
+            .prepare("SELECT id FROM comment WHERE review_id = ?1 AND parent_id IS NULL ORDER BY id")
+            .unwrap()
+            .query_map(params![rid], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert!(!left.contains(&owned) && !left.contains(&codex));
+        for kept in [other_tag, untagged, edited, resolved, replied, published, noted] {
+            assert!(left.contains(&kept), "comment {kept} kept");
+        }
+        assert!(prune_ai_comments_impl(&conn, rid, &["local".to_string()]).is_err());
+        assert!(prune_ai_comments_impl(&conn, rid, &[]).is_err());
     }
 
     #[test]

@@ -738,6 +738,9 @@ pub fn set_focus_plan_from(
 pub struct Raise {
     /// Replaces the summary line starting with the same `Label:` prefix, else is appended.
     pub summary_line: Option<String>,
+    /// Several such lines at once (applied after `summary_line`, in order).
+    #[serde(default)]
+    pub summary_lines: Vec<String>,
     #[serde(default)]
     pub hunks: Vec<RaiseHunk>,
 }
@@ -838,8 +841,18 @@ pub fn raise_focus_from(
             params![fid, h.hunk_id, h.file_path, h.old_start, h.new_start, r.tier, reason],
         )?;
     }
-    if let Some(line) = raise.summary_line.as_deref().filter(|l| !l.trim().is_empty()) {
-        let summary = with_summary_line(view.focus.summary.as_deref(), line);
+    let lines: Vec<&str> = raise
+        .summary_line
+        .iter()
+        .chain(&raise.summary_lines)
+        .map(String::as_str)
+        .filter(|l| !l.trim().is_empty())
+        .collect();
+    if !lines.is_empty() {
+        let mut summary = view.focus.summary.clone();
+        for line in lines {
+            summary = Some(with_summary_line(summary.as_deref(), line));
+        }
         tx.execute("UPDATE focus SET summary = ?1 WHERE id = ?2", params![summary, fid])?;
     }
     tx.commit()?;
@@ -1332,6 +1345,19 @@ mod tests {
         let view = raise_focus_from(&conn, rid, &hunks, raise(r#"{"summary_line":"Coverage: 85/100"}"#))
             .unwrap();
         assert_eq!(view.focus.summary.as_deref(), Some("Does X.\n\nCoverage: 85/100"), "line replaced");
+
+        let view = raise_focus_from(
+            &conn,
+            rid,
+            &hunks,
+            raise(r#"{"summary_lines":["Findings: 3 (1 high)","Coverage: 90/100"]}"#),
+        )
+        .unwrap();
+        assert_eq!(
+            view.focus.summary.as_deref(),
+            Some("Does X.\n\nCoverage: 90/100\n\nFindings: 3 (1 high)"),
+            "several lines, each replaced or appended"
+        );
 
         assert!(raise_focus_from(&conn, rid, &hunks, raise(r#"{"hunks":[{"id":"nope","tier":"review"}]}"#)).is_err());
         assert!(raise_focus_from(&conn, rid, &hunks, raise(&format!(r#"{{"hunks":[{{"id":"{a}","tier":"loud"}}]}}"#))).is_err());

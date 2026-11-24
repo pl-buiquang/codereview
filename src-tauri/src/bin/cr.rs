@@ -376,6 +376,14 @@ enum CommentAction {
     Delete {
         comment_id: i64,
     },
+    /// Delete the AI comments a rerun replaces: root, unpublished, unresolved, unedited and
+    /// reply-less comments still carrying one of the given tags. Focus notes are kept.
+    Prune {
+        review_id: i64,
+        /// AI tag to prune (repeatable): ai, ai:explain, ai:review, ai:codex, ai:coverage
+        #[arg(long = "tag", required = true)]
+        tags: Vec<String>,
+    },
     /// Mark a comment thread as resolved
     Resolve {
         comment_id: i64,
@@ -1089,6 +1097,15 @@ fn run(cmd: Cmd, json: bool, db: &Db) -> AppResult<()> {
                 review::delete_comment_impl(&conn, comment_id)?;
                 if !json {
                     println!("Deleted comment #{comment_id}");
+                }
+            }
+            CommentAction::Prune { review_id, tags } => {
+                let conn = db.0.lock().unwrap();
+                let n = review::prune_ai_comments_impl(&conn, review_id, &tags)?;
+                if json {
+                    println!("{}", serde_json::json!({ "pruned": n }));
+                } else {
+                    println!("Pruned {n} AI comment(s) from review #{review_id}");
                 }
             }
             CommentAction::Resolve { comment_id } => {
