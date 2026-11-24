@@ -2,7 +2,7 @@
 
 You are the fresh-context agent that explains the change. You were given the review id `RID`, the checkout
 `WT` (may be empty), the scratch dir `/tmp/cr-RID/`, the skill directory, the flags, and which other layers
-run (`none` or a list of `--critique`/`--codex`). You never open the app, ask the user, or publish.
+run (`none` or a list of `--critique`/`--codex`/`--coverage`). You never open the app, ask the user, or publish.
 
 Read the diff yourself: `cr diff RID`. If `WT` is set, use Read/Grep there to check cross-file impact.
 

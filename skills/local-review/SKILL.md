@@ -5,19 +5,21 @@ description: >
   CodeReview app. With no layer flags it auto-detects the mode from the PR's size and
   author: small PR = one explanatory comment per change; bigger PR = --focus (tier every
   hunk so the app hides the noise); big PR of yours = --focus + --codex (Codex adversarial
-  review), plus --critique when it closes an issue. Explicit layers: --focus, --critique
-  (Standards + Spec sub-agents), --codex, --plain. All analysis runs in fresh-context
+  review), plus --critique when it closes an issue, plus --coverage when it's a refactor. Explicit
+  layers: --focus, --critique (Standards + Spec sub-agents), --codex, --coverage (unit/e2e test coverage
+  score, gap comments, raised tiers), --plain. All analysis runs in fresh-context
   agents, never in the caller's context. Also drafts local replies to a PR's existing
   GitHub review threads. Use when asked to "review PR", "explain PR", "local review of PR",
   "focus review", "triage PR hunks", "filter the noise in PR", "critique PR",
-  "codex review of PR", "review branch <name>", or "reply to PR comments/threads".
+  "codex review of PR", "coverage review", "how well tested is PR", "test coverage of PR",
+  "review branch <name>", or "reply to PR comments/threads".
 ---
 
 # Local Review Skill
 
 Fetches a GitHub PR's diff (or a local branch diff), has fresh-context agents analyze it, and populates a
 local review in the CodeReview desktop app (via the `cr` CLI) so you can browse the annotated diff in the
-GUI. Everything written is tagged `ai:explain`, `ai:review` or `ai:codex` and stays local: nothing is
+GUI. Everything written is tagged `ai:explain`, `ai:review`, `ai:codex` or `ai:coverage` and stays local: nothing is
 published to GitHub unless the user removes the tag or edits the comment in the app.
 
 ## You are an orchestrator
@@ -47,9 +49,12 @@ Subagents cannot spawn subagents, so all fan-out happens from here.
 - `--focus [--level focus|thorough|critical]` — tier every hunk; see `focus.md`
 - `--critique` — Standards + Spec agents; see `critique.md`
 - `--codex[=adversarial|native] ["focus text"]` — Codex review of the checkout; see `codex.md`
+- `--coverage` — how well unit and e2e tests cover the change: a 0–100 score, focus areas, a comment per
+  gap and raised tiers on untested hunks; see `coverage.md`. Needs a focus (Step 1e) and a checkout.
 - `--with-replies` — also draft thread replies (see Reply mode). Never auto-enabled.
 
-Any of `--plain`/`--focus`/`--critique`/`--codex` disables auto: use exactly what was given.
+Any of `--plain`/`--focus`/`--critique`/`--codex`/`--coverage` disables auto: use exactly what was given
+(plus the `--focus` that `--coverage` may imply, Step 1e).
 
 **Reply mode** (draft replies to a PR's existing GitHub review threads, GitHub PR only):
 
@@ -65,7 +70,7 @@ cargo install --path ~/projects/codereview/src-tauri --bin cr
 ```
 
 The instruction files live next to this file. Agents read them, you do not (except `codex.md` §1–3):
-`explain.md`, `focus.md`, `critique.md`, `codex.md`, `merge.md`, `reply.md`. Pass the skill directory
+`explain.md`, `focus.md`, `critique.md`, `codex.md`, `coverage.md`, `merge.md`, `reply.md`. Pass the skill directory
 (the directory of this SKILL.md) in every brief.
 
 ## Workflow
@@ -83,10 +88,11 @@ Confirm both refs resolve (`git rev-parse`). Fail here, not inside parallel agen
 
 **1a. Metadata (auto mode only, before creating).**
 ```bash
-gh pr view <n> -R <owner>/<repo> --json additions,deletions,changedFiles,author,closingIssuesReferences
+gh pr view <n> -R <owner>/<repo> --json title,labels,additions,deletions,changedFiles,author,closingIssuesReferences
 gh api user --jq .login
 ```
-Branch mode: always "mine", no linked issue, size from `git -C <repo> diff --shortstat <base>...<head>`.
+Branch mode: always "mine", no linked issue, size from `git -C <repo> diff --shortstat <base>...<head>`,
+refactor from the commit headers (`git -C <repo> log --format=%s <base>..<head>`).
 `<review-id>` target: skip auto (plain, unless layers were given).
 
 **1b. Auto mode** (no layer flag). Size is *effective* lines (additions + deletions) and files.
@@ -97,12 +103,16 @@ Branch mode: always "mine", no linked issue, size from `git -C <repo> diff --sho
 | Medium | `--focus` |
 | Large: > 600 lines **or** > 20 files | `--focus`; add `--codex` (adversarial) if the PR is mine; add `--critique` if it has a closing issue |
 
+Medium or Large **and a refactor** (title type `refactor`, e.g. `refactor(api): …`, a `refactor` label, or
+in branch mode most commit headers typed `refactor`): also add `--coverage`.
+
 The raw gh numbers pick the tier before creation. After Step 1c, recompute
 the effective size without lockfiles/generated files and only ever **lower** the tier:
 ```bash
 cr focus hunks RID --json | jq '[.[] | select(.rule_tier == null)] | {lines: (map(.additions + .deletions) | add // 0), files: (map(.file_path) | unique | length)}'
 ```
-Announce one line and proceed without asking, e.g. `Auto: 420 lines / 14 files, yours → --focus --codex`.
+Announce one line and proceed without asking, e.g. `Auto: 420 lines / 14 files, yours → --focus --codex`
+or `Auto: 300 lines / 9 files, refactor → --focus --coverage`.
 
 **1c. Create.**
 ```bash
@@ -121,6 +131,14 @@ cr focus hunks RID --json | jq '[.[].file_path] | unique | length'
 `0`: report an empty diff and stop. `> 200`: AskUserQuestion whether to proceed or limit to specific paths
 (the only prompt left in the auto path).
 
+**1e. Coverage needs a focus.** With `--coverage` and no `--focus`:
+```bash
+cr focus show RID --json | jq '{planned: (.focus.planned_at != null), stale}'   # null = no focus
+```
+No focus, an unplanned one, or `stale: true`: add `--focus` (the Explain agent generates a fresh one).
+Otherwise **reuse** it: the merge agent raises its tiers with `cr focus raise`, never re-plans it.
+Announce it, e.g. `--coverage: reusing the focus` or `--coverage: focus is stale → adding --focus`.
+
 ### Step 2: Prepare the fan-out
 
 ```bash
@@ -137,7 +155,9 @@ If `--codex`: do `codex.md` §1–2 now. On a skip, write the reason to `/tmp/cr
 Send **one message** containing all of:
 
 - `--codex` (not skipped): `codex.md` §3, a background Bash call writing `/tmp/cr-RID/codex.json`.
-- The **Explain agent** (always).
+- The **Explain agent** (always, except when `--coverage` is the only layer and the focus is reused: the
+  focus already explains the change, so a plain explain would only duplicate it).
+- `--coverage`: the **Coverage agent**.
 - `--critique`: the **Standards agent** and the **Spec agent**.
 - `--with-replies`: the **Reply agent**.
 
@@ -155,14 +175,16 @@ Then per agent:
 - **Standards agent** / **Spec agent**: "Read `<dir>/critique.md`; you are the Standards (Spec) agent." It
   gathers its own sources, writes `/tmp/cr-RID/standards.json` (`spec.json`), and reports only the finding
   count and its worst finding.
+- **Coverage agent**: "Read `<dir>/coverage.md`." Plus: "Focus: generated in this run" or "Focus: reused".
+  It writes `/tmp/cr-RID/coverage.json` and reports the score and the top focus area only.
 - **Reply agent**: "Read `<dir>/reply.md`." Target: `<owner> <name> <number>`.
 
 ### Step 4: Merge (only if a layer ran)
 
 Wait for the background Codex run (you are notified; non-zero exit → write `codex failed: <first line of
 stderr>` to `/tmp/cr-RID/codex-skipped.txt`) and for the agents. Then launch one fresh **Merge agent**
-(common header, plus the flags and which of `plan.json`, `summary.md`, `standards.json`, `spec.json`,
-`codex.json`, `codex-skipped.txt` exist): "Read `<dir>/merge.md`." It returns a report of at most 150 words.
+(common header, plus the flags, whether the focus was generated or reused, and which of `plan.json`,
+`summary.md`, `standards.json`, `spec.json`, `codex.json`, `codex-skipped.txt`, `coverage.json` exist): "Read `<dir>/merge.md`." It returns a report of at most 150 words.
 
 No layer: skip this step. The Explain agent already reported the summary (and submitted the plan with `--focus`).
 
@@ -174,8 +196,8 @@ cr open review RID
 If it fails (older build), fall back to `open "codereview://review/RID"`.
 
 Tell the user, from the agents' reports only: the review id and the mode used (and why, if auto); comments
-added per tag (`ai:explain`, `ai:review`, `ai:codex`); with `--focus`, the tier counts and the `critical`
-hunks; any layer skipped or failed and why; that the app is open on the review; and the summary (from the agents' reports; it is not saved to the review, so nothing is published).
+added per tag (`ai:explain`, `ai:review`, `ai:codex`, `ai:coverage`); with `--focus`, the tier counts and the `critical`
+hunks; with `--coverage`, the score line, the focus areas and how many tiers were raised; any layer skipped or failed and why; that the app is open on the review; and the summary (from the agents' reports; it is not saved to the review, so nothing is published).
 
 Never set the review body or verdict: the body is what gets published to GitHub. This is an aid, not an approval gate.
 
@@ -205,5 +227,7 @@ Runs standalone (`/local-review reply owner/repo#123`) or with `--with-replies` 
 - Empty diff: skip commenting and report it.
 - `cr repo add` fails because the path is not a git repo: tell the user.
 - A layer fails (Codex missing, no spec, no checkout): continue with the others and say what was skipped.
+- `cr focus raise` fails because the focus went stale mid-run: report it. The coverage comments are
+  already posted; rerun with `--focus --coverage` to get the tiers.
 - An agent returns an error or an empty report: say which one, continue with the rest, and do not redo its
   analysis in the main context.
