@@ -57,42 +57,69 @@ ln -s "$PWD/skills/local-review" ~/.claude/skills/local-review
 It also needs `cr` on `PATH` (see [cli.md](cli.md#installing-cr)). Usage:
 
 ```text
-/local-review <owner/repo#N | pr-url | branch <head> [--base <b>] [--repo <path>] | review-id> [layers]
+/local-review <owner/repo#N | pr-url | branch <head> [--base <b>] [--repo <path>] | review-id> [--explain] [--depth normal|advanced | layers]
 /local-review reply owner/repo#N
 ```
 
-| Flag | Layer |
-|---|---|
-| `--focus [--level focus\|thorough\|critical]` | Tier every hunk ([`focus.md`](../../skills/local-review/focus.md)) |
-| `--critique` | Standards and Spec sub-agents ([`critique.md`](../../skills/local-review/critique.md)), with a code-smell baseline |
-| `--codex[=adversarial\|native] ["focus text"]` | The Codex plugin's review of the PR checkout, via `cr worktree` ([`codex.md`](../../skills/local-review/codex.md)) |
-| `--coverage` | How well unit and e2e tests cover the change ([`coverage.md`](../../skills/local-review/coverage.md)): a 0–100 score with unit/e2e sub-scores, focus areas, an `ai:coverage` comment per gap on `review`/`critical` hunks, and raised tiers on refactor red flags. Reuses a fresh focus (`cr focus raise`) or implies `--focus` |
-| `--plain` | One explanatory comment per change ([`explain.md`](../../skills/local-review/explain.md)) |
-| `--with-replies` | Also draft replies to existing GitHub review threads ([`reply.md`](../../skills/local-review/reply.md)) |
+The skill does two separate jobs.
 
-- **No layer flag means auto mode**, chosen by effective size: small (< 150 lines and <= 5 files) is plain; medium is `--focus`; large (> 600 lines or > 20 files) is `--focus`, plus `--codex` if the PR is yours and `--critique` if it closes an issue. Medium and large refactors (title type `refactor`, a `refactor` label, or mostly `refactor` commits) also get `--coverage`.
-- Comments are tagged `ai:explain` / `ai:review` / `ai:codex` / `ai:coverage`; the verdict is always `comment`.
-- The coverage score is stored as a `Coverage: …` line at the end of the focus summary (shown in the digest card). A rerun replaces that line.
-- The app embeds its own copy of `focus.md` at build time; it is the default of the editable "Focus mode" prompt.
+**Explain** (`--explain`, alias `--plain`) is a reading aid, not a review. It posts one `ai:explain` comment
+per change ([`explain.md`](../../skills/local-review/explain.md)) at any PR size, never touches the focus,
+and a rerun replaces the explanations you haven't touched.
+
+**Review** runs at two depths:
+
+| Depth | Layers |
+|---|---|
+| `--depth normal` | Standards and Spec sub-agents ([`critique.md`](../../skills/local-review/critique.md), with a code-smell baseline) + test coverage in **static** mode (tests mapped, not run) |
+| `--depth advanced` | normal + the Codex plugin's adversarial review of the checkout ([`codex.md`](../../skills/local-review/codex.md)) + coverage in **measured** mode (runs related unit tests when deps are installed) |
+
+- **No flag** means a review: `advanced` for a large PR (> 600 lines or > 20 files) of yours, else `normal`.
+- **Single layers** remain for terminal use: `--focus [--level ..]` (tiers + notes, like **Generate focus**),
+  `--critique`, `--codex[=adversarial|native] ["focus text"]`, `--coverage` (measured), `--with-replies`
+  ([`reply.md`](../../skills/local-review/reply.md)).
+- A layer that can't run (no Codex plugin, no checkout, no test runner) is skipped and named in the report;
+  the rest continue.
+
+### How review findings work ([`merge.md`](../../skills/local-review/merge.md))
+
+- **One severity scale.** Every finding is `critical`, `high`, `medium` or `low`: Codex keeps its own; Spec
+  `wrong` is high, `missing` medium, `scope-creep` low; a documented Standards rule is medium, a smell low;
+  coverage `refactor-risk` is high, `test-changed` medium, gaps medium on visible hunks and low elsewhere.
+- **Deduplicated across layers.** Findings on the same hunk about the same problem become one comment that
+  lists every source, e.g. `**[high · codex, standards · unbounded loop]**`. The tag follows the first source
+  (`ai:codex` > `ai:review` > `ai:coverage`).
+- **A rerun replaces the previous findings** of the layers it runs (`cr comment prune`). Comments you edited,
+  resolved, replied to or untagged are yours and stay.
+- **Tied to the focus.** A review needs a focus: it reuses a fresh one, else generates a **tiers-only** focus
+  (no notes) in the same run. Findings then raise the hunks they land on: critical/high → `critical`,
+  medium → at least `review`, low → no raise (a low finding on a hidden hunk stays in the report only). The
+  focus summary gets a `Findings: …` line (and `Coverage: …`). Regenerating the focus keeps them visible:
+  the focus prompt floors each hunk's tier from the severity prefix of the AI findings already on it. A small
+  PR (< 150 lines and ≤ 5 files) gets no focus, since nothing would be hidden.
+- Comments are tagged `ai:explain` / `ai:review` / `ai:codex` / `ai:coverage`; the verdict is never set.
+- The coverage score is the `Coverage: …` summary line; a rerun replaces it.
+- The app embeds its own copy of `focus.md` at build time; it is the default of the editable "Focus mode"
+  prompt. A prompt override does not get later changes to it (such as the findings floor).
 - `reply` mode drafts local replies to GitHub threads. Publish them with "Publish N draft replies" in the app or `cr comment publish-replies`.
 
-## In-app AI review runs
+## In-app AI runs
 
-The review actions menu can launch the same skill headlessly in the background, one run per review at a time:
+The review actions menu launches the skill headlessly in the background, one run per review at a time:
 
 | Menu item | Runs |
 |---|---|
-| AI review: explain changes | `/local-review <id>` |
-| AI review: critique (Standards + Spec) | `/local-review <id> --critique` |
-| AI review: Codex adversarial | `/local-review <id> --codex` (needs a local clone) |
-| AI review: test coverage | `/local-review <id> --coverage` (needs a local clone). Its allow-list adds test runners (`ubt`, `uv run`, `npx jest`/`vitest`, `pnpm exec`, `cargo llvm-cov`, `bundle exec rspec`) for the optional measured run, which never installs dependencies |
+| Explain changes | `/local-review <id> --explain` |
+| AI review | `/local-review <id> --depth normal` |
+| AI review: advanced | `/local-review <id> --depth advanced` (needs a local clone). Its allow-list adds test runners (`ubt`, `uv run`, `npx jest`/`vitest`, `pnpm exec`, `cargo llvm-cov`, `bundle exec rspec`) for the measured coverage run, which never installs dependencies |
 
 Behavior ([`ai_review.rs`](../../src-tauri/src/commands/ai_review.rs)):
 
 - Needs `claude` and the skill installed at `~/.claude/skills/local-review`.
-- Disabled on published reviews and while another AI review runs on the same review.
-- Uses the Settings → AI chat model. Runs in the repo checkout (a temp dir without a clone) with a restricted tool allow-list (`Read`, `Grep`, `Bash(cr:*)`, `Bash(git:*)`, `Bash(gh pr view:*)`, ...). `CODEREVIEW_DB` is set so its `cr` calls hit the same database as the app.
-- The header shows a spinner while it runs; results appear as tagged comments. There is no in-app `--focus` layer here: use **Generate focus** (the coverage run generates one itself when none is fresh).
+- Disabled on published reviews and while another AI run is active on the same review.
+- Runs on the routine's profile (Sessions → Config). Runs in the repo checkout (a temp dir without a clone) with a restricted tool allow-list (`Read`, `Grep`, `Bash(cr:*)`, `Bash(git:*)`, `Bash(gh pr view:*)`, ...). `CODEREVIEW_DB` is set so its `cr` calls hit the same database as the app.
+- The header shows a spinner while it runs; results appear as tagged comments and raised tiers.
+- These routines' prompt and tools follow the shipped skill: they are refreshed at every start (profile, model, timeout and enabled are yours). The former `critique`/`codex` routines became `AI review`/`AI review: advanced` with their settings and history; the `test coverage` routine's runs moved to advanced.
 
 ## Chat panel
 

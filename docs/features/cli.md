@@ -65,6 +65,7 @@ cr export 12 --format json -o review.json
 | `update <comment-id> --body <t>` | Change a comment's body |
 | `tag <comment-id> --tag <tag>` | Set or clear the tag |
 | `delete <comment-id>` | Delete a comment |
+| `prune <review-id> --tag <ai tag> [--tag ..]` | Delete the AI comments a rerun replaces: root, unpublished, unresolved, unedited, reply-less comments still carrying one of the tags. Focus notes and anything you touched are kept |
 | `resolve <comment-id>` / `unresolve <comment-id>` | Resolve or reopen a thread |
 | `reply <review-id> --parent-id <comment-id> --body <t> [--tag ..]` | Reply inside a local comment thread |
 | `draft-reply <review-id> --thread-comment-id <n> --file <p> --line <n> --body <t> [--side ..]` | Draft a reply to an existing **GitHub** thread; nothing is posted yet |
@@ -128,7 +129,7 @@ See [`skills/board/SKILL.md`](../../skills/board/SKILL.md) for the agent workflo
 | `cr focus hunks <id>` | The review's hunks: id, file, header, +/- counts, rule tier, preview |
 | `cr focus hunk <id> <hunk-id>` | One hunk's full text |
 | `cr focus set <id> --file <plan.json\|-> [--level off\|thorough\|focus\|critical]` | Write a focus plan, replacing the previous one (manual overrides are kept) |
-| `cr focus raise <id> --file <raises.json\|->` | Raise tiers on a fresh focus without re-planning (`{"summary_line", "hunks": [{"id","tier"}]}`): tiers only go up, notes/overrides/level are kept, `summary_line` replaces the summary line with the same `Label:` prefix. Fails on a stale focus; not available in remote runs |
+| `cr focus raise <id> --file <raises.json\|->` | Raise tiers on a fresh focus without re-planning (`{"summary_line", "summary_lines": [..], "hunks": [{"id","tier"}]}`): tiers only go up, notes/overrides/level are kept, each summary line replaces the line with the same `Label:` prefix (else is appended). Fails on a stale focus; not available in remote runs |
 | `cr focus show <id>` | Status, level, model, stale marker, summary, tier counts, AI notes |
 | `cr focus clear <id>` | Delete the focus |
 

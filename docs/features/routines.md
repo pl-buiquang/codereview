@@ -6,7 +6,7 @@ Routines, and routines are edited in Sessions → Config. Plain built-in routine
 **Reset** to their shipped text.
 
 Sessions → Config splits the list in two. **Routines** are plain: yours, plus Babysit and the issue
-routines, fully editable. **System routines** (focus, AI review layers, board overview, plan issue, image
+routines, fully editable. **System routines** (focus, explain changes, the two AI review levels, board overview, plan issue, image
 diff report) have a Rust handler that owns their prompt and tools; each shows a short description and
 only four controls: profile, model, timeout and enabled.
 
