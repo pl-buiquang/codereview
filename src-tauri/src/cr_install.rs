@@ -63,22 +63,48 @@ impl CrInstallResult {
 /// Silent no-op in debug builds, when the sidecar is not bundled, or when already installed.
 /// Returns Some(result) when there is something to tell the user.
 pub fn maybe_install() -> Option<CrInstallResult> {
-    // A debug build (`pnpm tauri dev`) has cargo's own debug `cr` next to it in
-    // target/debug, which is not a bundled sidecar: copying it would replace the
-    // user's `cr` with a dev build that reads the dev database.
+    install(false)
+}
+
+/// Settings → CLI "Reinstall": copy the bundled `cr` even when the installed one
+/// reports the same or a newer version (e.g. a stray dev build). Still refuses a
+/// sidecar whose version differs from the app's.
+pub fn reinstall() -> Result<CrInstallResult, String> {
+    if cfg!(debug_assertions) {
+        return Err("debug builds have no bundled cr (run a release build of the app)".into());
+    }
+    if sidecar_path().is_none() {
+        return Err("this app has no bundled cr next to its binary".into());
+    }
+    install(true).ok_or_else(|| "could not copy cr (see the log)".into())
+}
+
+/// The bundled sidecar, next to the app binary. `None` in debug builds: cargo's
+/// own debug `cr` sits in target/debug, but it is not a sidecar, and copying it
+/// would replace the user's `cr` with a dev build that reads the dev database.
+pub fn sidecar_path() -> Option<PathBuf> {
     if cfg!(debug_assertions) {
         return None;
     }
     let exe = std::env::current_exe().ok()?;
-    let bin_dir = exe.parent()?;
-
     let ext = if cfg!(windows) { ".exe" } else { "" };
-    let sidecar = bin_dir.join(format!("cr{ext}"));
+    let sidecar = exe.parent()?.join(format!("cr{ext}"));
+    sidecar.exists().then_some(sidecar)
+}
 
-    if !sidecar.exists() {
-        return None; // dev mode — not bundled
-    }
+/// Where an install would copy `cr` (see [`maybe_install`] for the order).
+pub fn install_dest() -> Option<PathBuf> {
+    pick_dest(if cfg!(windows) { ".exe" } else { "" })
+}
 
+/// `<path> --version`, for the Settings → CLI page.
+pub fn version_of(path: &Path) -> Option<String> {
+    cr_version(path)
+}
+
+fn install(force: bool) -> Option<CrInstallResult> {
+    let sidecar = sidecar_path()?;
+    let ext = if cfg!(windows) { ".exe" } else { "" };
     let dest = pick_dest(ext)?;
     let bundled = cr_version(&sidecar).unwrap_or_else(|| "unknown".into());
     let result = |outcome| {
@@ -100,7 +126,7 @@ pub fn maybe_install() -> Option<CrInstallResult> {
     } else {
         None
     };
-    if let Some(installed) = &installed {
+    if let Some(installed) = installed.as_ref().filter(|_| !force) {
         if *installed == bundled {
             return None;
         }

@@ -15,7 +15,7 @@ which feed app features from local state. The pickers refuse a remote profile fo
 You need SSH access to the host (key or agent; the app never prompts for a password), and on the host `git`,
 `gh` (logged in) and at least one harness (`claude`, `opencode` or `codex`, each logged in there).
 
-1. **Install `cr` on the host**, from the same build as the app (see *Versions* below). Put it where the
+1. **Install `cr` on the host**, from the same build as the app (see *Versions* below). Settings → CLI → *Install on a remote host* gives the ssh command that downloads the release `cr` for the host's platform into `~/.local/bin`. Put it where the
    daemon's environment finds it, normally `~/.local/bin/cr`: harness processes started by the daemon inherit
    its `PATH`, and a remote run calls `cr` (board, focus, `cr notify`) from the harness' shell.
 2. **Register the repositories** the routines will run on, with the clone on the host:

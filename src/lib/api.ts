@@ -87,6 +87,7 @@ import type {
   SessionUsageSummary,
   ToolEnv,
   MyVoiceResult,
+  CliStatus,
   UpdateReviewResult,
   InterdiffMeta,
   QuickInterdiff,
@@ -217,6 +218,8 @@ export const api = {
 
   // Chat
   crInstallNote: () => invoke<string | null>("cr_install_note"),
+  cliStatus: () => invoke<CliStatus>("cli_status"),
+  crReinstall: () => invoke<string>("cr_reinstall"),
   appVersion: () => invoke<string>("app_version"),
 
   // Logs

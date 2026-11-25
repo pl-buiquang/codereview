@@ -2,6 +2,7 @@ pub mod ai_profiles;
 pub mod ai_review;
 pub mod board;
 pub mod chat;
+pub mod cli;
 pub mod conversations;
 pub mod editor;
 pub mod export;

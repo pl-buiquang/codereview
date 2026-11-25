@@ -12,6 +12,8 @@
 | `--json` | Machine-readable output instead of text. Put it after the subcommand (`cr show 12 --json`) |
 | `--version` | Version of the build |
 
+`cr info` prints the version, whether it is a debug or release build, and the database it resolves with where that came from (`--db`, `CODEREVIEW_DB` or the default), without opening it.
+
 Environment: `CODEREVIEW_DB` (database path), `CODEREVIEW_BASE_PATHS` (comma-separated directories searched for a local clone by `cr create pr`; the app uses the Settings value instead). Errors go to stderr with exit code 1.
 
 `gh` (authenticated) is needed for anything touching GitHub; `git` for local reviews.
@@ -25,6 +27,8 @@ The app bundles `cr` as a sidecar and installs it on launch ([`cr_install.rs`](.
 3. `~/.local/bin/cr` (macOS/Linux; may need adding to `PATH`) or `%LOCALAPPDATA%\CodeReview\bin\cr.exe` (Windows).
 
 Versions are compared with `cr --version`. The copy is skipped when the installed `cr` reports the same version, or a newer one, so launching an older app never downgrades it. A sidecar whose version differs from the app's own is never copied: the app shows a "reinstall the app" toast instead. Nothing happens in debug builds (`pnpm tauri dev`): cargo's debug `cr` sits next to the dev app but is not a sidecar, and is never copied. Every install, update or skip-with-reason is shown as a toast and logged to `codereview.log`.
+
+Settings → **CLI** shows the bundled and installed `cr` (version, path, the database it resolves), with **Reinstall cr** to copy the bundled one over whatever is installed, including a newer or debug build. It also builds the ssh commands that install the release `cr` of the app's version on a [remote host](remote-hosts.md) and start or restart its daemon.
 
 From a source checkout instead:
 

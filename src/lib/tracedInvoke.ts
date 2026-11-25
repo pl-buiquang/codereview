@@ -53,6 +53,7 @@ export const MAJOR_ACTIONS = new Set([
   "board_overview_generate",
   "generate_live_session_summary",
   "prompt_set",
+  "cr_reinstall",
   "prompt_reset",
   // GitHub
   "set_pr_draft",

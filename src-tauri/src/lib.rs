@@ -528,6 +528,8 @@ pub fn run() {
             commands::graph::git_stash_drop,
             commands::graph::git_stash_diff,
             cr_install_note,
+            commands::cli::cli_status,
+            commands::cli::cr_reinstall,
             app_version,
         ]))
         .build(tauri::generate_context!())

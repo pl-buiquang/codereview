@@ -33,13 +33,15 @@ import { AiSection } from "./SettingsAiSection";
 import { ThemeSection } from "./SettingsThemeSection";
 import { ConversationRulesEditor } from "./SettingsConversationRules";
 import { UsageSection } from "./SettingsUsageSection";
+import { CliSection } from "./SettingsCliSection";
 
-type SettingsSection = "general" | "theme" | "ai" | "usage" | "logs";
+type SettingsSection = "general" | "theme" | "ai" | "cli" | "usage" | "logs";
 
 const SECTIONS: { key: SettingsSection; label: string; icon: IconName }[] = [
   { key: "general", label: "General", icon: "gear" },
   { key: "theme", label: "Theme", icon: "palette" },
   { key: "ai", label: "AI", icon: "bot" },
+  { key: "cli", label: "CLI", icon: "terminal" },
   { key: "usage", label: "Usage", icon: "flame" },
   { key: "logs", label: "Logs", icon: "file" },
 ];
@@ -795,6 +797,7 @@ export function SettingsView() {
           {section === "general" && <GeneralSection />}
           {section === "theme" && <ThemeSection />}
           {section === "ai" && <AiSection />}
+          {section === "cli" && <CliSection />}
           {section === "usage" && <UsageSection />}
           {section === "logs" && <LogsSection />}
         </div>

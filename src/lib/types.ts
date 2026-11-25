@@ -328,6 +328,33 @@ export interface ToolEnv {
   my_voice_skill: string | null;
 }
 
+// --- Settings → CLI ---
+
+export interface CrBinary {
+  path: string;
+  version: string | null;
+}
+
+/** `cr info --json` of the installed cr (null when it predates `cr info`). */
+export interface CrInfo {
+  version: string;
+  build: "debug" | "release";
+  db: string;
+  db_source: "--db" | "CODEREVIEW_DB" | "default";
+  db_exists: boolean;
+}
+
+export interface CliStatus {
+  app_version: string;
+  debug_build: boolean;
+  sidecar: CrBinary | null;
+  installed: CrBinary | null;
+  installed_info: CrInfo | null;
+  install_dest: string | null;
+  app_db: string;
+  env_db: string | null;
+}
+
 export interface MyVoiceResult {
   comment: Comment;
   /** The skill's Changes list; may be empty. */
