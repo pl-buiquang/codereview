@@ -1652,23 +1652,76 @@ td.diff-code {
 }
 .comment-item {
   display: flex;
-  gap: 8px;
-  align-items: flex-start;
+  flex-direction: column;
+  gap: 4px;
   margin-bottom: 8px;
+}
+/* Same shape as a GitHub thread: tag + badges top left, Resolve/delete top right. */
+.comment-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-height: 22px;
+}
+.comment-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+/* Publish toggle next to the tag: accent plane (filled) = published, grey outline = local. */
+.publish-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 20px;
+  padding: 0;
+  color: var(--text-3, var(--text-2));
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-s);
+  cursor: pointer;
+}
+.publish-toggle .icon-fill {
+  fill: none;
+}
+.publish-toggle.on {
+  color: var(--accent);
+}
+.publish-toggle.on .icon-fill {
+  fill: var(--accent-soft);
+}
+.publish-toggle:hover:not(:disabled) {
+  background: var(--surface-3);
+}
+.publish-toggle:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.comment-thread-actions {
+  margin-top: 0;
+}
+/* No trailing space under a thread (same bottom edge as a GitHub thread);
+   consecutive threads are spaced instead. */
+.comment-thread > :last-child,
+.comment-thread > .comment-replies:last-child > .comment-item:last-child {
+  margin-bottom: 0;
+}
+.resolved-bar:last-child {
+  margin-bottom: 0;
+}
+.comment-thread + .comment-thread,
+.comment-thread + .resolved-bar,
+.resolved-bar + .comment-thread {
+  margin-top: 8px;
 }
 /* Replies render indented under their root, read as nesting via a left border. */
 .comment-replies {
   margin-left: 16px;
   padding-left: 12px;
   border-left: 2px solid var(--border);
-}
-.comment-reply-btn {
-  flex: none;
-  align-self: center;
-}
-.btn-resolve {
-  flex: none;
-  align-self: center;
 }
 /* Collapsed bar for a resolved thread: full width, muted, single line. */
 .resolved-bar {
@@ -1728,7 +1781,7 @@ td.diff-code {
 }
 .comment-item textarea {
   flex: 1;
-  min-height: 44px;
+  min-height: 140px;
   resize: vertical;
   background: var(--surface);
   color: var(--text);

@@ -11,6 +11,7 @@ const item = (over: Partial<FilterableComment> = {}): FilterableComment => ({
   isResolved: false,
   source: "draft",
   tag: null,
+  toPublish: false,
   ...over,
 });
 const f = (over: Partial<CommentFilter>): CommentFilter => ({ ...DEFAULT_COMMENT_FILTER, ...over });
@@ -19,6 +20,12 @@ describe("matchesCommentFilter", () => {
   it("keeps everything by default", () => {
     expect(matchesCommentFilter(item(), DEFAULT_COMMENT_FILTER)).toBe(true);
     expect(isCommentFilterActive(DEFAULT_COMMENT_FILTER)).toBe(false);
+  });
+
+  it("filters to what the next publish sends", () => {
+    expect(matchesCommentFilter(item({ toPublish: false }), f({ publish: "publish" }))).toBe(false);
+    expect(matchesCommentFilter(item({ toPublish: true }), f({ publish: "publish" }))).toBe(true);
+    expect(isCommentFilterActive(f({ publish: "publish" }))).toBe(true);
   });
 
   it("filters by resolution", () => {

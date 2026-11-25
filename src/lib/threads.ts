@@ -78,3 +78,26 @@ export function formatThreadForChat(thread: PrThread): string {
   });
   return `${header}\n${quoted.join("\n>\n")}\n\n`;
 }
+
+/** A local comment thread as a chat message: where it sits, the diff hunk, and the
+ *  quoted root + replies. Same shape as {@link formatThreadForChat}. */
+export function formatCommentThreadForChat(root: Comment, replies: Comment[]): string {
+  let where: string;
+  if (root.subject_type === "file") where = `\`${root.file_path}\` (whole file)`;
+  else {
+    const lines =
+      root.start_line != null && root.start_line !== root.line
+        ? `lines ${root.start_line}–${root.line}`
+        : `line ${root.line}`;
+    where = `\`${root.file_path}\` ${lines} (${root.side})`;
+  }
+  const kind = root.tag ? ` [${root.tag}]` : "";
+  const header = `Regarding review comment${kind} on ${where}:`;
+  const hunk = root.diff_hunk ? `\n\`\`\`diff\n${root.diff_hunk.trimEnd()}\n\`\`\`` : "";
+  const quote = (c: Comment, who: string) => {
+    const [first, ...rest] = c.body.trim().split("\n");
+    return [`> **${who}**: ${first}`, ...rest.map((l) => `> ${l}`)].join("\n");
+  };
+  const quoted = [quote(root, root.tag?.startsWith("ai") ? "AI" : "me"), ...replies.map((r) => quote(r, "reply"))];
+  return `${header}${hunk}\n${quoted.join("\n>\n")}\n\n`;
+}

@@ -4,7 +4,7 @@ Everything AI in CodeReview runs through a harness, the [`claude` CLI](https://d
 
 - **Auth** is whatever your `claude` install already uses (Claude subscription, API key, Bedrock, ...). The app does not pass `--bare` or an empty `--setting-sources`, so Claude reads its own auth and settings from `~/.claude/`. It does pass `--strict-mcp-config` (no MCP servers) and an explicit `--permission-mode acceptEdits`, so your own default permission mode never leaks in.
 - If `claude` is not on `PATH`, the AI actions are disabled (Settings → General → Environment shows what was found).
-- AI-written content is **local only**: focus tiers, the focus summary and comments tagged `ai`, `ai:explain`, `ai:review`, `ai:codex` or `ai:coverage` are never published to GitHub (see [AI notes and tags](#ai-notes-and-tags)).
+- AI-written content is **local by default**: focus tiers and the focus summary are never published, and comments tagged `ai`, `ai:explain`, `ai:review`, `ai:codex` or `ai:coverage` are published only if you switch on their publish toggle (see [AI notes and tags](#ai-notes-and-tags)).
 
 ## Focus review
 
@@ -45,6 +45,10 @@ The **Focus** digest above the diff lists what is hidden at the current level, g
 ### AI notes and tags
 
 The AI can attach a short note to a hunk. Notes are ordinary **draft comments tagged `ai:explain`**. Each comment's tag menu offers `None`, `AI`, `Explain`, `Review`, `Codex`, `Coverage` and `Local`. Tagged comments show a pill and are skipped when publishing. To keep a note as your own comment, set its tag to **None**; it is then published with the review like any other comment.
+
+Every root comment has a **publish toggle** (a paper plane) right after its tag. Highlighted (accent colour) means it goes into the GitHub review, grey means it stays local; click it to switch (draft reviews only). AI-tagged comments start grey and keep their tag when you publish them; untagged comments start highlighted, so you can also keep one of your own local. `local`-tagged comments are always grey and the toggle is disabled. Changing a comment's tag (or editing an AI comment, which drops its tag) resets the toggle to the new tag's default. Toggling counts as touching the comment, so a rerun's `cr comment prune` keeps it.
+
+AI comments also get **My voice** under the thread (draft reviews only). It rewrites the comment with your own [`my-voice`](https://docs.claude.com/en/docs/claude-code/skills) Claude skill into a **new untagged draft** at the same anchor (file, side, line range), which publishes normally. The AI original stays local. The skill does not ship with the app: the button only shows when `~/.claude/skills/my-voice/SKILL.md` exists, checked at launch (Settings → General → Environment shows it, with **Recheck**). It runs `claude -p` (always Claude Code, the Chat profile's model when that profile is a Claude one, else Sonnet) with only `Skill`, `Read` and `Glob`; a toast shows the skill's list of changes. Tracked as **My voice** in Usage.
 
 ## The `/local-review` skill
 
@@ -130,6 +134,7 @@ A per-review conversation with Claude, in the review view ([`ChatPanel.tsx`](../
 - The system prompt carries the PR title, repo, changed files, existing comments and the `cr` commands for the review, so Claude can read, add, update or resolve comments itself.
 - A profile selector sits in the panel (the profile the chat runs on; the default comes from Settings → AI). A chat pins the profile it started with; picking another one starts a new session and the earlier messages are replayed to it once (capped at about 200 KB, oldest dropped first).
 - **Send to Chat**: in the line comment composer, this button sends your text, prefixed with the file, line range, side and the diff snippet, to the Chat panel instead of creating a comment. The panel expands if collapsed.
+- **Send to chat** on a comment thread (local or GitHub) puts the thread (location, diff hunk, quoted comments) in the chat input without sending it.
 - Assistant replies show their output token count. Clear the chat to start over (required to pick up an edited Review chat prompt).
 
 ## Prompts and models (Settings → AI)

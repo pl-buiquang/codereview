@@ -86,6 +86,7 @@ import type {
   AutoSync,
   SessionUsageSummary,
   ToolEnv,
+  MyVoiceResult,
   UpdateReviewResult,
   InterdiffMeta,
   QuickInterdiff,
@@ -664,6 +665,10 @@ export const api = {
     invoke<void>("update_comment", { commentId, body }),
   setCommentTag: (commentId: number, tag: CommentTag | null) =>
     invoke<void>("set_comment_tag", { commentId, tag }),
+  setCommentPublish: (commentId: number, publish: boolean) =>
+    invoke<void>("set_comment_publish", { commentId, publish }),
+  myVoiceRewrite: (commentId: number) =>
+    invoke<MyVoiceResult>("my_voice_rewrite", { commentId }),
   deleteComment: (commentId: number) =>
     invoke<void>("delete_comment", { commentId }),
   setCommentResolved: (commentId: number, resolved: boolean) =>

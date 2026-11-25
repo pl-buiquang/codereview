@@ -76,6 +76,29 @@ function EnvironmentPanel() {
           </span>
         )}
       </div>
+      <div className="settings-row">
+        <span title="Optional Claude skill behind the “My voice” button on AI comments. Not shipped with the app.">
+          my-voice skill
+        </span>
+        <span>
+          {env.my_voice_skill ? (
+            <code className="env-path" title={env.my_voice_skill}>
+              {env.my_voice_skill}
+            </code>
+          ) : (
+            <span className="muted">
+              Not installed (<code>~/.claude/skills/my-voice</code>) — “My voice” is hidden.
+            </span>
+          )}{" "}
+          <button
+            className="btn btn-sm"
+            onClick={() => envQuery.refetch()}
+            disabled={envQuery.isFetching}
+          >
+            Recheck
+          </button>
+        </span>
+      </div>
     </div>
   );
 }

@@ -99,10 +99,16 @@ import {
   type FileKbHandle,
   type JumpListHandle,
 } from "../lib/keyboard";
-import { groupThreads, isDraftReply, type CommentThread } from "../lib/threads";
+import {
+  formatCommentThreadForChat,
+  groupThreads,
+  isDraftReply,
+  type CommentThread,
+} from "../lib/threads";
 import {
   DEFAULT_COMMENT_FILTER,
   githubThreadItem,
+  isToPublish,
   localCommentItem,
   matchesCommentFilter,
   type CommentFilter,
@@ -114,7 +120,14 @@ import { RoutineLaunchModal } from "./routines/RoutineLaunchModal";
 import { ImageDiffLink } from "./ImageDiffLink";
 import { ImageDiffPane } from "./ImageDiffPane";
 import { imageDiffAction, isImagePath, isRasterImagePath, openImageDiffs, useImageDiffStatus, useImageDiffUi } from "../lib/imageDiff";
-import { AI_SUBTAGS, isAiTag, tagLabel, tagTitle, type CommentTag } from "../lib/commentTag";
+import {
+  AI_SUBTAGS,
+  isAiTag,
+  tagLabel,
+  tagTitle,
+  willPublish,
+  type CommentTag,
+} from "../lib/commentTag";
 import type {
   AiReviewLayer,
   Comment,
@@ -1087,6 +1100,7 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
           definitionOpen={definition != null}
           onLookup={setDefinition}
           readOnly={readOnly}
+          onDraftToChat={draftToChat}
           onClose={() => setFilePanePath(null)}
           onSaving={() => setSaveState("saving")}
           onSaved={() => {
@@ -1665,6 +1679,8 @@ function ReviewHeader({
   const hasPrMeta = isPr && !!detail.remote_owner && !!detail.remote_name && target.github_pr_number != null;
   const published = review.status === "published";
   const pending = review.status === "published_pending";
+  // Root comments publish sends (replies fold into their root; GitHub draft replies go separately).
+  const publishCount = detail.comments.filter(isToPublish).length;
   const isDraft = review.status === "draft";
   const verdictLabel =
     review.event === "approve"
@@ -1903,6 +1919,7 @@ function ReviewHeader({
             pending={publishReview.isPending}
             draftPending={publishPending.isPending}
             verdictLabel={verdictLabel}
+            commentCount={publishCount}
             onPublish={(event) => publishReview.mutate(event)}
             onPublishDraft={(event) => publishPending.mutate(event)}
             approvePending={approveOnly.isPending}
@@ -2844,6 +2861,7 @@ const FileReview = memo(function FileReview({
           onCloseComposer={() => setSelection(null)}
           onAdd={submitSelectionComment}
           onSendToChat={onSendToChat ? sendSelectionToChat : undefined}
+          onThreadToChat={onDraftToChat}
           onSaving={onSaving}
           onSaved={onSaved}
           onCommentsChanged={onCommentsChanged}
@@ -2982,6 +3000,7 @@ const FileReview = memo(function FileReview({
               baseSha={detail.review.base_sha}
               readOnly={readOnly}
               canReply={false}
+              onThreadToChat={onDraftToChat}
               onSaving={onSaving}
               onSaved={onSaved}
               onCommentsChanged={onCommentsChanged}
@@ -3149,6 +3168,7 @@ function FileBody({
               baseSha={baseSha}
               readOnly={readOnly}
               canReply={false}
+              onThreadToChat={onDraftToChat}
               onSaving={onSaving}
               onSaved={onSaved}
               onCommentsChanged={onCommentsChanged}
@@ -3364,6 +3384,7 @@ export function LineWidget({
   onCloseComposer,
   onAdd,
   onSendToChat,
+  onThreadToChat,
   onSaving,
   onSaved,
   onCommentsChanged,
@@ -3381,6 +3402,8 @@ export function LineWidget({
   onCloseComposer: () => void;
   onAdd: (text: string) => Promise<void>;
   onSendToChat?: (text: string) => void;
+  /** Prefill the chat with a whole thread ("Send to chat" on a comment). */
+  onThreadToChat?: (text: string) => void;
   onSaving: () => void;
   onSaved: () => void;
   onCommentsChanged: () => void;
@@ -3399,6 +3422,7 @@ export function LineWidget({
           showOrigin={showOrigin}
           canReply={canReply && !readOnly}
           suggestionSeedFor={suggestionSeedFor}
+          onThreadToChat={onThreadToChat}
           onSaving={onSaving}
           onSaved={onSaved}
           onCommentsChanged={onCommentsChanged}
@@ -3430,6 +3454,7 @@ export function ThreadItem({
   showOrigin,
   canReply,
   suggestionSeedFor,
+  onThreadToChat,
   onSaving,
   onSaved,
   onCommentsChanged,
@@ -3441,6 +3466,7 @@ export function ThreadItem({
   showOrigin?: boolean;
   canReply?: boolean;
   suggestionSeedFor?: (c: Comment) => string | null;
+  onThreadToChat?: (text: string) => void;
   onSaving: () => void;
   onSaved: () => void;
   onCommentsChanged: () => void;
@@ -3498,7 +3524,6 @@ export function ThreadItem({
         showOrigin={showOrigin}
         replyCount={replies.length}
         suggestionSeed={suggestionSeedFor?.(root) ?? null}
-        onReply={canReply ? () => setReplyOpen(true) : undefined}
         onSaving={onSaving}
         onSaved={onSaved}
         onCommentsChanged={onCommentsChanged}
@@ -3520,18 +3545,30 @@ export function ThreadItem({
           ))}
         </div>
       )}
-      {replyOpen && !readOnly && (
+      {replyOpen && !readOnly ? (
         <Composer
           onSubmit={submitReply}
           onCancel={() => setReplyOpen(false)}
           submitLabel="Reply"
+        />
+      ) : (
+        <ThreadActions
+          root={root}
+          readOnly={readOnly}
+          onReply={canReply ? () => setReplyOpen(true) : undefined}
+          onSendToChat={
+            onThreadToChat
+              ? () => onThreadToChat(formatCommentThreadForChat(root, replies))
+              : undefined
+          }
+          onCommentsChanged={onCommentsChanged}
         />
       )}
     </div>
   );
 }
 
-/** Root-comment-only tag pill: none/ai/local. Tagged comments never publish. */
+/** Root-comment-only tag pill: none/ai/local. Tagged comments publish only when an AI one is included. */
 function CommentTagPill({ comment, readOnly }: { comment: Comment; readOnly: boolean }) {
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
@@ -3549,7 +3586,10 @@ function CommentTagPill({ comment, readOnly }: { comment: Comment; readOnly: boo
   if (readOnly) {
     if (!comment.tag) return null;
     return (
-      <span className={isAiTag(comment.tag) ? "ai-pill" : "local-pill"} title={tagTitle(comment.tag)}>
+      <span
+        className={isAiTag(comment.tag) ? "ai-pill" : "local-pill"}
+        title={tagTitle(comment.tag)}
+      >
         {tagLabel(comment.tag)}
       </span>
     );
@@ -3576,7 +3616,7 @@ function CommentTagPill({ comment, readOnly }: { comment: Comment; readOnly: boo
         className={
           isAiTag(comment.tag) ? "ai-pill" : comment.tag === "local" ? "local-pill" : "expand-btn"
         }
-        title="Tag: ai/local comments are never published to GitHub"
+        title={comment.tag ? tagTitle(comment.tag) : "Tag the comment (AI or local)"}
         onClick={() => setOpen((o) => !o)}
       >
         {comment.tag ? tagLabel(comment.tag) : "+ tag"}
@@ -3599,13 +3639,54 @@ function CommentTagPill({ comment, readOnly }: { comment: Comment; readOnly: boo
   );
 }
 
+/** Root comments: paper plane right after the tag. Accent colour = goes into the GitHub review, grey =
+ *  stays local; click to switch. Untagged comments default to published, AI ones to local, and
+ *  `local`-tagged ones can't be published (disabled). */
+function PublishToggle({ comment, readOnly }: { comment: Comment; readOnly: boolean }) {
+  const queryClient = useQueryClient();
+  const on = willPublish(comment);
+  const locked = comment.tag === "local";
+  const title = locked
+    ? "Local comment: never published to GitHub"
+    : on
+      ? "Published with the GitHub review. Click to keep it local"
+      : "Kept local, not published. Click to publish it with the review";
+  const toggle = () => {
+    const key = ["review", comment.review_id];
+    queryClient.setQueriesData<ReviewDetail>({ queryKey: key }, (old) =>
+      old
+        ? {
+            ...old,
+            comments: old.comments.map((c) => (c.id === comment.id ? { ...c, publish: !on } : c)),
+          }
+        : old,
+    );
+    api.setCommentPublish(comment.id, !on).catch((e) => {
+      toast.error(String(e));
+      queryClient.invalidateQueries({ queryKey: key });
+    });
+  };
+  return (
+    <button
+      type="button"
+      className={`publish-toggle${on ? " on" : ""}`}
+      title={title}
+      aria-label={title}
+      aria-pressed={on}
+      disabled={readOnly || locked}
+      onClick={toggle}
+    >
+      <Icon name="send" size={13} />
+    </button>
+  );
+}
+
 export function CommentItem({
   comment,
   headSha,
   baseSha,
   readOnly,
   showOrigin,
-  onReply,
   replyCount,
   suggestionSeed,
   onSaving,
@@ -3617,7 +3698,6 @@ export function CommentItem({
   baseSha: string | null;
   readOnly: boolean;
   showOrigin?: boolean;
-  onReply?: () => void;
   replyCount?: number;
   suggestionSeed?: string | null;
   onSaving: () => void;
@@ -3640,31 +3720,32 @@ export function CommentItem({
   const outdated = isCommentOutdated(comment, baseSha, headSha);
   const pin = anchorPin(comment);
 
+  const isRoot = comment.parent_id == null;
+
   return (
     <div className="comment-item">
-      {comment.parent_id == null && <CommentTagPill comment={comment} readOnly={readOnly} />}
-      {showOrigin && comment.origin === "file_view" && (
-        <span
-          className="origin-badge"
-          title="Authored in the full-file view — folds into the review summary on publish, not posted as an inline GitHub comment."
-        >
-          in summary
-        </span>
-      )}
-      {outdated && pin && (
-        <span
-          className="stale-badge"
-          title={`Anchored to ${pin.slice(0, 7)}, but the ${
-            comment.side === "LEFT" ? "base" : "head"
-          } has since moved — this comment may no longer line up with the code.`}
-        >
-          outdated · {pin.slice(0, 7)}
-        </span>
-      )}
-      {readOnly ? (
-        <Markdown source={comment.body} />
-      ) : (
-        <div className="comment-edit">
+      <div className="comment-header">
+        {isRoot && <CommentTagPill comment={comment} readOnly={readOnly} />}
+        {isRoot && <PublishToggle comment={comment} readOnly={readOnly} />}
+        {showOrigin && comment.origin === "file_view" && (
+          <span
+            className="origin-badge"
+            title="Authored in the full-file view — folds into the review summary on publish, not posted as an inline GitHub comment."
+          >
+            in summary
+          </span>
+        )}
+        {outdated && pin && (
+          <span
+            className="stale-badge"
+            title={`Anchored to ${pin.slice(0, 7)}, but the ${
+              comment.side === "LEFT" ? "base" : "head"
+            } has since moved — this comment may no longer line up with the code.`}
+          >
+            outdated · {pin.slice(0, 7)}
+          </span>
+        )}
+        {!readOnly && (
           <div className="comment-edit-tabs">
             <button
               className={tab === "write" ? "active" : ""}
@@ -3679,6 +3760,56 @@ export function CommentItem({
               Preview
             </button>
           </div>
+        )}
+        {!readOnly && (
+          <span className="comment-header-actions">
+            {isRoot && (
+              <button
+                className="github-thread-action"
+                onClick={async () => {
+                  try {
+                    await api.setCommentResolved(comment.id, !comment.resolved_at);
+                    onCommentsChanged();
+                  } catch (e) {
+                    toast.error(String(e));
+                  }
+                }}
+              >
+                {comment.resolved_at ? "Unresolve" : "Resolve"}
+              </button>
+            )}
+            <button
+              className="btn-icon"
+              title="Delete comment"
+              onClick={async () => {
+                const message =
+                  replyCount && replyCount > 0
+                    ? `Delete this comment and its ${replyCount} ${
+                        replyCount === 1 ? "reply" : "replies"
+                      }?`
+                    : "Delete this comment?";
+                if (
+                  await confirmDialog({
+                    title: "Delete comment",
+                    message,
+                    confirmLabel: "Delete",
+                    danger: true,
+                  })
+                ) {
+                  await api.deleteComment(comment.id);
+                  onCommentsChanged();
+                }
+              }}
+            >
+              <Icon name="x" size={12} />
+            </button>
+          </span>
+        )}
+      </div>
+      {readOnly ? (
+        <Markdown source={comment.body} />
+      ) : (
+        <div className="comment-edit">
           {tab === "write" ? (
             <>
               {suggestionSeed != null && (
@@ -3697,6 +3828,8 @@ export function CommentItem({
               )}
               <textarea
                 value={body}
+                // Fit the text (8 to 30 rows); the corner handle still resizes.
+                rows={Math.min(30, Math.max(8, body.split("\n").length + 1))}
                 onChange={(e) => {
                   setBody(e.target.value);
                   save(e.target.value);
@@ -3708,51 +3841,76 @@ export function CommentItem({
           )}
         </div>
       )}
-      {!readOnly && onReply && (
-        <button className="btn-sm btn-ghost comment-reply-btn" onClick={onReply}>
-          Reply
+    </div>
+  );
+}
+
+/**
+ * The bottom action row of a local thread, styled like a GitHub thread's: Reply, Send to chat,
+ * and for AI comments My voice (when the skill is installed).
+ */
+export function ThreadActions({
+  root,
+  readOnly,
+  onReply,
+  onSendToChat,
+  onCommentsChanged,
+}: {
+  root: Comment;
+  readOnly: boolean;
+  onReply?: () => void;
+  onSendToChat?: () => void;
+  onCommentsChanged: () => void;
+}) {
+  const aiOff = useAiDisabledReason();
+  const env = useQuery({ queryKey: ["environment"], queryFn: api.checkEnvironment, staleTime: Infinity });
+  const ai = isAiTag(root.tag);
+
+  const myVoice = useMutation({
+    mutationFn: () => api.myVoiceRewrite(root.id),
+    onSuccess: (r) => {
+      onCommentsChanged();
+      toast.success(
+        r.changes
+          ? `Draft added in your voice. Changes:\n${r.changes.slice(0, 600)}`
+          : "Draft added in your voice",
+      );
+    },
+    onError: (e) => toast.error(`My voice failed:\n${String(e)}`),
+  });
+
+  const canReply = !readOnly && onReply != null;
+  const showMyVoice = ai && !readOnly && !!env.data?.my_voice_skill;
+  if (!canReply && !onSendToChat && !showMyVoice) return null;
+
+  return (
+    <div className="github-thread-reply comment-thread-actions">
+      {canReply && (
+        <button className="github-thread-action" onClick={onReply}>
+          Reply…
         </button>
       )}
-      {!readOnly && comment.parent_id == null && (
+      {onSendToChat && (
         <button
-          className="btn-sm btn-ghost btn-resolve"
-          onClick={async () => {
-            try {
-              await api.setCommentResolved(comment.id, !comment.resolved_at);
-              onCommentsChanged();
-            } catch (e) {
-              toast.error(String(e));
-            }
-          }}
+          className="github-thread-action"
+          disabled={aiOff != null}
+          title={aiOff ?? "Put this thread in the chat input"}
+          onClick={onSendToChat}
         >
-          {comment.resolved_at ? "Unresolve" : "Resolve"}
+          Send to chat
         </button>
       )}
-      {!readOnly && (
+      {showMyVoice && (
         <button
-          className="btn-icon"
-          title="Delete comment"
-          onClick={async () => {
-            const message =
-              replyCount && replyCount > 0
-                ? `Delete this comment and its ${replyCount} ${
-                    replyCount === 1 ? "reply" : "replies"
-                  }?`
-                : "Delete this comment?";
-            if (
-              await confirmDialog({
-                title: "Delete comment",
-                message,
-                confirmLabel: "Delete",
-                danger: true,
-              })
-            ) {
-              await api.deleteComment(comment.id);
-              onCommentsChanged();
-            }
-          }}
+          className="github-thread-action"
+          disabled={aiOff != null || myVoice.isPending}
+          title={
+            aiOff ??
+            "Rewrite with your my-voice skill into a new draft at this line (this AI comment stays)"
+          }
+          onClick={() => myVoice.mutate()}
         >
-          <Icon name="x" size={12} />
+          {myVoice.isPending ? "Rewriting…" : "My voice"}
         </button>
       )}
     </div>

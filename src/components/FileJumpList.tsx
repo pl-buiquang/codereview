@@ -28,8 +28,10 @@ import { AI_SUBTAGS, isAiTag, tagLabel, type CommentTag } from "../lib/commentTa
 import {
   DEFAULT_COMMENT_FILTER,
   isCommentFilterActive,
+  isToPublish,
   matchesCommentFilter,
   type CommentFilter,
+  type PublishFilter,
   type ResolutionFilter,
   type SourceFilter,
 } from "../lib/commentFilter";
@@ -58,6 +60,7 @@ interface DisplayItem {
   source: "draft" | "published" | "github";
   /** `ai`/`local`/none, for local comments only (GitHub threads are untagged). */
   tag: CommentTag | null;
+  toPublish: boolean;
   scrollId: string;
   scrollAttr: "comment-id" | "thread-id";
   replies: ReplyEntry[];
@@ -266,6 +269,8 @@ export function FileJumpList({
   const setResolutionFilter = (resolution: ResolutionFilter) =>
     onCommentFilterChange({ ...commentFilter, resolution });
   const setSourceFilter = (source: SourceFilter) => onCommentFilterChange({ ...commentFilter, source });
+  const setPublishFilter = (publish: PublishFilter) =>
+    onCommentFilterChange({ ...commentFilter, publish });
   const [sortMode, setSortMode] = useState<SortMode>("time");
 
   const allComments = detail?.comments ?? [];
@@ -301,6 +306,7 @@ export function FileJumpList({
         createdAt: c.created_at,
         source: c.github_comment_id != null ? "published" : "draft",
         tag: c.tag,
+        toPublish: isToPublish(c),
         scrollId: String(c.id),
         scrollAttr: "comment-id",
         replies: rawReplies.map((r) => ({
@@ -327,6 +333,7 @@ export function FileJumpList({
         createdAt: root.createdAt,
         source: "github",
         tag: null,
+        toPublish: false,
         scrollId: t.id,
         scrollAttr: "thread-id",
         replies: rest.map((r) => ({
@@ -620,6 +627,25 @@ export function FileJumpList({
                     ))}
                   </div>
                 )}
+                <div className="comment-filter-group">
+                  {(["all", "publish"] as PublishFilter[]).map((f) => (
+                    <button
+                      key={f}
+                      type="button"
+                      className={`comment-filter-btn${commentFilter.publish === f ? " active" : ""}`}
+                      title={
+                        f === "publish"
+                          ? "Only the comments the next publish sends (publish toggle on)"
+                          : undefined
+                      }
+                      onClick={() => setPublishFilter(f)}
+                    >
+                      {f === "all"
+                        ? "All"
+                        : `To publish (${displayItems.filter((i) => i.toPublish).length})`}
+                    </button>
+                  ))}
+                </div>
                 <div className="comment-filter-group">
                   {(["file", "time"] as SortMode[]).map((s) => (
                     <button

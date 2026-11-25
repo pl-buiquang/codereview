@@ -57,6 +57,7 @@ export function FileViewPane({
   onSaving,
   onSaved,
   onCommentsChanged,
+  onDraftToChat,
 }: {
   reviewId: number;
   detail: ReviewDetail;
@@ -78,6 +79,8 @@ export function FileViewPane({
   onSaving: () => void;
   onSaved: () => void;
   onCommentsChanged: () => void;
+  /** Prefill the chat input with a comment thread. */
+  onDraftToChat?: (text: string) => void;
 }) {
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -266,6 +269,7 @@ export function FileViewPane({
         canReply={!readOnly}
         onCloseComposer={() => setSelection(null)}
         onAdd={submitComment}
+        onThreadToChat={onDraftToChat}
         onSaving={onSaving}
         onSaved={onSaved}
         onCommentsChanged={onCommentsChanged}
@@ -348,6 +352,7 @@ export function FileViewPane({
                       readOnly={readOnly}
                       showOrigin
                       canReply={false}
+                      onThreadToChat={onDraftToChat}
                       onSaving={onSaving}
                       onSaved={onSaved}
                       onCommentsChanged={onCommentsChanged}

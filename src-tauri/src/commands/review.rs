@@ -138,7 +138,7 @@ pub(crate) fn get_review_row(conn: &Connection, id: i64) -> AppResult<Review> {
     .map_err(Into::into)
 }
 
-fn get_comment(conn: &Connection, id: i64) -> AppResult<Comment> {
+pub(crate) fn get_comment(conn: &Connection, id: i64) -> AppResult<Comment> {
     conn.query_row(
         "SELECT * FROM comment WHERE id = ?1",
         params![id],
@@ -168,7 +168,7 @@ pub(crate) fn ensure_draft(conn: &Connection, review_id: i64) -> AppResult<()> {
     }
 }
 
-/// `ai`, `ai:explain`, `ai:review`, `ai:codex`, `ai:coverage` or `local`, or none. Tagged comments are never published and don't pin
+/// `ai`, `ai:explain`, `ai:review`, `ai:codex`, `ai:coverage` or `local`, or none. Tagged comments are not published (unless an AI one is switched on, see `is_publishable`) and don't pin
 /// a focus-hidden hunk/file visible.
 fn validate_tag(tag: Option<&str>) -> AppResult<()> {
     match tag {
@@ -183,6 +183,21 @@ fn validate_tag(tag: Option<&str>) -> AppResult<()> {
 
 /// SQL predicate: the comment's `tag` is any AI tag (`ai` or `ai:*`).
 pub(crate) const AI_TAG_SQL: &str = "(tag = 'ai' OR tag LIKE 'ai:%')";
+
+/// The tag is an AI tag (`ai` or `ai:*`), the Rust twin of [`AI_TAG_SQL`].
+pub(crate) fn is_ai_tag(tag: Option<&str>) -> bool {
+    tag.is_some_and(|t| t == "ai" || t.starts_with("ai:"))
+}
+
+/// Whether publish sends a comment: a `local` tag never; an AI tag only when the
+/// user included it; an untagged comment unless the user excluded it.
+pub(crate) fn is_publishable(c: &Comment) -> bool {
+    match c.tag.as_deref() {
+        None => c.publish != Some(false),
+        Some("local") => false,
+        Some(_) => c.publish == Some(true),
+    }
+}
 
 /// Map the stored verdict to a GitHub review event. None/'comment' => COMMENT.
 fn gh_event(event: Option<&str>) -> &'static str {
@@ -1989,15 +2004,15 @@ fn is_anchored_to(c: &Comment, review: &Review) -> bool {
     }
 }
 
-/// Replies to fold under a published root: never a tagged (`ai`/`local`) reply,
-/// which stays local the same as a tagged root would.
+/// Replies to fold under a published root: never a `local` or non-included AI
+/// reply, which stays local the same as such a root would.
 fn publishable_replies<'a>(
     replies: &'a HashMap<i64, Vec<&'a Comment>>,
     root_id: i64,
 ) -> Vec<&'a Comment> {
     replies
         .get(&root_id)
-        .map(|rs| rs.iter().filter(|r| r.tag.is_none()).copied().collect())
+        .map(|rs| rs.iter().filter(|r| is_publishable(r)).copied().collect())
         .unwrap_or_default()
 }
 
@@ -2017,7 +2032,7 @@ fn inline_publish_comments(detail: &ReviewDetail) -> Vec<(&Comment, String)> {
                 && c.origin != "file_view"
                 && c.parent_id.is_none()
                 && c.github_thread_root_id.is_none()
-                && c.tag.is_none()
+                && is_publishable(c)
                 && is_anchored_to(c, &detail.review)
         })
         .map(|c| {
@@ -2101,7 +2116,7 @@ fn body_with_file_comments(detail: &ReviewDetail) -> String {
     let file_comments: Vec<&Comment> = detail
         .comments
         .iter()
-        .filter(|c| c.subject_type == "file" && c.parent_id.is_none() && c.tag.is_none())
+        .filter(|c| c.subject_type == "file" && c.parent_id.is_none() && is_publishable(c))
         .collect();
     if !file_comments.is_empty() {
         if !body.is_empty() {
@@ -2116,7 +2131,7 @@ fn body_with_file_comments(detail: &ReviewDetail) -> String {
     let file_view_comments: Vec<&Comment> = detail
         .comments
         .iter()
-        .filter(|c| c.origin == "file_view" && c.parent_id.is_none() && c.tag.is_none())
+        .filter(|c| c.origin == "file_view" && c.parent_id.is_none() && is_publishable(c))
         .collect();
     if !file_view_comments.is_empty() {
         if !body.is_empty() {
@@ -2143,7 +2158,7 @@ fn body_with_file_comments(detail: &ReviewDetail) -> String {
                 && c.origin != "file_view"
                 && c.parent_id.is_none()
                 && c.github_thread_root_id.is_none()
-                && c.tag.is_none()
+                && is_publishable(c)
                 && !is_anchored_to(c, &detail.review)
         })
         .collect();
@@ -2818,6 +2833,7 @@ pub fn update_comment_impl(conn: &Connection, comment_id: i64, body: String) -> 
     conn.execute(
         &format!(
             "UPDATE comment SET body = ?1, updated_at = ?2,
+                publish = CASE WHEN {AI_TAG_SQL} THEN NULL ELSE publish END,
                 tag = CASE WHEN {AI_TAG_SQL} THEN NULL ELSE tag END
              WHERE id = ?3"
         ),
@@ -2845,7 +2861,8 @@ pub fn set_comment_tag_impl(
     ensure_draft(conn, review_id)?;
     validate_tag(tag)?;
     conn.execute(
-        "UPDATE comment SET tag = ?1, updated_at = ?2 WHERE id = ?3",
+        // A new tag means a new default: drop any publish override.
+        "UPDATE comment SET tag = ?1, publish = NULL, updated_at = ?2 WHERE id = ?3",
         params![tag, now(), comment_id],
     )?;
     Ok(())
@@ -2855,6 +2872,63 @@ pub fn set_comment_tag_impl(
 pub fn set_comment_tag(comment_id: i64, tag: Option<String>, db: State<Db>) -> AppResult<()> {
     let conn = db.0.lock().unwrap();
     set_comment_tag_impl(&conn, comment_id, tag.as_deref())
+}
+
+/// A new untagged root draft at the exact anchor of `source_id` (file, side,
+/// line range, hunk, pinned shas, subject type and origin), with `body`. Used to
+/// turn an AI comment into the user's own without touching the original.
+pub fn add_sibling_comment_impl(
+    conn: &Connection,
+    source_id: i64,
+    body: &str,
+) -> AppResult<Comment> {
+    let src = get_comment(conn, source_id)?;
+    ensure_draft(conn, src.review_id)?;
+    if src.parent_id.is_some() || src.github_thread_root_id.is_some() {
+        return Err(AppError::Other(
+            "only a root comment can get a sibling".into(),
+        ));
+    }
+    let ts = now();
+    conn.execute(
+        "INSERT INTO comment
+            (review_id, file_path, subject_type, origin, side, line, start_line, diff_hunk, body,
+             anchored_head_sha, anchored_base_sha, created_at, updated_at)
+         SELECT review_id, file_path, subject_type, origin, side, line, start_line, diff_hunk, ?2,
+                anchored_head_sha, anchored_base_sha, ?3, ?3
+           FROM comment WHERE id = ?1",
+        params![source_id, body, ts],
+    )?;
+    get_comment(conn, conn.last_insert_rowid())
+}
+
+/// Publish or keep local a root comment, overriding its tag's default. Refused
+/// for `local`-tagged comments (never published). Bumps `updated_at`, so a
+/// rerun's prune treats the comment as the user's.
+pub fn set_comment_publish_impl(
+    conn: &Connection,
+    comment_id: i64,
+    publish: bool,
+) -> AppResult<()> {
+    let c = get_comment(conn, comment_id)?;
+    ensure_draft(conn, c.review_id)?;
+    if c.parent_id.is_some() {
+        return Err(AppError::Other("replies follow their root comment".into()));
+    }
+    if c.tag.as_deref() == Some("local") {
+        return Err(AppError::Other("local comments are never published".into()));
+    }
+    conn.execute(
+        "UPDATE comment SET publish = ?1, updated_at = ?2 WHERE id = ?3",
+        params![publish, now(), comment_id],
+    )?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn set_comment_publish(comment_id: i64, publish: bool, db: State<Db>) -> AppResult<()> {
+    let conn = db.0.lock().unwrap();
+    set_comment_publish_impl(&conn, comment_id, publish)
 }
 
 pub fn delete_comment_impl(conn: &Connection, comment_id: i64) -> AppResult<()> {
@@ -3678,6 +3752,40 @@ mod tests {
         );
 
         assert!(set_comment_tag_impl(&conn, local, Some("ai:bogus")).is_err());
+    }
+
+    #[test]
+    fn set_comment_publish_overrides_the_tag_default() {
+        let conn = open_memory();
+        let repo = seed_repo(&conn, None, None);
+        let target = get_or_create_local_target(&conn, repo, "/nope", "main", "feature", true)
+            .unwrap()
+            .0;
+        let review = new_review_for_target(&conn, target.id, &LiveShas::default()).unwrap();
+
+        let ai = seed_comment(&conn, review.id, "a.rs", "RIGHT", 1, None, "x");
+        set_comment_tag_impl(&conn, ai, Some("ai:review")).unwrap();
+        assert!(!is_publishable(&get_comment(&conn, ai).unwrap()));
+        set_comment_publish_impl(&conn, ai, true).unwrap();
+        let c = get_comment(&conn, ai).unwrap();
+        assert!(is_publishable(&c));
+        assert_eq!(c.tag.as_deref(), Some("ai:review"), "keeps its tag");
+
+        let mine = seed_comment(&conn, review.id, "a.rs", "RIGHT", 2, None, "y");
+        assert!(is_publishable(&get_comment(&conn, mine).unwrap()));
+        set_comment_publish_impl(&conn, mine, false).unwrap();
+        assert!(!is_publishable(&get_comment(&conn, mine).unwrap()));
+
+        let local = seed_comment(&conn, review.id, "a.rs", "RIGHT", 3, None, "z");
+        set_comment_tag_impl(&conn, local, Some("local")).unwrap();
+        assert!(set_comment_publish_impl(&conn, local, true).is_err());
+
+        conn.execute(
+            "UPDATE review SET status = 'published' WHERE id = ?1",
+            params![review.id],
+        )
+        .unwrap();
+        assert!(set_comment_publish_impl(&conn, ai, false).is_err());
     }
 
     #[test]
@@ -4515,9 +4623,45 @@ mod tests {
             resolved_at: None,
             github_thread_root_id: None,
             tag: None,
+            publish: None,
             created_at: "now".into(),
             updated_at: "now".into(),
         }
+    }
+
+    #[test]
+    fn payload_follows_publish_overrides_but_never_local_ones() {
+        let tagged = |id: i64, line: i64, tag: Option<&str>, publish: Option<bool>| Comment {
+            id,
+            line,
+            tag: tag.map(Into::into),
+            publish,
+            ..payload_comment(line, None, "RIGHT")
+        };
+        let mut file_ai = tagged(5, 0, Some("ai:explain"), Some(true));
+        file_ai.subject_type = "file".into();
+        file_ai.body = "file note".into();
+        let detail = detail_with(
+            None,
+            "",
+            vec![
+                payload_comment(1, None, "RIGHT"),
+                tagged(2, 2, Some("ai:review"), None),
+                tagged(3, 3, Some("ai:codex"), Some(true)),
+                tagged(4, 4, Some("local"), Some(true)),
+                tagged(6, 6, None, Some(false)),
+                file_ai,
+            ],
+        );
+        let payload = build_publish_payload(&detail);
+        let lines: Vec<i64> = payload["comments"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| c["line"].as_i64().unwrap())
+            .collect();
+        assert_eq!(lines, vec![1, 3]);
+        assert!(payload["body"].as_str().unwrap().contains("file note"));
     }
 
     #[test]

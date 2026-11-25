@@ -20,6 +20,7 @@ function comment(over: Partial<Comment> & { id: number }): Comment {
     resolved_at: null,
     github_thread_root_id: null,
     tag: null,
+    publish: null,
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
     ...over,

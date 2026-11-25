@@ -332,6 +332,7 @@ mod tests {
             resolved_at: None,
             github_thread_root_id: None,
             tag: None,
+            publish: None,
             created_at: "2026-01-01T00:00:00Z".into(),
             updated_at: "2026-01-01T00:00:00Z".into(),
         }

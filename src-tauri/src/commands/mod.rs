@@ -12,6 +12,7 @@ pub mod hosts;
 pub mod image_diff;
 pub mod inbox;
 pub mod issue_session;
+pub mod my_voice;
 pub mod overview;
 pub mod prompts;
 pub mod repo;

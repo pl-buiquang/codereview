@@ -89,6 +89,7 @@ For a RIGHT-side selection or comment, the composer shows "± Insert suggestion"
 
 ### Threads
 
+- Local threads are laid out like GitHub threads: the tag pill, the publish toggle (accent plane = published, grey = local), the badges and Write/Preview sit top left, **Resolve** and delete top right, and a row under the thread holds **Reply…** and **Send to chat**, plus **My voice** on AI comments ([AI notes and tags](focus-and-ai.md#ai-notes-and-tags)).
 - Reply to any root comment (one level of replies). Replies fold under their root on export and publish.
 - "Resolve" / "Unresolve" on a comment thread. Resolved threads collapse to a one-line "Resolved" bar; click it to expand, "Hide resolved thread" to collapse again. Resolving collapses and unresolving expands.
 - The file header shows "N comments, M resolved".

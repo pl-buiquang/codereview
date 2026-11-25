@@ -249,6 +249,8 @@ pub struct ToolEnv {
     pub claude: Option<String>,
     pub opencode: Option<String>,
     pub codex: Option<String>,
+    /// The user's `my-voice` Claude skill directory, when installed (not shipped with the app).
+    pub my_voice_skill: Option<String>,
 }
 
 /// Fetch a GitHub image URL (e.g. user-attachments) with auth, return as data URL.
@@ -267,5 +269,7 @@ pub fn check_environment() -> ToolEnv {
         claude: tools::claude_path(),
         opencode: tools::opencode_path(),
         codex: tools::codex_path(),
+        my_voice_skill: crate::commands::my_voice::skill_path()
+            .map(|p| p.to_string_lossy().into_owned()),
     }
 }

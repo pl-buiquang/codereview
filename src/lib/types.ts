@@ -255,6 +255,9 @@ export interface Comment {
   /** `ai`/`ai:*`/`local`/none. Tagged comments are never published and don't pin a
    *  focus-hidden hunk/file visible. Editing an AI comment clears the tag. */
   tag: CommentTag | null;
+  /** Publish override: null follows the tag (untagged published, AI not); true publishes an
+   *  AI comment, false keeps an untagged one local. A `local` tag always wins. */
+  publish: boolean | null;
   created_at: string;
   updated_at: string;
 }
@@ -321,6 +324,14 @@ export interface ToolEnv {
   claude: string | null;
   opencode: string | null;
   codex: string | null;
+  /** The user's `my-voice` Claude skill directory, when installed (not shipped with the app). */
+  my_voice_skill: string | null;
+}
+
+export interface MyVoiceResult {
+  comment: Comment;
+  /** The skill's Changes list; may be empty. */
+  changes: string;
 }
 
 // --- GitHub PR metadata (review header; read-only, ephemeral) ---

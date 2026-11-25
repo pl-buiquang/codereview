@@ -18,6 +18,7 @@ export function PublishButton({
   pending,
   draftPending,
   verdictLabel,
+  commentCount,
   onPublish,
   onPublishDraft,
   approvePending,
@@ -27,6 +28,8 @@ export function PublishButton({
   pending: boolean;
   draftPending: boolean;
   verdictLabel?: string | null;
+  /** Comments the review would send; shown as "(n)". */
+  commentCount?: number;
   onPublish: (event: ReviewEvent) => void;
   onPublishDraft: (event: ReviewEvent) => void;
   approvePending: boolean;
@@ -104,13 +107,19 @@ export function PublishButton({
       <button
         className="btn btn-primary"
         disabled={busy}
-        title="Stage this review on GitHub as a pending (draft) review, visible only to you"
+        title={`Stage this review on GitHub as a pending (draft) review, visible only to you${
+          commentCount != null
+            ? ` — ${commentCount} comment${commentCount === 1 ? "" : "s"} to send`
+            : ""
+        }`}
         onClick={() => publishDraftAs("comment", "Comment")}
       >
         {draftPending ? (
           <>
             <span className="spinner" /> Staging…
           </>
+        ) : commentCount != null ? (
+          `Publish as draft (${commentCount})`
         ) : (
           "Publish as draft"
         )}

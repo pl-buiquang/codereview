@@ -24,5 +24,12 @@ export function tagLabel(tag: CommentTag): string {
 }
 
 export function tagTitle(tag: CommentTag): string {
-  return tag === "local" ? "Local only; never published" : "Written by AI; not published";
+  return tag === "local" ? "Local only; never published" : "Written by AI";
+}
+
+/** Whether publish sends this comment (mirrors `is_publishable` in `commands/review.rs`). */
+export function willPublish(c: { tag: CommentTag | null; publish: boolean | null }): boolean {
+  if (c.tag == null) return c.publish !== false;
+  if (c.tag === "local") return false;
+  return c.publish === true;
 }

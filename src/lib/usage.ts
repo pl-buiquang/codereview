@@ -36,6 +36,7 @@ const FEATURE_LABELS: Record<string, string> = {
   focus: "Focus",
   board_overview: "Board overview",
   session_summary: "Session summary",
+  my_voice: "My voice",
   routine: "Routine",
 };
 

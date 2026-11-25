@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { formatThreadForChat, groupThreads } from "./threads";
+import { formatCommentThreadForChat, formatThreadForChat, groupThreads } from "./threads";
 import type { Comment, PrThread } from "./types";
 
 function comment(over: Partial<Comment> & { id: number }): Comment {
@@ -20,6 +20,7 @@ function comment(over: Partial<Comment> & { id: number }): Comment {
     resolved_at: null,
     github_thread_root_id: null,
     tag: null,
+    publish: null,
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
     ...over,
@@ -119,5 +120,26 @@ describe("formatThreadForChat", () => {
     expect(formatThreadForChat(prThread({ startLine: 10 }))).toMatch(/`src\/a.ts` lines 10–12 \(RIGHT\) —/);
     expect(formatThreadForChat(prThread({ isOutdated: true }))).toMatch(/line 12 \(RIGHT\), outdated —/);
     expect(formatThreadForChat(prThread({ line: null, diffSide: null }))).toMatch(/`src\/a.ts` \(file-level\) —/);
+  });
+});
+
+describe("formatCommentThreadForChat", () => {
+  it("quotes root and replies with location and hunk", () => {
+    const root = comment({
+      id: 1,
+      file_path: "src/a.rs",
+      line: 9,
+      start_line: 7,
+      side: "RIGHT",
+      body: "first\nsecond",
+      tag: "ai:review",
+      diff_hunk: "@@ -1 +1 @@\n+x",
+    });
+    const reply = comment({ id: 2, parent_id: 1, body: "agreed" });
+    expect(formatCommentThreadForChat(root, [reply])).toBe(
+      "Regarding review comment [ai:review] on `src/a.rs` lines 7–9 (RIGHT):\n" +
+        "```diff\n@@ -1 +1 @@\n+x\n```\n" +
+        "> **AI**: first\n> second\n>\n> **reply**: agreed\n\n",
+    );
   });
 });

@@ -206,9 +206,13 @@ pub struct Comment {
     /// databaseId of the GitHub thread's root comment this draft reply targets.
     /// NULL for normal local comments.
     pub github_thread_root_id: Option<i64>,
-    /// 'ai', 'ai:explain', 'ai:review', 'ai:codex', 'ai:coverage' or 'local', or NULL. Tagged comments are never published and don't
+    /// 'ai', 'ai:explain', 'ai:review', 'ai:codex', 'ai:coverage' or 'local', or NULL. Tagged comments are not published unless `publish` says so, and don't
     /// pin a focus-hidden hunk/file visible.
     pub tag: Option<String>,
+    /// Publish override: `None` follows the tag (untagged published, AI not), `Some(true)`
+    /// publishes an AI comment, `Some(false)` keeps an untagged one local. `local` always wins.
+    #[serde(default)]
+    pub publish: Option<bool>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -233,6 +237,7 @@ impl Comment {
             resolved_at: row.get("resolved_at")?,
             github_thread_root_id: row.get("github_thread_root_id")?,
             tag: row.get("tag")?,
+            publish: row.get("publish")?,
             created_at: row.get("created_at")?,
             updated_at: row.get("updated_at")?,
         })
