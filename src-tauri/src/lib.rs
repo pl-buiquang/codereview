@@ -135,10 +135,8 @@ pub fn run() {
     let t0 = std::time::Instant::now();
     path_env::ensure_login_path();
     let login_env_ms = t0.elapsed().as_millis();
-    let cr_note = cr_install::maybe_install().map(|r| {
-        let verb = if r.updated { "updated" } else { "installed" };
-        format!("cr CLI {verb} → {}", r.path.display())
-    });
+    let cr_note = cr_install::maybe_install().map(|r| r.note());
+    let cr_log_note = cr_note.clone();
     tools::init();
 
     tauri::Builder::default()
@@ -242,6 +240,9 @@ pub fn run() {
                 cfg!(debug_assertions),
                 db_path.display(),
             );
+            if let Some(note) = &cr_log_note {
+                log::info!("{note}");
+            }
             log::info!(
                 "startup: login env {login_env_ms}ms, setup done {}ms since launch",
                 t0.elapsed().as_millis(),
