@@ -82,7 +82,9 @@ pub fn parse_endpoint(s: &str) -> AppResult<RemoteEndpoint> {
     }
     // `:` separates the fields of an ssh forward spec, so it cannot appear in a path.
     if s.contains(':') || s.chars().any(char::is_control) {
-        return Err(AppError::Other(format!("`{s}`: the socket path may not contain `:` or control characters")));
+        return Err(AppError::Other(format!(
+            "`{s}`: the socket path may not contain `:` or control characters"
+        )));
     }
     Ok(RemoteEndpoint::Socket(s.to_string()))
 }
@@ -91,22 +93,34 @@ pub fn parse_endpoint(s: &str) -> AppResult<RemoteEndpoint> {
 pub fn validate_ssh_target(s: &str) -> AppResult<()> {
     let s = s.trim();
     if s.is_empty() {
-        return Err(AppError::Other("the SSH target is empty: use an alias from ~/.ssh/config".into()));
+        return Err(AppError::Other(
+            "the SSH target is empty: use an alias from ~/.ssh/config".into(),
+        ));
     }
     if s.starts_with('-') || s.chars().any(|c| c.is_whitespace() || c.is_control()) {
-        return Err(AppError::Other(format!("`{s}` is not a valid SSH target (no spaces, no leading `-`)")));
+        return Err(AppError::Other(format!(
+            "`{s}` is not a valid SSH target (no spaces, no leading `-`)"
+        )));
     }
     Ok(())
 }
 
 pub fn list(conn: &Connection) -> AppResult<Vec<Host>> {
     let mut stmt = conn.prepare("SELECT * FROM host ORDER BY name COLLATE NOCASE, id")?;
-    let rows = stmt.query_map([], Host::from_row)?.collect::<rusqlite::Result<_>>()?;
+    let rows = stmt
+        .query_map([], Host::from_row)?
+        .collect::<rusqlite::Result<_>>()?;
     Ok(rows)
 }
 
 pub fn get(conn: &Connection, id: i64) -> AppResult<Option<Host>> {
-    Ok(conn.query_row("SELECT * FROM host WHERE id = ?1", params![id], Host::from_row).optional()?)
+    Ok(conn
+        .query_row(
+            "SELECT * FROM host WHERE id = ?1",
+            params![id],
+            Host::from_row,
+        )
+        .optional()?)
 }
 
 /// The host `id`, or a readable error.
@@ -121,10 +135,15 @@ pub fn save(conn: &Connection, input: HostInput) -> AppResult<Host> {
     }
     validate_ssh_target(&input.ssh_target)?;
     parse_endpoint(&input.remote_endpoint)?;
-    let (target, endpoint) = (input.ssh_target.trim().to_string(), input.remote_endpoint.trim().to_string());
+    let (target, endpoint) = (
+        input.ssh_target.trim().to_string(),
+        input.remote_endpoint.trim().to_string(),
+    );
     let now = chrono::Utc::now().to_rfc3339();
     let taken = |e: rusqlite::Error| match e {
-        rusqlite::Error::SqliteFailure(f, _) if f.code == rusqlite::ErrorCode::ConstraintViolation => {
+        rusqlite::Error::SqliteFailure(f, _)
+            if f.code == rusqlite::ErrorCode::ConstraintViolation =>
+        {
             AppError::Other(format!("a host named “{name}” already exists"))
         }
         other => other.into(),
@@ -134,7 +153,9 @@ pub fn save(conn: &Connection, input: HostInput) -> AppResult<Host> {
             // A run in flight is followed by its remote id on this host's daemon: moving the host would
             // make the mirror ask another daemon about it.
             if let Some(old) = get(conn, id)? {
-                if (old.ssh_target != target || old.remote_endpoint != endpoint) && active_runs(conn, id)? > 0 {
+                if (old.ssh_target != target || old.remote_endpoint != endpoint)
+                    && active_runs(conn, id)? > 0
+                {
                     return Err(AppError::Other(format!(
                         "“{}” still has active runs: wait for them (or stop them) before changing its SSH target or endpoint",
                         old.name
@@ -171,7 +192,11 @@ pub fn save(conn: &Connection, input: HostInput) -> AppResult<Host> {
 }
 
 fn active_runs(conn: &Connection, host_id: i64) -> AppResult<i64> {
-    Ok(conn.query_row("SELECT COUNT(*) FROM routine_run WHERE host_id = ?1 AND status IN ('queued', 'running')", params![host_id], |r| r.get(0))?)
+    Ok(conn.query_row(
+        "SELECT COUNT(*) FROM routine_run WHERE host_id = ?1 AND status IN ('queued', 'running')",
+        params![host_id],
+        |r| r.get(0),
+    )?)
 }
 
 /// Remove a host. Refused while a profile points at it or a run on it is still going: both would
@@ -187,7 +212,11 @@ pub fn delete(conn: &Connection, id: i64) -> AppResult<()> {
             "“{}” is used by the profile{} {}: delete or move {} first",
             host.name,
             if profiles.len() > 1 { "s" } else { "" },
-            profiles.iter().map(|p| format!("“{p}”")).collect::<Vec<_>>().join(", "),
+            profiles
+                .iter()
+                .map(|p| format!("“{p}”"))
+                .collect::<Vec<_>>()
+                .join(", "),
             if profiles.len() > 1 { "them" } else { "it" },
         )));
     }
@@ -197,7 +226,10 @@ pub fn delete(conn: &Connection, id: i64) -> AppResult<()> {
         |r| r.get(0),
     )?;
     if active > 0 {
-        return Err(AppError::Other(format!("“{}” still has {active} active run(s): stop them first", host.name)));
+        return Err(AppError::Other(format!(
+            "“{}” still has {active} active run(s): stop them first",
+            host.name
+        )));
     }
     conn.execute("DELETE FROM host WHERE id = ?1", params![id])?;
     Ok(())
@@ -225,14 +257,23 @@ mod tests {
     use crate::db::open_memory;
 
     fn input(name: &str) -> HostInput {
-        HostInput { id: None, name: name.into(), ssh_target: "koza".into(), remote_endpoint: "/run/user/1000/codereview/worker.sock".into(), enabled: true }
+        HostInput {
+            id: None,
+            name: name.into(),
+            ssh_target: "koza".into(),
+            remote_endpoint: "/run/user/1000/codereview/worker.sock".into(),
+            enabled: true,
+        }
     }
 
     #[test]
     fn hosts_round_trip() {
         let conn = open_memory();
         let h = save(&conn, input("koza")).unwrap();
-        assert_eq!((h.kind.as_str(), h.enabled, h.last_seen.clone()), ("ssh", true, None));
+        assert_eq!(
+            (h.kind.as_str(), h.enabled, h.last_seen.clone()),
+            ("ssh", true, None)
+        );
         let mut edit = input("koza.tv");
         edit.id = Some(h.id);
         edit.enabled = false;
@@ -241,14 +282,20 @@ mod tests {
         assert_eq!(list(&conn).unwrap().len(), 1);
         delete(&conn, h.id).unwrap();
         assert!(list(&conn).unwrap().is_empty());
-        assert!(require(&conn, h.id).unwrap_err().to_string().contains("not found"));
+        assert!(require(&conn, h.id)
+            .unwrap_err()
+            .to_string()
+            .contains("not found"));
     }
 
     #[test]
     fn names_are_unique_case_insensitively_and_input_is_validated() {
         let conn = open_memory();
         save(&conn, input("Koza")).unwrap();
-        assert!(save(&conn, input("koza")).unwrap_err().to_string().contains("already exists"));
+        assert!(save(&conn, input("koza"))
+            .unwrap_err()
+            .to_string()
+            .contains("already exists"));
         assert!(save(&conn, input("  ")).is_err());
         let mut bad = input("x");
         bad.ssh_target = "-oProxyCommand=evil".into();
@@ -258,7 +305,10 @@ mod tests {
         assert!(save(&conn, spaced).is_err());
         let mut rel = input("x");
         rel.remote_endpoint = "~/worker.sock".into();
-        assert!(save(&conn, rel).unwrap_err().to_string().contains("absolute"));
+        assert!(save(&conn, rel)
+            .unwrap_err()
+            .to_string()
+            .contains("absolute"));
         let mut missing = input("x");
         missing.id = Some(99);
         assert!(save(&conn, missing).is_err());
@@ -266,8 +316,14 @@ mod tests {
 
     #[test]
     fn endpoints_are_a_socket_path_or_a_port() {
-        assert_eq!(parse_endpoint(" 7777 ").unwrap(), RemoteEndpoint::Port(7777));
-        assert_eq!(parse_endpoint("/run/x.sock").unwrap(), RemoteEndpoint::Socket("/run/x.sock".into()));
+        assert_eq!(
+            parse_endpoint(" 7777 ").unwrap(),
+            RemoteEndpoint::Port(7777)
+        );
+        assert_eq!(
+            parse_endpoint("/run/x.sock").unwrap(),
+            RemoteEndpoint::Socket("/run/x.sock".into())
+        );
         for bad in ["", "0", "70000", "rel.sock", "/a:b", "$XDG_RUNTIME_DIR/x"] {
             assert!(parse_endpoint(bad).is_err(), "{bad}");
         }
@@ -279,7 +335,10 @@ mod tests {
         let h = save(&conn, input("a")).unwrap();
         record_seen(&conn, h.id, 1, "0.6.0");
         let seen = get(&conn, h.id).unwrap().unwrap();
-        assert_eq!((seen.last_protocol, seen.last_version.as_deref()), (Some(1), Some("0.6.0")));
+        assert_eq!(
+            (seen.last_protocol, seen.last_version.as_deref()),
+            (Some(1), Some("0.6.0"))
+        );
         assert!(seen.last_seen.is_some());
         // a rename keeps it, a new endpoint clears it
         let mut e = input("b");
@@ -310,7 +369,10 @@ mod tests {
         let mut moved = input("a");
         moved.id = Some(h.id);
         moved.remote_endpoint = "7777".into();
-        assert!(save(&conn, moved).unwrap_err().to_string().contains("still has active runs"));
+        assert!(save(&conn, moved)
+            .unwrap_err()
+            .to_string()
+            .contains("still has active runs"));
         let mut other_target = input("a");
         other_target.id = Some(h.id);
         other_target.ssh_target = "elsewhere".into();
@@ -320,7 +382,8 @@ mod tests {
         renamed.id = Some(h.id);
         renamed.enabled = false;
         assert_eq!(save(&conn, renamed).unwrap().name, "b");
-        conn.execute("UPDATE routine_run SET status = 'ok'", []).unwrap();
+        conn.execute("UPDATE routine_run SET status = 'ok'", [])
+            .unwrap();
         let mut moved = input("b");
         moved.id = Some(h.id);
         moved.remote_endpoint = "7777".into();
@@ -336,8 +399,12 @@ mod tests {
             params![h.id],
         )
         .unwrap();
-        assert!(delete(&conn, h.id).unwrap_err().to_string().contains("“Remote”"));
-        conn.execute("DELETE FROM ai_profile WHERE host_id = ?1", params![h.id]).unwrap();
+        assert!(delete(&conn, h.id)
+            .unwrap_err()
+            .to_string()
+            .contains("“Remote”"));
+        conn.execute("DELETE FROM ai_profile WHERE host_id = ?1", params![h.id])
+            .unwrap();
         conn.execute(
             "INSERT INTO routine (key, name, context_type, prompt_template, created_at, updated_at) VALUES ('k', 'k', 'pr', 'p', 'n', 'n')",
             [],
@@ -350,8 +417,12 @@ mod tests {
             params![rid, h.id],
         )
         .unwrap();
-        assert!(delete(&conn, h.id).unwrap_err().to_string().contains("active run"));
-        conn.execute("UPDATE routine_run SET status = 'ok'", []).unwrap();
+        assert!(delete(&conn, h.id)
+            .unwrap_err()
+            .to_string()
+            .contains("active run"));
+        conn.execute("UPDATE routine_run SET status = 'ok'", [])
+            .unwrap();
         delete(&conn, h.id).unwrap();
     }
 
@@ -367,11 +438,19 @@ mod tests {
         )
         .unwrap();
         let (host, remote, seq): (Option<i64>, Option<i64>, i64) = conn
-            .query_row("SELECT host_id, remote_run_id, last_remote_seq FROM routine_run", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .query_row(
+                "SELECT host_id, remote_run_id, last_remote_seq FROM routine_run",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
             .unwrap();
         assert_eq!((host, remote, seq), (None, None, 0));
         let table_has = |table: &str, col: &str| {
-            conn.prepare(&format!("PRAGMA table_info({table})")).unwrap().query_map([], |r| r.get::<_, String>(1)).unwrap().any(|c| c.unwrap() == col)
+            conn.prepare(&format!("PRAGMA table_info({table})"))
+                .unwrap()
+                .query_map([], |r| r.get::<_, String>(1))
+                .unwrap()
+                .any(|c| c.unwrap() == col)
         };
         assert!(table_has("ai_run", "host_id"));
         assert!(table_has("remote_applied_op", "op_id"));

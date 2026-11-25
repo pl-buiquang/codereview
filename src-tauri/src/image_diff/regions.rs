@@ -37,7 +37,13 @@ struct Cell {
 }
 
 impl Cell {
-    const EMPTY: Cell = Cell { x0: u32::MAX, y0: u32::MAX, x1: 0, y1: 0, px: 0 };
+    const EMPTY: Cell = Cell {
+        x0: u32::MAX,
+        y0: u32::MAX,
+        x1: 0,
+        y1: 0,
+        px: 0,
+    };
 
     fn add_pixel(&mut self, x: u32, y: u32) {
         self.x0 = self.x0.min(x);
@@ -164,8 +170,28 @@ mod tests {
         let r = detect(&m, 400, 400);
         assert_eq!(r.other, 0);
         assert_eq!(r.regions.len(), 2);
-        assert_eq!(r.regions[0], Region { id: 0, x: 10, y: 10, w: 21, h: 11, changed_px: 2 });
-        assert_eq!(r.regions[1], Region { id: 1, x: 350, y: 380, w: 1, h: 1, changed_px: 1 });
+        assert_eq!(
+            r.regions[0],
+            Region {
+                id: 0,
+                x: 10,
+                y: 10,
+                w: 21,
+                h: 11,
+                changed_px: 2
+            }
+        );
+        assert_eq!(
+            r.regions[1],
+            Region {
+                id: 1,
+                x: 350,
+                y: 380,
+                w: 1,
+                h: 1,
+                changed_px: 1
+            }
+        );
     }
 
     #[test]
@@ -202,6 +228,9 @@ mod tests {
         assert_eq!(r.regions.len(), MAX_REGIONS);
         assert_eq!(r.other, 11);
         assert!(r.regions.iter().any(|r| r.changed_px == 100));
-        assert!(r.regions.windows(2).all(|p| (p[0].y, p[0].x) <= (p[1].y, p[1].x)));
+        assert!(r
+            .regions
+            .windows(2)
+            .all(|p| (p[0].y, p[0].x) <= (p[1].y, p[1].x)));
     }
 }

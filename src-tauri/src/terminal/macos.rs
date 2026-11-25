@@ -12,7 +12,10 @@ fn osascript(script: &str, argv: &[&str]) -> AppResult<String> {
         .output()
         .map_err(|e| AppError::Other(format!("failed to run osascript: {e}")))?;
     if !out.status.success() {
-        return Err(AppError::Other(format!("osascript: {}", String::from_utf8_lossy(&out.stderr).trim())));
+        return Err(AppError::Other(format!(
+            "osascript: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        )));
     }
     Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
@@ -78,24 +81,30 @@ fn parse_ps_all(out: &str) -> HashMap<i64, Proc> {
 /// Which terminal app owns `tty`, found by walking up from the tty's processes.
 fn host_app_in(procs: &HashMap<i64, Proc>, tty: &str) -> Option<HostApp> {
     let name = tty.trim_start_matches("/dev/");
-    procs.iter().filter(|(_, p)| p.tty == name).find_map(|(&pid, _)| {
-        let mut cur = pid;
-        for _ in 0..32 {
-            let p = procs.get(&cur)?;
-            if let Some(app) = host_app_from_comm(&p.comm) {
-                return Some(app);
+    procs
+        .iter()
+        .filter(|(_, p)| p.tty == name)
+        .find_map(|(&pid, _)| {
+            let mut cur = pid;
+            for _ in 0..32 {
+                let p = procs.get(&cur)?;
+                if let Some(app) = host_app_from_comm(&p.comm) {
+                    return Some(app);
+                }
+                if p.ppid <= 1 {
+                    return None;
+                }
+                cur = p.ppid;
             }
-            if p.ppid <= 1 {
-                return None;
-            }
-            cur = p.ppid;
-        }
-        None
-    })
+            None
+        })
 }
 
 fn host_app(tty: &str) -> Option<HostApp> {
-    let out = Command::new("ps").args(["-axo", "pid=,ppid=,tty=,comm="]).output().ok()?;
+    let out = Command::new("ps")
+        .args(["-axo", "pid=,ppid=,tty=,comm="])
+        .output()
+        .ok()?;
     host_app_in(&parse_ps_all(&String::from_utf8_lossy(&out.stdout)), tty)
 }
 
@@ -105,7 +114,9 @@ pub fn focus_tty(tty: &str, cwd_hint: Option<&str>) -> AppResult<()> {
     match host_app(tty) {
         Some(HostApp::Ghostty) => ghostty_focus(cwd_hint.unwrap_or("")),
         Some(HostApp::Iterm2) => iterm2_focus_tty(tty),
-        None => Err(AppError::Other(format!("{tty} is not in iTerm2 or Ghostty"))),
+        None => Err(AppError::Other(format!(
+            "{tty} is not in iTerm2 or Ghostty"
+        ))),
     }
 }
 
@@ -136,7 +147,9 @@ fn ghostty_focus(cwd: &str) -> AppResult<()> {
     match osascript(GHOSTTY_FOCUS, &[cwd])?.as_str() {
         "ok" => Ok(()),
         "not-running" => Err(AppError::Other("Ghostty is not running".into())),
-        _ => Err(AppError::Other("could not tell which Ghostty terminal shows this session".into())),
+        _ => Err(AppError::Other(
+            "could not tell which Ghostty terminal shows this session".into(),
+        )),
     }
 }
 
@@ -197,12 +210,20 @@ fn ghostty_maximizes_by_default() -> bool {
     Command::new("/Applications/Ghostty.app/Contents/MacOS/ghostty")
         .args(["+show-config"])
         .output()
-        .map(|o| String::from_utf8_lossy(&o.stdout).lines().any(|l| l.replace(' ', "") == "maximize=true"))
+        .map(|o| {
+            String::from_utf8_lossy(&o.stdout)
+                .lines()
+                .any(|l| l.replace(' ', "") == "maximize=true")
+        })
         .unwrap_or(false)
 }
 
 pub fn ghostty_open(cwd: &str, command: &str) -> AppResult<()> {
-    let maximize = if ghostty_maximizes_by_default() { "keep" } else { "toggle" };
+    let maximize = if ghostty_maximizes_by_default() {
+        "keep"
+    } else {
+        "toggle"
+    };
     osascript(GHOSTTY_OPEN, &[cwd, command, maximize]).map(|_| ())
 }
 
@@ -223,7 +244,10 @@ mod tests {
   900     1 ttys009  /usr/bin/login
 ";
         let procs = parse_ps_all(ps);
-        assert_eq!(procs[&1974].comm, "/Users/me/Library/Application Support/iTerm2/iTermServer-3.7.0");
+        assert_eq!(
+            procs[&1974].comm,
+            "/Users/me/Library/Application Support/iTerm2/iTermServer-3.7.0"
+        );
         assert_eq!(host_app_in(&procs, "/dev/ttys000"), Some(HostApp::Iterm2));
         assert_eq!(host_app_in(&procs, "/dev/ttys005"), Some(HostApp::Ghostty));
         assert_eq!(host_app_in(&procs, "/dev/ttys009"), None);

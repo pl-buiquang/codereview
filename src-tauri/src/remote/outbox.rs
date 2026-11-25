@@ -35,7 +35,9 @@ enum Progress {
     New,
     Applied,
     /// Failed, and it is time to try again (or it is not yet time: `wait`).
-    Failing { due: bool },
+    Failing {
+        due: bool,
+    },
     GivenUp,
 }
 
@@ -52,8 +54,12 @@ fn progress(conn: &Connection, run_id: i64, op_id: &str, retry_after: Duration) 
         Ok(Some((true, _, _))) => Progress::Applied,
         Ok(Some((false, attempts, _))) if attempts >= MAX_ATTEMPTS => Progress::GivenUp,
         Ok(Some((false, _, at))) => {
-            let last = chrono::DateTime::parse_from_rfc3339(&at).map(|t| t.with_timezone(&chrono::Utc)).unwrap_or_default();
-            let due = (chrono::Utc::now() - last).to_std().map_or(true, |age| age >= retry_after);
+            let last = chrono::DateTime::parse_from_rfc3339(&at)
+                .map(|t| t.with_timezone(&chrono::Utc))
+                .unwrap_or_default();
+            let due = (chrono::Utc::now() - last)
+                .to_std()
+                .map_or(true, |age| age >= retry_after);
             Progress::Failing { due }
         }
         Err(e) => {
@@ -88,11 +94,31 @@ fn record(conn: &Connection, run_id: i64, op_id: &str, result: &AppResult<()>) {
 /// reached just leaves the ops for the next sync. Returns the ops given up on (after [`MAX_ATTEMPTS`]
 /// failures spread over at least [`RETRY_AFTER`] each); they are acknowledged only when `terminal`
 /// (the run is over), so the host keeps them while there is still a chance to apply them.
-pub fn sync(applier: &dyn OpApplier, run_id: i64, remote_run_id: i64, client: &RemoteClient, terminal: bool) -> Vec<String> {
-    sync_with(applier, run_id, remote_run_id, client, terminal, RETRY_AFTER)
+pub fn sync(
+    applier: &dyn OpApplier,
+    run_id: i64,
+    remote_run_id: i64,
+    client: &RemoteClient,
+    terminal: bool,
+) -> Vec<String> {
+    sync_with(
+        applier,
+        run_id,
+        remote_run_id,
+        client,
+        terminal,
+        RETRY_AFTER,
+    )
 }
 
-pub fn sync_with(applier: &dyn OpApplier, run_id: i64, remote_run_id: i64, client: &RemoteClient, terminal: bool, retry_after: Duration) -> Vec<String> {
+pub fn sync_with(
+    applier: &dyn OpApplier,
+    run_id: i64,
+    remote_run_id: i64,
+    client: &RemoteClient,
+    terminal: bool,
+    retry_after: Duration,
+) -> Vec<String> {
     let ops = match client.outbox(remote_run_id, 0) {
         Ok(ops) => ops,
         Err(e) => {
@@ -141,15 +167,24 @@ pub struct Args<'a>(pub &'a Value);
 
 impl Args<'_> {
     pub fn str(&self, key: &str) -> AppResult<&str> {
-        self.0.get(key).and_then(Value::as_str).ok_or_else(|| AppError::Other(format!("op argument `{key}` is missing")))
+        self.0
+            .get(key)
+            .and_then(Value::as_str)
+            .ok_or_else(|| AppError::Other(format!("op argument `{key}` is missing")))
     }
 
     pub fn opt_str(&self, key: &str) -> Option<&str> {
-        self.0.get(key).and_then(Value::as_str).filter(|s| !s.is_empty())
+        self.0
+            .get(key)
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
     }
 
     pub fn int(&self, key: &str) -> AppResult<i64> {
-        self.0.get(key).and_then(Value::as_i64).ok_or_else(|| AppError::Other(format!("op argument `{key}` is missing")))
+        self.0
+            .get(key)
+            .and_then(Value::as_i64)
+            .ok_or_else(|| AppError::Other(format!("op argument `{key}` is missing")))
     }
 
     pub fn flag(&self, key: &str) -> bool {
@@ -185,7 +220,15 @@ mod tests {
             )
             .unwrap();
             let run = conn.last_insert_rowid();
-            (Self { conn: Mutex::new(conn), applied: RefCell::default(), fail: RefCell::default(), on_apply: RefCell::default() }, run)
+            (
+                Self {
+                    conn: Mutex::new(conn),
+                    applied: RefCell::default(),
+                    fail: RefCell::default(),
+                    on_apply: RefCell::default(),
+                },
+                run,
+            )
         }
     }
 
@@ -221,7 +264,8 @@ mod tests {
         .unwrap()
         .id;
         let conn = crate::worker::store::open(&srv.state.worker_db_path).unwrap();
-        conn.busy_timeout(std::time::Duration::from_secs(5)).unwrap();
+        conn.busy_timeout(std::time::Duration::from_secs(5))
+            .unwrap();
         for (t, a) in ops {
             append_outbox(&conn, id, t, a).unwrap();
         }
@@ -237,10 +281,20 @@ mod tests {
         let srv = TestServer::start(1);
         let proxy = Proxy::start(&srv);
         let c = proxy.client().unwrap();
-        let id = remote_run(&srv, &[("notify", serde_json::json!({"message": "a"})), ("board_track", serde_json::json!({"reference": "o/n#1"})), ("notify", serde_json::json!({"message": "b"}))]);
+        let id = remote_run(
+            &srv,
+            &[
+                ("notify", serde_json::json!({"message": "a"})),
+                ("board_track", serde_json::json!({"reference": "o/n#1"})),
+                ("notify", serde_json::json!({"message": "b"})),
+            ],
+        );
         let (fake, run) = Fake::new();
         sync(&fake, run, id, &c, false);
-        assert_eq!(*fake.applied.borrow(), [format!("{id}:1"), format!("{id}:2"), format!("{id}:3")]);
+        assert_eq!(
+            *fake.applied.borrow(),
+            [format!("{id}:1"), format!("{id}:2"), format!("{id}:3")]
+        );
         assert_eq!(pending(&c, id), 0, "acknowledged");
         // a second sync finds nothing and applies nothing
         sync(&fake, run, id, &c, false);
@@ -252,7 +306,13 @@ mod tests {
         let srv = TestServer::start(1);
         let proxy = Proxy::start(&srv);
         let c = proxy.client().unwrap();
-        let id = remote_run(&srv, &[("notify", serde_json::json!({"message": "a"})), ("notify", serde_json::json!({"message": "b"}))]);
+        let id = remote_run(
+            &srv,
+            &[
+                ("notify", serde_json::json!({"message": "a"})),
+                ("notify", serde_json::json!({"message": "b"})),
+            ],
+        );
         let (fake, run) = Fake::new();
         // the connection dies right after the last op is applied, so the acknowledgement is lost
         let p = proxy.clone();
@@ -265,7 +325,11 @@ mod tests {
         sync(&fake, run, id, &c, false);
         assert_eq!(fake.applied.borrow().len(), 2);
         proxy.set_down(false);
-        assert_eq!(pending(&proxy.client().unwrap(), id), 2, "the host still has them");
+        assert_eq!(
+            pending(&proxy.client().unwrap(), id),
+            2,
+            "the host still has them"
+        );
         // reconnect: the same ops come again, none is applied again, then they are acknowledged
         *fake.on_apply.borrow_mut() = None;
         sync(&fake, run, id, &proxy.client().unwrap(), false);
@@ -278,18 +342,36 @@ mod tests {
         let srv = TestServer::start(1);
         let proxy = Proxy::start(&srv);
         let c = proxy.client().unwrap();
-        let id = remote_run(&srv, &[("board_link", serde_json::json!({})), ("notify", serde_json::json!({"message": "ok"}))]);
+        let id = remote_run(
+            &srv,
+            &[
+                ("board_link", serde_json::json!({})),
+                ("notify", serde_json::json!({"message": "ok"})),
+            ],
+        );
         let (fake, run) = Fake::new();
         *fake.fail.borrow_mut() = vec!["board_link".into()];
         let now = Duration::ZERO;
         sync_with(&fake, run, id, &c, false, now);
-        assert_eq!(*fake.applied.borrow(), [format!("{id}:2")], "the later op still goes through");
-        assert_eq!(pending(&c, id), 2, "nothing is acknowledged past the failed op");
+        assert_eq!(
+            *fake.applied.borrow(),
+            [format!("{id}:2")],
+            "the later op still goes through"
+        );
+        assert_eq!(
+            pending(&c, id),
+            2,
+            "nothing is acknowledged past the failed op"
+        );
         sync_with(&fake, run, id, &c, false, now);
         // third attempt: given up, but a running run keeps it on the host
         let dropped = sync_with(&fake, run, id, &c, false, now);
         assert_eq!(dropped, [format!("board_link ({id}:1)")]);
-        assert_eq!(pending(&c, id), 2, "a given-up op is not acknowledged while the run goes on");
+        assert_eq!(
+            pending(&c, id),
+            2,
+            "a given-up op is not acknowledged while the run goes on"
+        );
         // the run ends: it is acknowledged and reported
         let dropped = sync_with(&fake, run, id, &c, true, now);
         assert_eq!(dropped.len(), 1);
@@ -298,10 +380,18 @@ mod tests {
             .conn
             .lock()
             .unwrap()
-            .query_row("SELECT error, attempts FROM remote_applied_op WHERE op_id = ?1", params![format!("{id}:1")], |r| Ok((r.get(0)?, r.get(1)?)))
+            .query_row(
+                "SELECT error, attempts FROM remote_applied_op WHERE op_id = ?1",
+                params![format!("{id}:1")],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
             .unwrap();
         assert_eq!((err.as_str(), attempts), ("boom", 3));
-        assert_eq!(fake.applied.borrow().len(), 1, "the good op was applied once");
+        assert_eq!(
+            fake.applied.borrow().len(),
+            1,
+            "the good op was applied once"
+        );
     }
 
     #[test]
@@ -316,12 +406,24 @@ mod tests {
         for _ in 0..10 {
             sync(&fake, run, id, &c, false);
         }
-        let attempts: i64 = fake.conn.lock().unwrap().query_row("SELECT attempts FROM remote_applied_op", [], |r| r.get(0)).unwrap();
+        let attempts: i64 = fake
+            .conn
+            .lock()
+            .unwrap()
+            .query_row("SELECT attempts FROM remote_applied_op", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(attempts, 1);
         assert_eq!(pending(&c, id), 1);
         // when the blip is over the op goes through
         fake.fail.borrow_mut().clear();
-        fake.conn.lock().unwrap().execute("UPDATE remote_applied_op SET applied_at = '2000-01-01T00:00:00Z'", []).unwrap();
+        fake.conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE remote_applied_op SET applied_at = '2000-01-01T00:00:00Z'",
+                [],
+            )
+            .unwrap();
         sync(&fake, run, id, &c, false);
         assert_eq!(fake.applied.borrow().len(), 1);
         assert_eq!(pending(&c, id), 0);
@@ -330,7 +432,9 @@ mod tests {
     #[test]
     fn an_unreachable_host_leaves_the_ops_alone() {
         let (fake, run) = Fake::new();
-        let c = RemoteClient::new(crate::remote::tunnel::Addr::Unix("/nonexistent/s.sock".into()));
+        let c = RemoteClient::new(crate::remote::tunnel::Addr::Unix(
+            "/nonexistent/s.sock".into(),
+        ));
         sync(&fake, run, 1, &c, false);
         assert!(fake.applied.borrow().is_empty());
     }
@@ -339,7 +443,20 @@ mod tests {
     fn args_report_what_is_missing() {
         let v = serde_json::json!({"a": "x", "n": 3, "empty": "", "f": true});
         let a = Args(&v);
-        assert_eq!((a.str("a").unwrap(), a.int("n").unwrap(), a.opt_str("empty"), a.flag("f"), a.flag("zz")), ("x", 3, None, true, false));
-        assert!(a.str("zz").unwrap_err().to_string().contains("`zz` is missing"));
+        assert_eq!(
+            (
+                a.str("a").unwrap(),
+                a.int("n").unwrap(),
+                a.opt_str("empty"),
+                a.flag("f"),
+                a.flag("zz")
+            ),
+            ("x", 3, None, true, false)
+        );
+        assert!(a
+            .str("zz")
+            .unwrap_err()
+            .to_string()
+            .contains("`zz` is missing"));
     }
 }

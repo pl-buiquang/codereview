@@ -93,8 +93,15 @@ pub fn pin_key(base: Option<&str>, head: Option<&str>, since: Option<(&str, &str
 }
 
 pub fn cache_root(db_path: &Path) -> PathBuf {
-    let stem = db_path.file_stem().and_then(|s| s.to_str()).unwrap_or("codereview");
-    db_path.parent().unwrap_or(Path::new(".")).join("image_diffs").join(stem)
+    let stem = db_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("codereview");
+    db_path
+        .parent()
+        .unwrap_or(Path::new("."))
+        .join("image_diffs")
+        .join(stem)
 }
 
 pub fn cache_dir(db_path: &Path, review_id: i64) -> PathBuf {
@@ -103,7 +110,9 @@ pub fn cache_dir(db_path: &Path, review_id: i64) -> PathBuf {
 
 /// The cache directory of a review as seen from its connection; `None` for an in-memory database.
 pub fn cache_dir_for_conn(conn: &rusqlite::Connection, review_id: i64) -> Option<PathBuf> {
-    conn.path().filter(|p| !p.is_empty()).map(|p| cache_dir(Path::new(p), review_id))
+    conn.path()
+        .filter(|p| !p.is_empty())
+        .map(|p| cache_dir(Path::new(p), review_id))
 }
 
 /// Delete a review's cache. Failures are logged: they must not fail what triggered the cleanup.
@@ -127,7 +136,10 @@ pub fn read_progress(dir: &Path) -> Option<Progress> {
 pub fn write_json(dir: &Path, name: &str, value: &impl Serialize) -> AppResult<()> {
     std::fs::create_dir_all(dir)?;
     let tmp = dir.join(format!(".{name}.tmp"));
-    std::fs::write(&tmp, serde_json::to_vec(value).map_err(|e| crate::error::AppError::Other(e.to_string()))?)?;
+    std::fs::write(
+        &tmp,
+        serde_json::to_vec(value).map_err(|e| crate::error::AppError::Other(e.to_string()))?,
+    )?;
     std::fs::rename(&tmp, dir.join(name))?;
     Ok(())
 }
@@ -196,11 +208,26 @@ mod tests {
 
         assert!(resolve_asset(&db, "/7/f0/diff.png").is_some());
         assert!(resolve_asset(&db, "7/f0/diff.png").is_some());
-        assert!(resolve_asset(&db, "/7/manifest.json").is_none(), "not a png");
-        assert!(resolve_asset(&db, "/7/../../secret.png").is_none(), "traversal");
-        assert!(resolve_asset(&db, "/7//etc/passwd.png").is_none(), "absolute");
-        assert!(resolve_asset(&db, "/7/f0\\..\\diff.png").is_none(), "backslash");
-        assert!(resolve_asset(&db, "/8/f0/diff.png").is_none(), "other review");
+        assert!(
+            resolve_asset(&db, "/7/manifest.json").is_none(),
+            "not a png"
+        );
+        assert!(
+            resolve_asset(&db, "/7/../../secret.png").is_none(),
+            "traversal"
+        );
+        assert!(
+            resolve_asset(&db, "/7//etc/passwd.png").is_none(),
+            "absolute"
+        );
+        assert!(
+            resolve_asset(&db, "/7/f0\\..\\diff.png").is_none(),
+            "backslash"
+        );
+        assert!(
+            resolve_asset(&db, "/8/f0/diff.png").is_none(),
+            "other review"
+        );
         assert!(resolve_asset(&db, "/x/f0/diff.png").is_none(), "bad id");
         std::fs::remove_dir_all(&root).unwrap();
     }
@@ -213,7 +240,15 @@ mod tests {
     #[test]
     fn json_roundtrip_is_atomic_and_readable() {
         let dir = tmp("json");
-        write_progress(&dir, &Progress { state: "running".into(), done: 1, total: 3, error: None });
+        write_progress(
+            &dir,
+            &Progress {
+                state: "running".into(),
+                done: 1,
+                total: 3,
+                error: None,
+            },
+        );
         let p = read_progress(&dir).unwrap();
         assert_eq!((p.state.as_str(), p.done, p.total), ("running", 1, 3));
         assert!(!dir.join(".progress.json.tmp").exists());

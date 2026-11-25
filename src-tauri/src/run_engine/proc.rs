@@ -11,7 +11,10 @@ pub const STOP_GRACE: Duration = Duration::from_secs(5);
 #[cfg(unix)]
 pub fn process_alive(pid: i32) -> bool {
     // SAFETY: signal 0 only probes for existence.
-    unsafe { libc::kill(pid, 0) == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM) }
+    unsafe {
+        libc::kill(pid, 0) == 0
+            || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+    }
 }
 
 #[cfg(not(unix))]

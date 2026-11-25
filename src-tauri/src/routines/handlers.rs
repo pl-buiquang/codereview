@@ -15,13 +15,13 @@ use tauri::{AppHandle, Emitter, Manager};
 use super::context::{ContextRef, Light};
 use super::manager::{get_run, routine_settings, RoutineRun};
 use super::Routine;
-use crate::run_usage::{RunTag, RunUsage};
 use crate::ai::profiles;
 use crate::commands::focus::{begin_generation, finish_generation, review_local_path};
 use crate::commands::{board::board_list_impl, overview, review::ensure_draft};
 use crate::db::{Db, DbPath};
-use crate::image_diff::{report, store};
 use crate::error::{AppError, AppResult};
+use crate::image_diff::{report, store};
+use crate::run_usage::{RunTag, RunUsage};
 
 const AI_REVIEW_PREFIX: &str = "ai_review_";
 pub const IMAGE_DIFF_REPORT_EVENT: &str = "image-diff-report-updated";
@@ -65,7 +65,14 @@ struct ImageDiffReportUpdated {
 }
 
 fn emit_report(app: &AppHandle, review_id: i64, status: &'static str, error: Option<String>) {
-    let _ = app.emit(IMAGE_DIFF_REPORT_EVENT, ImageDiffReportUpdated { review_id, status, error });
+    let _ = app.emit(
+        IMAGE_DIFF_REPORT_EVENT,
+        ImageDiffReportUpdated {
+            review_id,
+            status,
+            error,
+        },
+    );
 }
 
 /// Open-card ids each overview run was generated from, until the run ends.
@@ -74,7 +81,11 @@ static OVERVIEW_IDS: Mutex<Option<HashMap<i64, Vec<String>>>> = Mutex::new(None)
 /// The model a launch asks for: the launch override, else the routine's own, else its profile's
 /// (the routine's, else the default profile), with the legacy env fallback for Claude Code.
 pub fn launch_model(conn: &Connection, routine: &Routine, requested: &str) -> String {
-    let requested = if requested.trim().is_empty() { routine.model.as_str() } else { requested };
+    let requested = if requested.trim().is_empty() {
+        routine.model.as_str()
+    } else {
+        requested
+    };
     profiles::resolve_routine(conn, routine.profile_id).model_for(requested)
 }
 
@@ -84,11 +95,17 @@ pub fn effective_model(conn: &Connection, run: &RoutineRun, routine: &Routine) -
 }
 
 fn review_id(ctx: &ContextRef) -> AppResult<i64> {
-    ctx.id.parse().map_err(|_| AppError::Other("bad review id".into()))
+    ctx.id
+        .parse()
+        .map_err(|_| AppError::Other("bad review id".into()))
 }
 
 fn layer(routine: &Routine) -> String {
-    routine.key.strip_prefix(AI_REVIEW_PREFIX).unwrap_or(&routine.key).to_string()
+    routine
+        .key
+        .strip_prefix(AI_REVIEW_PREFIX)
+        .unwrap_or(&routine.key)
+        .to_string()
 }
 
 /// Usage-log tag: converted jobs keep the feature names they had before they ran as routines.
@@ -115,7 +132,13 @@ pub fn usage_tag(routine: &Routine, run: &RoutineRun, harness: &'static str) -> 
 
 /// Checks and side effects of a launch. Runs before the run row exists; `rollback` undoes it when
 /// the launch then fails.
-pub fn pre_launch(app: &AppHandle, routine: &Routine, ctx: &ContextRef, light: &Light, model: &str) -> AppResult<()> {
+pub fn pre_launch(
+    app: &AppHandle,
+    routine: &Routine,
+    ctx: &ContextRef,
+    light: &Light,
+    model: &str,
+) -> AppResult<()> {
     let db = app.state::<Db>();
     match routine.handler.as_deref() {
         Some("overview") => {
@@ -147,8 +170,13 @@ pub fn pre_launch(app: &AppHandle, routine: &Routine, ctx: &ContextRef, light: &
                 )
                 .ok();
             if let Some(key) = running {
-                let running = key.strip_prefix(AI_REVIEW_PREFIX).unwrap_or(&key).to_string();
-                return Err(AppError::Other(format!("an AI review ({running}) is already running for this review")));
+                let running = key
+                    .strip_prefix(AI_REVIEW_PREFIX)
+                    .unwrap_or(&key)
+                    .to_string();
+                return Err(AppError::Other(format!(
+                    "an AI review ({running}) is already running for this review"
+                )));
             }
             drop(conn);
             emit_ai_review(app, id, layer(routine), "running", None, None);
@@ -158,11 +186,17 @@ pub fn pre_launch(app: &AppHandle, routine: &Routine, ctx: &ContextRef, light: &
             let dir = image_diff_dir(app, id);
             let manifest = store::read_manifest(&dir)
                 .ok_or_else(|| AppError::Other("generate the image diffs first".into()))?;
-            if !manifest.files.iter().any(|f| f.skipped.is_none() && f.mismatch_px > 0) {
+            if !manifest
+                .files
+                .iter()
+                .any(|f| f.skipped.is_none() && f.mismatch_px > 0)
+            {
                 return Err(AppError::Other("no changed pixels to describe".into()));
             }
             if active_image_diff_report(&db.0.lock().unwrap(), id) {
-                return Err(AppError::Other("an image diff report is already running for this review".into()));
+                return Err(AppError::Other(
+                    "an image diff report is already running for this review".into(),
+                ));
             }
             emit_report(app, id, "running", None);
         }
@@ -180,10 +214,21 @@ pub fn rollback(app: &AppHandle, routine: &Routine, ctx: &ContextRef, error: &st
     let Ok(id) = review_id(ctx) else { return };
     match routine.handler.as_deref() {
         Some("focus") => {
-            let _ = finish_generation(&app.state::<Db>().0.lock().unwrap(), id, Some(error.to_string()));
+            let _ = finish_generation(
+                &app.state::<Db>().0.lock().unwrap(),
+                id,
+                Some(error.to_string()),
+            );
             let _ = app.emit("focus-updated", FocusUpdated { review_id: id });
         }
-        Some("ai_review") => emit_ai_review(app, id, layer(routine), "failed", Some(error.to_string()), None),
+        Some("ai_review") => emit_ai_review(
+            app,
+            id,
+            layer(routine),
+            "failed",
+            Some(error.to_string()),
+            None,
+        ),
         Some("image_diff_report") => emit_report(app, id, "failed", Some(error.to_string())),
         _ => {}
     }
@@ -197,12 +242,23 @@ fn emit_ai_review(
     error: Option<String>,
     summary: Option<String>,
 ) {
-    let _ = app.emit("ai-review-updated", AiReviewUpdated { review_id, layer, status, error, summary });
+    let _ = app.emit(
+        "ai-review-updated",
+        AiReviewUpdated {
+            review_id,
+            layer,
+            status,
+            error,
+            summary,
+        },
+    );
 }
 
 fn scratch_for(prefix: &str, id: i64) -> AppResult<PathBuf> {
     // Canonical so path rules match (macOS /var → /private/var).
-    let dir = std::env::temp_dir().canonicalize()?.join(format!("{prefix}-{id}"));
+    let dir = std::env::temp_dir()
+        .canonicalize()?
+        .join(format!("{prefix}-{id}"));
     std::fs::create_dir_all(&dir)?;
     Ok(dir)
 }
@@ -232,7 +288,11 @@ pub fn prepare(app: &AppHandle, routine: &Routine, run: &RoutineRun) -> AppResul
             if ids.is_empty() {
                 return Err(AppError::Other("no open cards on the board".into()));
             }
-            OVERVIEW_IDS.lock().unwrap().get_or_insert_with(HashMap::new).insert(run.id, ids);
+            OVERVIEW_IDS
+                .lock()
+                .unwrap()
+                .get_or_insert_with(HashMap::new)
+                .insert(run.id, ids);
             prep.vars.push(("snapshot".into(), snapshot));
             prep.cwd = Some(std::env::temp_dir().join("codereview_overview"));
             std::fs::create_dir_all(prep.cwd.as_ref().unwrap())?;
@@ -242,7 +302,8 @@ pub fn prepare(app: &AppHandle, routine: &Routine, run: &RoutineRun) -> AppResul
             // Plans go through a file: Claude Code refuses Bash commands that carry inline JSON.
             let scratch = scratch_for("codereview-focus", id)?;
             let plan = scratch.join("plan.json").display().to_string();
-            prep.extra_tools.push(format!("Edit(/{}/**)", scratch.display()));
+            prep.extra_tools
+                .push(format!("Edit(/{}/**)", scratch.display()));
             prep.system_suffix = format!(
                 "\n\n---\n\nApp mode. Review id = {id}. Do not create or open reviews. \
                  The `cr` CLI on PATH already points at the app's database. \
@@ -258,8 +319,10 @@ pub fn prepare(app: &AppHandle, routine: &Routine, run: &RoutineRun) -> AppResul
             prep.cwd = Some(review_cwd(app, id, "ai_review")?);
             prep.extra_dirs.push(scratch_for("cr", id)?);
             if let Some(home) = dirs::home_dir() {
-                prep.extra_dirs.push(home.join(".claude/skills/local-review"));
-                prep.extra_dirs.push(home.join(".claude/plugins/cache/openai-codex"));
+                prep.extra_dirs
+                    .push(home.join(".claude/skills/local-review"));
+                prep.extra_dirs
+                    .push(home.join(".claude/plugins/cache/openai-codex"));
             }
         }
         Some("image_diff_report") => {
@@ -268,7 +331,8 @@ pub fn prepare(app: &AppHandle, routine: &Routine, run: &RoutineRun) -> AppResul
             let report = dir.join(report::RAW);
             // The raw report may be rewritten by a previous run's leftovers: start clean.
             let _ = std::fs::remove_file(&report);
-            prep.extra_tools.push(format!("Edit(/{})", report.display()));
+            prep.extra_tools
+                .push(format!("Edit(/{})", report.display()));
             prep.system_suffix = format!(
                 "\n\n---\n\nApp mode. Review id = {id}. The image diffs are in `{}` (your working directory). \
                  Write the report with the Write tool to `{}` (the only writable path).",
@@ -284,8 +348,10 @@ pub fn prepare(app: &AppHandle, routine: &Routine, run: &RoutineRun) -> AppResul
             let root = canonical_dir(&s.notes_root)?;
             let plans = canonical_dir(&s.plans_dir)?;
             for dir in [&root, &plans] {
-                prep.extra_tools.push(format!("Write(/{}/**)", dir.display()));
-                prep.extra_tools.push(format!("Edit(/{}/**)", dir.display()));
+                prep.extra_tools
+                    .push(format!("Write(/{}/**)", dir.display()));
+                prep.extra_tools
+                    .push(format!("Edit(/{}/**)", dir.display()));
             }
             prep.extra_dirs.push(root.clone());
             if !plans.starts_with(&root) {
@@ -305,12 +371,29 @@ fn canonical_dir(configured: &str) -> AppResult<PathBuf> {
 }
 
 /// Post-process a run that ended (not on app exit: the row is settled elsewhere).
-pub fn finish(app: &AppHandle, routine: &Routine, run: &RoutineRun, status: &str, text: &str, error: Option<&str>, usage: &RunUsage) {
+pub fn finish(
+    app: &AppHandle,
+    routine: &Routine,
+    run: &RoutineRun,
+    status: &str,
+    text: &str,
+    error: Option<&str>,
+    usage: &RunUsage,
+) {
     let succeeded = matches!(status, "ok" | "needs_attention");
-    let failure = || error.map(str::to_string).unwrap_or_else(|| format!("the run ended: {status}"));
+    let failure = || {
+        error
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("the run ended: {status}"))
+    };
     match routine.handler.as_deref() {
         Some("overview") => {
-            let ids = OVERVIEW_IDS.lock().unwrap().as_mut().and_then(|m| m.remove(&run.id)).unwrap_or_default();
+            let ids = OVERVIEW_IDS
+                .lock()
+                .unwrap()
+                .as_mut()
+                .and_then(|m| m.remove(&run.id))
+                .unwrap_or_default();
             if succeeded && !text.trim().is_empty() {
                 let db = app.state::<Db>();
                 let conn = db.0.lock().unwrap();
@@ -349,7 +432,14 @@ pub fn finish(app: &AppHandle, routine: &Routine, run: &RoutineRun, status: &str
         Some("ai_review") => {
             if let Ok(id) = review_id(&run.context) {
                 if succeeded {
-                    emit_ai_review(app, id, layer(routine), "done", None, Some(text.to_string()));
+                    emit_ai_review(
+                        app,
+                        id,
+                        layer(routine),
+                        "done",
+                        None,
+                        Some(text.to_string()),
+                    );
                 } else {
                     emit_ai_review(app, id, layer(routine), "failed", Some(failure()), None);
                 }
@@ -358,7 +448,9 @@ pub fn finish(app: &AppHandle, routine: &Routine, run: &RoutineRun, status: &str
         Some("image_diff_report") => {
             if let Ok(id) = review_id(&run.context) {
                 let outcome = if succeeded {
-                    report::finalize(&image_diff_dir(app, id)).map(|_| ()).map_err(|e| e.to_string())
+                    report::finalize(&image_diff_dir(app, id))
+                        .map(|_| ())
+                        .map_err(|e| e.to_string())
                 } else {
                     Err(failure())
                 };
@@ -380,7 +472,15 @@ pub fn finish_dropped(app: &AppHandle, run_id: i64) {
         get_run(&conn, run_id).and_then(|run| super::get(&conn, run.routine_id).map(|r| (run, r)))
     };
     if let Ok((run, routine)) = loaded {
-        finish(app, &routine, &run, "killed", "", Some("stopped before it started"), &RunUsage::default());
+        finish(
+            app,
+            &routine,
+            &run,
+            "killed",
+            "",
+            Some("stopped before it started"),
+            &RunUsage::default(),
+        );
     }
 }
 
@@ -432,14 +532,22 @@ mod tests {
 
     fn routine(conn: &Connection, key: &str) -> Routine {
         crate::routines::seed(conn).unwrap();
-        crate::routines::list(conn).unwrap().into_iter().find(|r| r.key == key).unwrap()
+        crate::routines::list(conn)
+            .unwrap()
+            .into_iter()
+            .find(|r| r.key == key)
+            .unwrap()
     }
 
     #[test]
     fn launch_model_order_is_launch_then_routine_then_profile_then_default_profile() {
         let mut conn = open_memory();
         let mut r = routine(&conn, "focus");
-        conn.execute("UPDATE ai_profile SET model = 'opus' WHERE is_default = 1", []).unwrap();
+        conn.execute(
+            "UPDATE ai_profile SET model = 'opus' WHERE is_default = 1",
+            [],
+        )
+        .unwrap();
 
         // No profile of its own: the default profile's model.
         assert_eq!(launch_model(&conn, &r, ""), "opus");
@@ -456,9 +564,17 @@ mod tests {
     fn a_deleted_routine_profile_falls_back_to_the_default_profile() {
         let mut conn = open_memory();
         let mut r = routine(&conn, "focus");
-        conn.execute("UPDATE ai_profile SET model = 'opus' WHERE is_default = 1", []).unwrap();
+        conn.execute(
+            "UPDATE ai_profile SET model = 'opus' WHERE is_default = 1",
+            [],
+        )
+        .unwrap();
         r.profile_id = Some(profile(&mut conn, "haiku"));
-        conn.execute("DELETE FROM ai_profile WHERE id = ?1", [r.profile_id.unwrap()]).unwrap();
+        conn.execute(
+            "DELETE FROM ai_profile WHERE id = ?1",
+            [r.profile_id.unwrap()],
+        )
+        .unwrap();
         assert_eq!(launch_model(&conn, &r, ""), "opus");
     }
 }

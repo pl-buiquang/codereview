@@ -55,7 +55,13 @@ fn harness_infos() -> Vec<HarnessInfo> {
         .into_iter()
         .map(|h| {
             let available = h.available();
-            HarnessInfo { id: h.id(), name: h.name(), caps: h.caps(), available, version: available.then(|| h.version()).flatten() }
+            HarnessInfo {
+                id: h.id(),
+                name: h.name(),
+                caps: h.caps(),
+                available,
+                version: available.then(|| h.version()).flatten(),
+            }
         })
         .collect()
 }
@@ -68,8 +74,21 @@ fn remote_infos(host_id: i64) -> AppResult<Vec<HarnessInfo>> {
         .filter_map(|h| {
             let r = offered.iter().find(|o| o.id == h.id())?;
             // Protocol 1 carries no sessions or interactive use: show what a remote profile can really do.
-            let caps = Caps { sessions: false, resume: false, fork: false, interactive_tui: false, pins_session_id: false, ..r.caps.clone() };
-            Some(HarnessInfo { id: h.id(), name: h.name(), caps, available: r.available, version: r.version.clone() })
+            let caps = Caps {
+                sessions: false,
+                resume: false,
+                fork: false,
+                interactive_tui: false,
+                pins_session_id: false,
+                ..r.caps.clone()
+            };
+            Some(HarnessInfo {
+                id: h.id(),
+                name: h.name(),
+                caps,
+                available: r.available,
+                version: r.version.clone(),
+            })
         })
         .collect())
 }
@@ -89,10 +108,15 @@ pub async fn ai_harnesses(host_id: Option<i64>) -> AppResult<Vec<HarnessInfo>> {
 /// static suggestion list. Cached; `refresh` asks the CLI again. Empty when nothing is configured
 /// (opencode without a provider).
 #[tauri::command]
-pub async fn ai_harness_models(harness: String, refresh: Option<bool>, host_id: Option<i64>) -> AppResult<Vec<ai::models::ModelGroup>> {
+pub async fn ai_harness_models(
+    harness: String,
+    refresh: Option<bool>,
+    host_id: Option<i64>,
+) -> AppResult<Vec<ai::models::ModelGroup>> {
     tauri::async_runtime::spawn_blocking(move || match host_id {
         Some(host) => {
-            ai::harness_by_id(&harness).ok_or_else(|| AppError::Other(format!("unknown harness `{harness}`")))?;
+            ai::harness_by_id(&harness)
+                .ok_or_else(|| AppError::Other(format!("unknown harness `{harness}`")))?;
             let ids = crate::remote::harness::for_host(host, &harness)
                 .ok_or_else(|| AppError::Other(format!("unknown harness `{harness}`")))?
                 .models()?;
@@ -100,8 +124,8 @@ pub async fn ai_harness_models(harness: String, refresh: Option<bool>, host_id: 
         }
         None => ai::models::for_harness(&harness, refresh.unwrap_or(false)),
     })
-        .await
-        .map_err(|e| AppError::Other(format!("model listing failed: {e}")))?
+    .await
+    .map_err(|e| AppError::Other(format!("model listing failed: {e}")))?
 }
 
 #[cfg(test)]
@@ -114,7 +138,10 @@ mod tests {
         let oc = infos.iter().find(|i| i.id == "opencode").unwrap();
         assert_eq!(oc.name, "opencode");
         assert!(!oc.caps.tool_allowlist && !oc.caps.fork && oc.caps.pins_session_id);
-        assert_eq!(infos.iter().map(|i| i.id).collect::<Vec<_>>(), ["claude", "opencode", "codex"]);
+        assert_eq!(
+            infos.iter().map(|i| i.id).collect::<Vec<_>>(),
+            ["claude", "opencode", "codex"]
+        );
     }
 
     #[test]
@@ -124,6 +151,9 @@ mod tests {
         assert_eq!(claude.name, "Claude Code");
         assert!(claude.caps.tool_allowlist);
         let json = serde_json::to_value(claude).unwrap();
-        assert_eq!(json["caps"]["access_levels"], serde_json::json!(["default", "read_only", "edit", "full"]));
+        assert_eq!(
+            json["caps"]["access_levels"],
+            serde_json::json!(["default", "read_only", "edit", "full"])
+        );
     }
 }

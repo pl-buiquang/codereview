@@ -41,7 +41,10 @@ fn img(dir: &Path, rel: &str, alt: &str, class: &str) -> String {
 
 fn diff_dim(f: &FileEntry) -> Option<Dim> {
     let (b, a) = (f.before?, f.after?);
-    Some(Dim { width: b.width.max(a.width), height: b.height.max(a.height) })
+    Some(Dim {
+        width: b.width.max(a.width),
+        height: b.height.max(a.height),
+    })
 }
 
 /// The same rule as the panel's `imageAssetRel`: the preview when the picture is wider than it.
@@ -52,7 +55,11 @@ fn asset_rel(f: &FileEntry, slot: &str, preview_width: u32) -> String {
         _ => f.after,
     };
     let wide = dim.is_some_and(|d| d.width > preview_width);
-    format!("f{}/{}{slot}.png", f.index, if wide { "preview-" } else { "" })
+    format!(
+        "f{}/{}{slot}.png",
+        f.index,
+        if wide { "preview-" } else { "" }
+    )
 }
 
 fn change_label(c: Change) -> &'static str {
@@ -82,7 +89,8 @@ fn short(sha: Option<&str>) -> &str {
 }
 
 fn size(d: Option<Dim>) -> String {
-    d.map(|d| format!("{}×{}", d.width, d.height)).unwrap_or_else(|| "—".into())
+    d.map(|d| format!("{}×{}", d.width, d.height))
+        .unwrap_or_else(|| "—".into())
 }
 
 fn display_path(f: &FileEntry) -> String {
@@ -95,7 +103,11 @@ fn display_path(f: &FileEntry) -> String {
 fn crops(out: &mut String, dir: &Path, rel: impl Fn(&str) -> String, label: &str) {
     out.push_str(r#"<div class="crops">"#);
     for slot in SLOTS {
-        let _ = write!(out, "<figure>{}<figcaption>{slot}</figcaption></figure>", img(dir, &rel(slot), &format!("{slot} {label}"), "crop"));
+        let _ = write!(
+            out,
+            "<figure>{}<figcaption>{slot}</figcaption></figure>",
+            img(dir, &rel(slot), &format!("{slot} {label}"), "crop")
+        );
     }
     out.push_str("</div>");
 }
@@ -122,11 +134,20 @@ fn report_section(out: &mut String, dir: &Path, report: &Report) {
         if !f.description.is_empty() {
             let _ = write!(out, "<p>{}</p>", esc(&f.description));
         }
-        crops(out, dir, |slot| format!("report/{}-{slot}.png", f.n), &f.title);
+        crops(
+            out,
+            dir,
+            |slot| format!("report/{}-{slot}.png", f.n),
+            &f.title,
+        );
         out.push_str("</article>");
     }
     if report.dropped > 0 {
-        let _ = write!(out, r#"<p class="muted">{} finding(s) left out: they named no compared image.</p>"#, report.dropped);
+        let _ = write!(
+            out,
+            r#"<p class="muted">{} finding(s) left out: they named no compared image.</p>"#,
+            report.dropped
+        );
     }
     out.push_str("</section>");
 }
@@ -148,12 +169,20 @@ fn file_section(out: &mut String, dir: &Path, f: &FileEntry, preview_width: u32)
             size(f.after),
             f.mismatch_px,
             f.diff_pct,
-            if f.aa_px > 0 { format!(" · {} px anti-aliasing", f.aa_px) } else { String::new() }
+            if f.aa_px > 0 {
+                format!(" · {} px anti-aliasing", f.aa_px)
+            } else {
+                String::new()
+            }
         );
     }
     out.push_str("</header>");
     if let Some(why) = &f.skipped {
-        let _ = write!(out, r#"<p class="muted">Not compared: {}</p></section>"#, esc(why));
+        let _ = write!(
+            out,
+            r#"<p class="muted">Not compared: {}</p></section>"#,
+            esc(why)
+        );
         return;
     }
     let slots: &[&str] = match f.change {
@@ -161,10 +190,22 @@ fn file_section(out: &mut String, dir: &Path, f: &FileEntry, preview_width: u32)
         Change::Deleted => &["before"],
         _ => &SLOTS,
     };
-    let _ = write!(out, r#"<div class="cols" style="grid-template-columns: repeat({}, minmax(0, 1fr))">"#, slots.len());
+    let _ = write!(
+        out,
+        r#"<div class="cols" style="grid-template-columns: repeat({}, minmax(0, 1fr))">"#,
+        slots.len()
+    );
     for slot in slots {
-        let _ = write!(out, r#"<div class="col"><h4>{slot}</h4><div class="frame">"#);
-        out.push_str(&img(dir, &asset_rel(f, slot, preview_width), &format!("{slot} {}", f.path), "full"));
+        let _ = write!(
+            out,
+            r#"<div class="col"><h4>{slot}</h4><div class="frame">"#
+        );
+        out.push_str(&img(
+            dir,
+            &asset_rel(f, slot, preview_width),
+            &format!("{slot} {}", f.path),
+            "full",
+        ));
         if *slot == "diff" {
             if let Some(d) = dim {
                 for r in &f.regions {
@@ -187,15 +228,28 @@ fn file_section(out: &mut String, dir: &Path, f: &FileEntry, preview_width: u32)
     }
     out.push_str("</div>");
     if !f.regions.is_empty() {
-        let other = if f.other_regions > 0 { format!(" + {} smaller", f.other_regions) } else { String::new() };
-        let _ = write!(out, "<details><summary>Regions ({}{other}) · before / after / diff crops</summary>", f.regions.len());
+        let other = if f.other_regions > 0 {
+            format!(" + {} smaller", f.other_regions)
+        } else {
+            String::new()
+        };
+        let _ = write!(
+            out,
+            "<details><summary>Regions ({}{other}) · before / after / diff crops</summary>",
+            f.regions.len()
+        );
         for r in &f.regions {
             let _ = write!(
                 out,
                 r#"<div class="region"><div class="muted">#{} · {}×{} at {},{} · {} px</div>"#,
                 r.id, r.w, r.h, r.x, r.y, r.changed_px
             );
-            crops(out, dir, |slot| format!("f{}/crop-{}-{slot}.png", f.index, r.id), &format!("#{}", r.id));
+            crops(
+                out,
+                dir,
+                |slot| format!("f{}/crop-{}-{slot}.png", f.index, r.id),
+                &format!("#{}", r.id),
+            );
             out.push_str("</div>");
         }
         out.push_str("</details>");
@@ -246,7 +300,11 @@ pub fn render(dir: &Path, manifest: &Manifest, report: Option<&Report>) -> Strin
     );
     out.push_str("<nav><ul>");
     if let Some(r) = report {
-        let _ = write!(out, "<li><a href=\"#report\">AI report</a> ({} finding(s))</li>", r.findings.len());
+        let _ = write!(
+            out,
+            "<li><a href=\"#report\">AI report</a> ({} finding(s))</li>",
+            r.findings.len()
+        );
     }
     for f in &manifest.files {
         let changed = if f.mismatch_px > 0 { " changed" } else { "" };
@@ -286,7 +344,11 @@ mod tests {
 
     impl BlobSource for Fake {
         fn read(&self, side: Side, _: &str) -> AppResult<Vec<u8>> {
-            self.0.iter().find(|(s, _)| *s == side).map(|(_, b)| b.clone()).ok_or_else(|| AppError::Other("missing".into()))
+            self.0
+                .iter()
+                .find(|(s, _)| *s == side)
+                .map(|(_, b)| b.clone())
+                .ok_or_else(|| AppError::Other("missing".into()))
         }
     }
 
@@ -300,15 +362,24 @@ mod tests {
             }
         }
         let mut out = Vec::new();
-        image::DynamicImage::ImageRgba8(img).write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png).unwrap();
+        image::DynamicImage::ImageRgba8(img)
+            .write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png)
+            .unwrap();
         out
     }
 
     fn cache(name: &str, w: u32) -> (std::path::PathBuf, Manifest) {
         let dir = std::env::temp_dir().join(format!("cr-html-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        let blobs = Fake(vec![(Side::Left, png(w, 100, false)), (Side::Right, png(w, 100, true))]);
-        let file = ImageFile { path: "e2e/a.png".into(), old_path: None, change: Change::Modified };
+        let blobs = Fake(vec![
+            (Side::Left, png(w, 100, false)),
+            (Side::Right, png(w, 100, true)),
+        ]);
+        let file = ImageFile {
+            path: "e2e/a.png".into(),
+            old_path: None,
+            change: Change::Modified,
+        };
         let files = generate(&blobs, &[file], &dir, &AtomicBool::new(false), |_, _| {}).unwrap();
         let manifest = Manifest {
             version: MANIFEST_VERSION,
@@ -329,7 +400,11 @@ mod tests {
         let (dir, manifest) = cache("report", 300);
         std::fs::create_dir_all(dir.join("report")).unwrap();
         for slot in SLOTS {
-            std::fs::copy(dir.join(format!("f0/crop-0-{slot}.png")), dir.join(format!("report/0-{slot}.png"))).unwrap();
+            std::fs::copy(
+                dir.join(format!("f0/crop-0-{slot}.png")),
+                dir.join(format!("report/0-{slot}.png")),
+            )
+            .unwrap();
         }
         let report = Report {
             summary: "One <b>square</b>".into(),
@@ -347,8 +422,12 @@ mod tests {
             dropped: 2,
         };
         let html = render(&dir, &manifest, Some(&report));
-        assert!(html.contains("&lt;script&gt;alert(1)&lt;/script&gt;") && !html.contains("<script>"));
-        assert!(html.contains("One &lt;b&gt;square&lt;/b&gt;") && html.contains("A square &amp; more"));
+        assert!(
+            html.contains("&lt;script&gt;alert(1)&lt;/script&gt;") && !html.contains("<script>")
+        );
+        assert!(
+            html.contains("One &lt;b&gt;square&lt;/b&gt;") && html.contains("A square &amp; more")
+        );
         assert!(html.contains(r#"id="finding-0""#) && html.contains(r#"id="file-0""#));
         assert!(html.contains("2 finding(s) left out"));
         assert!(html.contains("01234567…?"), "short shas");
@@ -362,7 +441,10 @@ mod tests {
     #[test]
     fn without_a_report_only_the_images_and_wide_ones_as_previews() {
         let (dir, manifest) = cache("wide", 1200);
-        assert_eq!(asset_rel(&manifest.files[0], "diff", 1000), "f0/preview-diff.png");
+        assert_eq!(
+            asset_rel(&manifest.files[0], "diff", 1000),
+            "f0/preview-diff.png"
+        );
         let html = render(&dir, &manifest, None);
         assert!(!html.contains(r#"id="report""#));
         assert_eq!(html.matches("data:image/png;base64,").count(), 6);

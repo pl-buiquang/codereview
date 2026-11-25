@@ -66,7 +66,10 @@ struct Registry {
 
 impl Registry {
     fn is_active(&self, review_id: i64) -> bool {
-        self.current.as_ref().is_some_and(|(id, _)| *id == review_id) || self.queue.iter().any(|r| r.review_id == review_id)
+        self.current
+            .as_ref()
+            .is_some_and(|(id, _)| *id == review_id)
+            || self.queue.iter().any(|r| r.review_id == review_id)
     }
 
     fn enqueue(&mut self, req: Request) -> Enqueued {
@@ -120,7 +123,10 @@ static REGISTRY: Mutex<Option<Registry>> = Mutex::new(None);
 static PROBING: Mutex<Option<HashSet<i64>>> = Mutex::new(None);
 
 fn registry<T>(f: impl FnOnce(&mut Registry) -> T) -> T {
-    f(REGISTRY.lock().unwrap().get_or_insert_with(Registry::default))
+    f(REGISTRY
+        .lock()
+        .unwrap()
+        .get_or_insert_with(Registry::default))
 }
 
 pub fn is_active(review_id: i64) -> bool {
@@ -180,7 +186,11 @@ pub fn status_of(dir: &Path, current_pin: &str, active: bool) -> Status {
     let progress = store::read_progress(dir);
     if active {
         let (done, total) = progress.map(|p| (p.done, p.total)).unwrap_or((0, 0));
-        return Status { done, total, ..Status::bare("running") };
+        return Status {
+            done,
+            total,
+            ..Status::bare("running")
+        };
     }
     if let Some(m) = store::read_manifest(dir) {
         let skipped = m.files.iter().filter(|f| f.skipped.is_some()).count();
@@ -192,12 +202,25 @@ pub fn status_of(dir: &Path, current_pin: &str, active: bool) -> Status {
             base_sha: m.base_sha,
             head_sha: m.head_sha,
             has_report: dir.join(store::REPORT_FINAL).exists(),
-            ..Status::bare(if m.pin == current_pin { "ready" } else { "stale" })
+            ..Status::bare(if m.pin == current_pin {
+                "ready"
+            } else {
+                "stale"
+            })
         };
     }
     match progress {
-        Some(p) if p.state == "failed" => Status { error: p.error, done: p.done, total: p.total, ..Status::bare("failed") },
-        Some(p) => Status { done: p.done, total: p.total, ..Status::bare("interrupted") },
+        Some(p) if p.state == "failed" => Status {
+            error: p.error,
+            done: p.done,
+            total: p.total,
+            ..Status::bare("failed")
+        },
+        Some(p) => Status {
+            done: p.done,
+            total: p.total,
+            ..Status::bare("interrupted")
+        },
         None => Status::bare("none"),
     }
 }
@@ -205,7 +228,13 @@ pub fn status_of(dir: &Path, current_pin: &str, active: bool) -> Status {
 /// The review's pin as `store::pin_key` sees it.
 pub fn current_pin(conn: &rusqlite::Connection, review_id: i64) -> AppResult<String> {
     let r = get_review_row(conn, review_id)?;
-    Ok(store::pin_key(r.base_sha.as_deref(), r.head_sha.as_deref(), review_since(&r).as_ref().map(|(b, h)| (b.as_str(), h.as_str()))))
+    Ok(store::pin_key(
+        r.base_sha.as_deref(),
+        r.head_sha.as_deref(),
+        review_since(&r)
+            .as_ref()
+            .map(|(b, h)| (b.as_str(), h.as_str())),
+    ))
 }
 
 struct Inputs {
@@ -240,19 +269,37 @@ fn gather(app: &AppHandle, review_id: i64) -> AppResult<Inputs> {
     let db = app.state::<Db>();
     let (detail, source) = {
         let conn = db.0.lock().unwrap();
-        (load_detail(&conn, review_id)?, diff_source(&conn, review_id)?)
+        (
+            load_detail(&conn, review_id)?,
+            diff_source(&conn, review_id)?,
+        )
     };
     let diff = source.load()?;
     let r = &detail.review;
     let (left, right) = side_revs(&detail);
-    let local = detail.local_path.as_ref().map(PathBuf::from).filter(|p| p.exists());
+    let local = detail
+        .local_path
+        .as_ref()
+        .map(PathBuf::from)
+        .filter(|p| p.exists());
     let owner_name = detail.remote_owner.clone().zip(detail.remote_name.clone());
     Ok(Inputs {
         files: changed_image_files(&diff),
-        pin: store::pin_key(r.base_sha.as_deref(), r.head_sha.as_deref(), review_since(r).as_ref().map(|(b, h)| (b.as_str(), h.as_str()))),
+        pin: store::pin_key(
+            r.base_sha.as_deref(),
+            r.head_sha.as_deref(),
+            review_since(r)
+                .as_ref()
+                .map(|(b, h)| (b.as_str(), h.as_str())),
+        ),
         base_sha: r.base_sha.clone(),
         head_sha: r.head_sha.clone(),
-        blobs: GitBlobs { local, owner_name, left, right },
+        blobs: GitBlobs {
+            local,
+            owner_name,
+            left,
+            right,
+        },
     })
 }
 
@@ -260,8 +307,26 @@ fn db_path(app: &AppHandle) -> PathBuf {
     app.state::<DbPath>().0.clone()
 }
 
-fn emit(app: &AppHandle, review_id: i64, state: &'static str, done: usize, total: usize, error: Option<String>, auto: bool) {
-    let _ = app.emit(EVENT, Updated { review_id, state, done, total, error, auto });
+fn emit(
+    app: &AppHandle,
+    review_id: i64,
+    state: &'static str,
+    done: usize,
+    total: usize,
+    error: Option<String>,
+    auto: bool,
+) {
+    let _ = app.emit(
+        EVENT,
+        Updated {
+            review_id,
+            state,
+            done,
+            total,
+            error,
+            auto,
+        },
+    );
 }
 
 /// Wait for a background fetch of the clone (started by the diff load) so the blobs are local.
@@ -277,7 +342,15 @@ fn run(app: &AppHandle, req: &Request, cancel: &AtomicBool) {
     let dir = store::cache_dir(&db_path(app), id);
     let fail = |msg: String| {
         log::warn!(target: "image_diff", "review {id}: {msg}");
-        store::write_progress(&dir, &Progress { state: "failed".into(), done: 0, total: 0, error: Some(msg.clone()) });
+        store::write_progress(
+            &dir,
+            &Progress {
+                state: "failed".into(),
+                done: 0,
+                total: 0,
+                error: Some(msg.clone()),
+            },
+        );
         emit(app, id, "failed", 0, 0, Some(msg), req.auto);
     };
     let inputs = match gather(app, id) {
@@ -286,10 +359,20 @@ fn run(app: &AppHandle, req: &Request, cancel: &AtomicBool) {
     };
     let total = inputs.files.len();
     store::remove_cache(&dir);
-    store::write_progress(&dir, &Progress { state: "running".into(), done: 0, total, error: None });
+    store::write_progress(
+        &dir,
+        &Progress {
+            state: "running".into(),
+            done: 0,
+            total,
+            error: None,
+        },
+    );
     emit(app, id, "running", 0, total, None, req.auto);
 
-    if let (Some(local), Some(left), Some(right)) = (&inputs.blobs.local, &inputs.blobs.left, &inputs.blobs.right) {
+    if let (Some(local), Some(left), Some(right)) =
+        (&inputs.blobs.local, &inputs.blobs.left, &inputs.blobs.right)
+    {
         wait_for_fetch(local);
         // Missing commits fall back to the GitHub API per blob, so a failed fetch isn't fatal.
         if let Err(e) = git::ensure_commits(local, &[left, right]) {
@@ -298,7 +381,15 @@ fn run(app: &AppHandle, req: &Request, cancel: &AtomicBool) {
     }
     let started = std::time::Instant::now();
     let result = job::generate(&inputs.blobs, &inputs.files, &dir, cancel, |done, total| {
-        store::write_progress(&dir, &Progress { state: "running".into(), done, total, error: None });
+        store::write_progress(
+            &dir,
+            &Progress {
+                state: "running".into(),
+                done,
+                total,
+                error: None,
+            },
+        );
         emit(app, id, "running", done, total, None, req.auto);
     });
     match result {
@@ -336,7 +427,9 @@ fn run(app: &AppHandle, req: &Request, cancel: &AtomicBool) {
 
 /// Whether there is something for an AI report to describe: a compared pair with changed pixels.
 pub fn has_changes_to_describe(files: &[store::FileEntry]) -> bool {
-    files.iter().any(|f| f.skipped.is_none() && f.mismatch_px > 0)
+    files
+        .iter()
+        .any(|f| f.skipped.is_none() && f.mismatch_px > 0)
 }
 
 /// After an automatic generation: write the AI report too, when AI is on, `claude` is there and
@@ -345,9 +438,16 @@ fn chain_report(app: &AppHandle, review_id: i64, files: &[store::FileEntry]) {
     if !crate::ai_gate::is_enabled() || !has_changes_to_describe(files) {
         return;
     }
-    let ctx = crate::routines::context::ContextRef { kind: "review".into(), id: review_id.to_string(), base_paths: vec![] };
-    let launched = crate::commands::routines::builtin(&app.state::<Db>(), crate::routines::IMAGE_DIFF_REPORT_KEY)
-        .and_then(|routine| crate::commands::routines::launch(app, &routine, &ctx, "", ""));
+    let ctx = crate::routines::context::ContextRef {
+        kind: "review".into(),
+        id: review_id.to_string(),
+        base_paths: vec![],
+    };
+    let launched = crate::commands::routines::builtin(
+        &app.state::<Db>(),
+        crate::routines::IMAGE_DIFF_REPORT_KEY,
+    )
+    .and_then(|routine| crate::commands::routines::launch(app, &routine, &ctx, "", ""));
     if let Err(e) = launched {
         log::info!(target: "image_diff", "review {review_id}: no automatic AI report: {e}");
     }
@@ -355,11 +455,20 @@ fn chain_report(app: &AppHandle, review_id: i64, files: &[store::FileEntry]) {
 
 fn worker(app: AppHandle) {
     while let Some((req, cancel)) = registry(Registry::next) {
-        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(&app, &req, &cancel)));
+        let outcome =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(&app, &req, &cancel)));
         if outcome.is_err() {
             let dir = store::cache_dir(&db_path(&app), req.review_id);
             let msg = "image diff generation crashed".to_string();
-            store::write_progress(&dir, &Progress { state: "failed".into(), done: 0, total: 0, error: Some(msg.clone()) });
+            store::write_progress(
+                &dir,
+                &Progress {
+                    state: "failed".into(),
+                    done: 0,
+                    total: 0,
+                    error: Some(msg.clone()),
+                },
+            );
             emit(&app, req.review_id, "failed", 0, 0, Some(msg), req.auto);
         }
     }
@@ -373,7 +482,15 @@ pub fn start(app: &AppHandle, review_id: i64, auto: bool) -> bool {
     }
     let dir = store::cache_dir(&db_path(app), review_id);
     store::remove_cache(&dir);
-    store::write_progress(&dir, &Progress { state: "running".into(), done: 0, total: 0, error: None });
+    store::write_progress(
+        &dir,
+        &Progress {
+            state: "running".into(),
+            done: 0,
+            total: 0,
+            error: None,
+        },
+    );
     match registry(|r| r.enqueue(Request { review_id, auto })) {
         Enqueued::Duplicate => return false,
         Enqueued::Queued => {}
@@ -389,7 +506,9 @@ pub fn start(app: &AppHandle, review_id: i64, auto: bool) -> bool {
 /// Whether a set of images (the pixel counts of the larger side of each) is small enough to be
 /// diffed without being asked.
 pub fn within_budget(pixels: &[u64]) -> bool {
-    pixels.len() <= AUTO_MAX_FILES && pixels.iter().sum::<u64>() <= AUTO_MAX_PIXELS && pixels.iter().all(|p| *p <= MAX_PIXELS)
+    pixels.len() <= AUTO_MAX_FILES
+        && pixels.iter().sum::<u64>() <= AUTO_MAX_PIXELS
+        && pixels.iter().all(|p| *p <= MAX_PIXELS)
 }
 
 fn dims(blobs: &GitBlobs, side: Side, path: &str) -> Option<u64> {
@@ -404,7 +523,11 @@ pub fn maybe_auto(app: &AppHandle, review_id: i64, diff: Arc<String>) {
     if changed_image_files(&diff).is_empty() {
         return;
     }
-    let fresh = PROBING.lock().unwrap().get_or_insert_with(HashSet::new).insert(review_id);
+    let fresh = PROBING
+        .lock()
+        .unwrap()
+        .get_or_insert_with(HashSet::new)
+        .insert(review_id);
     if !fresh {
         return;
     }
@@ -429,11 +552,16 @@ fn up_to_date(app: &AppHandle, review_id: i64) -> AppResult<bool> {
 
 fn auto(app: &AppHandle, review_id: i64, diff: &str) -> AppResult<()> {
     if up_to_date(app, review_id)? {
-        return Err(AppError::Other("already generated, running or failed".into()));
+        return Err(AppError::Other(
+            "already generated, running or failed".into(),
+        ));
     }
     let files = changed_image_files(diff);
     if files.len() > AUTO_MAX_FILES {
-        return Err(AppError::Other(format!("{} images, over the {AUTO_MAX_FILES} limit", files.len())));
+        return Err(AppError::Other(format!(
+            "{} images, over the {AUTO_MAX_FILES} limit",
+            files.len()
+        )));
     }
     let detail = load_detail(&app.state::<Db>().0.lock().unwrap(), review_id)?;
     let local = detail
@@ -443,19 +571,37 @@ fn auto(app: &AppHandle, review_id: i64, diff: &str) -> AppResult<()> {
         .filter(|p| p.exists())
         .ok_or_else(|| AppError::Other("no linked clone".into()))?;
     let (left, right) = side_revs(&detail);
-    let (Some(left), Some(right)) = (left, right) else { return Err(AppError::Other("unresolved sides".into())) };
+    let (Some(left), Some(right)) = (left, right) else {
+        return Err(AppError::Other("unresolved sides".into()));
+    };
     wait_for_fetch(&local);
     git::ensure_commits(&local, &[&left, &right])?;
     // Local blobs only: a missing one must not turn into API downloads nobody asked for.
-    let blobs = GitBlobs { local: Some(local), owner_name: None, left: Some(left), right: Some(right) };
+    let blobs = GitBlobs {
+        local: Some(local),
+        owner_name: None,
+        left: Some(left),
+        right: Some(right),
+    };
     let mut pixels = Vec::with_capacity(files.len());
     for f in &files {
-        let before = (f.change != super::store::Change::Added).then(|| dims(&blobs, Side::Left, f.left_path())).flatten();
-        let after = (f.change != super::store::Change::Deleted).then(|| dims(&blobs, Side::Right, &f.path)).flatten();
-        pixels.push(before.max(after).ok_or_else(|| AppError::Other(format!("cannot read {}", f.path)))?);
+        let before = (f.change != super::store::Change::Added)
+            .then(|| dims(&blobs, Side::Left, f.left_path()))
+            .flatten();
+        let after = (f.change != super::store::Change::Deleted)
+            .then(|| dims(&blobs, Side::Right, &f.path))
+            .flatten();
+        pixels.push(
+            before
+                .max(after)
+                .ok_or_else(|| AppError::Other(format!("cannot read {}", f.path)))?,
+        );
     }
     if !within_budget(&pixels) {
-        return Err(AppError::Other(format!("{} MP in total, over the budget", pixels.iter().sum::<u64>() / 1_000_000)));
+        return Err(AppError::Other(format!(
+            "{} MP in total, over the budget",
+            pixels.iter().sum::<u64>() / 1_000_000
+        )));
     }
     // The diff could have been generated while we weighed it.
     if up_to_date(app, review_id)? {
@@ -468,10 +614,13 @@ fn auto(app: &AppHandle, review_id: i64, diff: &str) -> AppResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::image_diff::store::{FileEntry, Change};
+    use crate::image_diff::store::{Change, FileEntry};
 
     fn req(id: i64) -> Request {
-        Request { review_id: id, auto: false }
+        Request {
+            review_id: id,
+            auto: false,
+        }
     }
 
     #[test]
@@ -486,7 +635,11 @@ mod tests {
         assert!(r.is_active(2));
         assert_eq!(r.next().unwrap().0.review_id, 2);
         assert!(r.next().is_none());
-        assert_eq!(r.enqueue(req(3)), Enqueued::StartWorker, "a retired worker is restarted");
+        assert_eq!(
+            r.enqueue(req(3)),
+            Enqueued::StartWorker,
+            "a retired worker is restarted"
+        );
     }
 
     #[test]
@@ -510,7 +663,12 @@ mod tests {
         assert!(within_budget(&[25_000_000]));
         assert!(!within_budget(&[20_000_000, 5_000_001]));
         // Review 405: seven tall screenshots, about 200 MP.
-        assert!(!within_budget(&[1222 * 36386, 1191 * 11774, 1191 * 13456, 1191 * 15138]));
+        assert!(!within_budget(&[
+            1222 * 36386,
+            1191 * 11774,
+            1191 * 13456,
+            1191 * 15138
+        ]));
     }
 
     fn tmp(name: &str) -> PathBuf {
@@ -555,7 +713,10 @@ mod tests {
         files[1].mismatch_px = 3;
         assert!(has_changes_to_describe(&files));
         files[1].skipped = Some("bad".into());
-        assert!(!has_changes_to_describe(&files), "a skipped file has no crops");
+        assert!(
+            !has_changes_to_describe(&files),
+            "a skipped file has no crops"
+        );
     }
 
     #[test]
@@ -563,18 +724,47 @@ mod tests {
         let dir = tmp("flow");
         assert_eq!(status_of(&dir, "p", false).state, "none");
 
-        store::write_progress(&dir, &Progress { state: "running".into(), done: 1, total: 4, error: None });
+        store::write_progress(
+            &dir,
+            &Progress {
+                state: "running".into(),
+                done: 1,
+                total: 4,
+                error: None,
+            },
+        );
         let running = status_of(&dir, "p", true);
-        assert_eq!((running.state, running.done, running.total), ("running", 1, 4));
-        assert_eq!(status_of(&dir, "p", false).state, "interrupted", "a running file with no live job");
+        assert_eq!(
+            (running.state, running.done, running.total),
+            ("running", 1, 4)
+        );
+        assert_eq!(
+            status_of(&dir, "p", false).state,
+            "interrupted",
+            "a running file with no live job"
+        );
 
-        store::write_progress(&dir, &Progress { state: "failed".into(), done: 0, total: 0, error: Some("boom".into()) });
+        store::write_progress(
+            &dir,
+            &Progress {
+                state: "failed".into(),
+                done: 0,
+                total: 0,
+                error: Some("boom".into()),
+            },
+        );
         let failed = status_of(&dir, "p", false);
-        assert_eq!((failed.state, failed.error.as_deref()), ("failed", Some("boom")));
+        assert_eq!(
+            (failed.state, failed.error.as_deref()),
+            ("failed", Some("boom"))
+        );
 
         store::write_json(&dir, store::MANIFEST, &manifest("p", true)).unwrap();
         let ready = status_of(&dir, "p", false);
-        assert_eq!((ready.state, ready.total, ready.done, ready.auto), ("ready", 2, 1, true));
+        assert_eq!(
+            (ready.state, ready.total, ready.done, ready.auto),
+            ("ready", 2, 1, true)
+        );
         assert!(!ready.has_report);
         std::fs::write(dir.join(store::REPORT_FINAL), "{}").unwrap();
         assert!(status_of(&dir, "p", false).has_report);

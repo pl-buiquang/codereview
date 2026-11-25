@@ -23,10 +23,12 @@ fn now() -> String {
 // ---------------------------------------------------------------------------
 
 pub(crate) fn get_meta(conn: &Connection, key: &str) -> Option<String> {
-    conn.query_row("SELECT value FROM meta WHERE key = ?1", params![key], |r| r.get(0))
-        .optional()
-        .ok()
-        .flatten()
+    conn.query_row("SELECT value FROM meta WHERE key = ?1", params![key], |r| {
+        r.get(0)
+    })
+    .optional()
+    .ok()
+    .flatten()
 }
 
 pub(crate) fn set_meta(conn: &Connection, key: &str, value: &str) -> AppResult<()> {
@@ -80,7 +82,8 @@ const ITEM_VIEW: &str = "(
 )";
 
 /// My own PRs are on the Board already, so they are never queued.
-const NOT_MY_PR: &str = "NOT (type = 'pr' AND id IN (SELECT item_id FROM item_reasons WHERE reason = 'author'))";
+const NOT_MY_PR: &str =
+    "NOT (type = 'pr' AND id IN (SELECT item_id FROM item_reasons WHERE reason = 'author'))";
 
 /// Record a surfaced item. Its triage state is kept: a reopened item stays
 /// where the user put it (only a new reason brings an archived one back).
@@ -143,7 +146,12 @@ pub(crate) fn record_reasons(
 
 /// Move an item between triage states; triaging it also counts as viewing it
 /// and ends any "forgotten". A no-op for items the inbox never saw (board-only cards).
-pub(crate) fn set_inbox_state(conn: &Connection, id: &str, state: &str, cause: Option<&str>) -> AppResult<()> {
+pub(crate) fn set_inbox_state(
+    conn: &Connection,
+    id: &str,
+    state: &str,
+    cause: Option<&str>,
+) -> AppResult<()> {
     conn.execute(
         "UPDATE inbox_entry SET state = ?1, archive_cause = ?2, state_at = ?3, viewed_at = COALESCE(viewed_at, ?3),
              forgotten_at = NULL
@@ -167,7 +175,9 @@ pub(crate) fn active_inbox_ids(conn: &Connection) -> AppResult<Vec<String>> {
     let mut stmt = conn.prepare(&format!(
         "SELECT id FROM inbox_entry WHERE state = 'new' AND {NOT_MY_PR}"
     ))?;
-    let ids = stmt.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
+    let ids = stmt
+        .query_map([], |r| r.get(0))?
+        .collect::<rusqlite::Result<_>>()?;
     Ok(ids)
 }
 
@@ -178,7 +188,9 @@ fn attach_reasons(conn: &Connection, items: Vec<ItemRow>) -> AppResult<Vec<ItemW
     }
     let ids: Vec<String> = items.iter().map(|i| i.id.clone()).collect();
     let placeholders = vec!["?"; ids.len()].join(",");
-    let sql = format!("SELECT item_id, reason, detail FROM item_reasons WHERE item_id IN ({placeholders})");
+    let sql = format!(
+        "SELECT item_id, reason, detail FROM item_reasons WHERE item_id IN ({placeholders})"
+    );
     let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map(params_from_iter(ids.iter()), |r| {
         Ok((
@@ -204,7 +216,11 @@ fn attach_reasons(conn: &Connection, items: Vec<ItemRow>) -> AppResult<Vec<ItemW
 }
 
 /// `where_order` filters and orders the `ITEM_VIEW` columns.
-fn query_items(conn: &Connection, where_order: &str, params: &[&dyn rusqlite::ToSql]) -> AppResult<Vec<ItemWithReasons>> {
+fn query_items(
+    conn: &Connection,
+    where_order: &str,
+    params: &[&dyn rusqlite::ToSql],
+) -> AppResult<Vec<ItemWithReasons>> {
     let items: Vec<ItemRow> = {
         let mut stmt = conn.prepare(&format!("SELECT * FROM {ITEM_VIEW} {where_order}"))?;
         let rows = stmt
@@ -223,7 +239,9 @@ pub(crate) fn cached_viewer(conn: &Connection) -> Option<ViewerInfo> {
     let cached_at = get_meta(conn, "viewer_cached_at")?;
     let login = get_meta(conn, "viewer_login")?;
     let teams_json = get_meta(conn, "viewer_team_slugs_json")?;
-    let cached_ms = chrono::DateTime::parse_from_rfc3339(&cached_at).ok()?.timestamp_millis();
+    let cached_ms = chrono::DateTime::parse_from_rfc3339(&cached_at)
+        .ok()?
+        .timestamp_millis();
     let now_ms = Utc::now().timestamp_millis();
     if now_ms - cached_ms < inbox::VIEWER_TTL_MS {
         let team_slugs: Vec<String> = serde_json::from_str(&teams_json).ok()?;
@@ -250,7 +268,11 @@ pub(crate) fn cached_or_fetch_viewer(db: &Db) -> AppResult<ViewerInfo> {
             let v = inbox::fetch_viewer()?;
             let conn = db.0.lock().unwrap();
             set_meta(&conn, "viewer_login", &v.login)?;
-            set_meta(&conn, "viewer_team_slugs_json", &serde_json::to_string(&v.team_slugs)?)?;
+            set_meta(
+                &conn,
+                "viewer_team_slugs_json",
+                &serde_json::to_string(&v.team_slugs)?,
+            )?;
             set_meta(&conn, "viewer_cached_at", &now())?;
             Ok(v)
         }
@@ -307,8 +329,13 @@ pub fn list_inbox_archive_impl(
             "(LOWER(title) LIKE ?{n} OR LOWER(repo) LIKE ?{n} OR LOWER(COALESCE(author_login, '')) LIKE ?{n})"
         ));
     }
-    let sql = format!("WHERE {} ORDER BY state_at DESC LIMIT {}", clauses.join(" AND "), limit.max(1));
-    let params: Vec<&dyn rusqlite::ToSql> = args.iter().map(|a| a as &dyn rusqlite::ToSql).collect();
+    let sql = format!(
+        "WHERE {} ORDER BY state_at DESC LIMIT {}",
+        clauses.join(" AND "),
+        limit.max(1)
+    );
+    let params: Vec<&dyn rusqlite::ToSql> =
+        args.iter().map(|a| a as &dyn rusqlite::ToSql).collect();
     query_items(conn, &sql, &params)
 }
 
@@ -320,11 +347,21 @@ pub fn list_inbox_archive(
     db: State<Db>,
 ) -> AppResult<Vec<ItemWithReasons>> {
     let conn = db.0.lock().unwrap();
-    list_inbox_archive_impl(&conn, search.as_deref(), cause.as_deref(), limit.unwrap_or(100))
+    list_inbox_archive_impl(
+        &conn,
+        search.as_deref(),
+        cause.as_deref(),
+        limit.unwrap_or(100),
+    )
 }
 
 /// The inbox entry id for `owner/name#number`, if the inbox has seen it.
-pub fn find_item_id(conn: &Connection, owner: &str, name: &str, number: i64) -> AppResult<Option<String>> {
+pub fn find_item_id(
+    conn: &Connection,
+    owner: &str,
+    name: &str,
+    number: i64,
+) -> AppResult<Option<String>> {
     let repo = format!("{owner}/{name}");
     conn.query_row(
         &format!("SELECT id FROM {ITEM_VIEW} WHERE repo = ?1 COLLATE NOCASE AND number = ?2"),
@@ -364,7 +401,10 @@ pub fn mark_item_viewed_impl(conn: &Connection, id: &str) -> AppResult<()> {
 
 /// Count a New item in the badge again.
 pub fn mark_item_unread_impl(conn: &Connection, id: &str) -> AppResult<()> {
-    conn.execute("UPDATE inbox_entry SET viewed_at = NULL WHERE id = ?1", params![id])?;
+    conn.execute(
+        "UPDATE inbox_entry SET viewed_at = NULL WHERE id = ?1",
+        params![id],
+    )?;
     Ok(())
 }
 
@@ -406,22 +446,35 @@ pub async fn open_pr_review(
     base_paths: Vec<String>,
     db: State<'_, Db>,
 ) -> AppResult<Review> {
-    let review = crate::commands::review::create_review_for_pr_impl(&db, &owner, &name, number, &base_paths, true)?;
+    let review = crate::commands::review::create_review_for_pr_impl(
+        &db,
+        &owner,
+        &name,
+        number,
+        &base_paths,
+        true,
+    )?;
     // Starting a review means working on it. Opening must not fail on this.
     // The review open just put this PR in the mirror, so track it by id instead of resolving again.
-    let node_id: Option<String> = db
-        .0
-        .lock()
-        .unwrap()
-        .query_row("SELECT gh_pr_id FROM target WHERE id = ?1", [review.target_id], |r| r.get(0))
-        .ok()
-        .flatten();
+    let node_id: Option<String> =
+        db.0.lock()
+            .unwrap()
+            .query_row(
+                "SELECT gh_pr_id FROM target WHERE id = ?1",
+                [review.target_id],
+                |r| r.get(0),
+            )
+            .ok()
+            .flatten();
     let tracked = match node_id {
         Some(id) => crate::commands::board::board_track_pr_cached(&db, &id),
-        None => crate::commands::board::board_track_impl(&db, &format!("{owner}/{name}#{number}")).map(|_| ()),
+        None => crate::commands::board::board_track_impl(&db, &format!("{owner}/{name}#{number}"))
+            .map(|_| ()),
     };
     if let Err(e) = tracked {
-        crate::logging::warn(&format!("[inbox.open_pr_review] tracking {item_id} failed: {e}"));
+        crate::logging::warn(&format!(
+            "[inbox.open_pr_review] tracking {item_id} failed: {e}"
+        ));
     }
     Ok(review)
 }
@@ -460,15 +513,27 @@ mod tests {
     }
 
     fn reason(name: &str) -> inbox::Reason {
-        inbox::Reason { reason: name.into(), detail: String::new() }
+        inbox::Reason {
+            reason: name.into(),
+            detail: String::new(),
+        }
     }
 
     fn state_of(conn: &Connection, id: &str) -> String {
-        conn.query_row("SELECT state FROM inbox_entry WHERE id = ?1", params![id], |r| r.get(0)).unwrap()
+        conn.query_row(
+            "SELECT state FROM inbox_entry WHERE id = ?1",
+            params![id],
+            |r| r.get(0),
+        )
+        .unwrap()
     }
 
     fn new_ids(conn: &Connection) -> Vec<String> {
-        list_inbox_impl(conn).unwrap().into_iter().map(|i| i.item.id).collect()
+        list_inbox_impl(conn)
+            .unwrap()
+            .into_iter()
+            .map(|i| i.item.id)
+            .collect()
     }
 
     #[test]
@@ -483,7 +548,11 @@ mod tests {
         let mut ids = new_ids(&conn);
         ids.sort();
         assert_eq!(ids, ["I_mine", "PR_review"]);
-        assert_eq!(active_inbox_ids(&conn).unwrap().len(), 2, "my PRs are not probed either");
+        assert_eq!(
+            active_inbox_ids(&conn).unwrap().len(),
+            2,
+            "my PRs are not probed either"
+        );
     }
 
     #[test]
@@ -499,19 +568,39 @@ mod tests {
         assert_eq!(state_of(&conn, "PR_1"), "archived");
 
         // A reason it didn't have before brings it back.
-        record_reasons(&conn, "PR_1", &[reason("mention"), reason("direct_review")], Some("t2"), "t3").unwrap();
+        record_reasons(
+            &conn,
+            "PR_1",
+            &[reason("mention"), reason("direct_review")],
+            Some("t2"),
+            "t3",
+        )
+        .unwrap();
         assert_eq!(state_of(&conn, "PR_1"), "new");
 
         // A reason that lapsed (missed by the last complete discovery) and returned counts as new.
         archive_item_impl(&conn, "PR_1").unwrap();
         record_reasons(&conn, "PR_1", &[reason("mention")], Some("t3"), "t4").unwrap();
-        assert_eq!(state_of(&conn, "PR_1"), "archived", "mention was seen at t3");
+        assert_eq!(
+            state_of(&conn, "PR_1"),
+            "archived",
+            "mention was seen at t3"
+        );
         record_reasons(&conn, "PR_1", &[reason("direct_review")], Some("t4"), "t5").unwrap();
-        assert_eq!(state_of(&conn, "PR_1"), "new", "direct_review was last seen at t3, before t4");
+        assert_eq!(
+            state_of(&conn, "PR_1"),
+            "new",
+            "direct_review was last seen at t3, before t4"
+        );
     }
 
     fn viewed_at(conn: &Connection, id: &str) -> Option<String> {
-        conn.query_row("SELECT viewed_at FROM inbox_entry WHERE id = ?1", params![id], |r| r.get(0)).unwrap()
+        conn.query_row(
+            "SELECT viewed_at FROM inbox_entry WHERE id = ?1",
+            params![id],
+            |r| r.get(0),
+        )
+        .unwrap()
     }
 
     #[test]
@@ -524,13 +613,30 @@ mod tests {
         let first = viewed_at(&conn, "PR_1");
         assert!(first.is_some());
         mark_item_viewed_impl(&conn, "PR_1").unwrap();
-        assert_eq!(viewed_at(&conn, "PR_1"), first, "marking again keeps the first time");
+        assert_eq!(
+            viewed_at(&conn, "PR_1"),
+            first,
+            "marking again keeps the first time"
+        );
         assert_eq!(new_ids(&conn), ["PR_1"], "viewed items stay on the New tab");
 
         record_reasons(&conn, "PR_1", &[reason("mention")], Some("t1"), "t2").unwrap();
-        assert!(viewed_at(&conn, "PR_1").is_some(), "same reason again keeps it viewed");
-        record_reasons(&conn, "PR_1", &[reason("mention"), reason("direct_review")], Some("t2"), "t3").unwrap();
-        assert!(viewed_at(&conn, "PR_1").is_none(), "a new reason makes it unviewed");
+        assert!(
+            viewed_at(&conn, "PR_1").is_some(),
+            "same reason again keeps it viewed"
+        );
+        record_reasons(
+            &conn,
+            "PR_1",
+            &[reason("mention"), reason("direct_review")],
+            Some("t2"),
+            "t3",
+        )
+        .unwrap();
+        assert!(
+            viewed_at(&conn, "PR_1").is_none(),
+            "a new reason makes it unviewed"
+        );
     }
 
     #[test]
@@ -553,7 +659,10 @@ mod tests {
         assert!(viewed_at(&conn, "PR_1").is_some());
         assert!(viewed_at(&conn, "PR_2").is_some());
         restore_item_impl(&conn, "PR_1").unwrap();
-        assert!(viewed_at(&conn, "PR_1").is_some(), "a restored item doesn't count as unviewed");
+        assert!(
+            viewed_at(&conn, "PR_1").is_some(),
+            "a restored item doesn't count as unviewed"
+        );
     }
 
     #[test]
@@ -564,14 +673,32 @@ mod tests {
         forget_item_impl(&conn, "PR_1").unwrap();
         assert_eq!(state_of(&conn, "PR_1"), "archived");
 
-        record_reasons(&conn, "PR_1", &[reason("mention"), reason("direct_review")], Some("t1"), "t2").unwrap();
-        assert_eq!(state_of(&conn, "PR_1"), "archived", "a new reason doesn't bring a forgotten item back");
+        record_reasons(
+            &conn,
+            "PR_1",
+            &[reason("mention"), reason("direct_review")],
+            Some("t1"),
+            "t2",
+        )
+        .unwrap();
+        assert_eq!(
+            state_of(&conn, "PR_1"),
+            "archived",
+            "a new reason doesn't bring a forgotten item back"
+        );
         assert!(viewed_at(&conn, "PR_1").is_some());
-        assert_eq!(list_inbox_archive_impl(&conn, None, Some("forgotten"), 100).unwrap().len(), 1);
+        assert_eq!(
+            list_inbox_archive_impl(&conn, None, Some("forgotten"), 100)
+                .unwrap()
+                .len(),
+            1
+        );
 
         restore_item_impl(&conn, "PR_1").unwrap();
         assert_eq!(state_of(&conn, "PR_1"), "new");
-        assert!(list_inbox_archive_impl(&conn, None, Some("forgotten"), 100).unwrap().is_empty());
+        assert!(list_inbox_archive_impl(&conn, None, Some("forgotten"), 100)
+            .unwrap()
+            .is_empty());
 
         // A plain archive afterwards resurfaces again.
         archive_item_impl(&conn, "PR_1").unwrap();
@@ -605,7 +732,12 @@ mod tests {
         let tracked = list_inbox_archive_impl(&conn, None, Some("tracked"), 100).unwrap();
         assert_eq!(tracked.len(), 1);
         assert_eq!(tracked[0].item.id, "PR_2");
-        assert_eq!(list_inbox_archive_impl(&conn, None, None, 100).unwrap().len(), 2);
+        assert_eq!(
+            list_inbox_archive_impl(&conn, None, None, 100)
+                .unwrap()
+                .len(),
+            2
+        );
     }
 
     #[test]
@@ -616,9 +748,21 @@ mod tests {
             entry(&conn, &id, "issue");
             archive_item_impl(&conn, &id).unwrap();
         }
-        assert_eq!(list_inbox_archive_impl(&conn, None, None, 1000).unwrap().len(), 250);
-        assert_eq!(list_inbox_archive_impl(&conn, None, None, 100).unwrap().len(), 100);
-        assert!(list_inbox_archive_impl(&conn, Some("nomatch"), None, 100).unwrap().is_empty());
+        assert_eq!(
+            list_inbox_archive_impl(&conn, None, None, 1000)
+                .unwrap()
+                .len(),
+            250
+        );
+        assert_eq!(
+            list_inbox_archive_impl(&conn, None, None, 100)
+                .unwrap()
+                .len(),
+            100
+        );
+        assert!(list_inbox_archive_impl(&conn, Some("nomatch"), None, 100)
+            .unwrap()
+            .is_empty());
     }
 
     #[test]
@@ -626,17 +770,46 @@ mod tests {
         let conn = open_memory();
         entry(&conn, "I_1", "issue");
         entry(&conn, "I_2", "issue");
-        record_reasons(&conn, "I_1", &[reason("assigned")], None, "2024-01-01T00:00:00Z").unwrap();
-        record_reasons(&conn, "I_2", &[reason("assigned")], None, "2024-01-01T00:00:00Z").unwrap();
+        record_reasons(
+            &conn,
+            "I_1",
+            &[reason("assigned")],
+            None,
+            "2024-01-01T00:00:00Z",
+        )
+        .unwrap();
+        record_reasons(
+            &conn,
+            "I_2",
+            &[reason("assigned")],
+            None,
+            "2024-01-01T00:00:00Z",
+        )
+        .unwrap();
         let stale = |conn: &Connection| -> Vec<(String, bool)> {
-            let mut v: Vec<_> = list_inbox_impl(conn).unwrap().into_iter().map(|i| (i.item.id, i.item.stale)).collect();
+            let mut v: Vec<_> = list_inbox_impl(conn)
+                .unwrap()
+                .into_iter()
+                .map(|i| (i.item.id, i.item.stale))
+                .collect();
             v.sort();
             v
         };
-        assert_eq!(stale(&conn), [("I_1".into(), false), ("I_2".into(), false)], "no complete discovery yet");
+        assert_eq!(
+            stale(&conn),
+            [("I_1".into(), false), ("I_2".into(), false)],
+            "no complete discovery yet"
+        );
 
         // Next complete discovery finds only I_1.
-        record_reasons(&conn, "I_1", &[reason("assigned")], Some("2024-01-01T00:00:00Z"), "2024-01-02T00:00:00Z").unwrap();
+        record_reasons(
+            &conn,
+            "I_1",
+            &[reason("assigned")],
+            Some("2024-01-01T00:00:00Z"),
+            "2024-01-02T00:00:00Z",
+        )
+        .unwrap();
         set_meta(&conn, "last_complete_discovery_at", "2024-01-02T00:00:00Z").unwrap();
         assert_eq!(stale(&conn), [("I_1".into(), false), ("I_2".into(), true)]);
     }

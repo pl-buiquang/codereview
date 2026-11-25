@@ -42,11 +42,17 @@ pub struct DeleteOutcome {
 /// Force-deletes each requested branch that is *still* gone; anything else is ignored.
 pub fn delete_gone_branches(checkout: &Path, names: &[String]) -> AppResult<DeleteOutcome> {
     let gone = list_gone(checkout)?;
-    let mut outcome = DeleteOutcome { deleted: Vec::new(), failed: Vec::new() };
+    let mut outcome = DeleteOutcome {
+        deleted: Vec::new(),
+        failed: Vec::new(),
+    };
     for name in names.iter().filter(|n| gone.contains(n)) {
         match run_git(checkout, &["branch", "-D", "--", name]) {
             Ok(_) => outcome.deleted.push(name.clone()),
-            Err(e) => outcome.failed.push(FailedDelete { name: name.clone(), error: e.to_string() }),
+            Err(e) => outcome.failed.push(FailedDelete {
+                name: name.clone(),
+                error: e.to_string(),
+            }),
         }
     }
     Ok(outcome)
@@ -59,8 +65,17 @@ mod tests {
     use tempfile::TempDir;
 
     fn git(dir: &Path, args: &[&str]) -> String {
-        let out = Command::new("git").arg("-C").arg(dir).args(args).output().unwrap();
-        assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        let out = Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
         String::from_utf8_lossy(&out.stdout).trim().to_string()
     }
 
@@ -74,7 +89,10 @@ mod tests {
         git(l, &["config", "user.name", "T"]);
         git(l, &["config", "commit.gpgSign", "false"]);
         git(l, &["commit", "-q", "--allow-empty", "-m", "base"]);
-        git(l, &["remote", "add", "origin", remote.path().to_str().unwrap()]);
+        git(
+            l,
+            &["remote", "add", "origin", remote.path().to_str().unwrap()],
+        );
         for b in ["main", "feat/gone", "kept"] {
             if b != "main" {
                 git(l, &["branch", b]);
@@ -95,12 +113,23 @@ mod tests {
 
         let outcome = delete_gone_branches(
             local.path(),
-            &["feat/gone".into(), "kept".into(), "local-only".into(), "-D".into()],
+            &[
+                "feat/gone".into(),
+                "kept".into(),
+                "local-only".into(),
+                "-D".into(),
+            ],
         )
         .unwrap();
         assert_eq!(outcome.deleted, vec!["feat/gone".to_string()]);
         assert!(outcome.failed.is_empty());
-        let heads = git(local.path(), &["for-each-ref", "--format=%(refname:short)", "refs/heads"]);
-        assert_eq!(heads.lines().collect::<Vec<_>>(), vec!["kept", "local-only", "main"]);
+        let heads = git(
+            local.path(),
+            &["for-each-ref", "--format=%(refname:short)", "refs/heads"],
+        );
+        assert_eq!(
+            heads.lines().collect::<Vec<_>>(),
+            vec!["kept", "local-only", "main"]
+        );
     }
 }

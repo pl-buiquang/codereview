@@ -46,7 +46,12 @@ pub fn host_states(db: State<Db>) -> AppResult<Vec<HostState>> {
     let rt = runtime::global();
     Ok(hosts
         .into_iter()
-        .map(|h| HostState { host_id: h.id, state: rt.as_ref().map_or(ConnState::Disconnected, |rt| rt.tunnels.state(h.id)) })
+        .map(|h| HostState {
+            host_id: h.id,
+            state: rt
+                .as_ref()
+                .map_or(ConnState::Disconnected, |rt| rt.tunnels.state(h.id)),
+        })
         .collect())
 }
 
@@ -80,7 +85,12 @@ pub async fn host_test(id: i64) -> AppResult<HostTest> {
         protocol: info.protocol,
         version: info.version,
         host: info.host,
-        harnesses: info.harnesses.iter().filter(|h| h.available).map(|h| h.name.clone()).collect(),
+        harnesses: info
+            .harnesses
+            .iter()
+            .filter(|h| h.available)
+            .map(|h| h.name.clone())
+            .collect(),
         running: info.load.running,
         queued: info.load.queued,
         max_concurrency: info.max_concurrency,
@@ -99,7 +109,9 @@ pub fn remote_harness_infos(host_id: i64) -> AppResult<Vec<HarnessInfo>> {
 #[tauri::command]
 pub async fn list_remote_sessions(db: State<'_, Db>) -> AppResult<Vec<HostSessions>> {
     let hosts = host::list(&db.0.lock().unwrap())?;
-    let Some(rt) = runtime::global() else { return Ok(Vec::new()) };
+    let Some(rt) = runtime::global() else {
+        return Ok(Vec::new());
+    };
     if hosts.iter().all(|h| !h.enabled) {
         return Ok(Vec::new());
     }

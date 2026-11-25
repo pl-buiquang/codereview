@@ -75,14 +75,14 @@ pub fn export_vscode_review(review_id: i64, db: State<Db>) -> AppResult<String> 
         )));
     }
     let value = export::render_vscode(&detail, repo_path);
-    let review_file_id = value["id"]
-        .as_str()
-        .unwrap_or("review")
-        .to_owned();
+    let review_file_id = value["id"].as_str().unwrap_or("review").to_owned();
     let reviews_dir = repo_path.join(".vscode").join("reviews");
     fs::create_dir_all(&reviews_dir)?;
     let dest = reviews_dir.join(format!("{review_file_id}.json"));
-    fs::write(&dest, serde_json::to_string_pretty(&value).unwrap_or_default())?;
+    fs::write(
+        &dest,
+        serde_json::to_string_pretty(&value).unwrap_or_default(),
+    )?;
     conn.execute(
         "UPDATE review SET last_exported_at = ?1 WHERE id = ?2",
         params![Utc::now().to_rfc3339(), review_id],
@@ -157,9 +157,7 @@ struct ImportPayload {
 }
 
 fn find_or_create_repo(conn: &Connection, label: &str) -> AppResult<i64> {
-    let (owner, name) = label
-        .split_once('/')
-        .unwrap_or(("", label));
+    let (owner, name) = label.split_once('/').unwrap_or(("", label));
     if !owner.is_empty() && !name.is_empty() {
         let existing: Option<i64> = conn
             .query_row(
@@ -215,11 +213,9 @@ fn import_review_impl(conn: &Connection, payload: ImportPayload) -> AppResult<Re
     )?;
     let target_id = conn.last_insert_rowid();
 
-    let event = payload.verdict.as_deref().and_then(|v| {
-        match v {
-            "approve" | "request_changes" | "comment" => Some(v),
-            _ => None,
-        }
+    let event = payload.verdict.as_deref().and_then(|v| match v {
+        "approve" | "request_changes" | "comment" => Some(v),
+        _ => None,
     });
     let body = payload.summary.as_deref().unwrap_or("");
 
@@ -287,8 +283,8 @@ fn import_review_impl(conn: &Connection, payload: ImportPayload) -> AppResult<Re
 #[tauri::command]
 pub fn import_review(src_path: String, db: State<Db>) -> AppResult<Review> {
     let content = fs::read_to_string(&src_path)?;
-    let payload: ImportPayload =
-        serde_json::from_str(&content).map_err(|e| AppError::Other(format!("invalid JSON: {e}")))?;
+    let payload: ImportPayload = serde_json::from_str(&content)
+        .map_err(|e| AppError::Other(format!("invalid JSON: {e}")))?;
     let conn = db.0.lock().unwrap();
     import_review_impl(&conn, payload)
 }
@@ -307,7 +303,10 @@ pub fn read_settings_file(src_path: String) -> AppResult<String> {
 /// Durable copy of the frontend settings store, in case the webview's localStorage is wiped.
 fn settings_mirror_path(app: &tauri::AppHandle) -> AppResult<std::path::PathBuf> {
     use tauri::Manager;
-    let dir = app.path().app_data_dir().map_err(|e| AppError::Other(e.to_string()))?;
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::Other(e.to_string()))?;
     Ok(dir.join("settings.json"))
 }
 
@@ -492,8 +491,7 @@ mod tests {
     #[test]
     fn import_minimal_json_with_defaults() {
         let conn = open_memory();
-        let payload: ImportPayload =
-            serde_json::from_str(r#"{ "title": "bare review" }"#).unwrap();
+        let payload: ImportPayload = serde_json::from_str(r#"{ "title": "bare review" }"#).unwrap();
         let review = import_review_impl(&conn, payload).unwrap();
         assert_eq!(review.body, "");
         assert_eq!(review.event, None);

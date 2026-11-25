@@ -51,7 +51,12 @@ pub struct WorkerSink {
 
 impl WorkerSink {
     fn request(&self, id: i64) -> Result<RunRequest, String> {
-        let raw = self.store.db.request_json(id).map_err(|e| e.to_string())?.ok_or("the run no longer exists")?;
+        let raw = self
+            .store
+            .db
+            .request_json(id)
+            .map_err(|e| e.to_string())?
+            .ok_or("the run no longer exists")?;
         serde_json::from_str(&raw).map_err(|e| format!("unreadable stored request: {e}"))
     }
 }
@@ -81,7 +86,12 @@ impl EventSink for WorkerSink {
 
     fn prepare(&self, id: i64, stopped: &dyn Fn() -> bool) -> Result<Option<Prepared>, String> {
         let req = self.request(id)?;
-        let cwd = self.store.db.cwd(id).map_err(|e| e.to_string())?.ok_or("the run no longer exists")?;
+        let cwd = self
+            .store
+            .db
+            .cwd(id)
+            .map_err(|e| e.to_string())?
+            .ok_or("the run no longer exists")?;
         if stopped() {
             return Ok(None);
         }
@@ -92,7 +102,8 @@ impl EventSink for WorkerSink {
             .find(|h| h.id() == req.harness)
             .ok_or_else(|| format!("unknown harness `{}`", req.harness))?;
         let dir = self.store.runs_root().join(id.to_string());
-        remote::write_snapshot(&dir, &req.context).map_err(|e| format!("failed to write the context snapshot: {e}"))?;
+        remote::write_snapshot(&dir, &req.context)
+            .map_err(|e| format!("failed to write the context snapshot: {e}"))?;
         let mut env: Vec<(String, std::ffi::OsString)> = remote::run_env(id, &self.db_path, &dir);
         if let Some(path) = child_path() {
             env.push(("PATH".into(), path));
@@ -103,23 +114,39 @@ impl EventSink for WorkerSink {
             harness,
             model: req.model.clone(),
             system_prompt: req.system_prompt.clone(),
-            system_prompt_mode: if req.system_prompt_replace { SystemPromptMode::Replace } else { SystemPromptMode::Append },
+            system_prompt_mode: if req.system_prompt_replace {
+                SystemPromptMode::Replace
+            } else {
+                SystemPromptMode::Append
+            },
             prompt: req.prompt.clone(),
             cwd,
-            extra_dirs: if has_scratch { vec![scratch.clone()] } else { Vec::new() },
+            extra_dirs: if has_scratch {
+                vec![scratch.clone()]
+            } else {
+                Vec::new()
+            },
             tools: req.tools.policy(&req.allowed_tools),
             access: req.access.access(),
             session_id: new_session_id(),
             env,
             extra_args: Vec::new(),
-            usage_tag: RunTag::new("remote_run").harness(harness.id()).label(format!("run {id}")),
+            usage_tag: RunTag::new("remote_run")
+                .harness(harness.id())
+                .label(format!("run {id}")),
             timeout: Duration::from_secs(req.timeout_secs.max(1)),
-            cleanup: if has_scratch { vec![scratch] } else { Vec::new() },
+            cleanup: if has_scratch {
+                vec![scratch]
+            } else {
+                Vec::new()
+            },
         }))
     }
 
     fn adopt(&self, id: i64) -> Option<Duration> {
-        self.request(id).ok().map(|r| Duration::from_secs(r.timeout_secs.max(1)))
+        self.request(id)
+            .ok()
+            .map(|r| Duration::from_secs(r.timeout_secs.max(1)))
     }
 
     fn finished(&self, id: i64, _fin: &Finished) {

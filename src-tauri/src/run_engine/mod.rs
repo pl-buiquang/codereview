@@ -14,10 +14,10 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use crate::ai::{Access, Harness, OneShot, SystemPrompt, SystemPromptMode, ToolPolicy};
 use crate::ai::SessionMode;
-use crate::run_usage::{RunTag, RunUsage};
+use crate::ai::{Access, Harness, OneShot, SystemPrompt, SystemPromptMode, ToolPolicy};
 use crate::error::AppResult;
+use crate::run_usage::{RunTag, RunUsage};
 
 pub mod engine;
 pub mod outcome;
@@ -158,7 +158,11 @@ mod tests {
     fn engine_has_no_tauri_dependency() {
         let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
         // `run_usage` is the engine's only other import besides `ai` and `error`
-        let mut files: Vec<_> = std::fs::read_dir(src.join("run_engine")).unwrap().flatten().map(|e| e.path()).collect();
+        let mut files: Vec<_> = std::fs::read_dir(src.join("run_engine"))
+            .unwrap()
+            .flatten()
+            .map(|e| e.path())
+            .collect();
         files.push(src.join("run_usage.rs"));
         for path in files {
             let text = std::fs::read_to_string(&path).unwrap();
@@ -166,8 +170,15 @@ mod tests {
             let needle = format!("{}{}", "tau", "ri");
             for (n, line) in text.lines().enumerate() {
                 let code = line.trim_start();
-                let is_use = code.starts_with("use ") || code.starts_with("pub use ") || code.contains(&format!("{needle}::"));
-                assert!(!(is_use && code.contains(&needle)), "{}:{} depends on {needle}: {line}", path.display(), n + 1);
+                let is_use = code.starts_with("use ")
+                    || code.starts_with("pub use ")
+                    || code.contains(&format!("{needle}::"));
+                assert!(
+                    !(is_use && code.contains(&needle)),
+                    "{}:{} depends on {needle}: {line}",
+                    path.display(),
+                    n + 1
+                );
             }
         }
     }

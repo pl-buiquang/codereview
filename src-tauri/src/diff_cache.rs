@@ -26,7 +26,10 @@ struct Lru {
 
 impl Lru {
     const fn new() -> Self {
-        Self { entries: VecDeque::new(), bytes: 0 }
+        Self {
+            entries: VecDeque::new(),
+            bytes: 0,
+        }
     }
 
     fn get(&mut self, key: &DiffKey) -> Option<Arc<String>> {
@@ -100,7 +103,10 @@ mod tests {
     fn hit_skips_load_and_new_head_misses() {
         let mut lru = Lru::new();
         lru.put(key("a"), Arc::new("diff a".into()));
-        assert_eq!(lru.get(&key("a")).as_deref().map(String::as_str), Some("diff a"));
+        assert_eq!(
+            lru.get(&key("a")).as_deref().map(String::as_str),
+            Some("diff a")
+        );
         assert!(lru.get(&key("b")).is_none());
     }
 
@@ -113,7 +119,10 @@ mod tests {
         lru.get(&key("0"));
         lru.put(key("new"), Arc::new(String::new()));
         assert!(lru.get(&key("0")).is_some(), "recently used entry survives");
-        assert!(lru.get(&key("1")).is_none(), "oldest untouched entry evicted");
+        assert!(
+            lru.get(&key("1")).is_none(),
+            "oldest untouched entry evicted"
+        );
         assert_eq!(lru.entries.len(), MAX_ENTRIES);
     }
 
@@ -128,7 +137,10 @@ mod tests {
 
     #[test]
     fn global_cache_loads_once() {
-        let k = DiffKey { repo_id: -42, ..key("global") };
+        let k = DiffKey {
+            repo_id: -42,
+            ..key("global")
+        };
         let mut calls = 0;
         for _ in 0..2 {
             let d = get_or_load(&k, || {

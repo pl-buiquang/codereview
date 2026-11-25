@@ -96,8 +96,8 @@ pub fn get_or_create_remote_repository(
 /// The `gh` invocation context for a repository: a local clone when one is on
 /// disk, otherwise a clone-less remote context resolved from `owner/name`.
 pub(crate) fn gh_ctx_for_repo(conn: &Connection, repo_id: i64) -> AppResult<GhRepo> {
-    let (local_path, owner, name): (Option<String>, Option<String>, Option<String>) =
-        conn.query_row(
+    let (local_path, owner, name): (Option<String>, Option<String>, Option<String>) = conn
+        .query_row(
             "SELECT local_path, remote_owner, remote_name FROM repository WHERE id = ?1",
             params![repo_id],
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
@@ -105,10 +105,12 @@ pub(crate) fn gh_ctx_for_repo(conn: &Connection, repo_id: i64) -> AppResult<GhRe
     match local_path {
         Some(path) => Ok(GhRepo::Local(PathBuf::from(path))),
         None => {
-            let owner = owner
-                .ok_or_else(|| AppError::Other("repo has no local clone or GitHub remote".into()))?;
-            let name = name
-                .ok_or_else(|| AppError::Other("repo has no local clone or GitHub remote".into()))?;
+            let owner = owner.ok_or_else(|| {
+                AppError::Other("repo has no local clone or GitHub remote".into())
+            })?;
+            let name = name.ok_or_else(|| {
+                AppError::Other("repo has no local clone or GitHub remote".into())
+            })?;
             Ok(GhRepo::Remote { owner, name })
         }
     }
@@ -116,7 +118,10 @@ pub(crate) fn gh_ctx_for_repo(conn: &Connection, repo_id: i64) -> AppResult<GhRe
 
 /// The GitHub owner/name of a repository, if it has one.
 /// None for purely local repos (callers skip GitHub-API work gracefully).
-pub(crate) fn repo_owner_name(conn: &Connection, repo_id: i64) -> AppResult<Option<(String, String)>> {
+pub(crate) fn repo_owner_name(
+    conn: &Connection,
+    repo_id: i64,
+) -> AppResult<Option<(String, String)>> {
     let (owner, name): (Option<String>, Option<String>) = conn.query_row(
         "SELECT remote_owner, remote_name FROM repository WHERE id = ?1",
         params![repo_id],
@@ -126,13 +131,21 @@ pub(crate) fn repo_owner_name(conn: &Connection, repo_id: i64) -> AppResult<Opti
 }
 
 pub(crate) fn get_review_row(conn: &Connection, id: i64) -> AppResult<Review> {
-    conn.query_row("SELECT * FROM review WHERE id = ?1", params![id], Review::from_row)
-        .map_err(Into::into)
+    conn.query_row(
+        "SELECT * FROM review WHERE id = ?1",
+        params![id],
+        Review::from_row,
+    )
+    .map_err(Into::into)
 }
 
 fn get_comment(conn: &Connection, id: i64) -> AppResult<Comment> {
-    conn.query_row("SELECT * FROM comment WHERE id = ?1", params![id], Comment::from_row)
-        .map_err(Into::into)
+    conn.query_row(
+        "SELECT * FROM comment WHERE id = ?1",
+        params![id],
+        Comment::from_row,
+    )
+    .map_err(Into::into)
 }
 
 fn review_status(conn: &Connection, review_id: i64) -> AppResult<String> {
@@ -160,7 +173,9 @@ pub(crate) fn ensure_draft(conn: &Connection, review_id: i64) -> AppResult<()> {
 /// a focus-hidden hunk/file visible.
 fn validate_tag(tag: Option<&str>) -> AppResult<()> {
     match tag {
-        None | Some("ai" | "ai:explain" | "ai:review" | "ai:codex" | "ai:coverage" | "local") => Ok(()),
+        None | Some("ai" | "ai:explain" | "ai:review" | "ai:codex" | "ai:coverage" | "local") => {
+            Ok(())
+        }
         Some(t) => Err(AppError::Other(format!(
             "invalid tag '{t}' (expected ai, ai:explain, ai:review, ai:codex, ai:coverage or local)"
         ))),
@@ -183,7 +198,12 @@ fn gh_event(event: Option<&str>) -> &'static str {
 /// merge-base for three-dot (GitHub-PR semantics), the base tip for two-dot.
 /// This is the coordinate system a LEFT comment's line numbers are valid in, so
 /// it is what `anchored_base_sha` pins to.
-fn local_old_side_sha(repo: &Path, base_ref: &str, head_ref: &str, three_dot: bool) -> Option<String> {
+fn local_old_side_sha(
+    repo: &Path,
+    base_ref: &str,
+    head_ref: &str,
+    three_dot: bool,
+) -> Option<String> {
     if three_dot {
         git::merge_base(repo, base_ref, head_ref).ok()
     } else {
@@ -225,7 +245,10 @@ fn get_or_create_local_target(
         .optional()?;
 
     if let Some(id) = existing {
-        conn.execute("UPDATE target SET three_dot = ?1 WHERE id = ?2", params![three_dot as i64, id])?;
+        conn.execute(
+            "UPDATE target SET three_dot = ?1 WHERE id = ?2",
+            params![three_dot as i64, id],
+        )?;
         return Ok((get_target(conn, id)?, live));
     }
 
@@ -268,7 +291,12 @@ pub(crate) fn get_or_create_pr_target(
     get_target(conn, conn.last_insert_rowid())
 }
 
-fn update_pr_target_info(conn: &Connection, target_id: i64, info: &PrInfo, gh_pr_id: Option<&str>) -> AppResult<()> {
+fn update_pr_target_info(
+    conn: &Connection,
+    target_id: i64,
+    info: &PrInfo,
+    gh_pr_id: Option<&str>,
+) -> AppResult<()> {
     conn.execute(
         "UPDATE target SET title = ?1, base_ref = ?2, head_ref = ?3, gh_pr_id = COALESCE(?4, gh_pr_id)
          WHERE id = ?5",
@@ -299,17 +327,25 @@ pub struct FreshnessResult {
 }
 
 fn has_moved(pin: &LiveShas, live: &LiveShas) -> bool {
-    let differs = |pinned: &Option<String>, current: &Option<String>| current.is_some() && current != pinned;
+    let differs =
+        |pinned: &Option<String>, current: &Option<String>| current.is_some() && current != pinned;
     differs(&pin.head_sha, &live.head_sha) || differs(&pin.base_sha, &live.base_sha)
 }
 
 fn review_pin(review: &Review) -> LiveShas {
-    LiveShas { base_sha: review.base_sha.clone(), head_sha: review.head_sha.clone() }
+    LiveShas {
+        base_sha: review.base_sha.clone(),
+        head_sha: review.head_sha.clone(),
+    }
 }
 
 fn repo_local_path_of(db: &Db, repo_id: i64) -> AppResult<Option<String>> {
     let conn = db.0.lock().unwrap();
-    Ok(conn.query_row("SELECT local_path FROM repository WHERE id = ?1", params![repo_id], |r| r.get(0))?)
+    Ok(conn.query_row(
+        "SELECT local_path FROM repository WHERE id = ?1",
+        params![repo_id],
+        |r| r.get(0),
+    )?)
 }
 
 /// Resolve a target's live head and LEFT side from `git` / `gh`. Never touches
@@ -327,16 +363,26 @@ fn resolve_live(db: &Db, target: &Target) -> AppResult<LiveShas> {
             let (info, node_id) = sync_pr(db, &owner, &name, number)?;
             // PR diffs are three-dot: the LEFT side is the merge-base, not the
             // base-branch tip.
-            let base_sha = provider_for().merge_base_sha(&owner, &name, &info.base_ref, &info.head_sha).ok();
+            let base_sha = provider_for()
+                .merge_base_sha(&owner, &name, &info.base_ref, &info.head_sha)
+                .ok();
             update_pr_target_info(&db.0.lock().unwrap(), target.id, &info, Some(&node_id))?;
-            Ok(LiveShas { base_sha, head_sha: Some(info.head_sha) })
+            Ok(LiveShas {
+                base_sha,
+                head_sha: Some(info.head_sha),
+            })
         }
         _ => {
             let repo_path = repo_local_path_of(db, target.repo_id)?
                 .ok_or_else(|| AppError::Other("local targets require a local clone".into()))?;
             let repo = Path::new(&repo_path);
             Ok(LiveShas {
-                base_sha: local_old_side_sha(repo, &target.base_ref, &target.head_ref, target.three_dot),
+                base_sha: local_old_side_sha(
+                    repo,
+                    &target.base_ref,
+                    &target.head_ref,
+                    target.three_dot,
+                ),
                 head_sha: git::rev_parse(repo, &target.head_ref).ok(),
             })
         }
@@ -365,8 +411,10 @@ fn refresh_review_impl(review_id: i64, db: &Db) -> AppResult<FreshnessResult> {
         target.kind, pin.head_sha, live.head_sha
     );
     let new_commits = match (target.kind.as_str(), &pin.head_sha, &live.head_sha) {
-        ("local", Some(pinned), Some(current)) if pinned != current => repo_local_path_of(db, target.repo_id)?
-            .and_then(|p| count_new_commits(Path::new(&p), pinned, current)),
+        ("local", Some(pinned), Some(current)) if pinned != current => {
+            repo_local_path_of(db, target.repo_id)?
+                .and_then(|p| count_new_commits(Path::new(&p), pinned, current))
+        }
         ("local", Some(_), Some(_)) => Some(0),
         _ => None,
     };
@@ -406,10 +454,12 @@ pub fn update_review_pin_impl(review_id: i64, db: &Db) -> AppResult<UpdateReview
         (review, target)
     };
     let live = resolve_live(db, &target)?;
-    let head = live
-        .head_sha
-        .clone()
-        .ok_or_else(|| AppError::Other(format!("could not resolve the live head of `{}`", target.head_ref)))?;
+    let head = live.head_sha.clone().ok_or_else(|| {
+        AppError::Other(format!(
+            "could not resolve the live head of `{}`",
+            target.head_ref
+        ))
+    })?;
     let moved = has_moved(&review_pin(&review), &live);
 
     let conn = db.0.lock().unwrap();
@@ -509,7 +559,10 @@ fn read_versions(
             ))
         }
         None => {
-            let (owner, name) = (detail.remote_owner.as_deref()?, detail.remote_name.as_deref()?);
+            let (owner, name) = (
+                detail.remote_owner.as_deref()?,
+                detail.remote_name.as_deref()?,
+            );
             Some((
                 gh::file_at_ref(owner, name, file_path, pinned_sha).ok()?,
                 gh::file_at_ref(owner, name, file_path, current).ok()?,
@@ -743,12 +796,16 @@ fn copy_comments(
 ) -> AppResult<(usize, usize)> {
     ensure_draft(conn, review_id)?;
     if review_id == source_id {
-        return Err(AppError::Other("pick a different review to import from".into()));
+        return Err(AppError::Other(
+            "pick a different review to import from".into(),
+        ));
     }
     let source = get_review_row(conn, source_id)?;
     let dest = get_review_row(conn, review_id)?;
     if source.target_id != dest.target_id {
-        return Err(AppError::Other("can only import from a review on the same PR".into()));
+        return Err(AppError::Other(
+            "can only import from a review on the same PR".into(),
+        ));
     }
     for t in types {
         if t != "mine" {
@@ -780,7 +837,14 @@ fn copy_comments(
             "SELECT EXISTS(SELECT 1 FROM comment
                 WHERE review_id = ?1 AND parent_id IS NULL AND file_path = ?2 AND subject_type = ?3
                   AND side = ?4 AND line = ?5 AND body = ?6)",
-            params![review_id, root.file_path, root.subject_type, root.side, root.line, root.body],
+            params![
+                review_id,
+                root.file_path,
+                root.subject_type,
+                root.side,
+                root.line,
+                root.body
+            ],
             |r| r.get(0),
         )?;
         if dup {
@@ -789,11 +853,15 @@ fn copy_comments(
         }
         // An unpinned comment was written against the source's commits, so
         // pin it there and let re-anchoring map it forward.
-        let head = root.anchored_head_sha.clone().or_else(|| source.head_sha.clone());
-        let base = root
-            .anchored_base_sha
+        let head = root
+            .anchored_head_sha
             .clone()
-            .or_else(|| (root.side == "LEFT").then(|| source.base_sha.clone()).flatten());
+            .or_else(|| source.head_sha.clone());
+        let base = root.anchored_base_sha.clone().or_else(|| {
+            (root.side == "LEFT")
+                .then(|| source.base_sha.clone())
+                .flatten()
+        });
         let ts = now();
         let insert = |parent: Option<i64>, c: &Comment| -> AppResult<i64> {
             tx.execute(
@@ -831,7 +899,10 @@ fn copy_comments(
         imported += 1;
     }
     if imported > 0 {
-        tx.execute("UPDATE review SET updated_at = ?1 WHERE id = ?2", params![now(), review_id])?;
+        tx.execute(
+            "UPDATE review SET updated_at = ?1 WHERE id = ?2",
+            params![now(), review_id],
+        )?;
     }
     tx.commit()?;
     Ok((imported, skipped))
@@ -846,7 +917,11 @@ pub fn import_comments_impl(
     let (imported, skipped, detail) = {
         let conn = db.0.lock().unwrap();
         let (imported, skipped) = copy_comments(&conn, review_id, source_review_id, &types)?;
-        let detail = if imported > 0 { Some(load_detail(&conn, review_id)?) } else { None };
+        let detail = if imported > 0 {
+            Some(load_detail(&conn, review_id)?)
+        } else {
+            None
+        };
         (imported, skipped, detail)
     };
     let (mut reanchor, mut reanchor_error) = (None, None);
@@ -858,7 +933,12 @@ pub fn import_comments_impl(
             Err(e) => reanchor_error = Some(e.to_string()),
         }
     }
-    Ok(ImportCommentsResult { imported, skipped, reanchor, reanchor_error })
+    Ok(ImportCommentsResult {
+        imported,
+        skipped,
+        reanchor,
+        reanchor_error,
+    })
 }
 
 /// Import comments from an earlier review of the same target, then re-anchor
@@ -888,7 +968,12 @@ fn new_review_for_target(conn: &Connection, target_id: i64, pin: &LiveShas) -> A
 /// `pin`. With `reuse_published` (opening from the UI) a published review is
 /// reopened too, so a target only gets a new review when it has none; without
 /// it (`cr create`, which must write) only once all of its reviews are published.
-fn review_for_target(conn: &Connection, target_id: i64, pin: &LiveShas, reuse_published: bool) -> AppResult<Review> {
+fn review_for_target(
+    conn: &Connection,
+    target_id: i64,
+    pin: &LiveShas,
+    reuse_published: bool,
+) -> AppResult<Review> {
     if let Some(review) = latest_review(conn, target_id, reuse_published)? {
         return Ok(review);
     }
@@ -897,7 +982,11 @@ fn review_for_target(conn: &Connection, target_id: i64, pin: &LiveShas, reuse_pu
 
 /// `latest_open_review`, falling back to the most recently updated published
 /// review when `reuse_published`.
-fn latest_review(conn: &Connection, target_id: i64, reuse_published: bool) -> AppResult<Option<Review>> {
+fn latest_review(
+    conn: &Connection,
+    target_id: i64,
+    reuse_published: bool,
+) -> AppResult<Option<Review>> {
     if let Some(review) = latest_open_review(conn, target_id)? {
         return Ok(Some(review));
     }
@@ -956,7 +1045,11 @@ fn existing_pr_review(
 
 /// A PR's refs and live head as the mirror last saw them; `None` when the
 /// mirror doesn't have the PR (or its refs) yet.
-fn mirror_pr_info(conn: &Connection, repo_id: i64, pr_number: i64) -> AppResult<Option<(PrInfo, String)>> {
+fn mirror_pr_info(
+    conn: &Connection,
+    repo_id: i64,
+    pr_number: i64,
+) -> AppResult<Option<(PrInfo, String)>> {
     let row: Option<(String, Option<PrInfo>)> = conn
         .query_row(
             "SELECT node_id, title, base_ref, head_ref, head_sha FROM gh_pr WHERE repo_id = ?1 AND number = ?2",
@@ -1004,10 +1097,11 @@ pub async fn create_review(
             |r| r.get(0),
         )
         .map_err(AppError::from)?;
-    let repo_path = local_path.ok_or_else(|| {
-        AppError::Other("creating a local review requires a local clone".into())
-    })?;
-    create_review_impl(&conn, repo_id, &repo_path, &base_ref, &head_ref, three_dot, true)
+    let repo_path = local_path
+        .ok_or_else(|| AppError::Other("creating a local review requires a local clone".into()))?;
+    create_review_impl(
+        &conn, repo_id, &repo_path, &base_ref, &head_ref, three_dot, true,
+    )
 }
 
 /// Open the review of a real GitHub PR (creating/reusing its target): its open
@@ -1024,10 +1118,17 @@ pub fn create_review_for_pr_impl(
     reuse_published: bool,
 ) -> AppResult<Review> {
     // Reopening a review needs no GitHub round-trip: the tab refreshes the mirror itself.
-    if let Some(review) = existing_pr_review(&db.0.lock().unwrap(), owner, name, pr_number, reuse_published)? {
+    if let Some(review) = existing_pr_review(
+        &db.0.lock().unwrap(),
+        owner,
+        name,
+        pr_number,
+        reuse_published,
+    )? {
         return Ok(review);
     }
-    let repo_id = get_or_create_remote_repository(&db.0.lock().unwrap(), owner, name, base_paths)?.id;
+    let repo_id =
+        get_or_create_remote_repository(&db.0.lock().unwrap(), owner, name, base_paths)?.id;
     // A new review pins the mirror's head; the tab moves an untouched pin if it was stale.
     let cached = mirror_pr_info(&db.0.lock().unwrap(), repo_id, pr_number)?;
     let (info, node_id) = match cached {
@@ -1039,7 +1140,10 @@ pub fn create_review_for_pr_impl(
         .ok();
     let conn = db.0.lock().unwrap();
     let target = get_or_create_pr_target(&conn, repo_id, pr_number, &info, Some(&node_id))?;
-    let live = LiveShas { base_sha: merge_base, head_sha: Some(info.head_sha.clone()) };
+    let live = LiveShas {
+        base_sha: merge_base,
+        head_sha: Some(info.head_sha.clone()),
+    };
     review_for_target(&conn, target.id, &live, reuse_published)
 }
 
@@ -1059,7 +1163,12 @@ enum DiffCommand {
     LivePr { ctx: GhRepo, number: i64 },
     /// A PR's diff at the review's pin: from the local clone when it has (or
     /// can fetch) both commits, else the compare API.
-    PinnedPr { clone: Option<PathBuf>, owner_name: Option<(String, String)>, base: String, head: String },
+    PinnedPr {
+        clone: Option<PathBuf>,
+        owner_name: Option<(String, String)>,
+        base: String,
+        head: String,
+    },
     /// What changed in a PR since an earlier pin, rebase-aware (`git::interdiff`);
     /// without a usable clone, the compare API between the two heads.
     Interdiff {
@@ -1069,7 +1178,12 @@ enum DiffCommand {
         base: String,
         head: String,
     },
-    Local { path: PathBuf, base: String, head: String, three_dot: bool },
+    Local {
+        path: PathBuf,
+        base: String,
+        head: String,
+        three_dot: bool,
+    },
 }
 
 /// Everything needed to produce a review's diff, read from the DB so the
@@ -1106,9 +1220,10 @@ pub fn diff_source(conn: &Connection, review_id: i64) -> AppResult<DiffSource> {
                 .ok_or_else(|| AppError::Other("PR target missing number".into()))?,
         },
         _ => {
-            let local_path = detail.local_path.as_deref().ok_or_else(|| {
-                AppError::Other("local diff requires a local clone".into())
-            })?;
+            let local_path = detail
+                .local_path
+                .as_deref()
+                .ok_or_else(|| AppError::Other("local diff requires a local clone".into()))?;
             // Prefer the pinned SHA over the branch name: a branch can be deleted
             // or moved out from under a review, but the SHA it was pinned to
             // still diffs correctly as long as the commit itself survives.
@@ -1136,7 +1251,10 @@ pub fn diff_source(conn: &Connection, review_id: i64) -> AppResult<DiffSource> {
 
 /// The earlier pin a "changes since" review diffs from, when it has one.
 pub(crate) fn review_since(review: &Review) -> Option<(String, String)> {
-    Some((review.since_base_sha.clone()?, review.since_head_sha.clone()?))
+    Some((
+        review.since_base_sha.clone()?,
+        review.since_head_sha.clone()?,
+    ))
 }
 
 /// The since side of a PR interdiff, resolved against `new_base`; `None` when it
@@ -1163,7 +1281,9 @@ fn pinned_interdiff(
         // shows whatever a rebase pulled in.
         (_, Some((owner, name))) => provider_for().compare_diff(owner, name, &since.1, head),
         (Some(Err(e)), None) => Err(e),
-        (None, None) => Err(AppError::Other("interdiff needs a local clone or a GitHub remote".into())),
+        (None, None) => Err(AppError::Other(
+            "interdiff needs a local clone or a GitHub remote".into(),
+        )),
     }
 }
 
@@ -1177,7 +1297,10 @@ fn pinned_pr_diff(
     // included) before the diff could show. The compare API serves the same diff right away while
     // the clone catches up in the background; if it fails, fall back to fetching first.
     if let (Some(repo), Some((owner, name))) = (clone, owner_name) {
-        let missing: Vec<&str> = [base, head].into_iter().filter(|sha| !git::has_commit(repo, sha)).collect();
+        let missing: Vec<&str> = [base, head]
+            .into_iter()
+            .filter(|sha| !git::has_commit(repo, sha))
+            .collect();
         if !missing.is_empty() {
             if let Ok(diff) = provider_for().compare_diff(owner, name, base, head) {
                 git::fetch_commits_in_background(repo, &missing);
@@ -1194,7 +1317,9 @@ fn pinned_pr_diff(
         (Some(Ok(diff)), _) => Ok(diff),
         (_, Some((owner, name))) => provider_for().compare_diff(owner, name, base, head),
         (Some(Err(e)), None) => Err(e),
-        (None, None) => Err(AppError::Other("PR diff needs a local clone or a GitHub remote".into())),
+        (None, None) => Err(AppError::Other(
+            "PR diff needs a local clone or a GitHub remote".into(),
+        )),
     }
 }
 
@@ -1202,15 +1327,25 @@ impl DiffSource {
     pub fn load(&self) -> AppResult<Arc<String>> {
         let run = || match &self.command {
             DiffCommand::LivePr { ctx, number } => provider_for().pr_diff(ctx, *number),
-            DiffCommand::PinnedPr { clone, owner_name, base, head } => {
-                pinned_pr_diff(clone.as_deref(), owner_name.as_ref(), base, head)
-            }
-            DiffCommand::Interdiff { clone, owner_name, since, base, head } => {
-                pinned_interdiff(clone.as_deref(), owner_name.as_ref(), since, base, head)
-            }
-            DiffCommand::Local { path, base, head, three_dot } => {
-                git::diff(path, base, head, *three_dot)
-            }
+            DiffCommand::PinnedPr {
+                clone,
+                owner_name,
+                base,
+                head,
+            } => pinned_pr_diff(clone.as_deref(), owner_name.as_ref(), base, head),
+            DiffCommand::Interdiff {
+                clone,
+                owner_name,
+                since,
+                base,
+                head,
+            } => pinned_interdiff(clone.as_deref(), owner_name.as_ref(), since, base, head),
+            DiffCommand::Local {
+                path,
+                base,
+                head,
+                three_dot,
+            } => git::diff(path, base, head, *three_dot),
         };
         match &self.key {
             Some(key) => diff_cache::get_or_load(key, run),
@@ -1266,7 +1401,11 @@ pub fn file_source(
     let sha = match (sha, side.as_str(), detail.target.kind.as_str()) {
         (None, "LEFT", "github_pr") => {
             let resolved = owner_name.as_ref().and_then(|(o, n)| {
-                let head = detail.review.head_sha.as_deref().unwrap_or(&detail.target.head_ref);
+                let head = detail
+                    .review
+                    .head_sha
+                    .as_deref()
+                    .unwrap_or(&detail.target.head_ref);
                 provider_for()
                     .merge_base_sha(o, n, &detail.target.base_ref, head)
                     .ok()
@@ -1420,8 +1559,12 @@ pub fn list_reviews(repo_id: Option<i64>, db: State<Db>) -> AppResult<Vec<Review
 
 /// All reviews on a single target, newest first — for the review header's
 /// same-target switcher.
-pub fn list_target_reviews_impl(conn: &Connection, target_id: i64) -> AppResult<Vec<ReviewSummary>> {
-    let mut stmt = conn.prepare("SELECT * FROM review WHERE target_id = ?1 ORDER BY updated_at DESC")?;
+pub fn list_target_reviews_impl(
+    conn: &Connection,
+    target_id: i64,
+) -> AppResult<Vec<ReviewSummary>> {
+    let mut stmt =
+        conn.prepare("SELECT * FROM review WHERE target_id = ?1 ORDER BY updated_at DESC")?;
     let reviews = stmt
         .query_map(params![target_id], Review::from_row)?
         .collect::<rusqlite::Result<_>>()?;
@@ -1438,7 +1581,11 @@ pub fn list_target_reviews(target_id: i64, db: State<Db>) -> AppResult<Vec<Revie
 /// already has an open review — e.g. a second pass with a different kind of
 /// comment. Reopening the target (`review_for_target`, the board's
 /// `existing_review_id`) lands on the most recently updated open review.
-pub fn new_review_on_target_impl(conn: &Connection, target_id: i64, pin: &LiveShas) -> AppResult<Review> {
+pub fn new_review_on_target_impl(
+    conn: &Connection,
+    target_id: i64,
+    pin: &LiveShas,
+) -> AppResult<Review> {
     new_review_for_target(conn, target_id, pin)
 }
 
@@ -1473,7 +1620,11 @@ pub fn new_review_since_impl(db: &Db, review_id: i64, pin: Option<LiveShas>) -> 
 /// What a "changes since" review needs: the PR target, the source's pin and the
 /// commits to review up to. `pin` (from a quick view) skips resolving the live
 /// head, so the review covers exactly the diff that was previewed.
-fn since_plan(db: &Db, review_id: i64, pin: Option<LiveShas>) -> AppResult<(Target, (String, String), LiveShas)> {
+fn since_plan(
+    db: &Db,
+    review_id: i64,
+    pin: Option<LiveShas>,
+) -> AppResult<(Target, (String, String), LiveShas)> {
     let (source, target) = {
         let conn = db.0.lock().unwrap();
         let source = get_review_row(&conn, review_id)?;
@@ -1481,20 +1632,29 @@ fn since_plan(db: &Db, review_id: i64, pin: Option<LiveShas>) -> AppResult<(Targ
         (source, target)
     };
     if target.kind != "github_pr" {
-        return Err(AppError::Other("only PR reviews can be continued from new commits".into()));
+        return Err(AppError::Other(
+            "only PR reviews can be continued from new commits".into(),
+        ));
     }
-    let (Some(since_base), Some(since_head)) = (source.base_sha.clone(), source.head_sha.clone()) else {
-        return Err(AppError::Other("this review has no pinned commits to continue from".into()));
+    let (Some(since_base), Some(since_head)) = (source.base_sha.clone(), source.head_sha.clone())
+    else {
+        return Err(AppError::Other(
+            "this review has no pinned commits to continue from".into(),
+        ));
     };
     let live = match pin {
         Some(pin) => pin,
         None => resolve_live(db, &target)?,
     };
     if live.base_sha.is_none() || live.head_sha.is_none() {
-        return Err(AppError::Other("could not resolve the PR's latest commits".into()));
+        return Err(AppError::Other(
+            "could not resolve the PR's latest commits".into(),
+        ));
     }
     if !has_moved(&review_pin(&source), &live) {
-        return Err(AppError::Other("the PR has no new commits since this review".into()));
+        return Err(AppError::Other(
+            "the PR has no new commits since this review".into(),
+        ));
     }
     Ok((target, (since_base, since_head), live))
 }
@@ -1508,7 +1668,10 @@ pub async fn new_review_since(
     db: State<'_, Db>,
 ) -> AppResult<Review> {
     let pin = match (base_sha, head_sha) {
-        (Some(base_sha), Some(head_sha)) => Some(LiveShas { base_sha: Some(base_sha), head_sha: Some(head_sha) }),
+        (Some(base_sha), Some(head_sha)) => Some(LiveShas {
+            base_sha: Some(base_sha),
+            head_sha: Some(head_sha),
+        }),
         _ => None,
     };
     new_review_since_impl(&db, review_id, pin)
@@ -1517,7 +1680,10 @@ pub async fn new_review_since(
 /// The commits between a review's pinned base and head (a PR's own commits, newest
 /// first). Fetches missing PR commits from origin first. Needs a local clone.
 #[tauri::command]
-pub async fn review_commits(review_id: i64, db: State<'_, Db>) -> AppResult<Vec<crate::graph::GraphCommit>> {
+pub async fn review_commits(
+    review_id: i64,
+    db: State<'_, Db>,
+) -> AppResult<Vec<crate::graph::GraphCommit>> {
     let (review, target) = {
         let conn = db.0.lock().unwrap();
         let review = get_review_row(&conn, review_id)?;
@@ -1551,13 +1717,22 @@ pub struct QuickInterdiff {
 pub async fn quick_interdiff(review_id: i64, db: State<'_, Db>) -> AppResult<QuickInterdiff> {
     let (target, since, live) = since_plan(&db, review_id, None)?;
     let (Some(base), Some(head)) = (live.base_sha, live.head_sha) else {
-        return Err(AppError::Other("could not resolve the PR's latest commits".into()));
+        return Err(AppError::Other(
+            "could not resolve the PR's latest commits".into(),
+        ));
     };
     let (clone, owner_name, repo_id) = {
         let conn = db.0.lock().unwrap();
-        let local_path: Option<String> =
-            conn.query_row("SELECT local_path FROM repository WHERE id = ?1", params![target.repo_id], |r| r.get(0))?;
-        (local_path.map(PathBuf::from), repo_owner_name(&conn, target.repo_id)?, target.repo_id)
+        let local_path: Option<String> = conn.query_row(
+            "SELECT local_path FROM repository WHERE id = ?1",
+            params![target.repo_id],
+            |r| r.get(0),
+        )?;
+        (
+            local_path.map(PathBuf::from),
+            repo_owner_name(&conn, target.repo_id)?,
+            target.repo_id,
+        )
     };
     let source = DiffSource {
         key: Some(diff_cache::DiffKey {
@@ -1583,7 +1758,13 @@ pub async fn quick_interdiff(review_id: i64, db: State<'_, Db>) -> AppResult<Qui
             interdiff_since_side(clone.as_deref(), &since, &base),
             Some(git::InterdiffBase::Same(_) | git::InterdiffBase::Replayed(_))
         );
-    Ok(QuickInterdiff { diff, base_sha: base, head_sha: head, rebased, approximate })
+    Ok(QuickInterdiff {
+        diff,
+        base_sha: base,
+        head_sha: head,
+        rebased,
+        approximate,
+    })
 }
 
 /// How a "changes since" review's diff was derived, for its header chip.
@@ -1612,7 +1793,10 @@ pub fn interdiff_meta_impl(db: &Db, review_id: i64) -> AppResult<Option<Interdif
             interdiff_since_side(clone, &since, new_base),
             Some(git::InterdiffBase::Same(_) | git::InterdiffBase::Replayed(_))
         );
-    Ok(Some(InterdiffMeta { rebased, approximate }))
+    Ok(Some(InterdiffMeta {
+        rebased,
+        approximate,
+    }))
 }
 
 #[tauri::command(async)]
@@ -2078,10 +2262,7 @@ fn match_review_comments(
         // duplicates therefore zip in order.
         let mut unpaired: Vec<(i64, &str)> = Vec::new();
         for (id, body) in locals {
-            match remotes
-                .iter_mut()
-                .find(|r| !r.consumed && r.body == *body)
-            {
+            match remotes.iter_mut().find(|r| !r.consumed && r.body == *body) {
                 Some(r) => {
                     r.consumed = true;
                     matches.push((*id, r.github_id));
@@ -2092,8 +2273,7 @@ fn match_review_comments(
 
         // Pass 2: singleton fallback — exactly one unpaired local and exactly one
         // unconsumed remote on the same anchor pair despite body drift.
-        let remaining: Vec<&mut RemoteEntry> =
-            remotes.iter_mut().filter(|r| !r.consumed).collect();
+        let remaining: Vec<&mut RemoteEntry> = remotes.iter_mut().filter(|r| !r.consumed).collect();
         if unpaired.len() == 1 && remaining.len() == 1 {
             let (id, _) = unpaired[0];
             let r = remaining.into_iter().next().unwrap();
@@ -2403,7 +2583,9 @@ pub async fn find_closed_pr_reviews(db: State<'_, Db>) -> AppResult<Vec<i64>> {
         .into_iter()
         .filter(|(_, owner, name, number)| {
             matches!(
-                states.get(&(owner.clone(), name.clone(), *number)).map(String::as_str),
+                states
+                    .get(&(owner.clone(), name.clone(), *number))
+                    .map(String::as_str),
                 Some("MERGED") | Some("CLOSED")
             )
         })
@@ -2428,9 +2610,11 @@ pub fn delete_reviews(review_ids: Vec<i64>, db: State<Db>) -> AppResult<usize> {
 /// a root comment (one level of nesting, GitHub-style). Returns the parent row so
 /// the caller inherits its anchor columns.
 fn parent_for_reply(conn: &Connection, review_id: i64, parent_id: i64) -> AppResult<Comment> {
-    let parent = match conn
-        .query_row("SELECT * FROM comment WHERE id = ?1", params![parent_id], Comment::from_row)
-    {
+    let parent = match conn.query_row(
+        "SELECT * FROM comment WHERE id = ?1",
+        params![parent_id],
+        Comment::from_row,
+    ) {
         Ok(p) => p,
         Err(rusqlite::Error::QueryReturnedNoRows) => {
             return Err(AppError::Other("reply parent not found".into()))
@@ -2649,7 +2833,11 @@ pub fn update_comment(comment_id: i64, body: String, db: State<Db>) -> AppResult
     update_comment_impl(&conn, comment_id, body)
 }
 
-pub fn set_comment_tag_impl(conn: &Connection, comment_id: i64, tag: Option<&str>) -> AppResult<()> {
+pub fn set_comment_tag_impl(
+    conn: &Connection,
+    comment_id: i64,
+    tag: Option<&str>,
+) -> AppResult<()> {
     let review_id: i64 = conn.query_row(
         "SELECT review_id FROM comment WHERE id = ?1",
         params![comment_id],
@@ -2684,14 +2872,20 @@ pub fn delete_comment_impl(conn: &Connection, comment_id: i64) -> AppResult<()> 
 /// Delete the AI comments a rerun replaces: root, unpublished, unresolved, unedited
 /// (`updated_at = created_at`), reply-less comments still carrying one of `tags`, minus the notes a
 /// focus owns (`focus_comment`). Anything the user touched is theirs and stays. Returns the count.
-pub fn prune_ai_comments_impl(conn: &Connection, review_id: i64, tags: &[String]) -> AppResult<usize> {
+pub fn prune_ai_comments_impl(
+    conn: &Connection,
+    review_id: i64,
+    tags: &[String],
+) -> AppResult<usize> {
     ensure_draft(conn, review_id)?;
     if tags.is_empty() {
         return Err(AppError::Other("prune needs at least one --tag".into()));
     }
     for t in tags {
         if !t.starts_with("ai") {
-            return Err(AppError::Other(format!("prune only removes AI comments, not '{t}'")));
+            return Err(AppError::Other(format!(
+                "prune only removes AI comments, not '{t}'"
+            )));
         }
         validate_tag(Some(t))?;
     }
@@ -2785,7 +2979,16 @@ pub fn add_draft_reply_impl(
             (review_id, file_path, subject_type, origin, side, line, start_line,
              body, github_thread_root_id, created_at, updated_at)
          VALUES (?1, ?2, 'line', 'diff', ?3, ?4, ?5, ?6, ?7, ?8, ?8)",
-        params![review_id, file_path, side, line, start_line, body, github_thread_root_id, ts],
+        params![
+            review_id,
+            file_path,
+            side,
+            line,
+            start_line,
+            body,
+            github_thread_root_id,
+            ts
+        ],
     )?;
     conn.execute(
         "UPDATE review SET updated_at = ?1 WHERE id = ?2",
@@ -2807,7 +3010,16 @@ pub fn add_draft_reply(
     db: State<Db>,
 ) -> AppResult<Comment> {
     let conn = db.0.lock().unwrap();
-    add_draft_reply_impl(&conn, review_id, github_thread_root_id, body, file_path, side, line, start_line)
+    add_draft_reply_impl(
+        &conn,
+        review_id,
+        github_thread_root_id,
+        body,
+        file_path,
+        side,
+        line,
+        start_line,
+    )
 }
 
 /// Result of publishing all draft replies for a review.
@@ -2853,7 +3065,11 @@ pub fn publish_draft_replies_impl(db: &Db, review_id: i64) -> AppResult<PublishD
         )?;
         let rows = stmt
             .query_map(params![review_id], |r| {
-                Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, String>(2)?))
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    r.get::<_, i64>(1)?,
+                    r.get::<_, String>(2)?,
+                ))
             })?
             .collect::<rusqlite::Result<_>>()?;
         rows
@@ -2877,7 +3093,11 @@ pub fn publish_draft_replies_impl(db: &Db, review_id: i64) -> AppResult<PublishD
         }
     }
 
-    Ok(PublishDraftRepliesResult { published, failed, errors })
+    Ok(PublishDraftRepliesResult {
+        published,
+        failed,
+        errors,
+    })
 }
 
 #[tauri::command]
@@ -2898,7 +3118,11 @@ pub fn publish_draft_reply_impl(db: &Db, comment_id: i64) -> AppResult<()> {
                  WHERE id = ?1 AND github_thread_root_id IS NOT NULL",
                 params![comment_id],
                 |r| {
-                    Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, String>(2)?))
+                    Ok((
+                        r.get::<_, i64>(0)?,
+                        r.get::<_, i64>(1)?,
+                        r.get::<_, String>(2)?,
+                    ))
                 },
             )
             .map_err(|_| AppError::Other(format!("draft reply #{comment_id} not found")))?;
@@ -3085,13 +3309,17 @@ mod tests {
         let conn = open_memory();
         let repo = seed_repo(&conn, None, None);
 
-        let t1 = get_or_create_local_target(&conn, repo, "/nope", "main", "feature", true).unwrap().0;
+        let t1 = get_or_create_local_target(&conn, repo, "/nope", "main", "feature", true)
+            .unwrap()
+            .0;
         assert_eq!(t1.kind, "local");
         assert_eq!(t1.title, "main...feature");
         assert!(t1.three_dot);
 
         // Same (repo, base, head) reuses the row and can flip three_dot.
-        let t2 = get_or_create_local_target(&conn, repo, "/nope", "main", "feature", false).unwrap().0;
+        let t2 = get_or_create_local_target(&conn, repo, "/nope", "main", "feature", false)
+            .unwrap()
+            .0;
         assert_eq!(t1.id, t2.id);
         assert!(!t2.three_dot);
 
@@ -3131,7 +3359,10 @@ mod tests {
         )
         .unwrap();
         let t = get_target(&conn, t.id).unwrap();
-        assert_eq!((t.title.as_str(), t.base_ref.as_str(), t.head_ref.as_str()), ("Mirrored", "develop", "feat-2"));
+        assert_eq!(
+            (t.title.as_str(), t.base_ref.as_str(), t.head_ref.as_str()),
+            ("Mirrored", "develop", "feat-2")
+        );
     }
 
     #[test]
@@ -3144,7 +3375,10 @@ mod tests {
     }
 
     fn pin(base: Option<&str>, head: Option<&str>) -> LiveShas {
-        LiveShas { base_sha: base.map(Into::into), head_sha: head.map(Into::into) }
+        LiveShas {
+            base_sha: base.map(Into::into),
+            head_sha: head.map(Into::into),
+        }
     }
 
     #[test]
@@ -3152,7 +3386,8 @@ mod tests {
         let conn = open_memory();
         let repo = seed_repo(&conn, Some("owner"), Some("repo"));
         let target = get_or_create_pr_target(&conn, repo, 7, &pr_info(), None).unwrap();
-        let first = review_for_target(&conn, target.id, &pin(Some("mb1"), Some("deadbeef")), false).unwrap();
+        let first = review_for_target(&conn, target.id, &pin(Some("mb1"), Some("deadbeef")), false)
+            .unwrap();
         assert_eq!(first.head_sha.as_deref(), Some("deadbeef"));
         assert_eq!(first.base_sha.as_deref(), Some("mb1"));
 
@@ -3160,17 +3395,26 @@ mod tests {
         let mut moved = pr_info();
         moved.head_sha = "cafe".into();
         let again = get_or_create_pr_target(&conn, repo, 7, &moved, None).unwrap();
-        let reused = review_for_target(&conn, again.id, &pin(Some("mb2"), Some("cafe")), false).unwrap();
+        let reused =
+            review_for_target(&conn, again.id, &pin(Some("mb2"), Some("cafe")), false).unwrap();
         assert_eq!(reused.id, first.id);
         assert_eq!(reused.head_sha.as_deref(), Some("deadbeef"));
         assert_eq!(reused.base_sha.as_deref(), Some("mb1"));
 
         // Once it's published, the next review on the same target pins at the live head.
-        conn.execute("UPDATE review SET status = 'published' WHERE id = ?1", params![first.id]).unwrap();
-        let fresh = review_for_target(&conn, again.id, &pin(Some("mb2"), Some("cafe")), false).unwrap();
+        conn.execute(
+            "UPDATE review SET status = 'published' WHERE id = ?1",
+            params![first.id],
+        )
+        .unwrap();
+        let fresh =
+            review_for_target(&conn, again.id, &pin(Some("mb2"), Some("cafe")), false).unwrap();
         assert_ne!(fresh.id, first.id);
         assert_eq!(fresh.head_sha.as_deref(), Some("cafe"));
-        assert_eq!(get_review_row(&conn, first.id).unwrap().head_sha.as_deref(), Some("deadbeef"));
+        assert_eq!(
+            get_review_row(&conn, first.id).unwrap().head_sha.as_deref(),
+            Some("deadbeef")
+        );
     }
 
     #[test]
@@ -3212,8 +3456,9 @@ mod tests {
     fn new_review_starts_as_empty_draft() {
         let conn = open_memory();
         let repo = seed_repo(&conn, None, None);
-        let target =
-            get_or_create_local_target(&conn, repo, "/nope", "main", "feature", true).unwrap().0;
+        let target = get_or_create_local_target(&conn, repo, "/nope", "main", "feature", true)
+            .unwrap()
+            .0;
 
         let review = new_review_for_target(&conn, target.id, &LiveShas::default()).unwrap();
         assert_eq!(review.status, "draft");
@@ -3226,18 +3471,34 @@ mod tests {
     fn review_for_target_creates_only_when_every_review_is_published() {
         let conn = open_memory();
         let repo = seed_repo(&conn, None, None);
-        let target =
-            get_or_create_local_target(&conn, repo, "/nope", "main", "feature", true).unwrap().0;
-        let open = |conn: &Connection| review_for_target(conn, target.id, &LiveShas::default(), false).unwrap().id;
+        let target = get_or_create_local_target(&conn, repo, "/nope", "main", "feature", true)
+            .unwrap()
+            .0;
+        let open = |conn: &Connection| {
+            review_for_target(conn, target.id, &LiveShas::default(), false)
+                .unwrap()
+                .id
+        };
 
         let first = open(&conn);
         assert_eq!(open(&conn), first, "the draft is reused");
 
-        conn.execute("UPDATE review SET status = 'published_pending' WHERE id = ?1", params![first])
-            .unwrap();
-        assert_eq!(open(&conn), first, "a review pending on GitHub is reused too");
+        conn.execute(
+            "UPDATE review SET status = 'published_pending' WHERE id = ?1",
+            params![first],
+        )
+        .unwrap();
+        assert_eq!(
+            open(&conn),
+            first,
+            "a review pending on GitHub is reused too"
+        );
 
-        conn.execute("UPDATE review SET status = 'published' WHERE id = ?1", params![first]).unwrap();
+        conn.execute(
+            "UPDATE review SET status = 'published' WHERE id = ?1",
+            params![first],
+        )
+        .unwrap();
         let second = open(&conn);
         assert_ne!(second, first, "all published: a new review");
         assert_eq!(open(&conn), second);
@@ -3247,13 +3508,21 @@ mod tests {
     fn review_for_target_can_reopen_a_published_review() {
         let conn = open_memory();
         let repo = seed_repo(&conn, None, None);
-        let target =
-            get_or_create_local_target(&conn, repo, "/nope", "main", "feature", true).unwrap().0;
+        let target = get_or_create_local_target(&conn, repo, "/nope", "main", "feature", true)
+            .unwrap()
+            .0;
         let pin = LiveShas::default();
         let published = review_for_target(&conn, target.id, &pin, false).unwrap().id;
-        conn.execute("UPDATE review SET status = 'published' WHERE id = ?1", params![published]).unwrap();
+        conn.execute(
+            "UPDATE review SET status = 'published' WHERE id = ?1",
+            params![published],
+        )
+        .unwrap();
 
-        assert_eq!(review_for_target(&conn, target.id, &pin, true).unwrap().id, published);
+        assert_eq!(
+            review_for_target(&conn, target.id, &pin, true).unwrap().id,
+            published
+        );
         let draft = new_review_for_target(&conn, target.id, &pin).unwrap().id;
         assert_eq!(
             review_for_target(&conn, target.id, &pin, true).unwrap().id,
@@ -3266,8 +3535,9 @@ mod tests {
     fn list_target_reviews_returns_all_newest_first() {
         let conn = open_memory();
         let repo = seed_repo(&conn, None, None);
-        let target =
-            get_or_create_local_target(&conn, repo, "/nope", "main", "feature", true).unwrap().0;
+        let target = get_or_create_local_target(&conn, repo, "/nope", "main", "feature", true)
+            .unwrap()
+            .0;
 
         let first = new_review_for_target(&conn, target.id, &LiveShas::default()).unwrap();
         conn.execute(
@@ -3287,17 +3557,21 @@ mod tests {
         assert_eq!(summaries[0].review.id, second.id);
         assert_eq!(summaries[1].review.id, first.id);
 
-        let other_target =
-            get_or_create_local_target(&conn, repo, "/nope", "main", "other", true).unwrap().0;
-        assert!(list_target_reviews_impl(&conn, other_target.id).unwrap().is_empty());
+        let other_target = get_or_create_local_target(&conn, repo, "/nope", "main", "other", true)
+            .unwrap()
+            .0;
+        assert!(list_target_reviews_impl(&conn, other_target.id)
+            .unwrap()
+            .is_empty());
     }
 
     #[test]
     fn new_review_on_target_allows_a_second_open_draft() {
         let conn = open_memory();
         let repo = seed_repo(&conn, None, None);
-        let target =
-            get_or_create_local_target(&conn, repo, "/nope", "main", "feature", true).unwrap().0;
+        let target = get_or_create_local_target(&conn, repo, "/nope", "main", "feature", true)
+            .unwrap()
+            .0;
 
         let first = new_review_for_target(&conn, target.id, &LiveShas::default()).unwrap();
         let second = new_review_on_target_impl(&conn, target.id, &LiveShas::default()).unwrap();
@@ -3310,8 +3584,9 @@ mod tests {
     fn copy_comments_filters_types_skips_published_and_duplicates() {
         let conn = open_memory();
         let repo = seed_repo(&conn, None, None);
-        let target =
-            get_or_create_local_target(&conn, repo, "/nope", "main", "feature", true).unwrap().0;
+        let target = get_or_create_local_target(&conn, repo, "/nope", "main", "feature", true)
+            .unwrap()
+            .0;
         let src = new_review_for_target(&conn, target.id, &LiveShas::default()).unwrap();
         let dest = new_review_on_target_impl(&conn, target.id, &LiveShas::default()).unwrap();
 
@@ -3322,18 +3597,30 @@ mod tests {
         let local = seed_comment(&conn, src.id, "a.rs", "RIGHT", 3, None, "local");
         set_comment_tag_impl(&conn, local, Some("local")).unwrap();
         let published = seed_comment(&conn, src.id, "a.rs", "RIGHT", 4, None, "published");
-        conn.execute("UPDATE comment SET github_comment_id = 9 WHERE id = ?1", params![published]).unwrap();
+        conn.execute(
+            "UPDATE comment SET github_comment_id = 9 WHERE id = ?1",
+            params![published],
+        )
+        .unwrap();
 
         let types = vec!["mine".to_string(), "ai:review".to_string()];
-        assert_eq!(copy_comments(&conn, dest.id, src.id, &types).unwrap(), (2, 0));
+        assert_eq!(
+            copy_comments(&conn, dest.id, src.id, &types).unwrap(),
+            (2, 0)
+        );
         let copied = load_detail(&conn, dest.id).unwrap().comments;
         assert_eq!(copied.len(), 3, "two roots plus one reply");
         let root = copied.iter().find(|c| c.body == "mine").unwrap();
         let reply = copied.iter().find(|c| c.body == "reply").unwrap();
         assert_eq!(reply.parent_id, Some(root.id));
-        assert!(copied.iter().all(|c| c.body != "local" && c.body != "published"));
+        assert!(copied
+            .iter()
+            .all(|c| c.body != "local" && c.body != "published"));
 
-        assert_eq!(copy_comments(&conn, dest.id, src.id, &types).unwrap(), (0, 2));
+        assert_eq!(
+            copy_comments(&conn, dest.id, src.id, &types).unwrap(),
+            (0, 2)
+        );
         assert!(copy_comments(&conn, dest.id, dest.id, &types).is_err());
         assert!(copy_comments(&conn, dest.id, src.id, &["bogus".to_string()]).is_err());
     }
@@ -3342,15 +3629,23 @@ mod tests {
     fn copy_comments_rejects_other_target_and_non_draft_destination() {
         let conn = open_memory();
         let repo = seed_repo(&conn, None, None);
-        let t1 = get_or_create_local_target(&conn, repo, "/nope", "main", "feature", true).unwrap().0;
-        let t2 = get_or_create_local_target(&conn, repo, "/nope", "main", "other", true).unwrap().0;
+        let t1 = get_or_create_local_target(&conn, repo, "/nope", "main", "feature", true)
+            .unwrap()
+            .0;
+        let t2 = get_or_create_local_target(&conn, repo, "/nope", "main", "other", true)
+            .unwrap()
+            .0;
         let a = new_review_for_target(&conn, t1.id, &LiveShas::default()).unwrap();
         let b = new_review_for_target(&conn, t2.id, &LiveShas::default()).unwrap();
         let types = vec!["mine".to_string()];
         assert!(copy_comments(&conn, a.id, b.id, &types).is_err());
 
         let c = new_review_for_target(&conn, t1.id, &LiveShas::default()).unwrap();
-        conn.execute("UPDATE review SET status = 'published' WHERE id = ?1", params![c.id]).unwrap();
+        conn.execute(
+            "UPDATE review SET status = 'published' WHERE id = ?1",
+            params![c.id],
+        )
+        .unwrap();
         assert!(copy_comments(&conn, c.id, a.id, &types).is_err());
     }
 
@@ -3358,8 +3653,9 @@ mod tests {
     fn ai_subtags_are_valid_and_cleared_on_edit_but_local_survives() {
         let conn = open_memory();
         let repo = seed_repo(&conn, None, None);
-        let target =
-            get_or_create_local_target(&conn, repo, "/nope", "main", "feature", true).unwrap().0;
+        let target = get_or_create_local_target(&conn, repo, "/nope", "main", "feature", true)
+            .unwrap()
+            .0;
         let review = new_review_for_target(&conn, target.id, &LiveShas::default()).unwrap();
 
         for tag in ["ai", "ai:explain", "ai:review", "ai:codex", "ai:coverage"] {
@@ -3367,13 +3663,20 @@ mod tests {
             set_comment_tag_impl(&conn, id, Some(tag)).unwrap();
             assert_eq!(get_comment(&conn, id).unwrap().tag.as_deref(), Some(tag));
             update_comment_impl(&conn, id, "edited".into()).unwrap();
-            assert_eq!(get_comment(&conn, id).unwrap().tag, None, "{tag} cleared on edit");
+            assert_eq!(
+                get_comment(&conn, id).unwrap().tag,
+                None,
+                "{tag} cleared on edit"
+            );
         }
 
         let local = seed_comment(&conn, review.id, "a.rs", "RIGHT", 2, None, "y");
         set_comment_tag_impl(&conn, local, Some("local")).unwrap();
         update_comment_impl(&conn, local, "edited".into()).unwrap();
-        assert_eq!(get_comment(&conn, local).unwrap().tag.as_deref(), Some("local"));
+        assert_eq!(
+            get_comment(&conn, local).unwrap().tag.as_deref(),
+            Some("local")
+        );
 
         assert!(set_comment_tag_impl(&conn, local, Some("ai:bogus")).is_err());
     }
@@ -3382,8 +3685,9 @@ mod tests {
     fn ensure_draft_blocks_published_reviews() {
         let conn = open_memory();
         let repo = seed_repo(&conn, None, None);
-        let target =
-            get_or_create_local_target(&conn, repo, "/nope", "main", "feature", true).unwrap().0;
+        let target = get_or_create_local_target(&conn, repo, "/nope", "main", "feature", true)
+            .unwrap()
+            .0;
         let review = new_review_for_target(&conn, target.id, &LiveShas::default()).unwrap();
 
         assert!(ensure_draft(&conn, review.id).is_ok());
@@ -3401,8 +3705,9 @@ mod tests {
     fn ensure_draft_blocks_pending_reviews() {
         let conn = open_memory();
         let repo = seed_repo(&conn, None, None);
-        let target =
-            get_or_create_local_target(&conn, repo, "/nope", "main", "feature", true).unwrap().0;
+        let target = get_or_create_local_target(&conn, repo, "/nope", "main", "feature", true)
+            .unwrap()
+            .0;
         let review = new_review_for_target(&conn, target.id, &LiveShas::default()).unwrap();
 
         conn.execute(
@@ -3455,7 +3760,10 @@ mod tests {
         );
         let publish = build_publish_payload(&detail);
         let pending = build_pending_payload(&detail);
-        assert!(pending.get("event").is_none(), "pending payload has no event");
+        assert!(
+            pending.get("event").is_none(),
+            "pending payload has no event"
+        );
         assert_eq!(pending["comments"], publish["comments"]);
         assert_eq!(pending["body"], publish["body"]);
         assert_eq!(pending["commit_id"], publish["commit_id"]);
@@ -3610,9 +3918,11 @@ mod tests {
         assert!(result.is_err(), "deleting a pending review is rejected");
 
         let surviving: i64 = conn
-            .query_row("SELECT COUNT(*) FROM review WHERE id = ?1", params![review.id], |r| {
-                r.get(0)
-            })
+            .query_row(
+                "SELECT COUNT(*) FROM review WHERE id = ?1",
+                params![review.id],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(surviving, 1, "pending review row is not deleted");
     }
@@ -3623,8 +3933,9 @@ mod tests {
     fn review_with_root_comment() -> (Connection, i64, i64) {
         let conn = open_memory();
         let repo = seed_repo(&conn, None, None);
-        let target =
-            get_or_create_local_target(&conn, repo, "/nope", "main", "feature", true).unwrap().0;
+        let target = get_or_create_local_target(&conn, repo, "/nope", "main", "feature", true)
+            .unwrap()
+            .0;
         let review = new_review_for_target(&conn, target.id, &LiveShas::default()).unwrap();
         let root = add_comment_impl(
             &conn,
@@ -3647,8 +3958,9 @@ mod tests {
     fn add_comment_left_anchors_to_review_base_sha() {
         let conn = open_memory();
         let repo = seed_repo(&conn, None, None);
-        let target =
-            get_or_create_local_target(&conn, repo, "/nope", "main", "feature", true).unwrap().0;
+        let target = get_or_create_local_target(&conn, repo, "/nope", "main", "feature", true)
+            .unwrap()
+            .0;
         let review = new_review_for_target(&conn, target.id, &LiveShas::default()).unwrap();
         conn.execute(
             "UPDATE review SET base_sha = 'basesha' WHERE id = ?1",
@@ -3686,15 +3998,19 @@ mod tests {
             None,
         )
         .unwrap();
-        assert_eq!(right.anchored_base_sha, None, "RIGHT comments store no base pin");
+        assert_eq!(
+            right.anchored_base_sha, None,
+            "RIGHT comments store no base pin"
+        );
     }
 
     #[test]
     fn reply_inherits_anchored_base_sha() {
         let conn = open_memory();
         let repo = seed_repo(&conn, None, None);
-        let target =
-            get_or_create_local_target(&conn, repo, "/nope", "main", "feature", true).unwrap().0;
+        let target = get_or_create_local_target(&conn, repo, "/nope", "main", "feature", true)
+            .unwrap()
+            .0;
         let review = new_review_for_target(&conn, target.id, &LiveShas::default()).unwrap();
         conn.execute(
             "UPDATE review SET base_sha = 'basesha' WHERE id = ?1",
@@ -3869,8 +4185,9 @@ mod tests {
     fn reply_to_file_comment_inherits_subject_type() {
         let conn = open_memory();
         let repo = seed_repo(&conn, None, None);
-        let target =
-            get_or_create_local_target(&conn, repo, "/nope", "main", "feature", true).unwrap().0;
+        let target = get_or_create_local_target(&conn, repo, "/nope", "main", "feature", true)
+            .unwrap()
+            .0;
         let review = new_review_for_target(&conn, target.id, &LiveShas::default()).unwrap();
         // Seed a whole-file root via a direct INSERT mirroring add_file_comment.
         conn.execute(
@@ -3994,7 +4311,9 @@ mod tests {
         let db_path = dir.join("codereview.db");
         let conn = crate::db::open(&db_path).unwrap();
         let repo = seed_repo(&conn, None, None);
-        let target = get_or_create_local_target(&conn, repo, "/nope", "main", "feature", true).unwrap().0;
+        let target = get_or_create_local_target(&conn, repo, "/nope", "main", "feature", true)
+            .unwrap()
+            .0;
         let review = new_review_for_target(&conn, target.id, &LiveShas::default()).unwrap();
         let other = new_review_for_target(&conn, target.id, &LiveShas::default()).unwrap();
         let cache = crate::image_diff::store::cache_dir(&db_path, review.id);
@@ -4017,8 +4336,9 @@ mod tests {
     fn load_detail_returns_comments_ordered_by_file_line() {
         let conn = open_memory();
         let repo = seed_repo(&conn, None, None);
-        let target =
-            get_or_create_local_target(&conn, repo, "/nope", "main", "feature", true).unwrap().0;
+        let target = get_or_create_local_target(&conn, repo, "/nope", "main", "feature", true)
+            .unwrap()
+            .0;
         let review = new_review_for_target(&conn, target.id, &LiveShas::default()).unwrap();
 
         seed_comment(&conn, review.id, "b.rs", "RIGHT", 10, None, "second file");
@@ -4087,15 +4407,19 @@ mod tests {
         let r3 = get_or_create_remote_repository(&conn, "acme", "widget", &[]).unwrap();
         assert_eq!(r3.id, r1.id, "should reuse the same row");
         assert_eq!(r3.local_path.as_deref(), Some("/clones/widget"));
-        assert!(matches!(gh_ctx_for_repo(&conn, r3.id).unwrap(), GhRepo::Local(_)));
+        assert!(matches!(
+            gh_ctx_for_repo(&conn, r3.id).unwrap(),
+            GhRepo::Local(_)
+        ));
     }
 
     #[test]
     fn deleting_review_cascades_to_comments() {
         let conn = open_memory();
         let repo = seed_repo(&conn, None, None);
-        let target =
-            get_or_create_local_target(&conn, repo, "/nope", "main", "feature", true).unwrap().0;
+        let target = get_or_create_local_target(&conn, repo, "/nope", "main", "feature", true)
+            .unwrap()
+            .0;
         let review = new_review_for_target(&conn, target.id, &LiveShas::default()).unwrap();
         seed_comment(&conn, review.id, "a.rs", "RIGHT", 1, None, "note");
 
@@ -4111,8 +4435,9 @@ mod tests {
     fn deleting_repo_cascades_through_target_and_review() {
         let conn = open_memory();
         let repo = seed_repo(&conn, None, None);
-        let target =
-            get_or_create_local_target(&conn, repo, "/nope", "main", "feature", true).unwrap().0;
+        let target = get_or_create_local_target(&conn, repo, "/nope", "main", "feature", true)
+            .unwrap()
+            .0;
         let review = new_review_for_target(&conn, target.id, &LiveShas::default()).unwrap();
         seed_comment(&conn, review.id, "a.rs", "RIGHT", 1, None, "note");
 
@@ -4219,7 +4544,11 @@ mod tests {
 
     #[test]
     fn payload_single_line_comment_has_no_start_fields() {
-        let p = build_publish_payload(&detail_with(None, "", vec![payload_comment(5, None, "RIGHT")]));
+        let p = build_publish_payload(&detail_with(
+            None,
+            "",
+            vec![payload_comment(5, None, "RIGHT")],
+        ));
         let c = &p["comments"][0];
         assert_eq!(c["path"], "src/lib.rs");
         assert_eq!(c["side"], "RIGHT");
@@ -4231,8 +4560,11 @@ mod tests {
 
     #[test]
     fn payload_multiline_comment_adds_start_line_and_side() {
-        let p =
-            build_publish_payload(&detail_with(None, "", vec![payload_comment(8, Some(3), "LEFT")]));
+        let p = build_publish_payload(&detail_with(
+            None,
+            "",
+            vec![payload_comment(8, Some(3), "LEFT")],
+        ));
         let c = &p["comments"][0];
         assert_eq!(c["line"], 8);
         assert_eq!(c["start_line"], 3);
@@ -4244,7 +4576,10 @@ mod tests {
         let mut d = detail_with(
             None,
             "",
-            vec![payload_comment(5, None, "RIGHT"), payload_comment(7, None, "LEFT")],
+            vec![
+                payload_comment(5, None, "RIGHT"),
+                payload_comment(7, None, "LEFT"),
+            ],
         );
         d.review.since_base_sha = Some("oldbase".into());
         d.review.since_head_sha = Some("oldhead".into());
@@ -4252,13 +4587,19 @@ mod tests {
         assert_eq!(p["comments"].as_array().unwrap().len(), 1);
         assert_eq!(p["comments"][0]["side"], "RIGHT");
         let body = p["body"].as_str().unwrap();
-        assert!(body.contains("could not be posted inline") && body.contains("L7"), "{body}");
+        assert!(
+            body.contains("could not be posted inline") && body.contains("L7"),
+            "{body}"
+        );
     }
 
     #[test]
     fn payload_start_line_equal_to_line_is_treated_as_single_line() {
-        let p =
-            build_publish_payload(&detail_with(None, "", vec![payload_comment(5, Some(5), "RIGHT")]));
+        let p = build_publish_payload(&detail_with(
+            None,
+            "",
+            vec![payload_comment(5, Some(5), "RIGHT")],
+        ));
         let c = &p["comments"][0];
         assert!(c.get("start_line").is_none());
     }
@@ -4326,15 +4667,19 @@ mod tests {
 
     #[test]
     fn payload_file_comments_become_body_even_without_summary() {
-        let p = build_publish_payload(&detail_with(
-            None,
-            "",
-            vec![file_comment("a.rs", "note")],
-        ));
-        assert!(p["body"].as_str().unwrap().starts_with("## File-level comments"));
+        let p = build_publish_payload(&detail_with(None, "", vec![file_comment("a.rs", "note")]));
+        assert!(p["body"]
+            .as_str()
+            .unwrap()
+            .starts_with("## File-level comments"));
     }
 
-    fn file_view_comment(file_path: &str, line: i64, start_line: Option<i64>, body: &str) -> Comment {
+    fn file_view_comment(
+        file_path: &str,
+        line: i64,
+        start_line: Option<i64>,
+        body: &str,
+    ) -> Comment {
         Comment {
             origin: "file_view".into(),
             file_path: file_path.into(),
@@ -4389,7 +4734,11 @@ mod tests {
 
     #[test]
     fn payload_keeps_comment_inline_when_anchored_to_fresh_head() {
-        let mut d = detail_with(None, "", vec![anchored_payload_comment(5, None, Some("freshsha"))]);
+        let mut d = detail_with(
+            None,
+            "",
+            vec![anchored_payload_comment(5, None, Some("freshsha"))],
+        );
         d.review.head_sha = Some("freshsha".into());
 
         let p = build_publish_payload(&d);
@@ -4446,9 +4795,15 @@ mod tests {
         let comments = p["comments"].as_array().unwrap();
         // The stale-LEFT comment is excluded; the two current-base LEFT comments post inline.
         assert_eq!(comments.len(), 2);
-        let lines: Vec<i64> = comments.iter().map(|c| c["line"].as_i64().unwrap()).collect();
+        let lines: Vec<i64> = comments
+            .iter()
+            .map(|c| c["line"].as_i64().unwrap())
+            .collect();
         assert!(lines.contains(&9));
-        assert!(lines.contains(&11), "stale-head/current-base LEFT still posts inline");
+        assert!(
+            lines.contains(&11),
+            "stale-head/current-base LEFT still posts inline"
+        );
         assert!(!lines.contains(&7), "stale-base LEFT must not post inline");
         for c in comments {
             assert_eq!(c["side"], "LEFT");
@@ -4457,8 +4812,14 @@ mod tests {
         let body = p["body"].as_str().unwrap();
         assert!(body.contains("## Comments that could not be re-anchored"));
         assert!(body.contains("**src/lib.rs** L7: comment body"));
-        assert!(!body.contains("L9"), "fresh LEFT comment is not in the lost section");
-        assert!(!body.contains("L11"), "current-base LEFT comment is not in the lost section");
+        assert!(
+            !body.contains("L9"),
+            "fresh LEFT comment is not in the lost section"
+        );
+        assert!(
+            !body.contains("L11"),
+            "current-base LEFT comment is not in the lost section"
+        );
     }
 
     // ---- comment-id capture (Spec 17): inline selection, matcher, store ----
@@ -4502,7 +4863,12 @@ mod tests {
         }
     }
 
-    fn local_key(id: i64, line: i64, start_line: Option<i64>, body: &str) -> (i64, AnchorKey, String) {
+    fn local_key(
+        id: i64,
+        line: i64,
+        start_line: Option<i64>,
+        body: &str,
+    ) -> (i64, AnchorKey, String) {
         let c = Comment {
             line,
             start_line,
@@ -4514,8 +4880,18 @@ mod tests {
 
     #[test]
     fn match_singleton_anchor_pairs_despite_body_drift() {
-        let local = vec![(1, AnchorKey::local(&payload_comment(5, None, "RIGHT")), "local body".into())];
-        let remote = vec![remote_comment(9001, Some(5), None, Some("RIGHT"), "drifted body")];
+        let local = vec![(
+            1,
+            AnchorKey::local(&payload_comment(5, None, "RIGHT")),
+            "local body".into(),
+        )];
+        let remote = vec![remote_comment(
+            9001,
+            Some(5),
+            None,
+            Some("RIGHT"),
+            "drifted body",
+        )];
         assert_eq!(match_review_comments(&local, &remote), vec![(1, 9001)]);
     }
 
@@ -4538,14 +4914,25 @@ mod tests {
         // Two locals, same anchor + same body; two identical remotes → paired in
         // order, distinct gh ids, each remote consumed once.
         let local = vec![
-            (1, AnchorKey::local(&payload_comment(5, None, "RIGHT")), "dup".into()),
-            (2, AnchorKey::local(&payload_comment(5, None, "RIGHT")), "dup".into()),
+            (
+                1,
+                AnchorKey::local(&payload_comment(5, None, "RIGHT")),
+                "dup".into(),
+            ),
+            (
+                2,
+                AnchorKey::local(&payload_comment(5, None, "RIGHT")),
+                "dup".into(),
+            ),
         ];
         let remote = vec![
             remote_comment(9001, Some(5), None, Some("RIGHT"), "dup"),
             remote_comment(9002, Some(5), None, Some("RIGHT"), "dup"),
         ];
-        assert_eq!(match_review_comments(&local, &remote), vec![(1, 9001), (2, 9002)]);
+        assert_eq!(
+            match_review_comments(&local, &remote),
+            vec![(1, 9001), (2, 9002)]
+        );
     }
 
     #[test]
@@ -4553,8 +4940,16 @@ mod tests {
         // Two locals same anchor, two remotes, no body equality, not a singleton
         // bucket → nothing paired.
         let local = vec![
-            (1, AnchorKey::local(&payload_comment(5, None, "RIGHT")), "A".into()),
-            (2, AnchorKey::local(&payload_comment(5, None, "RIGHT")), "B".into()),
+            (
+                1,
+                AnchorKey::local(&payload_comment(5, None, "RIGHT")),
+                "A".into(),
+            ),
+            (
+                2,
+                AnchorKey::local(&payload_comment(5, None, "RIGHT")),
+                "B".into(),
+            ),
         ];
         let remote = vec![
             remote_comment(9001, Some(5), None, Some("RIGHT"), "X"),
@@ -4568,8 +4963,16 @@ mod tests {
         // Two locals on distinct anchors, one remote matching the first → exactly
         // one pair (folded-comment scenario: the second local has no remote).
         let local = vec![
-            (1, AnchorKey::local(&payload_comment(5, None, "RIGHT")), "first".into()),
-            (2, AnchorKey::local(&payload_comment(9, None, "RIGHT")), "second".into()),
+            (
+                1,
+                AnchorKey::local(&payload_comment(5, None, "RIGHT")),
+                "first".into(),
+            ),
+            (
+                2,
+                AnchorKey::local(&payload_comment(9, None, "RIGHT")),
+                "second".into(),
+            ),
         ];
         let remote = vec![remote_comment(9001, Some(5), None, Some("RIGHT"), "first")];
         assert_eq!(match_review_comments(&local, &remote), vec![(1, 9001)]);
@@ -4579,8 +4982,18 @@ mod tests {
     fn match_normalizes_single_line_start() {
         // Local with start_line == line normalizes to None and matches a remote
         // single-line comment (start_line: None).
-        let local = vec![(1, AnchorKey::local(&payload_comment(5, Some(5), "RIGHT")), "comment body".into())];
-        let remote = vec![remote_comment(9001, Some(5), None, Some("RIGHT"), "comment body")];
+        let local = vec![(
+            1,
+            AnchorKey::local(&payload_comment(5, Some(5), "RIGHT")),
+            "comment body".into(),
+        )];
+        let remote = vec![remote_comment(
+            9001,
+            Some(5),
+            None,
+            Some("RIGHT"),
+            "comment body",
+        )];
         assert_eq!(match_review_comments(&local, &remote), vec![(1, 9001)]);
     }
 
@@ -4588,7 +5001,11 @@ mod tests {
     fn match_multiline_range_key() {
         // Local range (start=3, line=5) matches the range remote, never the
         // single-line remote at line 5.
-        let local = vec![(1, AnchorKey::local(&payload_comment(5, Some(3), "RIGHT")), "ranged".into())];
+        let local = vec![(
+            1,
+            AnchorKey::local(&payload_comment(5, Some(3), "RIGHT")),
+            "ranged".into(),
+        )];
         let remote = vec![
             remote_comment(9001, Some(5), None, Some("RIGHT"), "single"),
             remote_comment(9002, Some(5), Some(3), Some("RIGHT"), "ranged"),
@@ -4598,7 +5015,11 @@ mod tests {
 
     #[test]
     fn match_skips_remote_without_anchor() {
-        let local = vec![(1, AnchorKey::local(&payload_comment(5, None, "RIGHT")), "comment body".into())];
+        let local = vec![(
+            1,
+            AnchorKey::local(&payload_comment(5, None, "RIGHT")),
+            "comment body".into(),
+        )];
         // Remote missing side and line has no AnchorKey → never paired.
         let remote = vec![remote_comment(9001, None, None, None, "comment body")];
         assert!(match_review_comments(&local, &remote).is_empty());
@@ -4608,31 +5029,48 @@ mod tests {
     fn store_comment_id_matches_writes_only_matched_rows() {
         let conn = open_memory();
         let repo = seed_repo(&conn, Some("owner"), Some("repo"));
-        let target =
-            get_or_create_local_target(&conn, repo, "/nope", "main", "feature", true).unwrap().0;
+        let target = get_or_create_local_target(&conn, repo, "/nope", "main", "feature", true)
+            .unwrap()
+            .0;
         let review = new_review_for_target(&conn, target.id, &LiveShas::default()).unwrap();
 
         let c1 = seed_comment(&conn, review.id, "a.rs", "RIGHT", 5, None, "one");
         let c2 = seed_comment(&conn, review.id, "a.rs", "RIGHT", 9, None, "two");
 
         let before: String = conn
-            .query_row("SELECT updated_at FROM comment WHERE id = ?1", params![c2], |r| r.get(0))
+            .query_row(
+                "SELECT updated_at FROM comment WHERE id = ?1",
+                params![c2],
+                |r| r.get(0),
+            )
             .unwrap();
 
         let n = store_comment_id_matches(&conn, &[(c1, 9001)]).unwrap();
         assert_eq!(n, 1);
 
         let id1: Option<i64> = conn
-            .query_row("SELECT github_comment_id FROM comment WHERE id = ?1", params![c1], |r| r.get(0))
+            .query_row(
+                "SELECT github_comment_id FROM comment WHERE id = ?1",
+                params![c1],
+                |r| r.get(0),
+            )
             .unwrap();
         let id2: Option<i64> = conn
-            .query_row("SELECT github_comment_id FROM comment WHERE id = ?1", params![c2], |r| r.get(0))
+            .query_row(
+                "SELECT github_comment_id FROM comment WHERE id = ?1",
+                params![c2],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(id1, Some(9001));
         assert_eq!(id2, None, "the unmatched row stays NULL");
 
         let after: String = conn
-            .query_row("SELECT updated_at FROM comment WHERE id = ?1", params![c2], |r| r.get(0))
+            .query_row(
+                "SELECT updated_at FROM comment WHERE id = ?1",
+                params![c2],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(before, after, "store must not touch updated_at");
     }
@@ -4752,8 +5190,9 @@ mod tests {
         let conn = open_memory();
         let repo = seed_repo_at(&conn, &repo_path);
         // The review was pinned at H1; the branch has since moved to H2.
-        let target =
-            get_or_create_local_target(&conn, repo, &repo_path, "main~1", "main", true).unwrap().0;
+        let target = get_or_create_local_target(&conn, repo, &repo_path, "main~1", "main", true)
+            .unwrap()
+            .0;
         let review = new_review_for_target(&conn, target.id, &pin(Some(&h1), Some(&h1))).unwrap();
 
         let db = Db(Mutex::new(conn));
@@ -4765,7 +5204,11 @@ mod tests {
         assert_eq!(fresh.new_commits, Some(1));
 
         let stored = get_review_row(&db.0.lock().unwrap(), review.id).unwrap();
-        assert_eq!(stored.head_sha.as_deref(), Some(h1.as_str()), "refresh never moves the pin");
+        assert_eq!(
+            stored.head_sha.as_deref(),
+            Some(h1.as_str()),
+            "refresh never moves the pin"
+        );
         assert_eq!(stored.updated_at, review.updated_at);
     }
 
@@ -4776,12 +5219,22 @@ mod tests {
 
         let conn = open_memory();
         let repo = seed_repo_at(&conn, &repo_path);
-        let target =
-            get_or_create_local_target(&conn, repo, &repo_path, "main~1", "main", true).unwrap().0;
+        let target = get_or_create_local_target(&conn, repo, &repo_path, "main~1", "main", true)
+            .unwrap()
+            .0;
         let review = new_review_for_target(&conn, target.id, &pin(Some(&h1), Some(&h1))).unwrap();
         let other = new_review_for_target(&conn, target.id, &pin(Some(&h1), Some(&h1))).unwrap();
         // beta is line 2 at H1; H2 inserts a line above it.
-        let c = seed_comment_anchored(&conn, review.id, "file.txt", "RIGHT", 2, None, "on beta", Some(&h1));
+        let c = seed_comment_anchored(
+            &conn,
+            review.id,
+            "file.txt",
+            "RIGHT",
+            2,
+            None,
+            "on beta",
+            Some(&h1),
+        );
 
         let db = Db(Mutex::new(conn));
         let result = update_review_pin_impl(review.id, &db).unwrap();
@@ -4813,11 +5266,15 @@ mod tests {
 
         let conn = open_memory();
         let repo = seed_repo_at(&conn, &repo_path);
-        let target =
-            get_or_create_local_target(&conn, repo, &repo_path, "main~1", "main", true).unwrap().0;
+        let target = get_or_create_local_target(&conn, repo, &repo_path, "main~1", "main", true)
+            .unwrap()
+            .0;
         let review = new_review_for_target(&conn, target.id, &pin(Some(&h1), Some(&h1))).unwrap();
-        conn.execute("UPDATE review SET status = 'published' WHERE id = ?1", params![review.id])
-            .unwrap();
+        conn.execute(
+            "UPDATE review SET status = 'published' WHERE id = ?1",
+            params![review.id],
+        )
+        .unwrap();
 
         let db = Db(Mutex::new(conn));
         assert!(update_review_pin_impl(review.id, &db).is_err());
@@ -4871,7 +5328,11 @@ mod tests {
         assert_eq!(live2.base_sha.as_deref(), Some(base_tip.as_str()));
 
         // resolve_live reproduces the same coordinate choice from three_dot.
-        conn.execute("UPDATE target SET three_dot = 1 WHERE id = ?1", params![three.id]).unwrap();
+        conn.execute(
+            "UPDATE target SET three_dot = 1 WHERE id = ?1",
+            params![three.id],
+        )
+        .unwrap();
         let db = Db(Mutex::new(conn));
         let target = get_target(&db.0.lock().unwrap(), three.id).unwrap();
         let live = resolve_live(&db, &target).unwrap();
@@ -4934,8 +5395,9 @@ mod tests {
 
         let conn = open_memory();
         let repo = seed_repo_at(&conn, &repo_path);
-        let target =
-            get_or_create_local_target(&conn, repo, &repo_path, "main~1", "main", false).unwrap().0;
+        let target = get_or_create_local_target(&conn, repo, &repo_path, "main~1", "main", false)
+            .unwrap()
+            .0;
         let review = new_review_for_target(&conn, target.id, &LiveShas::default()).unwrap();
         conn.execute(
             "UPDATE review SET head_sha = ?1 WHERE id = ?2",
@@ -4973,30 +5435,52 @@ mod tests {
         git(p, &["init", "-q", "-b", "main"]);
         git(p, &["config", "user.email", "test@example.com"]);
         git(p, &["config", "user.name", "Test"]);
-        fs::write(p.join("file.txt"), "one\ntwo\nneedle_call(42)\nthree\nfour\nfive\n").unwrap();
+        fs::write(
+            p.join("file.txt"),
+            "one\ntwo\nneedle_call(42)\nthree\nfour\nfive\n",
+        )
+        .unwrap();
         git(p, &["add", "."]);
         git(p, &["commit", "-q", "-m", "h1"]);
         let h1 = git::rev_parse(p, "HEAD").unwrap();
         // The commented line moves to the end: the diff deletes it, content finds it.
-        fs::write(p.join("file.txt"), "one\ntwo\nthree\nfour\nfive\nneedle_call(42)\n").unwrap();
+        fs::write(
+            p.join("file.txt"),
+            "one\ntwo\nthree\nfour\nfive\nneedle_call(42)\n",
+        )
+        .unwrap();
         git(p, &["commit", "-q", "-am", "h2"]);
         let h2 = git::rev_parse(p, "HEAD").unwrap();
         let repo_path = p.to_str().unwrap().to_string();
 
         let conn = open_memory();
         let repo = seed_repo_at(&conn, &repo_path);
-        let target =
-            get_or_create_local_target(&conn, repo, &repo_path, "main~1", "main", false).unwrap().0;
+        let target = get_or_create_local_target(&conn, repo, &repo_path, "main~1", "main", false)
+            .unwrap()
+            .0;
         let review = new_review_for_target(&conn, target.id, &LiveShas::default()).unwrap();
-        conn.execute("UPDATE review SET head_sha = ?1 WHERE id = ?2", params![h2, review.id])
-            .unwrap();
+        conn.execute(
+            "UPDATE review SET head_sha = ?1 WHERE id = ?2",
+            params![h2, review.id],
+        )
+        .unwrap();
         let id = seed_comment_anchored(
-            &conn, review.id, "file.txt", "RIGHT", 3, None, "on call", Some(&h1),
+            &conn,
+            review.id,
+            "file.txt",
+            "RIGHT",
+            3,
+            None,
+            "on call",
+            Some(&h1),
         );
 
         let detail = load_detail(&conn, review.id).unwrap();
         let result = reanchor_review_comments(&conn, &detail).unwrap();
-        assert_eq!((result.reanchored, result.relocated, result.lost), (1, 1, 0));
+        assert_eq!(
+            (result.reanchored, result.relocated, result.lost),
+            (1, 1, 0)
+        );
         let c = comment_row(&conn, id);
         assert_eq!(c.line, 6);
         assert_eq!(c.anchored_head_sha.as_deref(), Some(h2.as_str()));
@@ -5009,8 +5493,9 @@ mod tests {
 
         let conn = open_memory();
         let repo = seed_repo_at(&conn, &repo_path);
-        let target =
-            get_or_create_local_target(&conn, repo, &repo_path, "main~1", "main", false).unwrap().0;
+        let target = get_or_create_local_target(&conn, repo, &repo_path, "main~1", "main", false)
+            .unwrap()
+            .0;
         let review = new_review_for_target(&conn, target.id, &LiveShas::default()).unwrap();
         conn.execute(
             "UPDATE review SET head_sha = ?1 WHERE id = ?2",
@@ -5078,7 +5563,10 @@ mod tests {
         let result = reanchor_review_comments(&conn, &detail).unwrap();
         assert_eq!(result.reanchored, 0);
         assert_eq!(result.lost, 0);
-        assert_eq!(result.skipped_no_change, 1, "base pass skips the NULL base pin");
+        assert_eq!(
+            result.skipped_no_change, 1,
+            "base pass skips the NULL base pin"
+        );
 
         let c = comment_row(&conn, id);
         assert_eq!(c.line, 2);
@@ -5093,8 +5581,9 @@ mod tests {
 
         let conn = open_memory();
         let repo = seed_repo_at(&conn, &repo_path);
-        let target =
-            get_or_create_local_target(&conn, repo, &repo_path, "main~1", "main", false).unwrap().0;
+        let target = get_or_create_local_target(&conn, repo, &repo_path, "main~1", "main", false)
+            .unwrap()
+            .0;
         let review = new_review_for_target(&conn, target.id, &LiveShas::default()).unwrap();
         conn.execute(
             "UPDATE review SET head_sha = ?1 WHERE id = ?2",
@@ -5131,8 +5620,9 @@ mod tests {
 
         let conn = open_memory();
         let repo = seed_repo_at(&conn, &repo_path);
-        let target =
-            get_or_create_local_target(&conn, repo, &repo_path, "main~1", "main", false).unwrap().0;
+        let target = get_or_create_local_target(&conn, repo, &repo_path, "main~1", "main", false)
+            .unwrap()
+            .0;
         let review = new_review_for_target(&conn, target.id, &LiveShas::default()).unwrap();
         conn.execute(
             "UPDATE review SET head_sha = ?1 WHERE id = ?2",
@@ -5142,7 +5632,14 @@ mod tests {
 
         // beta (H1 line 2) shifts to line 3 in H2; the reply rides along.
         let root_id = seed_comment_anchored(
-            &conn, review.id, "file.txt", "RIGHT", 2, None, "on beta", Some(&h1),
+            &conn,
+            review.id,
+            "file.txt",
+            "RIGHT",
+            2,
+            None,
+            "on beta",
+            Some(&h1),
         );
         let reply_id = seed_reply(&conn, review.id, root_id, "agreed");
 
@@ -5166,8 +5663,9 @@ mod tests {
 
         let conn = open_memory();
         let repo = seed_repo_at(&conn, &repo_path);
-        let target =
-            get_or_create_local_target(&conn, repo, &repo_path, "main~1", "main", false).unwrap().0;
+        let target = get_or_create_local_target(&conn, repo, &repo_path, "main~1", "main", false)
+            .unwrap()
+            .0;
         let review = new_review_for_target(&conn, target.id, &LiveShas::default()).unwrap();
         conn.execute(
             "UPDATE review SET head_sha = ?1 WHERE id = ?2",
@@ -5177,7 +5675,14 @@ mod tests {
 
         // gamma (H1 line 3) is replaced in H2 -> Lost; the reply stays put.
         let root_id = seed_comment_anchored(
-            &conn, review.id, "file.txt", "RIGHT", 3, None, "on gamma", Some(&h1),
+            &conn,
+            review.id,
+            "file.txt",
+            "RIGHT",
+            3,
+            None,
+            "on gamma",
+            Some(&h1),
         );
         let reply_id = seed_reply(&conn, review.id, root_id, "still here");
 
@@ -5206,8 +5711,9 @@ mod tests {
         let repo = seed_repo_at(&conn, &repo_path);
         // Two-dot local target; pin base_sha to the *current* base B2 (head is
         // irrelevant to the LEFT pass) while comments still point at B1.
-        let target =
-            get_or_create_local_target(&conn, repo, &repo_path, "main", "main", false).unwrap().0;
+        let target = get_or_create_local_target(&conn, repo, &repo_path, "main", "main", false)
+            .unwrap()
+            .0;
         let review = new_review_for_target(&conn, target.id, &LiveShas::default()).unwrap();
         conn.execute(
             "UPDATE review SET base_sha = ?1, head_sha = ?2 WHERE id = ?3",
@@ -5221,7 +5727,8 @@ mod tests {
     fn left_reanchor_shifts_comment_and_advances_base_sha() {
         let (_dir, conn, review_id, b1, b2) = left_base_review();
         // beta (B1 line 2) shifts to line 3 in B2; head pin left NULL.
-        let id = seed_comment_anchored_base(&conn, review_id, "file.txt", 2, None, "on beta", Some(&b1));
+        let id =
+            seed_comment_anchored_base(&conn, review_id, "file.txt", 2, None, "on beta", Some(&b1));
 
         let detail = load_detail(&conn, review_id).unwrap();
         let result = reanchor_review_comments(&conn, &detail).unwrap();
@@ -5239,7 +5746,15 @@ mod tests {
     fn left_reanchor_replaced_line_is_lost() {
         let (_dir, conn, review_id, b1, _b2) = left_base_review();
         // gamma (B1 line 3) is replaced in B2 -> Lost.
-        let id = seed_comment_anchored_base(&conn, review_id, "file.txt", 3, None, "on gamma", Some(&b1));
+        let id = seed_comment_anchored_base(
+            &conn,
+            review_id,
+            "file.txt",
+            3,
+            None,
+            "on gamma",
+            Some(&b1),
+        );
 
         let detail = load_detail(&conn, review_id).unwrap();
         let result = reanchor_review_comments(&conn, &detail).unwrap();
@@ -5248,18 +5763,36 @@ mod tests {
 
         let c = comment_row(&conn, id);
         assert_eq!(c.line, 3, "lost comment's line is left untouched");
-        assert_eq!(c.anchored_base_sha.as_deref(), Some(b1.as_str()), "pin stays at B1");
+        assert_eq!(
+            c.anchored_base_sha.as_deref(),
+            Some(b1.as_str()),
+            "pin stays at B1"
+        );
     }
 
     #[test]
     fn left_reanchor_range_moves_both_endpoints() {
         let (_dir, conn, review_id, b1, b2) = left_base_review();
         // Range alpha..beta (B1 lines 1-2) -> 1-3 (beta shifts, alpha unmoved).
-        let moved =
-            seed_comment_anchored_base(&conn, review_id, "file.txt", 2, Some(1), "range", Some(&b1));
+        let moved = seed_comment_anchored_base(
+            &conn,
+            review_id,
+            "file.txt",
+            2,
+            Some(1),
+            "range",
+            Some(&b1),
+        );
         // Range with one endpoint on gamma (replaced) -> whole comment Lost.
-        let lost =
-            seed_comment_anchored_base(&conn, review_id, "file.txt", 3, Some(1), "spans gamma", Some(&b1));
+        let lost = seed_comment_anchored_base(
+            &conn,
+            review_id,
+            "file.txt",
+            3,
+            Some(1),
+            "spans gamma",
+            Some(&b1),
+        );
 
         let detail = load_detail(&conn, review_id).unwrap();
         let result = reanchor_review_comments(&conn, &detail).unwrap();
@@ -5283,8 +5816,15 @@ mod tests {
         // NULL base pin and a pin already at B2 must both be skipped, untouched.
         let null_pin =
             seed_comment_anchored_base(&conn, review_id, "file.txt", 2, None, "null pin", None);
-        let current_pin =
-            seed_comment_anchored_base(&conn, review_id, "file.txt", 2, None, "already current", Some(&b2));
+        let current_pin = seed_comment_anchored_base(
+            &conn,
+            review_id,
+            "file.txt",
+            2,
+            None,
+            "already current",
+            Some(&b2),
+        );
 
         let detail = load_detail(&conn, review_id).unwrap();
         let result = reanchor_review_comments(&conn, &detail).unwrap();
@@ -5295,7 +5835,10 @@ mod tests {
         assert_eq!(comment_row(&conn, null_pin).line, 2);
         assert_eq!(comment_row(&conn, null_pin).anchored_base_sha, None);
         assert_eq!(comment_row(&conn, current_pin).line, 2);
-        assert_eq!(comment_row(&conn, current_pin).anchored_base_sha.as_deref(), Some(b2.as_str()));
+        assert_eq!(
+            comment_row(&conn, current_pin).anchored_base_sha.as_deref(),
+            Some(b2.as_str())
+        );
     }
 
     #[test]
@@ -5307,7 +5850,8 @@ mod tests {
             params![review_id],
         )
         .unwrap();
-        let id = seed_comment_anchored_base(&conn, review_id, "file.txt", 2, None, "on beta", Some(&b1));
+        let id =
+            seed_comment_anchored_base(&conn, review_id, "file.txt", 2, None, "on beta", Some(&b1));
 
         let detail = load_detail(&conn, review_id).unwrap();
         let result = reanchor_review_comments(&conn, &detail).unwrap();
@@ -5328,8 +5872,9 @@ mod tests {
         let repo_path = dir.path().to_str().unwrap().to_string();
         let conn = open_memory();
         let repo = seed_repo_at(&conn, &repo_path);
-        let target =
-            get_or_create_local_target(&conn, repo, &repo_path, "main", "main", false).unwrap().0;
+        let target = get_or_create_local_target(&conn, repo, &repo_path, "main", "main", false)
+            .unwrap()
+            .0;
         // head advanced B1 -> B2; base is already current (B2).
         let review = new_review_for_target(&conn, target.id, &LiveShas::default()).unwrap();
         conn.execute(
@@ -5339,15 +5884,33 @@ mod tests {
         .unwrap();
 
         let right = seed_comment_anchored(
-            &conn, review.id, "file.txt", "RIGHT", 2, None, "right beta", Some(&b1),
+            &conn,
+            review.id,
+            "file.txt",
+            "RIGHT",
+            2,
+            None,
+            "right beta",
+            Some(&b1),
         );
-        let left = seed_comment_anchored_base(&conn, review.id, "file.txt", 1, None, "left alpha", Some(&b2));
+        let left = seed_comment_anchored_base(
+            &conn,
+            review.id,
+            "file.txt",
+            1,
+            None,
+            "left alpha",
+            Some(&b2),
+        );
 
         let detail = load_detail(&conn, review.id).unwrap();
         let result = reanchor_review_comments(&conn, &detail).unwrap();
         assert_eq!(result.reanchored, 1, "only the RIGHT row moves");
         assert_eq!(result.lost, 0);
-        assert_eq!(result.skipped_no_change, 1, "the current LEFT pin is skipped");
+        assert_eq!(
+            result.skipped_no_change, 1,
+            "the current LEFT pin is skipped"
+        );
 
         let r = comment_row(&conn, right);
         assert_eq!(r.line, 3);
@@ -5386,10 +5949,16 @@ mod tests {
             params![repo],
         )
         .unwrap();
-        let rid = new_review_for_target(&conn, conn.last_insert_rowid(), &LiveShas::default()).unwrap().id;
+        let rid = new_review_for_target(&conn, conn.last_insert_rowid(), &LiveShas::default())
+            .unwrap()
+            .id;
         let add = |tag: Option<&str>| {
             let id = seed_comment(&conn, rid, "a.rs", "RIGHT", 1, None, "x");
-            conn.execute("UPDATE comment SET tag = ?1 WHERE id = ?2", params![tag, id]).unwrap();
+            conn.execute(
+                "UPDATE comment SET tag = ?1 WHERE id = ?2",
+                params![tag, id],
+            )
+            .unwrap();
             id
         };
         let owned = add(Some("ai:review"));
@@ -5397,9 +5966,17 @@ mod tests {
         let other_tag = add(Some("ai:coverage"));
         let untagged = add(None);
         let edited = add(Some("ai:review"));
-        conn.execute("UPDATE comment SET updated_at = 'later' WHERE id = ?1", params![edited]).unwrap();
+        conn.execute(
+            "UPDATE comment SET updated_at = 'later' WHERE id = ?1",
+            params![edited],
+        )
+        .unwrap();
         let resolved = add(Some("ai:review"));
-        conn.execute("UPDATE comment SET resolved_at = 'later' WHERE id = ?1", params![resolved]).unwrap();
+        conn.execute(
+            "UPDATE comment SET resolved_at = 'later' WHERE id = ?1",
+            params![resolved],
+        )
+        .unwrap();
         let replied = add(Some("ai:review"));
         conn.execute(
             "INSERT INTO comment (review_id, file_path, side, line, body, parent_id, created_at, updated_at)
@@ -5408,7 +5985,11 @@ mod tests {
         )
         .unwrap();
         let published = add(Some("ai:review"));
-        conn.execute("UPDATE comment SET github_comment_id = 9 WHERE id = ?1", params![published]).unwrap();
+        conn.execute(
+            "UPDATE comment SET github_comment_id = 9 WHERE id = ?1",
+            params![published],
+        )
+        .unwrap();
         let noted = add(Some("ai:review"));
         conn.execute(
             "INSERT INTO focus (review_id, status, level, created_at) VALUES (?1, 'ready', 'focus', 'now')",
@@ -5424,14 +6005,18 @@ mod tests {
         let tags = vec!["ai:review".to_string(), "ai:codex".to_string()];
         assert_eq!(prune_ai_comments_impl(&conn, rid, &tags).unwrap(), 2);
         let left: Vec<i64> = conn
-            .prepare("SELECT id FROM comment WHERE review_id = ?1 AND parent_id IS NULL ORDER BY id")
+            .prepare(
+                "SELECT id FROM comment WHERE review_id = ?1 AND parent_id IS NULL ORDER BY id",
+            )
             .unwrap()
             .query_map(params![rid], |r| r.get(0))
             .unwrap()
             .collect::<Result<_, _>>()
             .unwrap();
         assert!(!left.contains(&owned) && !left.contains(&codex));
-        for kept in [other_tag, untagged, edited, resolved, replied, published, noted] {
+        for kept in [
+            other_tag, untagged, edited, resolved, replied, published, noted,
+        ] {
             assert!(left.contains(&kept), "comment {kept} kept");
         }
         assert!(prune_ai_comments_impl(&conn, rid, &["local".to_string()]).is_err());
@@ -5492,7 +6077,11 @@ mod tests {
     }
 
     fn git_in(dir: &std::path::Path, args: &[&str]) {
-        let status = Command::new("git").current_dir(dir).args(args).status().unwrap();
+        let status = Command::new("git")
+            .current_dir(dir)
+            .args(args)
+            .status()
+            .unwrap();
         assert!(status.success(), "git {args:?} failed");
     }
 
@@ -5523,9 +6112,20 @@ mod tests {
         )
         .unwrap();
         let repo_id = conn.last_insert_rowid();
-        let review =
-            create_review_impl(&conn, repo_id, &path.to_string_lossy(), "main", "feature", true, false).unwrap();
-        let pinned_head = review.head_sha.clone().expect("sha resolves while the branch exists");
+        let review = create_review_impl(
+            &conn,
+            repo_id,
+            &path.to_string_lossy(),
+            "main",
+            "feature",
+            true,
+            false,
+        )
+        .unwrap();
+        let pinned_head = review
+            .head_sha
+            .clone()
+            .expect("sha resolves while the branch exists");
         let pinned_base = review.base_sha.clone().expect("merge-base resolves");
 
         git_in(path, &["branch", "-D", "feature"]);
@@ -5552,10 +6152,20 @@ mod tests {
     fn mirror_pr_info_reads_refs_and_head_from_the_mirror() {
         let conn = open_memory();
         let repo_id = seed_repo(&conn, Some("o"), Some("r"));
-        assert!(mirror_pr_info(&conn, repo_id, 7).unwrap().is_none(), "no mirror row yet");
+        assert!(
+            mirror_pr_info(&conn, repo_id, 7).unwrap().is_none(),
+            "no mirror row yet"
+        );
         seed_mirror_pr(&conn, repo_id, 7, "abc123");
         let (info, node_id) = mirror_pr_info(&conn, repo_id, 7).unwrap().unwrap();
-        assert_eq!((info.base_ref.as_str(), info.head_ref.as_str(), info.head_sha.as_str()), ("main", "feat", "abc123"));
+        assert_eq!(
+            (
+                info.base_ref.as_str(),
+                info.head_ref.as_str(),
+                info.head_sha.as_str()
+            ),
+            ("main", "feat", "abc123")
+        );
         assert_eq!(node_id, "PR_node");
     }
 
@@ -5564,8 +6174,12 @@ mod tests {
         let conn = open_memory();
         let repo_id = seed_repo(&conn, Some("o"), Some("r"));
         seed_mirror_pr(&conn, repo_id, 7, "abc123");
-        conn.execute("UPDATE gh_pr SET head_ref = NULL", []).unwrap();
-        assert!(mirror_pr_info(&conn, repo_id, 7).unwrap().is_none(), "falls back to a live fetch");
+        conn.execute("UPDATE gh_pr SET head_ref = NULL", [])
+            .unwrap();
+        assert!(
+            mirror_pr_info(&conn, repo_id, 7).unwrap().is_none(),
+            "falls back to a live fetch"
+        );
     }
 
     #[test]
@@ -5573,35 +6187,92 @@ mod tests {
         let conn = open_memory();
         let repo_id = seed_repo(&conn, Some("o"), Some("r"));
         // A friendly name changes the repo's display label, not how its drafts are found.
-        conn.execute("UPDATE repository SET friendly_name = 'Widget' WHERE id = ?1", params![repo_id]).unwrap();
+        conn.execute(
+            "UPDATE repository SET friendly_name = 'Widget' WHERE id = ?1",
+            params![repo_id],
+        )
+        .unwrap();
         seed_mirror_pr(&conn, repo_id, 7, "abc123");
-        let info = PrInfo { title: "A title".into(), base_ref: "main".into(), head_ref: "feat".into(), head_sha: "abc123".into() };
+        let info = PrInfo {
+            title: "A title".into(),
+            base_ref: "main".into(),
+            head_ref: "feat".into(),
+            head_sha: "abc123".into(),
+        };
         let target = get_or_create_pr_target(&conn, repo_id, 7, &info, Some("PR_node")).unwrap();
-        let live = LiveShas { base_sha: Some("base0".into()), head_sha: Some("abc123".into()) };
+        let live = LiveShas {
+            base_sha: Some("base0".into()),
+            head_sha: Some("abc123".into()),
+        };
         let draft = new_review_for_target(&conn, target.id, &live).unwrap();
         let db = Db(Mutex::new(conn));
         // The test has no network: a GitHub lookup here would fail the call.
         let reopened = create_review_for_pr_impl(&db, "o", "r", 7, &[], false).unwrap();
         assert_eq!(reopened.id, draft.id);
-        assert_eq!(reopened.head_sha.as_deref(), Some("abc123"), "pin untouched");
+        assert_eq!(
+            reopened.head_sha.as_deref(),
+            Some("abc123"),
+            "pin untouched"
+        );
     }
 
     #[test]
     fn existing_pr_review_is_none_without_an_open_review() {
         let conn = open_memory();
-        assert!(existing_pr_review(&conn, "o", "r", 7, false).unwrap().is_none(), "unknown repo");
+        assert!(
+            existing_pr_review(&conn, "o", "r", 7, false)
+                .unwrap()
+                .is_none(),
+            "unknown repo"
+        );
         let repo_id = seed_repo(&conn, Some("o"), Some("r"));
-        assert!(existing_pr_review(&conn, "o", "r", 7, false).unwrap().is_none(), "no target");
-        let info = PrInfo { title: "t".into(), base_ref: "main".into(), head_ref: "feat".into(), head_sha: "abc".into() };
+        assert!(
+            existing_pr_review(&conn, "o", "r", 7, false)
+                .unwrap()
+                .is_none(),
+            "no target"
+        );
+        let info = PrInfo {
+            title: "t".into(),
+            base_ref: "main".into(),
+            head_ref: "feat".into(),
+            head_sha: "abc".into(),
+        };
         let target = get_or_create_pr_target(&conn, repo_id, 7, &info, None).unwrap();
-        assert!(existing_pr_review(&conn, "o", "r", 7, false).unwrap().is_none(), "no review");
-        let live = LiveShas { base_sha: None, head_sha: Some("abc".into()) };
+        assert!(
+            existing_pr_review(&conn, "o", "r", 7, false)
+                .unwrap()
+                .is_none(),
+            "no review"
+        );
+        let live = LiveShas {
+            base_sha: None,
+            head_sha: Some("abc".into()),
+        };
         let draft = new_review_for_target(&conn, target.id, &live).unwrap();
-        assert_eq!(existing_pr_review(&conn, "o", "r", 7, false).unwrap().unwrap().id, draft.id);
-        conn.execute("UPDATE review SET status = 'published' WHERE id = ?1", params![draft.id]).unwrap();
-        assert!(existing_pr_review(&conn, "o", "r", 7, false).unwrap().is_none(), "only published");
         assert_eq!(
-            existing_pr_review(&conn, "o", "r", 7, true).unwrap().unwrap().id,
+            existing_pr_review(&conn, "o", "r", 7, false)
+                .unwrap()
+                .unwrap()
+                .id,
+            draft.id
+        );
+        conn.execute(
+            "UPDATE review SET status = 'published' WHERE id = ?1",
+            params![draft.id],
+        )
+        .unwrap();
+        assert!(
+            existing_pr_review(&conn, "o", "r", 7, false)
+                .unwrap()
+                .is_none(),
+            "only published"
+        );
+        assert_eq!(
+            existing_pr_review(&conn, "o", "r", 7, true)
+                .unwrap()
+                .unwrap()
+                .id,
             draft.id,
             "a published review is reopened when asked"
         );

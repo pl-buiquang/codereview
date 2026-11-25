@@ -5,17 +5,17 @@
 //! The app uses the system `ssh` and stores no credential: whatever authenticates the connection
 //! (agent, key, `~/.ssh/config`) is the user's.
 
-pub mod host;
-pub mod error;
-pub mod tunnel;
-pub mod http;
 pub mod client;
-#[cfg(all(test, feature = "worker", unix))]
-mod test_server;
+pub mod error;
 pub mod harness;
-pub mod runtime;
-pub mod startup;
+pub mod host;
+pub mod http;
+pub mod launch;
 pub mod mirror;
 pub mod outbox;
-pub mod launch;
+pub mod runtime;
 pub mod sessions;
+pub mod startup;
+#[cfg(all(test, feature = "worker", unix))]
+mod test_server;
+pub mod tunnel;

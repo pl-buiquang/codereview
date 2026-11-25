@@ -42,7 +42,9 @@ pub struct Language {
 impl Language {
     pub fn for_path(path: &str) -> Option<&'static Language> {
         let ext = extension(path)?;
-        LANGUAGES.iter().find(|l| l.extensions.contains(&ext.as_str()))
+        LANGUAGES
+            .iter()
+            .find(|l| l.extensions.contains(&ext.as_str()))
     }
 }
 
@@ -50,7 +52,9 @@ impl Parser {
     /// The parser for `path`, if any grammar of `lang` reads that extension.
     pub fn for_path(lang: &'static Language, path: &str) -> Option<&'static Parser> {
         let ext = extension(path)?;
-        lang.parsers.iter().find(|p| p.extensions.contains(&ext.as_str()))
+        lang.parsers
+            .iter()
+            .find(|p| p.extensions.contains(&ext.as_str()))
     }
 }
 
@@ -94,7 +98,9 @@ fn python_shortlist(sym: &str) -> Vec<String> {
 
 fn rust_shortlist(sym: &str) -> Vec<String> {
     let s = esc(sym);
-    vec![format!("(fn|struct|enum|trait|type|const|static|mod|union|macro_rules!){SP}{s}{END}")]
+    vec![format!(
+        "(fn|struct|enum|trait|type|const|static|mod|union|macro_rules!){SP}{s}{END}"
+    )]
 }
 
 fn js_shortlist(sym: &str) -> Vec<String> {
@@ -220,9 +226,13 @@ pub static LANGUAGES: &[Language] = &[
     },
     Language {
         name: "TypeScript / JavaScript",
-        extensions: &["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs", "vue", "svelte"],
+        extensions: &[
+            "ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs", "vue", "svelte",
+        ],
         parsers: JS_FAMILY_GRAMMARS,
-        parsed_globs: &["*.ts", "*.tsx", "*.mts", "*.cts", "*.js", "*.jsx", "*.mjs", "*.cjs"],
+        parsed_globs: &[
+            "*.ts", "*.tsx", "*.mts", "*.cts", "*.js", "*.jsx", "*.mjs", "*.cjs",
+        ],
         shortlist: js_shortlist,
         // single-file components embed their script; no grammar for the wrapper
         grep_globs: &["*.vue", "*.svelte"],
@@ -257,7 +267,9 @@ pub static LANGUAGES: &[Language] = &[
         parsers: &[],
         parsed_globs: &[],
         shortlist: none,
-        grep_globs: &["*.java", "*.kt", "*.kts", "*.scala", "*.swift", "*.php", "*.dart"],
+        grep_globs: &[
+            "*.java", "*.kt", "*.kts", "*.scala", "*.swift", "*.php", "*.dart",
+        ],
         exact: jvm_exact,
     },
     Language {
@@ -298,14 +310,28 @@ mod tests {
             documented.extend(exts.split('`').skip(1).step_by(2).map(str::to_string));
         }
         for lang in LANGUAGES {
-            assert!(table.iter().any(|r| r.contains(lang.name)), "{} is not in the docs table", lang.name);
+            assert!(
+                table.iter().any(|r| r.contains(lang.name)),
+                "{} is not in the docs table",
+                lang.name
+            );
             for ext in lang.extensions {
-                assert!(documented.iter().any(|d| d == ext), "extension `{ext}` of {} is not in the docs table", lang.name);
+                assert!(
+                    documented.iter().any(|d| d == ext),
+                    "extension `{ext}` of {} is not in the docs table",
+                    lang.name
+                );
             }
         }
-        let known: Vec<&str> = LANGUAGES.iter().flat_map(|l| l.extensions.iter().copied()).collect();
+        let known: Vec<&str> = LANGUAGES
+            .iter()
+            .flat_map(|l| l.extensions.iter().copied())
+            .collect();
         for d in &documented {
-            assert!(known.contains(&d.as_str()), "docs table lists `{d}` which no language handles");
+            assert!(
+                known.contains(&d.as_str()),
+                "docs table lists `{d}` which no language handles"
+            );
         }
     }
 
@@ -318,7 +344,10 @@ mod tests {
             }
         }
         assert_eq!(Language::for_path("a/b/Foo.RB").unwrap().name, "Ruby");
-        assert_eq!(Language::for_path("x.tsx").unwrap().name, "TypeScript / JavaScript");
+        assert_eq!(
+            Language::for_path("x.tsx").unwrap().name,
+            "TypeScript / JavaScript"
+        );
         assert!(Language::for_path("Makefile").is_none());
         assert!(Language::for_path("notes.txt").is_none());
     }

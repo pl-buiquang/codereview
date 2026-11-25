@@ -92,8 +92,9 @@ pub fn add_repository(path: String, db: State<Db>) -> AppResult<Repository> {
 }
 
 pub fn list_repositories_impl(conn: &Connection) -> AppResult<Vec<Repository>> {
-    let mut stmt =
-        conn.prepare("SELECT * FROM repository WHERE registered_at IS NOT NULL ORDER BY added_at DESC")?;
+    let mut stmt = conn.prepare(
+        "SELECT * FROM repository WHERE registered_at IS NOT NULL ORDER BY added_at DESC",
+    )?;
     let rows = stmt
         .query_map([], Repository::from_row)?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -127,8 +128,8 @@ pub fn list_branches(repo_id: i64, db: State<Db>) -> AppResult<Vec<git::Branch>>
             |r| r.get(0),
         )
         .map_err(AppError::from)?;
-    let path =
-        local_path.ok_or_else(|| AppError::Other("listing branches requires a local clone".into()))?;
+    let path = local_path
+        .ok_or_else(|| AppError::Other("listing branches requires a local clone".into()))?;
     git::list_branches(Path::new(&path))
 }
 
@@ -149,8 +150,7 @@ pub fn diff_refs(
             |r| r.get(0),
         )
         .map_err(AppError::from)?;
-    let path =
-        local_path.ok_or_else(|| AppError::Other("diff requires a local clone".into()))?;
+    let path = local_path.ok_or_else(|| AppError::Other("diff requires a local clone".into()))?;
     git::diff(Path::new(&path), &base, &head, three_dot)
 }
 
@@ -160,7 +160,10 @@ pub fn set_repository_friendly_name_impl(
     repo_id: i64,
     friendly_name: Option<String>,
 ) -> AppResult<Repository> {
-    let trimmed = friendly_name.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    let trimmed = friendly_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
     conn.execute(
         "UPDATE repository SET friendly_name = ?1 WHERE id = ?2",
         params![trimmed, repo_id],
@@ -204,7 +207,8 @@ pub fn auto_link_repos(base_paths: Vec<String>, db: State<Db>) -> AppResult<i64>
              WHERE local_path IS NULL AND remote_owner IS NOT NULL AND remote_name IS NOT NULL
                AND registered_at IS NOT NULL",
         )?;
-        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+        let rows = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
             .collect::<rusqlite::Result<_>>()?;
         rows
     };
@@ -337,12 +341,12 @@ mod tests {
         let conn = open_memory();
         let repo = upsert_repository(&conn, "/repo", None, None, None).unwrap();
 
-        let named = set_repository_friendly_name_impl(&conn, repo.id, Some("  Widget  ".into()))
-            .unwrap();
+        let named =
+            set_repository_friendly_name_impl(&conn, repo.id, Some("  Widget  ".into())).unwrap();
         assert_eq!(named.friendly_name.as_deref(), Some("Widget"));
 
-        let blanked = set_repository_friendly_name_impl(&conn, repo.id, Some("   ".into()))
-            .unwrap();
+        let blanked =
+            set_repository_friendly_name_impl(&conn, repo.id, Some("   ".into())).unwrap();
         assert_eq!(blanked.friendly_name, None);
 
         let cleared = set_repository_friendly_name_impl(&conn, repo.id, None).unwrap();

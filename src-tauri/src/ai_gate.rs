@@ -20,7 +20,9 @@ pub fn ensure_enabled() -> AppResult<()> {
     if is_enabled() {
         Ok(())
     } else {
-        Err(AppError::Other("AI features are turned off (Settings → AI)".into()))
+        Err(AppError::Other(
+            "AI features are turned off (Settings → AI)".into(),
+        ))
     }
 }
 

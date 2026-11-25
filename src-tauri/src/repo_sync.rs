@@ -64,12 +64,15 @@ fn older_than(ts: Option<&str>, age: Duration, now: DateTime<Utc>) -> bool {
     let Some(at) = ts.and_then(|t| DateTime::parse_from_rfc3339(t).ok()) else {
         return true;
     };
-    (now - at.with_timezone(&Utc)).to_std().is_ok_and(|elapsed| elapsed >= age)
+    (now - at.with_timezone(&Utc))
+        .to_std()
+        .is_ok_and(|elapsed| elapsed >= age)
 }
 
 /// A fetch can be skipped when the last one succeeded less than `min_interval` ago.
 fn is_fresh(state: &RepoSyncState, min_interval: Duration, now: DateTime<Utc>) -> bool {
-    state.last_fetch_error.is_none() && !older_than(state.last_fetch_at.as_deref(), min_interval, now)
+    state.last_fetch_error.is_none()
+        && !older_than(state.last_fetch_at.as_deref(), min_interval, now)
 }
 
 /// Fetches `origin` for the repo unless a successful fetch is younger than
@@ -97,11 +100,15 @@ pub fn fetch_repo(db: &Db, repo_id: i64, min_interval: Duration) -> AppResult<Fe
             .flatten();
         (path, state(&conn, repo_id)?, checked)
     };
-    let path = PathBuf::from(path.ok_or_else(|| AppError::Other("fetch requires a local clone".into()))?);
+    let path =
+        PathBuf::from(path.ok_or_else(|| AppError::Other("fetch requires a local clone".into()))?);
     let started = Utc::now();
     if is_fresh(&before, min_interval, started) {
         log::debug!(target: "fetch", "repo {repo_id}: skipped, last fetch {:?} is fresh (< {min_interval:?})", before.last_fetch_at);
-        return Ok(FetchResult { fetched: false, state: before });
+        return Ok(FetchResult {
+            fetched: false,
+            state: before,
+        });
     }
 
     log::debug!(target: "fetch", "repo {repo_id}: git fetch origin in {}", path.display());
@@ -110,7 +117,12 @@ pub fn fetch_repo(db: &Db, repo_id: i64, min_interval: Duration) -> AppResult<Fe
         Ok(_) => log::debug!(target: "fetch", "repo {repo_id}: fetch ok"),
         Err(e) => log::warn!(target: "fetch", "repo {repo_id}: fetch failed: {e}"),
     }
-    let check_branch = result.is_ok() && older_than(branch_checked_at.as_deref(), DEFAULT_BRANCH_MAX_AGE, started);
+    let check_branch = result.is_ok()
+        && older_than(
+            branch_checked_at.as_deref(),
+            DEFAULT_BRANCH_MAX_AGE,
+            started,
+        );
     let default_branch = check_branch.then(|| remote_default_branch(&path)).flatten();
 
     let now = Utc::now().to_rfc3339();
@@ -136,7 +148,10 @@ pub fn fetch_repo(db: &Db, repo_id: i64, min_interval: Duration) -> AppResult<Fe
     }
     let after = state(&conn, repo_id)?;
     match result {
-        Ok(_) => Ok(FetchResult { fetched: true, state: after }),
+        Ok(_) => Ok(FetchResult {
+            fetched: true,
+            state: after,
+        }),
         Err(e) => Err(e),
     }
 }
@@ -145,10 +160,13 @@ pub fn fetch_repo(db: &Db, repo_id: i64, min_interval: Duration) -> AppResult<Fe
 /// checked-out branch: a feature branch must not become the default.
 fn remote_default_branch(path: &Path) -> Option<String> {
     let _ = run_git(path, &["remote", "set-head", "origin", "--auto"]);
-    run_git(path, &["symbolic-ref", "--short", "refs/remotes/origin/HEAD"])
-        .ok()
-        .map(|s| s.trim().trim_start_matches("origin/").to_string())
-        .filter(|s| !s.is_empty())
+    run_git(
+        path,
+        &["symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
+    )
+    .ok()
+    .map(|s| s.trim().trim_start_matches("origin/").to_string())
+    .filter(|s| !s.is_empty())
 }
 
 /// Stamps a local change seen by a watcher.
@@ -169,8 +187,17 @@ mod tests {
     use tempfile::TempDir;
 
     fn git(dir: &Path, args: &[&str]) {
-        let out = Command::new("git").arg("-C").arg(dir).args(args).output().unwrap();
-        assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        let out = Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
     }
 
     /// A bare origin on `trunk` and a clone of it registered as repo 1.
@@ -179,11 +206,30 @@ mod tests {
         git(origin.path(), &["init", "-q", "--bare", "-b", "trunk"]);
         let seed = TempDir::new().unwrap();
         git(seed.path(), &["init", "-q", "-b", "trunk"]);
-        git(seed.path(), &["-c", "user.email=t@e", "-c", "user.name=T", "commit", "-q", "--allow-empty", "-m", "c"]);
-        git(seed.path(), &["remote", "add", "origin", origin.path().to_str().unwrap()]);
+        git(
+            seed.path(),
+            &[
+                "-c",
+                "user.email=t@e",
+                "-c",
+                "user.name=T",
+                "commit",
+                "-q",
+                "--allow-empty",
+                "-m",
+                "c",
+            ],
+        );
+        git(
+            seed.path(),
+            &["remote", "add", "origin", origin.path().to_str().unwrap()],
+        );
         git(seed.path(), &["push", "-q", "origin", "trunk"]);
         let clone = TempDir::new().unwrap();
-        git(clone.path(), &["clone", "-q", origin.path().to_str().unwrap(), "."]);
+        git(
+            clone.path(),
+            &["clone", "-q", origin.path().to_str().unwrap(), "."],
+        );
 
         let conn = open_memory();
         conn.execute(
@@ -199,12 +245,22 @@ mod tests {
         let now = Utc::now();
         let recent = Some((now - chrono::Duration::seconds(10)).to_rfc3339());
         let min = Duration::from_secs(60);
-        let ok = RepoSyncState { last_fetch_at: recent.clone(), ..Default::default() };
+        let ok = RepoSyncState {
+            last_fetch_at: recent.clone(),
+            ..Default::default()
+        };
         assert!(is_fresh(&ok, min, now));
         assert!(!is_fresh(&ok, Duration::from_secs(5), now));
-        let failed = RepoSyncState { last_fetch_at: recent, last_fetch_error: Some("x".into()), ..Default::default() };
+        let failed = RepoSyncState {
+            last_fetch_at: recent,
+            last_fetch_error: Some("x".into()),
+            ..Default::default()
+        };
         assert!(!is_fresh(&failed, min, now), "a failed fetch is retried");
-        assert!(!is_fresh(&RepoSyncState::default(), min, now), "never fetched");
+        assert!(
+            !is_fresh(&RepoSyncState::default(), min, now),
+            "never fetched"
+        );
     }
 
     #[test]
@@ -214,9 +270,15 @@ mod tests {
         assert!(first.fetched);
         assert!(first.state.last_fetch_at.is_some());
         assert!(first.state.last_fetch_error.is_none());
-        let branch: String = db.0.lock().unwrap()
-            .query_row("SELECT default_branch FROM repository WHERE id = 1", [], |r| r.get(0))
-            .unwrap();
+        let branch: String =
+            db.0.lock()
+                .unwrap()
+                .query_row(
+                    "SELECT default_branch FROM repository WHERE id = 1",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
         assert_eq!(branch, "trunk");
 
         let second = fetch_repo(&db, 1, Duration::from_secs(60)).unwrap();

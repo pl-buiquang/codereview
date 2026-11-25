@@ -44,16 +44,19 @@ fn is_normal_window(xprop_type: &str) -> bool {
 fn unmapped_window(pid: i64) -> Option<String> {
     let ids = stdout(Command::new("xdotool").args(["search", "--pid", &pid.to_string()]))?;
     let id = ids.split_whitespace().find(|id| {
-        stdout(Command::new("xprop").args(["-id", id, "_NET_WM_WINDOW_TYPE"])).is_some_and(|t| is_normal_window(&t))
+        stdout(Command::new("xprop").args(["-id", id, "_NET_WM_WINDOW_TYPE"]))
+            .is_some_and(|t| is_normal_window(&t))
     })?;
     stdout(Command::new("xdotool").args(["windowmap", "--sync", id]))?;
     Some(format!("0x{:x}", id.parse::<u64>().ok()?))
 }
 
 pub fn focus_tty(tty: &str) -> AppResult<()> {
-    let pid = host_pid(tty).ok_or_else(|| AppError::Other(format!("no terminal process found for {tty}")))?;
-    let windows = stdout(Command::new("wmctrl").arg("-lp"))
-        .ok_or_else(|| AppError::Other("wmctrl is required to focus terminals (X11 only)".into()))?;
+    let pid = host_pid(tty)
+        .ok_or_else(|| AppError::Other(format!("no terminal process found for {tty}")))?;
+    let windows = stdout(Command::new("wmctrl").arg("-lp")).ok_or_else(|| {
+        AppError::Other("wmctrl is required to focus terminals (X11 only)".into())
+    })?;
     let window = windows
         .lines()
         .find_map(|l| {
@@ -63,7 +66,9 @@ pub fn focus_tty(tty: &str) -> AppResult<()> {
             (it.next()?.parse::<i64>().ok()? == pid).then(|| id.to_string())
         })
         .or_else(|| unmapped_window(pid))
-        .ok_or_else(|| AppError::Other("terminal window not found (hidden windows need xdotool)".into()))?;
+        .ok_or_else(|| {
+            AppError::Other("terminal window not found (hidden windows need xdotool)".into())
+        })?;
     stdout(Command::new("wmctrl").args(["-ia", &window]))
         .map(|_| ())
         .ok_or_else(|| AppError::Other("wmctrl failed to activate the window".into()))
@@ -75,8 +80,12 @@ mod tests {
 
     #[test]
     fn detects_normal_windows() {
-        assert!(is_normal_window("_NET_WM_WINDOW_TYPE(ATOM) = _NET_WM_WINDOW_TYPE_NORMAL"));
-        assert!(!is_normal_window("_NET_WM_WINDOW_TYPE(ATOM) = _NET_WM_WINDOW_TYPE_POPUP_MENU"));
+        assert!(is_normal_window(
+            "_NET_WM_WINDOW_TYPE(ATOM) = _NET_WM_WINDOW_TYPE_NORMAL"
+        ));
+        assert!(!is_normal_window(
+            "_NET_WM_WINDOW_TYPE(ATOM) = _NET_WM_WINDOW_TYPE_POPUP_MENU"
+        ));
         assert!(!is_normal_window("_NET_WM_WINDOW_TYPE:  not found."));
     }
 }

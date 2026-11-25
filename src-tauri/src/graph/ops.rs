@@ -11,7 +11,8 @@ use crate::git::{run_git, run_git_env, validate_commit_ref};
 use super::wip::ensure_inside_checkout;
 use super::{StashEntry, WipKind};
 
-const NO_PROMPT_ENV: [(&str, &str); 2] = [("GIT_TERMINAL_PROMPT", "0"), ("GCM_INTERACTIVE", "never")];
+const NO_PROMPT_ENV: [(&str, &str); 2] =
+    [("GIT_TERMINAL_PROMPT", "0"), ("GCM_INTERACTIVE", "never")];
 
 fn classify(stderr: &str) -> Option<&'static str> {
     let s = stderr.to_lowercase();
@@ -60,9 +61,12 @@ fn validate_branch_name(name: &str) -> AppResult<()> {
 
 fn validate_tag_name(name: &str) -> AppResult<()> {
     validate_commit_ref(name)?;
-    run_git(checkout_dummy(), &["check-ref-format", &format!("refs/tags/{name}")])
-        .map(|_| ())
-        .map_err(|_| AppError::Git(format!("invalid tag name: {name}")))
+    run_git(
+        checkout_dummy(),
+        &["check-ref-format", &format!("refs/tags/{name}")],
+    )
+    .map(|_| ())
+    .map_err(|_| AppError::Git(format!("invalid tag name: {name}")))
 }
 
 /// `check-ref-format` needs no repository; any existing directory works as cwd.
@@ -98,7 +102,11 @@ pub fn create_branch(checkout: &Path, name: &str, at: &str, switch: bool) -> App
 
 pub fn delete_branch(checkout: &Path, name: &str, force: bool) -> AppResult<()> {
     validate_commit_ref(name)?;
-    run(checkout, &["branch", if force { "-D" } else { "-d" }, "--", name]).map(|_| ())
+    run(
+        checkout,
+        &["branch", if force { "-D" } else { "-d" }, "--", name],
+    )
+    .map(|_| ())
 }
 
 pub fn rename_branch(checkout: &Path, old: &str, new: &str) -> AppResult<()> {
@@ -123,7 +131,9 @@ pub fn create_tag(
     };
     if push {
         run_network(checkout, &["push", "origin", &format!("refs/tags/{name}")]).map_err(|e| {
-            AppError::Git(format!("tag {name} was created locally but the push failed: {e}"))
+            AppError::Git(format!(
+                "tag {name} was created locally but the push failed: {e}"
+            ))
         })?;
     }
     Ok(())
@@ -173,7 +183,11 @@ pub fn discard(checkout: &Path, paths: &[String], kind: WipKind) -> AppResult<()
     let mut args = match kind {
         WipKind::Unstaged => vec!["restore", "--"],
         WipKind::Untracked => vec!["clean", "-f", "--"],
-        WipKind::Staged => return Err(AppError::Git("unstage the file before discarding it".into())),
+        WipKind::Staged => {
+            return Err(AppError::Git(
+                "unstage the file before discarding it".into(),
+            ))
+        }
     };
     args.extend(paths.iter().map(String::as_str));
     run(checkout, &args).map(|_| ())
@@ -213,7 +227,11 @@ pub fn push(checkout: &Path, force_with_lease: bool) -> AppResult<String> {
     run_network(checkout, &args)
 }
 
-pub fn stash_push(checkout: &Path, message: Option<&str>, include_untracked: bool) -> AppResult<()> {
+pub fn stash_push(
+    checkout: &Path,
+    message: Option<&str>,
+    include_untracked: bool,
+) -> AppResult<()> {
     let mut args = vec!["stash", "push"];
     if include_untracked {
         args.push("-u");
@@ -264,7 +282,14 @@ pub fn stash_drop(checkout: &Path, index: u32) -> AppResult<()> {
 pub fn stash_diff(checkout: &Path, index: u32) -> AppResult<String> {
     run_git(
         checkout,
-        &["stash", "show", "-p", "--no-color", "--no-ext-diff", &stash_ref(index)],
+        &[
+            "stash",
+            "show",
+            "-p",
+            "--no-color",
+            "--no-ext-diff",
+            &stash_ref(index),
+        ],
     )
 }
 
@@ -279,7 +304,14 @@ mod tests {
 
     fn git(dir: &Path, args: &[&str]) -> String {
         let out = Command::new("git")
-            .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"])
+            .args([
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "-c",
+                "commit.gpgsign=false",
+            ])
             .arg("-C")
             .arg(dir)
             .args(args)
@@ -305,7 +337,9 @@ mod tests {
     }
 
     fn head_branch(dir: &Path) -> String {
-        git(dir, &["rev-parse", "--abbrev-ref", "HEAD"]).trim().to_string()
+        git(dir, &["rev-parse", "--abbrev-ref", "HEAD"])
+            .trim()
+            .to_string()
     }
 
     fn err_text(r: AppResult<()>) -> String {
@@ -314,11 +348,26 @@ mod tests {
 
     #[test]
     fn classify_recognises_refusals() {
-        assert_eq!(classify("error: The branch 'x' is not fully merged."), Some("not_fully_merged"));
-        assert_eq!(classify("fatal: 'x' is already used by worktree at '/p'"), Some("checked_out_elsewhere"));
-        assert_eq!(classify("Your local changes to the following files would be overwritten"), Some("dirty_tree"));
-        assert_eq!(classify(" ! [rejected] main -> main (non-fast-forward)"), Some("push_rejected"));
-        assert_eq!(classify("fatal: Not possible to fast-forward, aborting."), Some("not_fast_forward"));
+        assert_eq!(
+            classify("error: The branch 'x' is not fully merged."),
+            Some("not_fully_merged")
+        );
+        assert_eq!(
+            classify("fatal: 'x' is already used by worktree at '/p'"),
+            Some("checked_out_elsewhere")
+        );
+        assert_eq!(
+            classify("Your local changes to the following files would be overwritten"),
+            Some("dirty_tree")
+        );
+        assert_eq!(
+            classify(" ! [rejected] main -> main (non-fast-forward)"),
+            Some("push_rejected")
+        );
+        assert_eq!(
+            classify("fatal: Not possible to fast-forward, aborting."),
+            Some("not_fast_forward")
+        );
         assert_eq!(classify("something else"), None);
     }
 
@@ -333,7 +382,9 @@ mod tests {
         git(p, &["commit", "-q", "-m", "b"]);
         checkout_branch(p, "main").unwrap();
 
-        assert!(err_text(delete_branch(p, "feat", false)).starts_with("git error: [not_fully_merged]"));
+        assert!(
+            err_text(delete_branch(p, "feat", false)).starts_with("git error: [not_fully_merged]")
+        );
         rename_branch(p, "feat", "feat2").unwrap();
         delete_branch(p, "feat2", true).unwrap();
         assert!(!git(p, &["branch", "--list", "feat2"]).contains("feat2"));
@@ -359,9 +410,22 @@ mod tests {
         let p = d.path();
         let wt = TempDir::new().unwrap();
         let wt_path = wt.path().join("wt");
-        git(p, &["worktree", "add", "-q", "-b", "held", wt_path.to_str().unwrap()]);
+        git(
+            p,
+            &[
+                "worktree",
+                "add",
+                "-q",
+                "-b",
+                "held",
+                wt_path.to_str().unwrap(),
+            ],
+        );
         let msg = err_text(checkout_branch(p, "held"));
-        assert!(msg.starts_with("git error: [checked_out_elsewhere]"), "{msg}");
+        assert!(
+            msg.starts_with("git error: [checked_out_elsewhere]"),
+            "{msg}"
+        );
     }
 
     #[test]
@@ -403,7 +467,10 @@ mod tests {
         assert!(commit(p, "  ", false).is_err());
         commit(p, "second", false).unwrap();
         commit(p, "second, reworded", true).unwrap();
-        assert_eq!(git(p, &["log", "-1", "--format=%s"]).trim(), "second, reworded");
+        assert_eq!(
+            git(p, &["log", "-1", "--format=%s"]).trim(),
+            "second, reworded"
+        );
         assert_eq!(git(p, &["rev-list", "--count", "HEAD"]).trim(), "2");
     }
 
@@ -422,7 +489,10 @@ mod tests {
     fn stash_roundtrip() {
         let d = init();
         let p = d.path();
-        assert_eq!(err_text(stash_push(p, None, false)), "git error: nothing to stash");
+        assert_eq!(
+            err_text(stash_push(p, None, false)),
+            "git error: nothing to stash"
+        );
         fs::write(p.join("a.txt"), "wip\n").unwrap();
         fs::write(p.join("u.txt"), "u\n").unwrap();
         stash_push(p, Some("my stash"), true).unwrap();
@@ -451,7 +521,10 @@ mod tests {
         fs::write(a.path().join("f"), "1\n").unwrap();
         git(a.path(), &["add", "."]);
         git(a.path(), &["commit", "-q", "-m", "init"]);
-        git(a.path(), &["remote", "add", "origin", remote.path().to_str().unwrap()]);
+        git(
+            a.path(),
+            &["remote", "add", "origin", remote.path().to_str().unwrap()],
+        );
         let b = TempDir::new().unwrap();
         (remote, a, b)
     }
@@ -462,7 +535,10 @@ mod tests {
         push(a.path(), false).unwrap();
         assert!(git(a.path(), &["rev-parse", "--abbrev-ref", "@{u}"]).contains("origin/main"));
 
-        git(b.path(), &["clone", "-q", remote.path().to_str().unwrap(), "."]);
+        git(
+            b.path(),
+            &["clone", "-q", remote.path().to_str().unwrap(), "."],
+        );
         fs::write(a.path().join("f"), "2\n").unwrap();
         git(a.path(), &["commit", "-q", "-am", "two"]);
         push(a.path(), false).unwrap();

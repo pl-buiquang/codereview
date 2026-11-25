@@ -39,8 +39,12 @@ fn pipe<R: Read + Send + 'static>(r: Option<R>) -> std::thread::JoinHandle<Vec<u
 
 /// `cmd.output()`, killed (with its process group) once the thread's limit passes.
 pub fn output(cmd: &mut Command) -> io::Result<Output> {
-    let Some(limit) = LIMIT.with(|l| l.get()) else { return cmd.output() };
-    cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    let Some(limit) = LIMIT.with(|l| l.get()) else {
+        return cmd.output();
+    };
+    cmd.stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
     #[cfg(unix)]
     std::os::unix::process::CommandExt::process_group(cmd, 0);
     let mut child = cmd.spawn()?;
@@ -66,8 +70,15 @@ pub fn output(cmd: &mut Command) -> io::Result<Output> {
     let stdout = out.join().unwrap_or_default();
     let stderr = err.join().unwrap_or_default();
     match status {
-        Some(status) => Ok(Output { status, stdout, stderr }),
-        None => Err(io::Error::new(io::ErrorKind::TimedOut, format!("timed out after {}s", limit.as_secs().max(1)))),
+        Some(status) => Ok(Output {
+            status,
+            stdout,
+            stderr,
+        }),
+        None => Err(io::Error::new(
+            io::ErrorKind::TimedOut,
+            format!("timed out after {}s", limit.as_secs().max(1)),
+        )),
     }
 }
 
@@ -79,7 +90,9 @@ mod tests {
     #[test]
     fn a_hung_child_is_killed_at_the_limit() {
         let started = Instant::now();
-        let r = with_timeout(Duration::from_millis(200), || output(Command::new("sh").args(["-c", "sleep 30 & sleep 30"])));
+        let r = with_timeout(Duration::from_millis(200), || {
+            output(Command::new("sh").args(["-c", "sleep 30 & sleep 30"]))
+        });
         assert!(is_timeout(&r.unwrap_err()));
         assert!(started.elapsed() < Duration::from_secs(5));
     }
@@ -88,7 +101,10 @@ mod tests {
     fn without_a_limit_or_within_it_the_output_is_returned() {
         let r = output(Command::new("sh").args(["-c", "echo hi"])).unwrap();
         assert_eq!(r.stdout, b"hi\n");
-        let r = with_timeout(Duration::from_secs(10), || output(Command::new("sh").args(["-c", "echo hi"]))).unwrap();
+        let r = with_timeout(Duration::from_secs(10), || {
+            output(Command::new("sh").args(["-c", "echo hi"]))
+        })
+        .unwrap();
         assert_eq!(r.stdout, b"hi\n");
         assert!(LIMIT.with(|l| l.get()).is_none(), "the limit is restored");
     }

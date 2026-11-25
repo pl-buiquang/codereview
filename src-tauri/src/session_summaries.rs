@@ -95,7 +95,9 @@ pub fn load(dir: &Path) -> HashMap<String, Vec<SessionSummary>> {
 }
 
 fn collect_md(dir: &Path, out: &mut Vec<(PathBuf, SystemTime)>) {
-    let Ok(entries) = fs::read_dir(dir) else { return };
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
     for e in entries.flatten() {
         if e.file_name().to_string_lossy().starts_with('.') {
             continue;
@@ -120,7 +122,9 @@ fn parse(content: &str) -> Option<ParsedSummary> {
 
     let mut fields: HashMap<&str, String> = HashMap::new();
     for line in front.lines() {
-        let Some((k, v)) = line.split_once(':') else { continue };
+        let Some((k, v)) = line.split_once(':') else {
+            continue;
+        };
         let v = v.trim();
         let v = if v.starts_with('"') {
             serde_json::from_str::<String>(v).unwrap_or_else(|_| v.trim_matches('"').to_string())
@@ -145,13 +149,18 @@ fn parse(content: &str) -> Option<ParsedSummary> {
 
 fn parse_cost(fields: &HashMap<&str, String>) -> Option<SessionCost> {
     let total = fields.get("cost_usd").and_then(|v| v.parse::<f64>().ok());
-    let detail = fields.get("cost").and_then(|v| serde_json::from_str::<SessionCost>(v).ok());
+    let detail = fields
+        .get("cost")
+        .and_then(|v| serde_json::from_str::<SessionCost>(v).ok());
     if total.is_none() && detail.is_none() {
         return None;
     }
     let mut cost = detail.unwrap_or_default();
     cost.total_usd = total.unwrap_or(cost.main_usd + cost.subagents_usd);
-    cost.subagents = fields.get("subagents").and_then(|v| v.parse().ok()).unwrap_or(0);
+    cost.subagents = fields
+        .get("subagents")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
     Some(cost)
 }
 
@@ -159,7 +168,12 @@ fn parse_cost(fields: &HashMap<&str, String>) -> Option<SessionCost> {
 pub fn split_title(output: &str) -> (Option<String>, String) {
     let output = output.trim_start();
     let (first, rest) = output.split_once('\n').unwrap_or((output, ""));
-    match first.trim().strip_prefix("Title:").map(str::trim).filter(|t| !t.is_empty()) {
+    match first
+        .trim()
+        .strip_prefix("Title:")
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+    {
         Some(title) => (Some(title.to_string()), rest.trim().to_string()),
         None => (None, output.trim().to_string()),
     }
@@ -171,7 +185,9 @@ pub fn transcript_extract(path: &Path, max_bytes: usize) -> Option<String> {
     let content = fs::read_to_string(path).ok()?;
     let mut out = String::new();
     for line in content.lines().filter(|l| l.contains("\"message\"")) {
-        let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else { continue };
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
         let role = match v.get("type").and_then(|t| t.as_str()) {
             Some("user") => "USER",
             Some("assistant") => "ASSISTANT",
@@ -230,18 +246,36 @@ mod tests {
         )
         .unwrap();
         let c = p.summary.cost.unwrap();
-        assert_eq!((c.total_usd, c.main_usd, c.subagents_usd, c.subagents), (5.93, 4.73, 1.2, 8));
+        assert_eq!(
+            (c.total_usd, c.main_usd, c.subagents_usd, c.subagents),
+            (5.93, 4.73, 1.2, 8)
+        );
         assert_eq!(c.by_agent_type["general-purpose"].n, 8);
         let m = &c.by_model["claude-opus-5-5"];
-        assert_eq!((m.msgs, m.input, m.output, m.cache_read, m.cache_write), (34, 66, 24868, 2623190, 205875));
+        assert_eq!(
+            (m.msgs, m.input, m.output, m.cache_read, m.cache_write),
+            (34, 66, 24868, 2623190, 205875)
+        );
     }
 
     #[test]
     fn cost_usd_alone_and_none() {
-        let c = parse("---\nsession_id: a\ncost_usd: 0.54\n---\nb").unwrap().summary.cost.unwrap();
+        let c = parse("---\nsession_id: a\ncost_usd: 0.54\n---\nb")
+            .unwrap()
+            .summary
+            .cost
+            .unwrap();
         assert_eq!((c.total_usd, c.by_model.len()), (0.54, 0));
-        assert!(parse("---\nsession_id: a\ncost: {oops\n---\nb").unwrap().summary.cost.is_none());
-        assert!(parse("---\nsession_id: a\n---\nb").unwrap().summary.cost.is_none());
+        assert!(parse("---\nsession_id: a\ncost: {oops\n---\nb")
+            .unwrap()
+            .summary
+            .cost
+            .is_none());
+        assert!(parse("---\nsession_id: a\n---\nb")
+            .unwrap()
+            .summary
+            .cost
+            .is_none());
     }
 
     #[test]
@@ -267,8 +301,16 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("cr-summaries-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(dir.join("sub")).unwrap();
-        fs::write(dir.join("a.md"), "---\nsession_id: s1\ndate: 2026-01-01 10:00\n---\nold").unwrap();
-        fs::write(dir.join("sub/b.md"), "---\nsession_id: s1\ndate: 2026-01-02 10:00\n---\nnew").unwrap();
+        fs::write(
+            dir.join("a.md"),
+            "---\nsession_id: s1\ndate: 2026-01-01 10:00\n---\nold",
+        )
+        .unwrap();
+        fs::write(
+            dir.join("sub/b.md"),
+            "---\nsession_id: s1\ndate: 2026-01-02 10:00\n---\nnew",
+        )
+        .unwrap();
         fs::write(dir.join(".hidden.md"), "---\nsession_id: s2\n---\nx").unwrap();
         fs::write(dir.join("c.log"), "---\nsession_id: s3\n---\nx").unwrap();
         let map = load(&dir);
@@ -284,7 +326,10 @@ mod tests {
             split_title("Title: Fix the thing\n\n## Goal\nDo it.\n"),
             (Some("Fix the thing".into()), "## Goal\nDo it.".into())
         );
-        assert_eq!(split_title("## Goal\nDo it."), (None, "## Goal\nDo it.".into()));
+        assert_eq!(
+            split_title("## Goal\nDo it."),
+            (None, "## Goal\nDo it.".into())
+        );
         assert_eq!(split_title("Title:\nbody"), (None, "Title:\nbody".into()));
     }
 

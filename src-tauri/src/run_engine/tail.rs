@@ -5,7 +5,6 @@ use std::io::{BufRead, BufReader};
 use std::path::Path;
 use std::time::Duration;
 
-
 use crate::ai::{norm_json, FinalResult, Harness, RunAcc};
 
 pub const TAIL_POLL: Duration = Duration::from_millis(200);
@@ -39,7 +38,9 @@ pub fn tail_events(
     detaching: &dyn Fn() -> bool,
     record: &mut dyn FnMut(i64, &str, &str, &str),
 ) -> Tail {
-    let Ok(file) = File::open(path) else { return Tail::Done(None) };
+    let Ok(file) = File::open(path) else {
+        return Tail::Done(None);
+    };
     let mut reader = BufReader::new(file);
     let mut result: Option<FinalResult> = None;
     let mut acc = RunAcc::default();
@@ -105,18 +106,37 @@ mod tests {
         )
         .unwrap();
         let mut seen = Vec::new();
-        let tail = tail_events(&ClaudeCode, &path, 2, &mut || false, &|| false, &mut |s, k, _, _| seen.push((s, k.to_string())));
+        let tail = tail_events(
+            &ClaudeCode,
+            &path,
+            2,
+            &mut || false,
+            &|| false,
+            &mut |s, k, _, _| seen.push((s, k.to_string())),
+        );
         // blank lines are not numbered; the first two lines were recorded earlier; an unterminated
         // last line is still drained once the process is gone
-        assert_eq!(seen, vec![(3, "raw".to_string()), (4, "result".to_string())]);
-        let Tail::Done(Some(r)) = tail else { panic!("expected a result") };
+        assert_eq!(
+            seen,
+            vec![(3, "raw".to_string()), (4, "result".to_string())]
+        );
+        let Tail::Done(Some(r)) = tail else {
+            panic!("expected a result")
+        };
         assert_eq!(r.text.as_deref(), Some("x"));
         let _ = std::fs::remove_file(&path);
     }
 
     #[test]
     fn missing_file_is_done_without_result() {
-        let tail = tail_events(&ClaudeCode, &tmp("none"), 0, &mut || false, &|| false, &mut |_, _, _, _| {});
+        let tail = tail_events(
+            &ClaudeCode,
+            &tmp("none"),
+            0,
+            &mut || false,
+            &|| false,
+            &mut |_, _, _, _| {},
+        );
         assert!(matches!(tail, Tail::Done(None)));
     }
 
@@ -125,7 +145,14 @@ mod tests {
         let path = tmp("detach");
         std::fs::write(&path, "{\"type\":\"assistant\"}\n").unwrap();
         let mut n = 0;
-        let tail = tail_events(&ClaudeCode, &path, 0, &mut || true, &|| true, &mut |_, _, _, _| n += 1);
+        let tail = tail_events(
+            &ClaudeCode,
+            &path,
+            0,
+            &mut || true,
+            &|| true,
+            &mut |_, _, _, _| n += 1,
+        );
         assert!(matches!(tail, Tail::Detached));
         assert_eq!(n, 1);
         let _ = std::fs::remove_file(&path);

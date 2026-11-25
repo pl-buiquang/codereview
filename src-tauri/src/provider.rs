@@ -35,28 +35,52 @@ pub trait ReviewProvider: Send + Sync {
     /// Flip a PR between draft and ready-for-review.
     fn set_pr_draft(&self, owner: &str, name: &str, number: i64, draft: bool) -> AppResult<()>;
     /// Update a PR's head branch from its base (merge, or rebase when `rebase`).
-    fn update_pr_branch(&self, owner: &str, name: &str, number: i64, rebase: bool) -> AppResult<()>;
-    /// Enable (squash) or disable GitHub auto-merge on a PR.
-    fn set_pr_auto_merge(&self, owner: &str, name: &str, number: i64, enable: bool) -> AppResult<()>;
-    /// Approve a PR (a bare approving review, no comments).
-    fn approve_pr(&self, owner: &str, name: &str, number: i64) -> AppResult<()>;
-    /// Add (`on`) or remove a label on a PR.
-    fn set_pr_label(&self, owner: &str, name: &str, number: i64, label: &str, on: bool) -> AppResult<()>;
-    /// Request (`on`) or withdraw a user's or team's review.
-    fn set_pr_reviewer(&self, owner: &str, name: &str, number: i64, reviewer: &str, team: bool, on: bool)
+    fn update_pr_branch(&self, owner: &str, name: &str, number: i64, rebase: bool)
         -> AppResult<()>;
-    /// Labels defined on a repo / users assignable as reviewers (header pickers).
-    fn repo_labels(&self, owner: &str, name: &str) -> AppResult<Vec<gh::PrLabel>>;
-    fn repo_assignable_users(&self, owner: &str, name: &str, query: &str) -> AppResult<Vec<gh::PrActor>>;
-    /// Batch state (`OPEN`/`CLOSED`/`MERGED`) lookup, keyed by `(owner, name, number)`.
-    /// Used by the "clean up merged PRs" review-list action.
-    fn pr_states(&self, prs: &[(String, String, i64)]) -> AppResult<HashMap<(String, String, i64), String>>;
-    fn pr_review_threads(
+    /// Enable (squash) or disable GitHub auto-merge on a PR.
+    fn set_pr_auto_merge(
         &self,
         owner: &str,
         name: &str,
         number: i64,
-    ) -> AppResult<Vec<PrThread>>;
+        enable: bool,
+    ) -> AppResult<()>;
+    /// Approve a PR (a bare approving review, no comments).
+    fn approve_pr(&self, owner: &str, name: &str, number: i64) -> AppResult<()>;
+    /// Add (`on`) or remove a label on a PR.
+    fn set_pr_label(
+        &self,
+        owner: &str,
+        name: &str,
+        number: i64,
+        label: &str,
+        on: bool,
+    ) -> AppResult<()>;
+    /// Request (`on`) or withdraw a user's or team's review.
+    fn set_pr_reviewer(
+        &self,
+        owner: &str,
+        name: &str,
+        number: i64,
+        reviewer: &str,
+        team: bool,
+        on: bool,
+    ) -> AppResult<()>;
+    /// Labels defined on a repo / users assignable as reviewers (header pickers).
+    fn repo_labels(&self, owner: &str, name: &str) -> AppResult<Vec<gh::PrLabel>>;
+    fn repo_assignable_users(
+        &self,
+        owner: &str,
+        name: &str,
+        query: &str,
+    ) -> AppResult<Vec<gh::PrActor>>;
+    /// Batch state (`OPEN`/`CLOSED`/`MERGED`) lookup, keyed by `(owner, name, number)`.
+    /// Used by the "clean up merged PRs" review-list action.
+    fn pr_states(
+        &self,
+        prs: &[(String, String, i64)],
+    ) -> AppResult<HashMap<(String, String, i64), String>>;
+    fn pr_review_threads(&self, owner: &str, name: &str, number: i64) -> AppResult<Vec<PrThread>>;
     fn compare(
         &self,
         owner: &str,
@@ -122,7 +146,12 @@ pub trait ReviewProvider: Send + Sync {
     /// GraphQL node id). Covers both resolve and unresolve.
     fn set_thread_resolved(&self, thread_id: &str, resolved: bool) -> AppResult<bool>; // spec 18
     /// Add/remove my emoji reaction (`content` = GitHub `ReactionContent`) on a comment.
-    fn set_reaction(&self, subject_id: &str, content: &str, on: bool) -> AppResult<Vec<gh::ReactionGroup>>;
+    fn set_reaction(
+        &self,
+        subject_id: &str,
+        content: &str,
+        on: bool,
+    ) -> AppResult<Vec<gh::ReactionGroup>>;
 }
 
 /// GitHub, via the `gh` CLI. Stateless: auth and host config live in `gh` itself.
@@ -157,11 +186,23 @@ impl ReviewProvider for GithubProvider {
         gh::set_pr_draft(owner, name, number, draft)
     }
 
-    fn update_pr_branch(&self, owner: &str, name: &str, number: i64, rebase: bool) -> AppResult<()> {
+    fn update_pr_branch(
+        &self,
+        owner: &str,
+        name: &str,
+        number: i64,
+        rebase: bool,
+    ) -> AppResult<()> {
         gh::update_pr_branch(owner, name, number, rebase)
     }
 
-    fn set_pr_auto_merge(&self, owner: &str, name: &str, number: i64, enable: bool) -> AppResult<()> {
+    fn set_pr_auto_merge(
+        &self,
+        owner: &str,
+        name: &str,
+        number: i64,
+        enable: bool,
+    ) -> AppResult<()> {
         gh::set_pr_auto_merge(owner, name, number, enable)
     }
 
@@ -169,7 +210,14 @@ impl ReviewProvider for GithubProvider {
         gh::approve_pr(owner, name, number)
     }
 
-    fn set_pr_label(&self, owner: &str, name: &str, number: i64, label: &str, on: bool) -> AppResult<()> {
+    fn set_pr_label(
+        &self,
+        owner: &str,
+        name: &str,
+        number: i64,
+        label: &str,
+        on: bool,
+    ) -> AppResult<()> {
         gh::set_pr_label(owner, name, number, label, on)
     }
 
@@ -189,20 +237,23 @@ impl ReviewProvider for GithubProvider {
         gh::repo_labels(owner, name)
     }
 
-    fn repo_assignable_users(&self, owner: &str, name: &str, query: &str) -> AppResult<Vec<gh::PrActor>> {
-        gh::repo_assignable_users(owner, name, query)
-    }
-
-    fn pr_states(&self, prs: &[(String, String, i64)]) -> AppResult<HashMap<(String, String, i64), String>> {
-        gh::pr_states(prs)
-    }
-
-    fn pr_review_threads(
+    fn repo_assignable_users(
         &self,
         owner: &str,
         name: &str,
-        number: i64,
-    ) -> AppResult<Vec<PrThread>> {
+        query: &str,
+    ) -> AppResult<Vec<gh::PrActor>> {
+        gh::repo_assignable_users(owner, name, query)
+    }
+
+    fn pr_states(
+        &self,
+        prs: &[(String, String, i64)],
+    ) -> AppResult<HashMap<(String, String, i64), String>> {
+        gh::pr_states(prs)
+    }
+
+    fn pr_review_threads(&self, owner: &str, name: &str, number: i64) -> AppResult<Vec<PrThread>> {
         gh::pr_review_threads(owner, name, number)
     }
 
@@ -289,7 +340,12 @@ impl ReviewProvider for GithubProvider {
     fn set_thread_resolved(&self, thread_id: &str, resolved: bool) -> AppResult<bool> {
         gh::set_thread_resolved(thread_id, resolved)
     }
-    fn set_reaction(&self, subject_id: &str, content: &str, on: bool) -> AppResult<Vec<gh::ReactionGroup>> {
+    fn set_reaction(
+        &self,
+        subject_id: &str,
+        content: &str,
+        on: bool,
+    ) -> AppResult<Vec<gh::ReactionGroup>> {
         gh::set_reaction(subject_id, content, on)
     }
 }

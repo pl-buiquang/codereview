@@ -63,9 +63,15 @@ pub fn insert_run(
 
     // Older claude versions omit `modelUsage`; attribute the totals to the requested model.
     let fallback;
-    let models: &[ModelTokens] = if usage.models.is_empty() && (usage.cost_usd > 0.0 || usage.input_tokens > 0 || usage.output_tokens > 0) {
+    let models: &[ModelTokens] = if usage.models.is_empty()
+        && (usage.cost_usd > 0.0 || usage.input_tokens > 0 || usage.output_tokens > 0)
+    {
         fallback = [ModelTokens {
-            model: if tag.model.is_empty() { "unknown".to_string() } else { tag.model.clone() },
+            model: if tag.model.is_empty() {
+                "unknown".to_string()
+            } else {
+                tag.model.clone()
+            },
             input_tokens: usage.input_tokens,
             output_tokens: usage.output_tokens,
             cache_read_tokens: usage.cache_read_tokens,
@@ -95,9 +101,17 @@ pub fn insert_run(
 }
 
 /// Record a finished run. Never fails the run itself: problems are only logged.
-pub fn record(tag: &RunTag, started_at: &str, duration_ms: i64, usage: &RunUsage, error: Option<&str>) {
+pub fn record(
+    tag: &RunTag,
+    started_at: &str,
+    duration_ms: i64,
+    usage: &RunUsage,
+    error: Option<&str>,
+) {
     let Some(app) = APP.get() else { return };
-    let Some(db) = app.try_state::<Db>() else { return };
+    let Some(db) = app.try_state::<Db>() else {
+        return;
+    };
     let result = {
         let mut conn = db.0.lock().unwrap();
         insert_run(&mut conn, tag, started_at, duration_ms, usage, error)
@@ -189,9 +203,15 @@ fn range_since(range: &str, now: DateTime<Local>) -> AppResult<Option<DateTime<L
     Ok(Some(match range {
         "all" => return Ok(None),
         "today" => {
-            let midnight = now.date_naive().and_hms_opt(0, 0, 0).expect("valid midnight");
+            let midnight = now
+                .date_naive()
+                .and_hms_opt(0, 0, 0)
+                .expect("valid midnight");
             // A DST gap can make local midnight nonexistent; fall back to 24h ago.
-            Local.from_local_datetime(&midnight).earliest().unwrap_or(now - Duration::hours(24))
+            Local
+                .from_local_datetime(&midnight)
+                .earliest()
+                .unwrap_or(now - Duration::hours(24))
         }
         "7d" => now - Duration::days(7),
         "30d" => now - Duration::days(30),
@@ -236,7 +256,11 @@ pub fn summary(conn: &Connection, since: Option<&str>) -> rusqlite::Result<AiUsa
              GROUP BY r.feature, r.variant ORDER BY SUM(r.cost_usd) DESC, COUNT(*) DESC"
         ))?
         .query_map(params![since], |r| {
-            Ok(FeatureUsage { feature: r.get(0)?, variant: r.get(1)?, totals: totals_at(r, 2)? })
+            Ok(FeatureUsage {
+                feature: r.get(0)?,
+                variant: r.get(1)?,
+                totals: totals_at(r, 2)?,
+            })
         })?
         .collect::<rusqlite::Result<_>>()?;
 
@@ -252,13 +276,27 @@ pub fn summary(conn: &Connection, since: Option<&str>) -> rusqlite::Result<AiUsa
              WHERE (?1 IS NULL OR r.started_at >= ?1)
              GROUP BY m.model ORDER BY SUM(m.cost_usd) DESC, COUNT(*) DESC",
         )?
-        .query_map(params![since], |r| Ok(ModelUsageRow { model: r.get(0)?, totals: totals_at(r, 1)? }))?
+        .query_map(params![since], |r| {
+            Ok(ModelUsageRow {
+                model: r.get(0)?,
+                totals: totals_at(r, 1)?,
+            })
+        })?
         .collect::<rusqlite::Result<_>>()?;
 
-    Ok(AiUsageSummary { totals, by_feature, by_model })
+    Ok(AiUsageSummary {
+        totals,
+        by_feature,
+        by_model,
+    })
 }
 
-pub fn runs(conn: &Connection, since: Option<&str>, feature: Option<&str>, limit: i64) -> rusqlite::Result<Vec<AiRun>> {
+pub fn runs(
+    conn: &Connection,
+    since: Option<&str>,
+    feature: Option<&str>,
+    limit: i64,
+) -> rusqlite::Result<Vec<AiRun>> {
     conn.prepare(
         "SELECT r.id, r.started_at, r.duration_ms, r.feature, r.variant, rev.id, r.label,
             r.requested_model,
@@ -325,7 +363,10 @@ pub fn session_summary(
     let mut out = SessionUsageSummary::default();
     let mut models: BTreeMap<&str, UsageTotals> = BTreeMap::new();
     for list in sessions.values() {
-        let Some((cost, date)) = list.iter().find_map(|s| s.cost.as_ref().map(|c| (c, s.date.as_deref()))) else {
+        let Some((cost, date)) = list
+            .iter()
+            .find_map(|s| s.cost.as_ref().map(|c| (c, s.date.as_deref())))
+        else {
             continue;
         };
         if let Some(since) = since {
@@ -352,8 +393,15 @@ pub fn session_summary(
             t.cost_usd += m.usd;
         }
     }
-    out.by_model = models.into_iter().map(|(m, totals)| ModelUsageRow { model: m.to_string(), totals }).collect();
-    out.by_model.sort_by(|a, b| b.totals.cost_usd.total_cmp(&a.totals.cost_usd));
+    out.by_model = models
+        .into_iter()
+        .map(|(m, totals)| ModelUsageRow {
+            model: m.to_string(),
+            totals,
+        })
+        .collect();
+    out.by_model
+        .sort_by(|a, b| b.totals.cost_usd.total_cmp(&a.totals.cost_usd));
     out
 }
 
@@ -364,7 +412,9 @@ pub fn session_usage_summary(range: String, summary_dir: String) -> AppResult<Se
     if dir.is_empty() {
         return Ok(SessionUsageSummary::default());
     }
-    let sessions = session_summaries::load(std::path::Path::new(&crate::commands::repo::expand_home(dir)));
+    let sessions = session_summaries::load(std::path::Path::new(
+        &crate::commands::repo::expand_home(dir),
+    ));
     Ok(session_summary(&sessions, since))
 }
 
@@ -376,10 +426,20 @@ pub fn ai_usage_summary(range: String, db: State<Db>) -> AppResult<AiUsageSummar
 }
 
 #[tauri::command]
-pub fn ai_usage_runs(range: String, feature: Option<String>, limit: Option<i64>, db: State<Db>) -> AppResult<Vec<AiRun>> {
+pub fn ai_usage_runs(
+    range: String,
+    feature: Option<String>,
+    limit: Option<i64>,
+    db: State<Db>,
+) -> AppResult<Vec<AiRun>> {
     let since = range_start(&range, Local::now())?;
     let conn = db.0.lock().unwrap();
-    Ok(runs(&conn, since.as_deref(), feature.as_deref(), limit.unwrap_or(50).clamp(1, 500))?)
+    Ok(runs(
+        &conn,
+        since.as_deref(),
+        feature.as_deref(),
+        limit.unwrap_or(50).clamp(1, 500),
+    )?)
 }
 
 #[cfg(test)]
@@ -387,11 +447,24 @@ mod tests {
     use super::*;
 
     fn model(name: &str, input: i64, cost: f64) -> ModelTokens {
-        ModelTokens { model: name.into(), input_tokens: input, output_tokens: 10, cost_usd: cost, ..Default::default() }
+        ModelTokens {
+            model: name.into(),
+            input_tokens: input,
+            output_tokens: 10,
+            cost_usd: cost,
+            ..Default::default()
+        }
     }
 
     fn usage(cost: f64, models: Vec<ModelTokens>) -> RunUsage {
-        RunUsage { num_turns: 1, input_tokens: 100, output_tokens: 10, cost_usd: cost, models, ..Default::default() }
+        RunUsage {
+            num_turns: 1,
+            input_tokens: 100,
+            output_tokens: 10,
+            cost_usd: cost,
+            models,
+            ..Default::default()
+        }
     }
 
     #[test]
@@ -399,7 +472,15 @@ mod tests {
         let mut conn = crate::db::open_memory();
         let chat = RunTag::new("chat").review(7);
         let review = RunTag::new("ai_review").variant("critique").review(7);
-        insert_run(&mut conn, &chat, "2026-10-20T10:00:00.000Z", 1000, &usage(1.0, vec![model("opus", 100, 1.0)]), None).unwrap();
+        insert_run(
+            &mut conn,
+            &chat,
+            "2026-10-20T10:00:00.000Z",
+            1000,
+            &usage(1.0, vec![model("opus", 100, 1.0)]),
+            None,
+        )
+        .unwrap();
         insert_run(
             &mut conn,
             &review,
@@ -409,7 +490,15 @@ mod tests {
             None,
         )
         .unwrap();
-        insert_run(&mut conn, &review, "2026-10-20T12:00:00.000Z", 500, &RunUsage::default(), Some("boom")).unwrap();
+        insert_run(
+            &mut conn,
+            &review,
+            "2026-10-20T12:00:00.000Z",
+            500,
+            &RunUsage::default(),
+            Some("boom"),
+        )
+        .unwrap();
 
         let all = summary(&conn, None).unwrap();
         assert_eq!(all.totals.runs, 3);
@@ -417,10 +506,21 @@ mod tests {
         assert_eq!(all.totals.cost_usd, 4.0);
         assert_eq!(all.totals.duration_ms, 3500);
 
-        let features: Vec<_> = all.by_feature.iter().map(|f| (f.feature.as_str(), f.variant.as_deref(), f.totals.runs)).collect();
-        assert_eq!(features, vec![("ai_review", Some("critique"), 2), ("chat", None, 1)]);
+        let features: Vec<_> = all
+            .by_feature
+            .iter()
+            .map(|f| (f.feature.as_str(), f.variant.as_deref(), f.totals.runs))
+            .collect();
+        assert_eq!(
+            features,
+            vec![("ai_review", Some("critique"), 2), ("chat", None, 1)]
+        );
 
-        let models: Vec<_> = all.by_model.iter().map(|m| (m.model.as_str(), m.totals.runs, m.totals.cost_usd)).collect();
+        let models: Vec<_> = all
+            .by_model
+            .iter()
+            .map(|m| (m.model.as_str(), m.totals.runs, m.totals.cost_usd))
+            .collect();
         assert_eq!(models, vec![("opus", 2, 3.5), ("haiku", 1, 0.5)]);
 
         let recent = summary(&conn, Some("2026-10-20T11:30:00.000Z")).unwrap();
@@ -431,8 +531,19 @@ mod tests {
     #[test]
     fn run_list_filters_by_feature_and_lists_models_newest_first() {
         let mut conn = crate::db::open_memory();
-        let review = RunTag::new("ai_review").variant("explain").review(99).label("x");
-        insert_run(&mut conn, &RunTag::new("focus"), "2026-10-20T10:00:00.000Z", 1, &usage(0.1, vec![model("opus", 1, 0.1)]), None).unwrap();
+        let review = RunTag::new("ai_review")
+            .variant("explain")
+            .review(99)
+            .label("x");
+        insert_run(
+            &mut conn,
+            &RunTag::new("focus"),
+            "2026-10-20T10:00:00.000Z",
+            1,
+            &usage(0.1, vec![model("opus", 1, 0.1)]),
+            None,
+        )
+        .unwrap();
         insert_run(
             &mut conn,
             &review,
@@ -444,9 +555,15 @@ mod tests {
         .unwrap();
 
         let list = runs(&conn, None, None, 50).unwrap();
-        assert_eq!(list.iter().map(|r| r.feature.as_str()).collect::<Vec<_>>(), vec!["ai_review", "focus"]);
+        assert_eq!(
+            list.iter().map(|r| r.feature.as_str()).collect::<Vec<_>>(),
+            vec!["ai_review", "focus"]
+        );
         assert_eq!(list[0].models.len(), 2);
-        assert_eq!(list[0].review_id, None, "review 99 does not exist, so the row is not linkable");
+        assert_eq!(
+            list[0].review_id, None,
+            "review 99 does not exist, so the row is not linkable"
+        );
 
         let only_focus = runs(&conn, None, Some("focus"), 50).unwrap();
         assert_eq!(only_focus.len(), 1);
@@ -457,10 +574,34 @@ mod tests {
         let mut conn = crate::db::open_memory();
         let mut tag = RunTag::new("board_overview");
         tag.model = "sonnet".into();
-        insert_run(&mut conn, &tag, "2026-10-20T10:00:00.000Z", 1, &usage(0.4, vec![]), None).unwrap();
-        insert_run(&mut conn, &RunTag::new("focus"), "2026-10-20T10:01:00.000Z", 1, &usage(0.4, vec![]), None).unwrap();
+        insert_run(
+            &mut conn,
+            &tag,
+            "2026-10-20T10:00:00.000Z",
+            1,
+            &usage(0.4, vec![]),
+            None,
+        )
+        .unwrap();
+        insert_run(
+            &mut conn,
+            &RunTag::new("focus"),
+            "2026-10-20T10:01:00.000Z",
+            1,
+            &usage(0.4, vec![]),
+            None,
+        )
+        .unwrap();
         // A failed run with no usage adds no model row.
-        insert_run(&mut conn, &RunTag::new("focus"), "2026-10-20T10:02:00.000Z", 1, &RunUsage::default(), Some("x")).unwrap();
+        insert_run(
+            &mut conn,
+            &RunTag::new("focus"),
+            "2026-10-20T10:02:00.000Z",
+            1,
+            &RunUsage::default(),
+            Some("x"),
+        )
+        .unwrap();
 
         let by_model = summary(&conn, None).unwrap().by_model;
         let names: Vec<_> = by_model.iter().map(|m| m.model.as_str()).collect();
@@ -473,7 +614,10 @@ mod tests {
         let now = Local.with_ymd_and_hms(2026, 10, 20, 15, 30, 0).unwrap();
         assert_eq!(range_start("all", now).unwrap(), None);
         let today = range_start("today", now).unwrap().unwrap();
-        let midnight = Local.with_ymd_and_hms(2026, 10, 20, 0, 0, 0).unwrap().with_timezone(&Utc);
+        let midnight = Local
+            .with_ymd_and_hms(2026, 10, 20, 0, 0, 0)
+            .unwrap()
+            .with_timezone(&Utc);
         assert_eq!(today, stamp(midnight));
         let week = range_start("7d", now).unwrap().unwrap();
         assert_eq!(week, stamp((now - Duration::days(7)).with_timezone(&Utc)));
@@ -491,31 +635,79 @@ mod tests {
             cost: Some(SessionCost {
                 total_usd: usd,
                 main_usd: usd,
-                by_model: BTreeMap::from([(model.to_string(), ModelCost { usd, output: 10, ..Default::default() })]),
+                by_model: BTreeMap::from([(
+                    model.to_string(),
+                    ModelCost {
+                        usd,
+                        output: 10,
+                        ..Default::default()
+                    },
+                )]),
                 ..Default::default()
             }),
         };
         let sessions = HashMap::from([
-            ("a".to_string(), vec![sum("2026-10-20 10:00", 3.0, "opus"), sum("2026-10-10 10:00", 1.0, "opus")]),
-            ("b".to_string(), vec![sum("2026-10-01 10:00", 2.0, "sonnet")]),
+            (
+                "a".to_string(),
+                vec![
+                    sum("2026-10-20 10:00", 3.0, "opus"),
+                    sum("2026-10-10 10:00", 1.0, "opus"),
+                ],
+            ),
+            (
+                "b".to_string(),
+                vec![sum("2026-10-01 10:00", 2.0, "sonnet")],
+            ),
         ]);
         let all = session_summary(&sessions, None);
         assert_eq!((all.totals.runs, all.totals.cost_usd), (2, 5.0));
         assert_eq!(all.by_model[0].model, "opus");
         let since = NaiveDateTime::parse_from_str("2026-10-15 00:00", "%Y-%m-%d %H:%M").unwrap();
         let recent = session_summary(&sessions, Some(since));
-        assert_eq!((recent.totals.runs, recent.totals.cost_usd, recent.by_model.len()), (1, 3.0, 1));
+        assert_eq!(
+            (
+                recent.totals.runs,
+                recent.totals.cost_usd,
+                recent.by_model.len()
+            ),
+            (1, 3.0, 1)
+        );
     }
 
     #[test]
     fn runs_record_the_harness_that_ran_them() {
         let mut conn = crate::db::open_memory();
-        insert_run(&mut conn, &RunTag::new("chat"), "2026-10-20T10:00:00.000Z", 1, &usage(0.1, vec![]), None).unwrap();
-        insert_run(&mut conn, &RunTag::new("chat").harness("codex"), "2026-10-20T10:01:00.000Z", 1, &usage(0.1, vec![]), None).unwrap();
-        let harnesses: Vec<String> =
-            conn.prepare("SELECT harness FROM ai_run ORDER BY id").unwrap().query_map([], |r| r.get(0)).unwrap().map(Result::unwrap).collect();
+        insert_run(
+            &mut conn,
+            &RunTag::new("chat"),
+            "2026-10-20T10:00:00.000Z",
+            1,
+            &usage(0.1, vec![]),
+            None,
+        )
+        .unwrap();
+        insert_run(
+            &mut conn,
+            &RunTag::new("chat").harness("codex"),
+            "2026-10-20T10:01:00.000Z",
+            1,
+            &usage(0.1, vec![]),
+            None,
+        )
+        .unwrap();
+        let harnesses: Vec<String> = conn
+            .prepare("SELECT harness FROM ai_run ORDER BY id")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
         assert_eq!(harnesses, ["claude", "codex"]);
-        let listed: Vec<String> = runs(&conn, None, None, 10).unwrap().into_iter().map(|r| r.harness).collect();
+        let listed: Vec<String> = runs(&conn, None, None, 10)
+            .unwrap()
+            .into_iter()
+            .map(|r| r.harness)
+            .collect();
         assert_eq!(listed, ["codex", "claude"]);
     }
 
@@ -524,10 +716,45 @@ mod tests {
         let mut conn = crate::db::open_memory();
         conn.execute("INSERT INTO host (name, ssh_target, remote_endpoint, created_at, updated_at) VALUES ('koza', 'koza', '1', 'n', 'n')", []).unwrap();
         let koza = conn.last_insert_rowid();
-        insert_run(&mut conn, &RunTag::new("chat"), "2026-10-20T10:00:00.000Z", 1, &usage(0.1, vec![]), None).unwrap();
-        insert_run(&mut conn, &RunTag::new("chat").host(Some(koza)), "2026-10-20T10:01:00.000Z", 1, &usage(0.1, vec![]), None).unwrap();
-        insert_run(&mut conn, &RunTag::new("chat").host(Some(999)), "2026-10-20T10:02:00.000Z", 1, &usage(0.1, vec![]), None).unwrap();
-        let hosts: Vec<Option<String>> = runs(&conn, None, None, 10).unwrap().into_iter().map(|r| r.host).collect();
-        assert_eq!(hosts, [Some("host #999".to_string()), Some("koza".to_string()), None]);
+        insert_run(
+            &mut conn,
+            &RunTag::new("chat"),
+            "2026-10-20T10:00:00.000Z",
+            1,
+            &usage(0.1, vec![]),
+            None,
+        )
+        .unwrap();
+        insert_run(
+            &mut conn,
+            &RunTag::new("chat").host(Some(koza)),
+            "2026-10-20T10:01:00.000Z",
+            1,
+            &usage(0.1, vec![]),
+            None,
+        )
+        .unwrap();
+        insert_run(
+            &mut conn,
+            &RunTag::new("chat").host(Some(999)),
+            "2026-10-20T10:02:00.000Z",
+            1,
+            &usage(0.1, vec![]),
+            None,
+        )
+        .unwrap();
+        let hosts: Vec<Option<String>> = runs(&conn, None, None, 10)
+            .unwrap()
+            .into_iter()
+            .map(|r| r.host)
+            .collect();
+        assert_eq!(
+            hosts,
+            [
+                Some("host #999".to_string()),
+                Some("koza".to_string()),
+                None
+            ]
+        );
     }
 }

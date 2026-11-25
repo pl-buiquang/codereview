@@ -22,7 +22,6 @@ use super::{get as get_routine, Routine};
 use crate::ai::profiles;
 use crate::ai::{self, Harness, ToolPolicy};
 use crate::ai_usage;
-use crate::run_usage::RunTag;
 use crate::commands::chat::new_session_id;
 use crate::commands::focus::child_path;
 use crate::db::{Db, DbPath};
@@ -31,13 +30,17 @@ use crate::prompts;
 use crate::run_engine::engine::RunEngine;
 use crate::run_engine::outcome::STDOUT_FILE;
 use crate::run_engine::{proc, EventSink, Finished, Prepared, RunStore, RunningRun};
+use crate::run_usage::RunTag;
 
 pub use crate::run_engine::engine::DEFAULT_CONCURRENCY;
 const CONCURRENCY_KEY: &str = "routine_max_concurrency";
 
 /// `<db dir>/routine_runs`: one subdirectory per live run (prompt, stdout, stderr).
 fn runs_root(db_path: &Path) -> PathBuf {
-    db_path.parent().unwrap_or(Path::new(".")).join("routine_runs")
+    db_path
+        .parent()
+        .unwrap_or(Path::new("."))
+        .join("routine_runs")
 }
 
 /// Owns the run engine of the app. The engine is built on first use (it needs the app handle).
@@ -95,8 +98,11 @@ impl RoutineRun {
             context_type: row.get("context_type")?,
             context_key: row.get("context_key")?,
             context_label: row.get("context_label")?,
-            context: serde_json::from_str(&json)
-                .unwrap_or(ContextRef { kind: String::new(), id: String::new(), base_paths: vec![] }),
+            context: serde_json::from_str(&json).unwrap_or(ContextRef {
+                kind: String::new(),
+                id: String::new(),
+                base_paths: vec![],
+            }),
             status: row.get("status")?,
             note: row.get("note")?,
             model: row.get("model")?,
@@ -117,15 +123,25 @@ impl RoutineRun {
 }
 
 pub fn get_run(conn: &Connection, id: i64) -> AppResult<RoutineRun> {
-    conn.query_row(&format!("{RUN_SELECT} WHERE r.id = ?1"), params![id], RoutineRun::from_row)
-        .map_err(|e| match e {
-            rusqlite::Error::QueryReturnedNoRows => AppError::Other(format!("routine run {id} not found")),
-            other => other.into(),
-        })
+    conn.query_row(
+        &format!("{RUN_SELECT} WHERE r.id = ?1"),
+        params![id],
+        RoutineRun::from_row,
+    )
+    .map_err(|e| match e {
+        rusqlite::Error::QueryReturnedNoRows => {
+            AppError::Other(format!("routine run {id} not found"))
+        }
+        other => other.into(),
+    })
 }
 
 /// Active (`queued` / `running`) run of a routine on a context, if any.
-pub fn active_run(conn: &Connection, routine_id: i64, context_key: &str) -> AppResult<Option<RoutineRun>> {
+pub fn active_run(
+    conn: &Connection,
+    routine_id: i64,
+    context_key: &str,
+) -> AppResult<Option<RoutineRun>> {
     Ok(conn
         .query_row(
             &format!(
@@ -187,8 +203,12 @@ const UNSEEN_WHERE: &str = "r.seen_at IS NULL AND r.ended_at IS NOT NULL
      AND (r.status IN ('needs_attention', 'error', 'timeout') OR (r.status = 'ok' AND ro.handler = 'ai_review'))";
 
 pub fn unseen_runs(conn: &Connection) -> AppResult<Vec<RoutineRun>> {
-    let mut stmt = conn.prepare(&format!("{RUN_SELECT} WHERE {UNSEEN_WHERE} ORDER BY r.id DESC LIMIT 100"))?;
-    let rows = stmt.query_map([], RoutineRun::from_row)?.collect::<rusqlite::Result<_>>()?;
+    let mut stmt = conn.prepare(&format!(
+        "{RUN_SELECT} WHERE {UNSEEN_WHERE} ORDER BY r.id DESC LIMIT 100"
+    ))?;
+    let rows = stmt
+        .query_map([], RoutineRun::from_row)?
+        .collect::<rusqlite::Result<_>>()?;
     Ok(rows)
 }
 
@@ -208,17 +228,27 @@ pub fn run_events(conn: &Connection, run_id: i64, after_seq: i64) -> AppResult<V
         .prepare("SELECT seq, ts, kind, json, norm FROM routine_run_event WHERE run_id = ?1 AND seq > ?2 ORDER BY seq")?;
     let rows = stmt
         .query_map(params![run_id, after_seq], |r| {
-            Ok(RunEvent { seq: r.get(0)?, ts: r.get(1)?, kind: r.get(2)?, json: r.get(3)?, norm: r.get(4)? })
+            Ok(RunEvent {
+                seq: r.get(0)?,
+                ts: r.get(1)?,
+                kind: r.get(2)?,
+                json: r.get(3)?,
+                norm: r.get(4)?,
+            })
         })?
         .collect::<rusqlite::Result<_>>()?;
     Ok(rows)
 }
 
 pub fn max_concurrency(conn: &Connection) -> i64 {
-    conn.query_row("SELECT value FROM meta WHERE key = ?1", params![CONCURRENCY_KEY], |r| r.get::<_, String>(0))
-        .ok()
-        .and_then(|v| v.parse::<i64>().ok())
-        .map_or(DEFAULT_CONCURRENCY, |n| n.max(1))
+    conn.query_row(
+        "SELECT value FROM meta WHERE key = ?1",
+        params![CONCURRENCY_KEY],
+        |r| r.get::<_, String>(0),
+    )
+    .ok()
+    .and_then(|v| v.parse::<i64>().ok())
+    .map_or(DEFAULT_CONCURRENCY, |n| n.max(1))
 }
 
 pub fn set_max_concurrency(conn: &Connection, n: i64) -> AppResult<()> {
@@ -243,10 +273,12 @@ pub const DEFAULT_PLANS_DIR: &str = "~/Nextcloud/Notes/_work/plans";
 pub const DEFAULT_NOTES_ROOT: &str = "~/Nextcloud/Notes";
 
 fn meta_value(conn: &Connection, key: &str) -> Option<String> {
-    conn.query_row("SELECT value FROM meta WHERE key = ?1", params![key], |r| r.get::<_, String>(0))
-        .ok()
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty())
+    conn.query_row("SELECT value FROM meta WHERE key = ?1", params![key], |r| {
+        r.get::<_, String>(0)
+    })
+    .ok()
+    .map(|v| v.trim().to_string())
+    .filter(|v| !v.is_empty())
 }
 
 pub fn routine_settings(conn: &Connection) -> RoutineSettings {
@@ -257,7 +289,10 @@ pub fn routine_settings(conn: &Connection) -> RoutineSettings {
 }
 
 pub fn set_routine_settings(conn: &Connection, s: &RoutineSettings) -> AppResult<()> {
-    for (key, value) in [(PLANS_DIR_KEY, &s.plans_dir), (NOTES_ROOT_KEY, &s.notes_root)] {
+    for (key, value) in [
+        (PLANS_DIR_KEY, &s.plans_dir),
+        (NOTES_ROOT_KEY, &s.notes_root),
+    ] {
         conn.execute(
             "INSERT INTO meta (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             params![key, value.trim()],
@@ -285,7 +320,13 @@ pub(super) struct RunEventPayload<'a> {
 }
 
 pub(super) fn emit_updated(app: &AppHandle, run_id: i64, status: &str) {
-    let _ = app.emit("routine-run-updated", RunUpdated { run_id, status: status.to_string() });
+    let _ = app.emit(
+        "routine-run-updated",
+        RunUpdated {
+            run_id,
+            status: status.to_string(),
+        },
+    );
 }
 
 /// Runs left `running` / `queued` by a previous session never finished: they are `interrupted`.
@@ -295,9 +336,12 @@ pub(super) fn emit_updated(app: &AppHandle, run_id: i64, status: &str) {
 pub fn mark_interrupted(conn: &Connection, db_path: &Path) -> AppResult<usize> {
     let root = runs_root(db_path);
     // Runs on a remote host are not ours to interrupt: `resume_remote` re-attaches to them.
-    let mut stmt = conn.prepare("SELECT id, pid, harness FROM routine_run WHERE status = 'running' AND host_id IS NULL")?;
-    let rows: Vec<(i64, Option<i64>, String)> =
-        stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect::<rusqlite::Result<_>>()?;
+    let mut stmt = conn.prepare(
+        "SELECT id, pid, harness FROM routine_run WHERE status = 'running' AND host_id IS NULL",
+    )?;
+    let rows: Vec<(i64, Option<i64>, String)> = stmt
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+        .collect::<rusqlite::Result<_>>()?;
     let mut n = conn.execute(
         "UPDATE routine_run SET status = 'interrupted', ended_at = ?1 WHERE status = 'queued' AND host_id IS NULL",
         params![now()],
@@ -308,7 +352,10 @@ pub fn mark_interrupted(conn: &Connection, db_path: &Path) -> AppResult<usize> {
         }
         if let Some(pid) = pid {
             // Only if it still looks like its harness' own process (an id we don't know is Claude's, as before).
-            proc::kill_leftover(ai::harness_by_id(&harness).unwrap_or_else(ai::harness_for), pid as i32);
+            proc::kill_leftover(
+                ai::harness_by_id(&harness).unwrap_or_else(ai::harness_for),
+                pid as i32,
+            );
         }
         n += conn.execute(
             "UPDATE routine_run SET status = 'interrupted', ended_at = ?2 WHERE id = ?1",
@@ -321,8 +368,15 @@ pub fn mark_interrupted(conn: &Connection, db_path: &Path) -> AppResult<usize> {
 impl RoutineManager {
     fn engine(&self, app: &AppHandle) -> &Arc<RunEngine> {
         self.engine.get_or_init(|| {
-            let sink = Arc::new(AppSink { app: app.clone(), loaded: Mutex::default() });
-            RunEngine::new(Arc::new(SqliteRunStore { app: app.clone() }), sink, ai::harness_for())
+            let sink = Arc::new(AppSink {
+                app: app.clone(),
+                loaded: Mutex::default(),
+            });
+            RunEngine::new(
+                Arc::new(SqliteRunStore { app: app.clone() }),
+                sink,
+                ai::harness_for(),
+            )
         })
     }
 
@@ -361,7 +415,9 @@ impl RoutineManager {
             );
             match inserted {
                 Ok(_) => conn.last_insert_rowid(),
-                Err(rusqlite::Error::SqliteFailure(e, _)) if e.code == rusqlite::ErrorCode::ConstraintViolation => {
+                Err(rusqlite::Error::SqliteFailure(e, _))
+                    if e.code == rusqlite::ErrorCode::ConstraintViolation =>
+                {
                     return Err(AppError::Other(format!(
                         "“{}” is already running on {}",
                         routine.name, light.label
@@ -430,7 +486,10 @@ struct SqliteRunStore {
 
 impl SqliteRunStore {
     fn with_conn<T>(&self, f: impl FnOnce(&Connection) -> AppResult<T>) -> AppResult<T> {
-        let db = self.app.try_state::<Db>().ok_or_else(|| AppError::Other("the database is not ready".into()))?;
+        let db = self
+            .app
+            .try_state::<Db>()
+            .ok_or_else(|| AppError::Other("the database is not ready".into()))?;
         let conn = db.0.lock().unwrap();
         f(&conn)
     }
@@ -442,11 +501,18 @@ impl RunStore for SqliteRunStore {
     }
 
     fn max_concurrency(&self) -> i64 {
-        self.with_conn(|c| Ok(max_concurrency(c))).unwrap_or(DEFAULT_CONCURRENCY)
+        self.with_conn(|c| Ok(max_concurrency(c)))
+            .unwrap_or(DEFAULT_CONCURRENCY)
     }
 
     fn running_count(&self) -> AppResult<i64> {
-        self.with_conn(|c| Ok(c.query_row("SELECT COUNT(*) FROM routine_run WHERE status = 'running' AND host_id IS NULL", [], |r| r.get(0))?))
+        self.with_conn(|c| {
+            Ok(c.query_row(
+                "SELECT COUNT(*) FROM routine_run WHERE status = 'running' AND host_id IS NULL",
+                [],
+                |r| r.get(0),
+            )?)
+        })
     }
 
     fn next_queued(&self) -> AppResult<Option<i64>> {
@@ -466,8 +532,14 @@ impl RunStore for SqliteRunStore {
     }
 
     fn is_running(&self, id: i64) -> bool {
-        self.with_conn(|c| Ok(c.query_row("SELECT status = 'running' FROM routine_run WHERE id = ?1", params![id], |r| r.get(0))?))
-            .unwrap_or(false)
+        self.with_conn(|c| {
+            Ok(c.query_row(
+                "SELECT status = 'running' FROM routine_run WHERE id = ?1",
+                params![id],
+                |r| r.get(0),
+            )?)
+        })
+        .unwrap_or(false)
     }
 
     fn drop_queued(&self, id: i64) -> AppResult<bool> {
@@ -527,10 +599,17 @@ impl RunStore for SqliteRunStore {
 
     fn cleanup_dirs(&self, id: i64) -> Vec<PathBuf> {
         let json: Option<String> = self
-            .with_conn(|c| Ok(c.query_row("SELECT cleanup_json FROM routine_run WHERE id = ?1", params![id], |r| r.get(0))?))
+            .with_conn(|c| {
+                Ok(c.query_row(
+                    "SELECT cleanup_json FROM routine_run WHERE id = ?1",
+                    params![id],
+                    |r| r.get(0),
+                )?)
+            })
             .ok()
             .flatten();
-        json.and_then(|j| serde_json::from_str(&j).ok()).unwrap_or_default()
+        json.and_then(|j| serde_json::from_str(&j).ok())
+            .unwrap_or_default()
     }
 
     fn append_event(&self, id: i64, seq: i64, kind: &str, json: &str, norm: &str) {
@@ -545,7 +624,11 @@ impl RunStore for SqliteRunStore {
 
     fn last_seq(&self, id: i64) -> i64 {
         self.with_conn(|c| {
-            Ok(c.query_row("SELECT COALESCE(MAX(seq), 0) FROM routine_run_event WHERE run_id = ?1", params![id], |r| r.get(0))?)
+            Ok(c.query_row(
+                "SELECT COALESCE(MAX(seq), 0) FROM routine_run_event WHERE run_id = ?1",
+                params![id],
+                |r| r.get(0),
+            )?)
         })
         .unwrap_or(0)
     }
@@ -630,7 +713,8 @@ impl AppSink {
     fn load(&self, id: i64) -> AppResult<(RoutineRun, Routine)> {
         let db = self.app.state::<Db>();
         let conn = db.0.lock().unwrap();
-        let loaded = get_run(&conn, id).and_then(|run| get_routine(&conn, run.routine_id).map(|r| (run, r)))?;
+        let loaded = get_run(&conn, id)
+            .and_then(|run| get_routine(&conn, run.routine_id).map(|r| (run, r)))?;
         self.loaded.lock().unwrap().insert(id, loaded.clone());
         Ok(loaded)
     }
@@ -654,7 +738,15 @@ impl EventSink for AppSink {
     }
 
     fn event(&self, id: i64, seq: i64, kind: &str, json: &str) {
-        let _ = self.app.emit("routine-run-event", RunEventPayload { run_id: id, seq, kind, json });
+        let _ = self.app.emit(
+            "routine-run-event",
+            RunEventPayload {
+                run_id: id,
+                seq,
+                kind,
+                json,
+            },
+        );
     }
 
     fn dropped(&self, id: i64) {
@@ -670,10 +762,17 @@ impl EventSink for AppSink {
         }
         let prep = handlers::prepare(app, &routine, &run).map_err(|e| e.to_string())?;
         let cwd = prep.cwd.clone().unwrap_or_else(|| resolved.cwd.clone());
-        let vars: Vec<(&str, &str)> =
-            resolved.vars.iter().chain(&prep.vars).map(|(k, v)| (k.as_str(), v.as_str())).collect();
+        let vars: Vec<(&str, &str)> = resolved
+            .vars
+            .iter()
+            .chain(&prep.vars)
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect();
         let prompt = prompts::render(&routine.prompt_template, &vars);
-        let mut system = prep.system.clone().unwrap_or_else(|| prompts::render(&routine.system_prompt, &vars));
+        let mut system = prep
+            .system
+            .clone()
+            .unwrap_or_else(|| prompts::render(&routine.system_prompt, &vars));
         system.push_str(&prep.system_suffix);
         // Handler routines feed app features and keep exactly the prompt they always had.
         if routine.handler.is_none() {
@@ -683,15 +782,25 @@ impl EventSink for AppSink {
             system.push_str(&resolved.block);
         }
         if !run.note.trim().is_empty() {
-            system.push_str(&format!("\n\n## Extra instructions for this run\n{}", run.note.trim()));
+            system.push_str(&format!(
+                "\n\n## Extra instructions for this run\n{}",
+                run.note.trim()
+            ));
         }
         let (model, harness, profile_args) = {
             let db = app.state::<Db>();
             let conn = db.0.lock().unwrap();
             let resolved = profiles::resolve_routine(&conn, routine.profile_id);
             let harness = resolved.harness;
-            let _ = conn.execute("UPDATE routine_run SET harness = ?1 WHERE id = ?2", params![harness.id(), run.id]);
-            (handlers::effective_model(&conn, &run, &routine), harness, harness.settings_args(&resolved.settings))
+            let _ = conn.execute(
+                "UPDATE routine_run SET harness = ?1 WHERE id = ?2",
+                params![harness.id(), run.id],
+            );
+            (
+                handlers::effective_model(&conn, &run, &routine),
+                harness,
+                harness.settings_args(&resolved.settings),
+            )
         };
 
         log::info!(target: "routines", "run {}: starting {} on {}", run.id, routine.key, run.context_label);
@@ -723,19 +832,32 @@ impl EventSink for AppSink {
 
 /// A run is over and recorded: handlers, the update event, the notification and the usage log. Shared
 /// by the local engine's sink and the mirror of a remote run.
-pub(super) fn run_finished(app: &AppHandle, id: i64, loaded: Option<(RoutineRun, Routine)>, fin: &Finished) {
+pub(super) fn run_finished(
+    app: &AppHandle,
+    id: i64,
+    loaded: Option<(RoutineRun, Routine)>,
+    fin: &Finished,
+) {
     let error = fin.error.as_deref();
     if !fin.shutting_down {
         if let Some((run, routine)) = &loaded {
             handlers::finish(app, routine, run, fin.status, &fin.text, error, &fin.usage);
         }
         emit_updated(app, id, fin.status);
-        if let (Some((run, routine)), true) =
-            (&loaded, matches!(fin.status, "ok" | "needs_attention" | "error" | "timeout"))
-        {
+        if let (Some((run, routine)), true) = (
+            &loaded,
+            matches!(fin.status, "ok" | "needs_attention" | "error" | "timeout"),
+        ) {
             // The board overview is a refresh button, not a task worth a banner.
             if !(routine.handler.as_deref() == Some("overview") && fin.status == "ok") {
-                notify(app, routine, &run.context_label, fin.status, &fin.text, error);
+                notify(
+                    app,
+                    routine,
+                    &run.context_label,
+                    fin.status,
+                    &fin.text,
+                    error,
+                );
             }
         }
     }
@@ -743,11 +865,23 @@ pub(super) fn run_finished(app: &AppHandle, id: i64, loaded: Option<(RoutineRun,
         let harness = {
             let db = app.state::<Db>();
             let conn = db.0.lock().unwrap();
-            profiles::resolve_routine(&conn, routine.profile_id).harness.id()
+            profiles::resolve_routine(&conn, routine.profile_id)
+                .harness
+                .id()
         };
         let mut tag = handlers::usage_tag(routine, run, harness).host(run.host_id);
-        tag.model = if run.model.is_empty() { routine.model.clone() } else { run.model.clone() };
-        ai_usage::record(&tag, &fin.started_at, fin.elapsed.as_millis() as i64, &fin.usage, fin.usage_error.as_deref());
+        tag.model = if run.model.is_empty() {
+            routine.model.clone()
+        } else {
+            run.model.clone()
+        };
+        ai_usage::record(
+            &tag,
+            &fin.started_at,
+            fin.elapsed.as_millis() as i64,
+            &fin.usage,
+            fin.usage_error.as_deref(),
+        );
     }
 }
 
@@ -781,7 +915,13 @@ fn build_prepared(
         prompt,
         cwd,
         extra_dirs: prep.extra_dirs.clone(),
-        tools: ToolPolicy::Allowlist(opts.allowed_tools.iter().chain(&prep.extra_tools).cloned().collect()),
+        tools: ToolPolicy::Allowlist(
+            opts.allowed_tools
+                .iter()
+                .chain(&prep.extra_tools)
+                .cloned()
+                .collect(),
+        ),
         access: opts.access,
         session_id,
         env,
@@ -792,7 +932,14 @@ fn build_prepared(
     }
 }
 
-fn notify(app: &AppHandle, routine: &Routine, label: &str, status: &str, text: &str, error: Option<&str>) {
+fn notify(
+    app: &AppHandle,
+    routine: &Routine,
+    label: &str,
+    status: &str,
+    text: &str,
+    error: Option<&str>,
+) {
     let headline = match status {
         "ok" => "finished",
         "needs_attention" => "needs your attention",
@@ -800,11 +947,26 @@ fn notify(app: &AppHandle, routine: &Routine, label: &str, status: &str, text: &
         _ => "failed",
     };
     let detail = error.unwrap_or(text);
-    let body: String = detail.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("").chars().take(160).collect();
+    let body: String = detail
+        .lines()
+        .rev()
+        .find(|l| !l.trim().is_empty())
+        .unwrap_or("")
+        .chars()
+        .take(160)
+        .collect();
     let _ = app
         .notification()
         .builder()
-        .title(format!("{} {headline}{}", routine.name, if label.is_empty() { String::new() } else { format!(" · {label}") }))
+        .title(format!(
+            "{} {headline}{}",
+            routine.name,
+            if label.is_empty() {
+                String::new()
+            } else {
+                format!(" · {label}")
+            }
+        ))
         .body(body)
         .show();
 }
@@ -813,8 +975,13 @@ fn notify(app: &AppHandle, routine: &Routine, label: &str, status: &str, text: &
 mod tests {
     use super::*;
     use crate::db::open_memory;
-    
-    fn insert_run(conn: &Connection, routine_id: i64, key: &str, status: &str) -> rusqlite::Result<usize> {
+
+    fn insert_run(
+        conn: &Connection,
+        routine_id: i64,
+        key: &str,
+        status: &str,
+    ) -> rusqlite::Result<usize> {
         conn.execute(
             "INSERT INTO routine_run (routine_id, context_type, context_key, context_json, status, queued_at)
              VALUES (?1, 'pr', ?2, '{\"kind\":\"pr\"}', ?3, 'now')",
@@ -836,9 +1003,16 @@ mod tests {
         assert!(insert_run(&conn, rid, "pr:o/n#1", "running").is_err());
         // another context is fine, and so is the same context once the first run ended
         insert_run(&conn, rid, "pr:o/n#2", "running").unwrap();
-        conn.execute("UPDATE routine_run SET status = 'ok' WHERE context_key = 'pr:o/n#1'", []).unwrap();
+        conn.execute(
+            "UPDATE routine_run SET status = 'ok' WHERE context_key = 'pr:o/n#1'",
+            [],
+        )
+        .unwrap();
         insert_run(&conn, rid, "pr:o/n#1", "queued").unwrap();
-        assert_eq!(active_run(&conn, rid, "pr:o/n#1").unwrap().unwrap().status, "queued");
+        assert_eq!(
+            active_run(&conn, rid, "pr:o/n#1").unwrap().unwrap().status,
+            "queued"
+        );
     }
 
     #[test]
@@ -847,8 +1021,15 @@ mod tests {
         insert_run(&conn, rid, "a", "queued").unwrap();
         insert_run(&conn, rid, "b", "running").unwrap();
         insert_run(&conn, rid, "c", "ok").unwrap();
-        assert_eq!(mark_interrupted(&conn, Path::new("/nonexistent/db.sqlite")).unwrap(), 2);
-        let statuses: Vec<String> = list_runs(&conn, &RunFilter::default()).unwrap().into_iter().map(|r| r.status).collect();
+        assert_eq!(
+            mark_interrupted(&conn, Path::new("/nonexistent/db.sqlite")).unwrap(),
+            2
+        );
+        let statuses: Vec<String> = list_runs(&conn, &RunFilter::default())
+            .unwrap()
+            .into_iter()
+            .map(|r| r.status)
+            .collect();
         assert_eq!(statuses, ["ok", "interrupted", "interrupted"]);
     }
 
@@ -858,14 +1039,31 @@ mod tests {
         insert_run(&conn, rid, "local-queued", "queued").unwrap();
         insert_run(&conn, rid, "remote-queued", "queued").unwrap();
         insert_run(&conn, rid, "remote-running", "running").unwrap();
-        conn.execute("UPDATE routine_run SET host_id = 1 WHERE context_key LIKE 'remote-%'", []).unwrap();
-        assert_eq!(mark_interrupted(&conn, Path::new("/nonexistent/db.sqlite")).unwrap(), 1);
-        let by_key: Vec<(String, String)> =
-            list_runs(&conn, &RunFilter::default()).unwrap().into_iter().map(|r| (r.context_key, r.status)).collect();
+        conn.execute(
+            "UPDATE routine_run SET host_id = 1 WHERE context_key LIKE 'remote-%'",
+            [],
+        )
+        .unwrap();
+        assert_eq!(
+            mark_interrupted(&conn, Path::new("/nonexistent/db.sqlite")).unwrap(),
+            1
+        );
+        let by_key: Vec<(String, String)> = list_runs(&conn, &RunFilter::default())
+            .unwrap()
+            .into_iter()
+            .map(|r| (r.context_key, r.status))
+            .collect();
         assert!(by_key.contains(&("local-queued".into(), "interrupted".into())));
         assert!(by_key.contains(&("remote-queued".into(), "queued".into())));
         assert!(by_key.contains(&("remote-running".into(), "running".into())));
-        assert_eq!(list_runs(&conn, &RunFilter::default()).unwrap().iter().filter(|r| r.host_id == Some(1)).count(), 2);
+        assert_eq!(
+            list_runs(&conn, &RunFilter::default())
+                .unwrap()
+                .iter()
+                .filter(|r| r.host_id == Some(1))
+                .count(),
+            2
+        );
     }
 
     #[test]
@@ -879,8 +1077,11 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join(STDOUT_FILE), "").unwrap();
         assert_eq!(mark_interrupted(&conn, &tmp.join("db.sqlite")).unwrap(), 1);
-        let by_key: Vec<(String, String)> =
-            list_runs(&conn, &RunFilter::default()).unwrap().into_iter().map(|r| (r.context_key, r.status)).collect();
+        let by_key: Vec<(String, String)> = list_runs(&conn, &RunFilter::default())
+            .unwrap()
+            .into_iter()
+            .map(|r| (r.context_key, r.status))
+            .collect();
         assert!(by_key.contains(&("a".into(), "running".into())));
         assert!(by_key.contains(&("b".into(), "interrupted".into())));
         let _ = std::fs::remove_dir_all(&tmp);
@@ -900,8 +1101,14 @@ mod tests {
     fn routine_settings_default_and_round_trip() {
         let conn = open_memory();
         let s = routine_settings(&conn);
-        assert_eq!((s.plans_dir.as_str(), s.notes_root.as_str()), (DEFAULT_PLANS_DIR, DEFAULT_NOTES_ROOT));
-        let custom = RoutineSettings { plans_dir: " ~/plans ".into(), notes_root: "".into() };
+        assert_eq!(
+            (s.plans_dir.as_str(), s.notes_root.as_str()),
+            (DEFAULT_PLANS_DIR, DEFAULT_NOTES_ROOT)
+        );
+        let custom = RoutineSettings {
+            plans_dir: " ~/plans ".into(),
+            notes_root: "".into(),
+        };
         set_routine_settings(&conn, &custom).unwrap();
         let s = routine_settings(&conn);
         assert_eq!(s.plans_dir, "~/plans");
@@ -981,23 +1188,60 @@ mod tests {
         let cwd = Path::new("/repo");
         let prompt = Path::new("/runs/5/system.txt");
         let db = Path::new("/data/cr.db");
-        for (mode, flag) in [("append", "--append-system-prompt-file"), ("replace", "--system-prompt-file")] {
+        for (mode, flag) in [
+            ("append", "--append-system-prompt-file"),
+            ("replace", "--system-prompt-file"),
+        ] {
             let routine = test_routine(mode);
-            let p = build_prepared(ai::harness_for(), Vec::new(), &routine, &prep, cwd.into(), "opus".into(), "sid".into(), String::new(), "p".into(), db, RunTag::new("t"));
+            let p = build_prepared(
+                ai::harness_for(),
+                Vec::new(),
+                &routine,
+                &prep,
+                cwd.into(),
+                "opus".into(),
+                "sid".into(),
+                String::new(),
+                "p".into(),
+                db,
+                RunTag::new("t"),
+            );
             let cmd = crate::ai::claude::command(&p.request(prompt), true, Some(prompt));
             assert_eq!(
                 argv(&cmd),
                 strs(&[
-                    "-p", "--output-format", "stream-json", "--verbose", "--strict-mcp-config",
-                    "--permission-mode", "acceptEdits", "--add-dir", "/repo", "--add-dir", "/skills",
-                    "--allowedTools", "Bash(git:*)", "Read", "Skill", "--model", "opus", "--effort", "high",
-                    "--session-id", "sid", flag, "/runs/5/system.txt",
+                    "-p",
+                    "--output-format",
+                    "stream-json",
+                    "--verbose",
+                    "--strict-mcp-config",
+                    "--permission-mode",
+                    "acceptEdits",
+                    "--add-dir",
+                    "/repo",
+                    "--add-dir",
+                    "/skills",
+                    "--allowedTools",
+                    "Bash(git:*)",
+                    "Read",
+                    "Skill",
+                    "--model",
+                    "opus",
+                    "--effort",
+                    "high",
+                    "--session-id",
+                    "sid",
+                    flag,
+                    "/runs/5/system.txt",
                 ])
             );
             assert_eq!(
                 envs(&cmd),
                 vec![
-                    ("CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS".to_string(), "0".to_string()),
+                    (
+                        "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS".to_string(),
+                        "0".to_string()
+                    ),
                     ("CODEREVIEW_DB".to_string(), "/data/cr.db".to_string()),
                 ]
             );
@@ -1009,25 +1253,54 @@ mod tests {
     fn stream_command_omits_empty_tools_and_model() {
         use crate::test_support::{argv, strs};
         let mut routine = test_routine("append");
-        routine.harness_overrides = serde_json::json!({ "claude": { "permission_mode": "acceptEdits" } });
+        routine.harness_overrides =
+            serde_json::json!({ "claude": { "permission_mode": "acceptEdits" } });
         let prep = handlers::Prep::default();
-        let p = build_prepared(ai::harness_for(), Vec::new(), &routine, &prep, "/r".into(), String::new(), "s".into(), String::new(), "p".into(), Path::new("/d"), RunTag::new("t"));
-        let cmd = crate::ai::claude::command(&p.request(Path::new("/p")), true, Some(Path::new("/p")));
+        let p = build_prepared(
+            ai::harness_for(),
+            Vec::new(),
+            &routine,
+            &prep,
+            "/r".into(),
+            String::new(),
+            "s".into(),
+            String::new(),
+            "p".into(),
+            Path::new("/d"),
+            RunTag::new("t"),
+        );
+        let cmd =
+            crate::ai::claude::command(&p.request(Path::new("/p")), true, Some(Path::new("/p")));
         assert_eq!(
             argv(&cmd),
             strs(&[
-                "-p", "--output-format", "stream-json", "--verbose", "--strict-mcp-config", "--permission-mode",
-                "acceptEdits", "--add-dir", "/r", "--session-id", "s", "--append-system-prompt-file", "/p",
+                "-p",
+                "--output-format",
+                "stream-json",
+                "--verbose",
+                "--strict-mcp-config",
+                "--permission-mode",
+                "acceptEdits",
+                "--add-dir",
+                "/r",
+                "--session-id",
+                "s",
+                "--append-system-prompt-file",
+                "/p",
             ])
         );
     }
-
 
     #[test]
     fn unseen_runs_are_problems_and_ai_review_successes_until_seen() {
         let conn = open_memory();
         crate::routines::seed(&conn).unwrap();
-        let rid = |key: &str| conn.query_row("SELECT id FROM routine WHERE key = ?1", params![key], |r| r.get::<_, i64>(0)).unwrap();
+        let rid = |key: &str| {
+            conn.query_row("SELECT id FROM routine WHERE key = ?1", params![key], |r| {
+                r.get::<_, i64>(0)
+            })
+            .unwrap()
+        };
         let (review, overview) = (rid("ai_review_normal"), rid("board_overview"));
         let run = |routine: i64, status: &str, ended: bool| {
             conn.execute(
@@ -1044,7 +1317,13 @@ mod tests {
         let attention = run(overview, "needs_attention", true);
         let _running = run(review, "running", false);
         let _killed = run(review, "killed", true);
-        let ids = |conn: &Connection| unseen_runs(conn).unwrap().iter().map(|r| r.id).collect::<Vec<_>>();
+        let ids = |conn: &Connection| {
+            unseen_runs(conn)
+                .unwrap()
+                .iter()
+                .map(|r| r.id)
+                .collect::<Vec<_>>()
+        };
         assert_eq!(ids(&conn), vec![attention, overview_failed, review_ok]);
         assert!(!ids(&conn).contains(&overview_ok));
 
@@ -1052,8 +1331,13 @@ mod tests {
         assert_eq!(ids(&conn), vec![attention, overview_failed]);
         mark_runs_seen(&conn, None).unwrap();
         assert!(ids(&conn).is_empty());
-        let running_seen: Option<String> =
-            conn.query_row("SELECT seen_at FROM routine_run WHERE status = 'running'", [], |r| r.get(0)).unwrap();
+        let running_seen: Option<String> = conn
+            .query_row(
+                "SELECT seen_at FROM routine_run WHERE status = 'running'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert!(running_seen.is_none(), "active runs are never marked seen");
     }
 }

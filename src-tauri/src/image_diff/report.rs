@@ -69,9 +69,13 @@ fn compared_size(f: &FileEntry) -> Option<(u32, u32)> {
 /// its regions.
 fn resolve_bbox(raw: &RawFinding, file: &FileEntry, (w, h): (u32, u32)) -> Option<[u32; 4]> {
     let union = || {
-        let mut it = raw.region_ids.iter().filter_map(|id| file.regions.iter().find(|r| r.id == *id));
+        let mut it = raw
+            .region_ids
+            .iter()
+            .filter_map(|id| file.regions.iter().find(|r| r.id == *id));
         let first = it.next()?;
-        let (mut x0, mut y0, mut x1, mut y1) = (first.x, first.y, first.x + first.w, first.y + first.h);
+        let (mut x0, mut y0, mut x1, mut y1) =
+            (first.x, first.y, first.x + first.w, first.y + first.h);
         for r in it {
             x0 = x0.min(r.x);
             y0 = y0.min(r.y);
@@ -81,7 +85,9 @@ fn resolve_bbox(raw: &RawFinding, file: &FileEntry, (w, h): (u32, u32)) -> Optio
         Some([x0, y0, x1 - x0, y1 - y0])
     };
     let [x, y, bw, bh] = match raw.bbox {
-        Some([x, y, bw, bh]) if bw > 0 && bh > 0 => [x.max(0) as u32, y.max(0) as u32, bw as u32, bh as u32],
+        Some([x, y, bw, bh]) if bw > 0 && bh > 0 => {
+            [x.max(0) as u32, y.max(0) as u32, bw as u32, bh as u32]
+        }
         _ => union()?,
     };
     let x = x.min(w - 1);
@@ -92,9 +98,12 @@ fn resolve_bbox(raw: &RawFinding, file: &FileEntry, (w, h): (u32, u32)) -> Optio
 /// Check `dir/report.json` against the manifest, write the crops of every finding and the final
 /// report, and return it.
 pub fn finalize(dir: &Path) -> AppResult<Report> {
-    let manifest = store::read_manifest(dir).ok_or_else(|| AppError::Other("the image diffs are gone".into()))?;
-    let bytes = std::fs::read(dir.join(RAW)).map_err(|_| AppError::Other("the run did not write report.json".into()))?;
-    let raw: RawReport = serde_json::from_slice(&bytes).map_err(|e| AppError::Other(format!("report.json is not valid: {e}")))?;
+    let manifest = store::read_manifest(dir)
+        .ok_or_else(|| AppError::Other("the image diffs are gone".into()))?;
+    let bytes = std::fs::read(dir.join(RAW))
+        .map_err(|_| AppError::Other("the run did not write report.json".into()))?;
+    let raw: RawReport = serde_json::from_slice(&bytes)
+        .map_err(|e| AppError::Other(format!("report.json is not valid: {e}")))?;
     let report = build(dir, &manifest, raw)?;
     store::write_json(dir, store::REPORT_FINAL, &report)?;
     Ok(report)
@@ -113,8 +122,13 @@ fn build(dir: &Path, manifest: &Manifest, raw: RawReport) -> AppResult<Report> {
             dropped += 1;
             continue;
         }
-        let file = manifest.files.iter().find(|f| f.path == r.file || f.old_path.as_deref() == Some(&r.file));
-        let usable = file.filter(|f| f.skipped.is_none() && matches!(f.change, Change::Modified | Change::Renamed));
+        let file = manifest
+            .files
+            .iter()
+            .find(|f| f.path == r.file || f.old_path.as_deref() == Some(&r.file));
+        let usable = file.filter(|f| {
+            f.skipped.is_none() && matches!(f.change, Change::Modified | Change::Renamed)
+        });
         let Some((file, size)) = usable.and_then(|f| Some((f, compared_size(f)?))) else {
             dropped += 1;
             continue;
@@ -127,7 +141,11 @@ fn build(dir: &Path, manifest: &Manifest, raw: RawReport) -> AppResult<Report> {
         let fdir = dir.join(format!("f{}", file.index));
         // A finding that is exactly one region already has its crops.
         let single = match r.region_ids.as_slice() {
-            [id] => file.regions.iter().find(|g| g.id == *id).filter(|g| [g.x, g.y, g.w, g.h] == bbox),
+            [id] => file
+                .regions
+                .iter()
+                .find(|g| g.id == *id)
+                .filter(|g| [g.x, g.y, g.w, g.h] == bbox),
             _ => None,
         };
         for slot in ["before", "after", "diff"] {
@@ -138,7 +156,12 @@ fn build(dir: &Path, manifest: &Manifest, raw: RawReport) -> AppResult<Report> {
             }
             if loaded.as_ref().is_none_or(|(i, ..)| *i != file.index) {
                 let read = |name: &str| read_png(&fdir.join(name)).map_err(AppError::Other);
-                loaded = Some((file.index, read("before.png")?, read("after.png")?, read("diff.png")?));
+                loaded = Some((
+                    file.index,
+                    read("before.png")?,
+                    read("after.png")?,
+                    read("diff.png")?,
+                ));
             }
             let (_, before, after, diff) = loaded.as_ref().expect("just loaded");
             let img = match slot {
@@ -155,9 +178,14 @@ fn build(dir: &Path, manifest: &Manifest, raw: RawReport) -> AppResult<Report> {
                 padded = pad_white(img, w, h);
                 &padded
             };
-            write_window(&target, (bbox[0], bbox[1], bbox[2], bbox[3]), rgba, w, h).map_err(AppError::Other)?;
+            write_window(&target, (bbox[0], bbox[1], bbox[2], bbox[3]), rgba, w, h)
+                .map_err(AppError::Other)?;
         }
-        let kind = if KINDS.contains(&r.kind.as_str()) { r.kind } else { "content".into() };
+        let kind = if KINDS.contains(&r.kind.as_str()) {
+            r.kind
+        } else {
+            "content".into()
+        };
         findings.push(Finding {
             n,
             file: file.path.clone(),
@@ -169,7 +197,12 @@ fn build(dir: &Path, manifest: &Manifest, raw: RawReport) -> AppResult<Report> {
             kind,
         });
     }
-    Ok(Report { summary: raw.summary.trim().to_string(), generated_at: chrono::Utc::now().to_rfc3339(), findings, dropped })
+    Ok(Report {
+        summary: raw.summary.trim().to_string(),
+        generated_at: chrono::Utc::now().to_rfc3339(),
+        findings,
+        dropped,
+    })
 }
 
 fn pad_white(img: &Raster, w: u32, h: u32) -> Vec<u8> {
@@ -200,7 +233,11 @@ mod tests {
 
     impl BlobSource for Fake {
         fn read(&self, side: Side, _: &str) -> AppResult<Vec<u8>> {
-            self.0.iter().find(|(s, _)| *s == side).map(|(_, b)| b.clone()).ok_or_else(|| AppError::Other("missing".into()))
+            self.0
+                .iter()
+                .find(|(s, _)| *s == side)
+                .map(|(_, b)| b.clone())
+                .ok_or_else(|| AppError::Other("missing".into()))
         }
     }
 
@@ -214,7 +251,9 @@ mod tests {
             }
         }
         let mut out = Vec::new();
-        image::DynamicImage::ImageRgba8(img).write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png).unwrap();
+        image::DynamicImage::ImageRgba8(img)
+            .write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png)
+            .unwrap();
         out
     }
 
@@ -222,8 +261,15 @@ mod tests {
     fn cache(name: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("cr-report-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        let blobs = Fake(vec![(Side::Left, png(300, 200, &[])), (Side::Right, png(300, 200, &[(10, 10, 6), (250, 150, 6)]))]);
-        let file = ImageFile { path: "a.png".into(), old_path: None, change: Change::Modified };
+        let blobs = Fake(vec![
+            (Side::Left, png(300, 200, &[])),
+            (Side::Right, png(300, 200, &[(10, 10, 6), (250, 150, 6)])),
+        ]);
+        let file = ImageFile {
+            path: "a.png".into(),
+            old_path: None,
+            change: Change::Modified,
+        };
         let files = generate(&blobs, &[file], &dir, &AtomicBool::new(false), |_, _| {}).unwrap();
         assert_eq!(files[0].regions.len(), 2);
         let manifest = Manifest {
@@ -260,13 +306,31 @@ mod tests {
         assert_eq!(report.summary, "two squares");
         assert_eq!(report.dropped, 0);
         assert_eq!(report.findings.len(), 3);
-        assert_eq!(report.findings[0].bbox, [10, 10, 6, 6], "taken from the region");
-        assert_eq!(report.findings[1].bbox, [240, 140, 60, 60], "clamped into the 300x200 image");
-        assert_eq!(report.findings[1].kind, "content", "unknown kinds fall back");
-        assert_eq!(report.findings[2].bbox, [10, 10, 246, 146], "union of both regions");
+        assert_eq!(
+            report.findings[0].bbox,
+            [10, 10, 6, 6],
+            "taken from the region"
+        );
+        assert_eq!(
+            report.findings[1].bbox,
+            [240, 140, 60, 60],
+            "clamped into the 300x200 image"
+        );
+        assert_eq!(
+            report.findings[1].kind, "content",
+            "unknown kinds fall back"
+        );
+        assert_eq!(
+            report.findings[2].bbox,
+            [10, 10, 246, 146],
+            "union of both regions"
+        );
         for n in 0..3 {
             for slot in ["before", "after", "diff"] {
-                assert!(dir.join(format!("report/{n}-{slot}.png")).exists(), "{n}-{slot}");
+                assert!(
+                    dir.join(format!("report/{n}-{slot}.png")).exists(),
+                    "{n}-{slot}"
+                );
             }
         }
         // The single-region finding reuses the region crop byte for byte.
@@ -299,9 +363,15 @@ mod tests {
     #[test]
     fn a_missing_or_broken_report_is_an_error_not_an_empty_report() {
         let dir = cache("bad");
-        assert!(finalize(&dir).unwrap_err().to_string().contains("did not write report.json"));
+        assert!(finalize(&dir)
+            .unwrap_err()
+            .to_string()
+            .contains("did not write report.json"));
         write_raw(&dir, "not json");
-        assert!(finalize(&dir).unwrap_err().to_string().contains("not valid"));
+        assert!(finalize(&dir)
+            .unwrap_err()
+            .to_string()
+            .contains("not valid"));
         assert!(read_final(&dir).is_none());
         std::fs::remove_dir_all(&dir).unwrap();
     }

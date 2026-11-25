@@ -19,14 +19,20 @@ use crate::{prompts, terminal};
 
 /// Newest `file` meta tagged `plan`: the plan the Plan routine (or the user) linked.
 fn linked_plan(meta: &[BoardMetaRow]) -> Option<&BoardMetaRow> {
-    meta.iter().rev().find(|m| m.kind == "file" && m.tag.as_deref() == Some("plan"))
+    meta.iter()
+        .rev()
+        .find(|m| m.kind == "file" && m.tag.as_deref() == Some("plan"))
 }
 
 /// The frontmatter `status:` of a ticket file, if it has one.
 fn plan_status(text: &str) -> Option<String> {
     let body = text.strip_prefix("---")?;
     let front = body.split("\n---").next()?;
-    front.lines().find_map(|l| l.strip_prefix("status:")).map(|v| v.trim().to_string()).filter(|v| !v.is_empty())
+    front
+        .lines()
+        .find_map(|l| l.strip_prefix("status:"))
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
 }
 
 /// One line per note / file / link; recorded AI sessions are bookkeeping, not context.
@@ -35,9 +41,23 @@ fn render_meta(meta: &[BoardMetaRow]) -> String {
         .iter()
         .filter(|m| !m.is_session())
         .map(|m| {
-            let tag = m.tag.as_deref().filter(|t| !t.is_empty()).map(|t| format!(" [{t}]")).unwrap_or_default();
-            let label = m.label.as_deref().filter(|l| !l.is_empty()).map(|l| format!(" {l}:")).unwrap_or_default();
-            let value = if m.value.is_empty() { "(tag only)" } else { m.value.as_str() };
+            let tag = m
+                .tag
+                .as_deref()
+                .filter(|t| !t.is_empty())
+                .map(|t| format!(" [{t}]"))
+                .unwrap_or_default();
+            let label = m
+                .label
+                .as_deref()
+                .filter(|l| !l.is_empty())
+                .map(|l| format!(" {l}:"))
+                .unwrap_or_default();
+            let value = if m.value.is_empty() {
+                "(tag only)"
+            } else {
+                m.value.as_str()
+            };
             format!("- {}{tag}{label} {value}", m.kind)
         })
         .collect();
@@ -52,7 +72,9 @@ fn render_meta(meta: &[BoardMetaRow]) -> String {
 pub(crate) fn render_context(conn: &Connection, card_id: &str) -> AppResult<String> {
     let card = card_row(conn, card_id)?;
     if card.typ != "issue" {
-        return Err(AppError::Other("only issue cards have an issue session".into()));
+        return Err(AppError::Other(
+            "only issue cards have an issue session".into(),
+        ));
     }
     let meta = board_meta_list_impl(conn, card_id)?;
     let plan = linked_plan(&meta);
@@ -60,10 +82,16 @@ pub(crate) fn render_context(conn: &Connection, card_id: &str) -> AppResult<Stri
         .and_then(|p| std::fs::read_to_string(expand_home(&p.value)).ok())
         .and_then(|t| plan_status(&t))
         .unwrap_or_else(|| "unknown".into());
-    let state = if card.closed_at.is_some() { "closed" } else { "open" };
+    let state = if card.closed_at.is_some() {
+        "closed"
+    } else {
+        "open"
+    };
     let number = card.number.to_string();
     let plans_dir = expand_home(&routine_settings(conn).plans_dir);
-    let plan_path = plan.map(|p| p.value.clone()).unwrap_or_else(|| "none linked yet".into());
+    let plan_path = plan
+        .map(|p| p.value.clone())
+        .unwrap_or_else(|| "none linked yet".into());
     let meta_text = render_meta(&meta);
     let template = prompts::resolve(conn, prompts::ISSUE_SESSION)?;
     Ok(prompts::render(
@@ -85,9 +113,14 @@ pub(crate) fn render_context(conn: &Connection, card_id: &str) -> AppResult<Stri
 /// Whether Claude still has a transcript for this session id (an id recorded at launch has none
 /// until the first message, and `--resume` fails on it).
 fn transcript_exists(session_id: &str) -> bool {
-    let Some(projects) = dirs::home_dir().map(|h| h.join(".claude/projects")) else { return false };
+    let Some(projects) = dirs::home_dir().map(|h| h.join(".claude/projects")) else {
+        return false;
+    };
     std::fs::read_dir(projects)
-        .map(|dirs| dirs.flatten().any(|d| d.path().join(format!("{session_id}.jsonl")).is_file()))
+        .map(|dirs| {
+            dirs.flatten()
+                .any(|d| d.path().join(format!("{session_id}.jsonl")).is_file())
+        })
         .unwrap_or(false)
 }
 
@@ -110,7 +143,12 @@ pub async fn board_open_issue_agent(
         let local_path = repo_local_path(&conn, &card.repo)
             .filter(|p| std::path::Path::new(&expand_home(p)).is_dir())
             .map(|p| expand_home(&p))
-            .ok_or_else(|| AppError::Other(format!("{} has no local clone — link one in Repositories", card.repo)))?;
+            .ok_or_else(|| {
+                AppError::Other(format!(
+                    "{} has no local clone — link one in Repositories",
+                    card.repo
+                ))
+            })?;
         let context = render_context(&conn, &card_id)?;
         // Only Claude's transcripts can be checked here; another harness' recorded session is trusted.
         let resume = resumable_card_session(&conn, &card_id, &live, harness.id())?
@@ -118,7 +156,8 @@ pub async fn board_open_issue_agent(
         (harness, card, local_path, context, resume)
     };
 
-    let context_file: PathBuf = std::env::temp_dir().join(format!("codereview_issue_session_{}.md", card.number));
+    let context_file: PathBuf =
+        std::env::temp_dir().join(format!("codereview_issue_session_{}.md", card.number));
     std::fs::write(&context_file, context)?;
 
     let new_id;
@@ -128,7 +167,13 @@ pub async fn board_open_issue_agent(
             // Pin the id so the session can be recorded on the card: the SessionStart hook resolves
             // cards from the checked-out branch, which the main clone never matches.
             new_id = new_session_id();
-            board_meta_add_session(&db.0.lock().unwrap(), &card_id, harness.id(), &new_id, Some(&local_path))?;
+            board_meta_add_session(
+                &db.0.lock().unwrap(),
+                &card_id,
+                harness.id(),
+                &new_id,
+                Some(&local_path),
+            )?;
             crate::ai::SessionMode::New(&new_id)
         }
         // A harness that can't pin an id can't be linked to the card: nothing is recorded.
@@ -140,7 +185,15 @@ pub async fn board_open_issue_agent(
         system_prompt_mode: crate::ai::SystemPromptMode::Append,
     };
     let argv = crate::ai::argv_of(harness, &opts)?;
-    terminal::open_session(host, tmux_target, &tmux_session, &card.repo, &format!("#{}", card.number), &local_path, &argv)?;
+    terminal::open_session(
+        host,
+        tmux_target,
+        &tmux_session,
+        &card.repo,
+        &format!("#{}", card.number),
+        &local_path,
+        &argv,
+    )?;
     Ok(harness.context_file_note(&opts))
 }
 
@@ -167,7 +220,11 @@ mod tests {
 
     #[test]
     fn reads_the_status_from_frontmatter() {
-        assert_eq!(plan_status("---\ntype: ticket\nstatus: ready-for-agent\n---\n# x\nstatus: no").as_deref(), Some("ready-for-agent"));
+        assert_eq!(
+            plan_status("---\ntype: ticket\nstatus: ready-for-agent\n---\n# x\nstatus: no")
+                .as_deref(),
+            Some("ready-for-agent")
+        );
         assert_eq!(plan_status("# no frontmatter\nstatus: done"), None);
     }
 
@@ -194,23 +251,44 @@ mod tests {
             params![repo_id],
         )
         .unwrap();
-        conn.execute("INSERT INTO board_card (id, type, tracked_at) VALUES ('I_1', 'issue', 'now')", []).unwrap();
+        conn.execute(
+            "INSERT INTO board_card (id, type, tracked_at) VALUES ('I_1', 'issue', 'now')",
+            [],
+        )
+        .unwrap();
     }
 
     #[test]
     fn renders_the_card_and_its_plan_into_the_template() {
         let conn = open_memory();
         seed_issue(&conn);
-        let dir = std::env::temp_dir().join(format!("codereview_issue_session_test_{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!(
+            "codereview_issue_session_test_{}",
+            std::process::id()
+        ));
         std::fs::create_dir_all(&dir).unwrap();
         let plan = dir.join("plan.md");
         std::fs::write(&plan, "---\nstatus: needs-info\n---\n# Plan\n").unwrap();
-        board_meta_add_impl(&conn, "I_1", "file", &plan.to_string_lossy(), Some("plan"), Some("Plan"), None).unwrap();
+        board_meta_add_impl(
+            &conn,
+            "I_1",
+            "file",
+            &plan.to_string_lossy(),
+            Some("plan"),
+            Some("Plan"),
+            None,
+        )
+        .unwrap();
         board_meta_add_impl(&conn, "I_1", "note", "waiting on design", None, None, None).unwrap();
 
         let text = render_context(&conn, "I_1").unwrap();
-        assert!(text.contains("https://github.com/o/r/issues/7 (Fix the thing), state open, repo o/r"));
-        assert!(text.contains(&format!("Plan file: {} (status: needs-info)", plan.display())));
+        assert!(
+            text.contains("https://github.com/o/r/issues/7 (Fix the thing), state open, repo o/r")
+        );
+        assert!(text.contains(&format!(
+            "Plan file: {} (status: needs-info)",
+            plan.display()
+        )));
         assert!(text.contains("- note waiting on design"));
         assert!(!text.contains("{{"), "every placeholder is filled");
         std::fs::remove_dir_all(dir).ok();
@@ -226,7 +304,11 @@ mod tests {
             params![repo_id],
         )
         .unwrap();
-        conn.execute("INSERT INTO board_card (id, type, tracked_at) VALUES ('PR_1', 'pr', 'now')", []).unwrap();
+        conn.execute(
+            "INSERT INTO board_card (id, type, tracked_at) VALUES ('PR_1', 'pr', 'now')",
+            [],
+        )
+        .unwrap();
         assert!(render_context(&conn, "PR_1").is_err());
     }
 }

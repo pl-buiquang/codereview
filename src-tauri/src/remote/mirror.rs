@@ -34,7 +34,13 @@ pub trait MirrorHooks: Send + Sync {
     fn finished(&self, _run_id: i64, _fin: &Finished) {}
     /// Apply the run's pending outbox ops locally and acknowledge them (see [`super::outbox`]). `terminal`:
     /// the run is over. Returns the ops that were given up on.
-    fn sync_outbox(&self, _run_id: i64, _remote_run_id: i64, _client: &RemoteClient, _terminal: bool) -> Vec<String> {
+    fn sync_outbox(
+        &self,
+        _run_id: i64,
+        _remote_run_id: i64,
+        _client: &RemoteClient,
+        _terminal: bool,
+    ) -> Vec<String> {
         Vec::new()
     }
 }
@@ -50,7 +56,11 @@ pub struct MirrorConfig {
 
 impl Default for MirrorConfig {
     fn default() -> Self {
-        Self { retry_base: Duration::from_secs(2), retry_max: Duration::from_secs(30), outbox_every: Duration::from_secs(1) }
+        Self {
+            retry_base: Duration::from_secs(2),
+            retry_max: Duration::from_secs(30),
+            outbox_every: Duration::from_secs(1),
+        }
     }
 }
 
@@ -99,7 +109,9 @@ pub fn store_event(conn: &Connection, run_id: i64, e: &StreamEvent) -> bool {
 
 /// The usage a remote status reports (`usage` is the daemon's `usage_json`).
 pub fn usage_of(v: &Option<Value>) -> RunUsage {
-    let Some(v) = v.as_ref().filter(|v| v.is_object()) else { return RunUsage::default() };
+    let Some(v) = v.as_ref().filter(|v| v.is_object()) else {
+        return RunUsage::default();
+    };
     let n = |k: &str| v.get(k).and_then(Value::as_i64).unwrap_or(0);
     RunUsage {
         num_turns: n("num_turns"),
@@ -108,7 +120,10 @@ pub fn usage_of(v: &Option<Value>) -> RunUsage {
         cache_read_tokens: n("cache_read_tokens"),
         cache_creation_tokens: n("cache_creation_tokens"),
         cost_usd: v.get("cost_usd").and_then(Value::as_f64).unwrap_or(0.0),
-        session_id: v.get("session_id").and_then(Value::as_str).map(str::to_string),
+        session_id: v
+            .get("session_id")
+            .and_then(Value::as_str)
+            .map(str::to_string),
         models: Vec::new(),
     }
 }
@@ -126,7 +141,14 @@ fn static_status(s: &str) -> &'static str {
 
 /// Settle the local row (only a `queued` / `running` one) and tell the hooks. Returns whether this
 /// call settled it.
-pub fn finish_local(h: &dyn MirrorHooks, run_id: i64, status: &str, text: &str, error: Option<&str>, usage: RunUsage) -> bool {
+pub fn finish_local(
+    h: &dyn MirrorHooks,
+    run_id: i64,
+    status: &str,
+    text: &str,
+    error: Option<&str>,
+    usage: RunUsage,
+) -> bool {
     let status = static_status(status);
     let started_at = {
         let conn = h.db();
@@ -141,19 +163,30 @@ pub fn finish_local(h: &dyn MirrorHooks, run_id: i64, status: &str, text: &str, 
         if changed == 0 {
             return false;
         }
-        conn.query_row("SELECT started_at FROM routine_run WHERE id = ?1", params![run_id], |r| r.get::<_, Option<String>>(0)).ok().flatten()
+        conn.query_row(
+            "SELECT started_at FROM routine_run WHERE id = ?1",
+            params![run_id],
+            |r| r.get::<_, Option<String>>(0),
+        )
+        .ok()
+        .flatten()
     };
     let elapsed = started_at
         .as_deref()
         .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
-        .map(|t| (chrono::Utc::now() - t.with_timezone(&chrono::Utc)).to_std().unwrap_or_default())
+        .map(|t| {
+            (chrono::Utc::now() - t.with_timezone(&chrono::Utc))
+                .to_std()
+                .unwrap_or_default()
+        })
         .unwrap_or_default();
     let fin = Finished {
         status,
         text: text.to_string(),
         error: error.map(str::to_string),
         usage,
-        usage_error: (status != "ok" && status != "needs_attention").then(|| error.unwrap_or(status).to_string()),
+        usage_error: (status != "ok" && status != "needs_attention")
+            .then(|| error.unwrap_or(status).to_string()),
         shutting_down: false,
         started_at: started_at.unwrap_or_else(now_stamp),
         elapsed,
@@ -163,7 +196,14 @@ pub fn finish_local(h: &dyn MirrorHooks, run_id: i64, status: &str, text: &str, 
 }
 
 fn finish_status(h: &dyn MirrorHooks, run_id: i64, s: &StatusEvent) -> bool {
-    finish_local(h, run_id, &s.status, s.text.as_deref().unwrap_or(""), s.error.as_deref(), usage_of(&s.usage))
+    finish_local(
+        h,
+        run_id,
+        &s.status,
+        s.text.as_deref().unwrap_or(""),
+        s.error.as_deref(),
+        usage_of(&s.usage),
+    )
 }
 
 enum Step {
@@ -197,18 +237,31 @@ pub fn follow(h: &dyn MirrorHooks, cfg: &MirrorConfig, run_id: i64, stop: &Atomi
         if stop.load(Ordering::Relaxed) {
             return Followed::Abandoned;
         }
-        let Some(run) = load(&h.db(), run_id) else { return Followed::Settled };
+        let Some(run) = load(&h.db(), run_id) else {
+            return Followed::Settled;
+        };
         if !matches!(run.status.as_str(), "queued" | "running") {
             return Followed::Settled;
         }
         let Some(remote_id) = run.remote_run_id else {
-            finish_local(h, run_id, "error", "", Some("the run was never created on the host"), RunUsage::default());
+            finish_local(
+                h,
+                run_id,
+                "error",
+                "",
+                Some("the run was never created on the host"),
+                RunUsage::default(),
+            );
             return Followed::Settled;
         };
         match step(h, cfg, run_id, &run, remote_id, stop) {
             Step::Done => return Followed::Settled,
             Step::Retry { why, progress } => {
-                failures = if progress { 1 } else { failures.saturating_add(1) };
+                failures = if progress {
+                    1
+                } else {
+                    failures.saturating_add(1)
+                };
                 let wait = super::tunnel::backoff(failures, cfg.retry_base, cfg.retry_max);
                 log::info!(target: "remote", "run {run_id}: {why}; retrying in {}ms", wait.as_millis());
                 sleep_unless_stopped(stop, wait);
@@ -217,8 +270,18 @@ pub fn follow(h: &dyn MirrorHooks, cfg: &MirrorConfig, run_id: i64, stop: &Atomi
     }
 }
 
-fn step(h: &dyn MirrorHooks, cfg: &MirrorConfig, run_id: i64, run: &MirrorRun, remote_id: i64, stop: &AtomicBool) -> Step {
-    let retry = |e: RemoteError, progress| Step::Retry { why: e.to_string(), progress };
+fn step(
+    h: &dyn MirrorHooks,
+    cfg: &MirrorConfig,
+    run_id: i64,
+    run: &MirrorRun,
+    remote_id: i64,
+    stop: &AtomicBool,
+) -> Step {
+    let retry = |e: RemoteError, progress| Step::Retry {
+        why: e.to_string(),
+        progress,
+    };
     let client = match h.client(run.host_id) {
         Ok(c) => c,
         Err(e) => return retry(e, false),
@@ -236,7 +299,9 @@ fn step(h: &dyn MirrorHooks, cfg: &MirrorConfig, run_id: i64, run: &MirrorRun, r
             );
             return Step::Done;
         }
-        Ok(Some(rv)) => log::debug!(target: "remote", "run {run_id}: remote run {remote_id} is {}", rv.status),
+        Ok(Some(rv)) => {
+            log::debug!(target: "remote", "run {run_id}: remote run {remote_id} is {}", rv.status)
+        }
         Err(e) => return retry(e, false),
     }
     // A connection-level resume point: what is stored locally, not what the row says (the two can
@@ -244,14 +309,25 @@ fn step(h: &dyn MirrorHooks, cfg: &MirrorConfig, run_id: i64, run: &MirrorRun, r
     let after = {
         let conn = h.db();
         let stored: i64 = conn
-            .query_row("SELECT COALESCE(MAX(seq), 0) FROM routine_run_event WHERE run_id = ?1", params![run_id], |r| r.get(0))
+            .query_row(
+                "SELECT COALESCE(MAX(seq), 0) FROM routine_run_event WHERE run_id = ?1",
+                params![run_id],
+                |r| r.get(0),
+            )
             .unwrap_or(0);
         stored.max(run.last_seq)
     };
     let mut stream = match client.events(remote_id, after) {
         Ok(s) => s,
         Err(e) if e.code == "not_found" => {
-            finish_local(h, run_id, "error", "", Some("run_not_found: the host does not know this run any more"), RunUsage::default());
+            finish_local(
+                h,
+                run_id,
+                "error",
+                "",
+                Some("run_not_found: the host does not know this run any more"),
+                RunUsage::default(),
+            );
             return Step::Done;
         }
         Err(e) => return retry(e, false),
@@ -262,7 +338,10 @@ fn step(h: &dyn MirrorHooks, cfg: &MirrorConfig, run_id: i64, run: &MirrorRun, r
     h.sync_outbox(run_id, remote_id, &client, false);
     loop {
         if stop.load(Ordering::Relaxed) {
-            return Step::Retry { why: "stopped".into(), progress };
+            return Step::Retry {
+                why: "stopped".into(),
+                progress,
+            };
         }
         match stream.next_item() {
             Ok(Some(StreamItem::Event(e))) => {
@@ -292,7 +371,11 @@ fn step(h: &dyn MirrorHooks, cfg: &MirrorConfig, run_id: i64, run: &MirrorRun, r
                     let mut s = s;
                     if !dropped.is_empty() {
                         // Never silent: the run's error says which board/focus writes did not make it.
-                        let note = format!("{} op(s) from the remote run could not be applied here: {}", dropped.len(), dropped.join(", "));
+                        let note = format!(
+                            "{} op(s) from the remote run could not be applied here: {}",
+                            dropped.len(),
+                            dropped.join(", ")
+                        );
                         s.error = Some(match s.error.take() {
                             Some(e) if !e.is_empty() => format!("{e}\n{note}"),
                             _ => note,
@@ -306,7 +389,10 @@ fn step(h: &dyn MirrorHooks, cfg: &MirrorConfig, run_id: i64, run: &MirrorRun, r
             }
             Ok(None) => {
                 // Closed without a terminal status: the daemon restarted or the tunnel flapped.
-                return Step::Retry { why: "the event stream ended before the run did".into(), progress };
+                return Step::Retry {
+                    why: "the event stream ended before the run did".into(),
+                    progress,
+                };
             }
             Err(e) => return retry(e, progress),
         }
@@ -341,7 +427,11 @@ mod tests {
             self.events.lock().unwrap().push((run_id, seq));
         }
         fn finished(&self, _: i64, fin: &Finished) {
-            self.finished.lock().unwrap().push((fin.status.to_string(), fin.text.clone(), fin.error.clone()));
+            self.finished.lock().unwrap().push((
+                fin.status.to_string(),
+                fin.text.clone(),
+                fin.error.clone(),
+            ));
         }
         fn sync_outbox(&self, _: i64, _: i64, _: &RemoteClient, _: bool) -> Vec<String> {
             self.syncs.fetch_add(1, Ordering::Relaxed);
@@ -350,7 +440,11 @@ mod tests {
     }
 
     fn fast() -> MirrorConfig {
-        MirrorConfig { retry_base: Duration::from_millis(20), retry_max: Duration::from_millis(80), outbox_every: Duration::from_millis(0) }
+        MirrorConfig {
+            retry_base: Duration::from_millis(20),
+            retry_max: Duration::from_millis(80),
+            outbox_every: Duration::from_millis(0),
+        }
     }
 
     fn request(key: &str, script: &str) -> RunRequest {
@@ -369,7 +463,11 @@ mod tests {
         crate::routines::seed(&conn).unwrap();
         let rid = crate::routines::list(&conn).unwrap()[0].id;
         conn.execute("INSERT INTO host (name, ssh_target, remote_endpoint, created_at, updated_at) VALUES ('h', 'h', '1', 'n', 'n')", []).unwrap();
-        let created = proxy.client().unwrap().create_run(&request("k", script)).unwrap();
+        let created = proxy
+            .client()
+            .unwrap()
+            .create_run(&request("k", script))
+            .unwrap();
         conn.execute(
             "INSERT INTO routine_run (routine_id, context_type, context_key, context_json, status, queued_at, started_at, host_id, remote_run_id)
              VALUES (?1, 'pr', 'a', '{}', 'running', 'n', ?2, 1, ?3)",
@@ -377,25 +475,42 @@ mod tests {
         )
         .unwrap();
         let run_id = conn.last_insert_rowid();
-        let hooks = Arc::new(TestHooks { conn: Mutex::new(conn), proxy, events: Mutex::new(Vec::new()), finished: Mutex::new(Vec::new()), syncs: AtomicUsize::new(0), dropped: Mutex::new(Vec::new()) });
+        let hooks = Arc::new(TestHooks {
+            conn: Mutex::new(conn),
+            proxy,
+            events: Mutex::new(Vec::new()),
+            finished: Mutex::new(Vec::new()),
+            syncs: AtomicUsize::new(0),
+            dropped: Mutex::new(Vec::new()),
+        });
         (srv, hooks, run_id, created.id)
     }
 
     fn stored_seqs(h: &TestHooks, run_id: i64) -> Vec<i64> {
         let conn = h.conn.lock().unwrap();
-        let mut stmt = conn.prepare("SELECT seq FROM routine_run_event WHERE run_id = ?1 ORDER BY seq").unwrap();
-        stmt.query_map(params![run_id], |r| r.get(0)).unwrap().map(Result::unwrap).collect()
+        let mut stmt = conn
+            .prepare("SELECT seq FROM routine_run_event WHERE run_id = ?1 ORDER BY seq")
+            .unwrap();
+        stmt.query_map(params![run_id], |r| r.get(0))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect()
     }
 
     fn status_of(h: &TestHooks, run_id: i64) -> (String, Option<String>, Option<String>) {
         h.conn
             .lock()
             .unwrap()
-            .query_row("SELECT status, result_text, error FROM routine_run WHERE id = ?1", params![run_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .query_row(
+                "SELECT status, result_text, error FROM routine_run WHERE id = ?1",
+                params![run_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
             .unwrap()
     }
 
-    const QUICK: &str = r#"echo '{"type":"a"}'; echo '{"type":"b"}'; echo '{"type":"result","result":"all done"}'"#;
+    const QUICK: &str =
+        r#"echo '{"type":"a"}'; echo '{"type":"b"}'; echo '{"type":"result","result":"all done"}'"#;
     const SLOW: &str = r#"for i in 1 2 3 4 5 6 7 8; do echo "{\"type\":\"a\",\"n\":$i}"; sleep 0.15; done; echo '{"type":"result","result":"slow done"}'"#;
 
     #[test]
@@ -404,15 +519,43 @@ mod tests {
         let stop = AtomicBool::new(false);
         assert_eq!(follow(&*h, &fast(), run_id, &stop), Followed::Settled);
         assert_eq!(stored_seqs(&h, run_id), [1, 2, 3]);
-        assert_eq!(h.events.lock().unwrap().iter().map(|e| e.1).collect::<Vec<_>>(), [1, 2, 3]);
+        assert_eq!(
+            h.events
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|e| e.1)
+                .collect::<Vec<_>>(),
+            [1, 2, 3]
+        );
         let (status, text, error) = status_of(&h, run_id);
-        assert_eq!((status.as_str(), text.as_deref(), error), ("ok", Some("all done"), None));
+        assert_eq!(
+            (status.as_str(), text.as_deref(), error),
+            ("ok", Some("all done"), None)
+        );
         assert_eq!(h.finished.lock().unwrap().len(), 1);
-        assert!(h.syncs.load(Ordering::Relaxed) >= 2, "the outbox is synced while mirroring and at the end");
+        assert!(
+            h.syncs.load(Ordering::Relaxed) >= 2,
+            "the outbox is synced while mirroring and at the end"
+        );
         // the normalized form came from the remote
-        let norm: Option<String> = h.conn.lock().unwrap().query_row("SELECT norm FROM routine_run_event WHERE seq = 3", [], |r| r.get(0)).unwrap();
+        let norm: Option<String> = h
+            .conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT norm FROM routine_run_event WHERE seq = 3",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert!(norm.unwrap().contains("\"final\""));
-        let last: i64 = h.conn.lock().unwrap().query_row("SELECT last_remote_seq FROM routine_run", [], |r| r.get(0)).unwrap();
+        let last: i64 = h
+            .conn
+            .lock()
+            .unwrap()
+            .query_row("SELECT last_remote_seq FROM routine_run", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(last, 3);
     }
 
@@ -434,12 +577,20 @@ mod tests {
         h.proxy.set_down(true);
         h.proxy.cut();
         std::thread::sleep(Duration::from_millis(400));
-        assert_eq!(status_of(&h, run_id).0, "running", "a lost connection does not end the run");
+        assert_eq!(
+            status_of(&h, run_id).0,
+            "running",
+            "a lost connection does not end the run"
+        );
         h.proxy.set_down(false);
         assert_eq!(worker.join().unwrap(), Followed::Settled);
         assert_eq!(stored_seqs(&h, run_id), (1..=9).collect::<Vec<i64>>());
         let announced: Vec<i64> = h.events.lock().unwrap().iter().map(|e| e.1).collect();
-        assert_eq!(announced, (1..=9).collect::<Vec<i64>>(), "each event is announced once, in order");
+        assert_eq!(
+            announced,
+            (1..=9).collect::<Vec<i64>>(),
+            "each event is announced once, in order"
+        );
         assert_eq!(status_of(&h, run_id).1.as_deref(), Some("slow done"));
     }
 
@@ -449,12 +600,22 @@ mod tests {
         let stop = AtomicBool::new(false);
         follow(&*h, &fast(), run_id, &stop);
         // pretend the app crashed before it recorded progress: the row is rewound, the events stay
-        h.conn.lock().unwrap().execute("UPDATE routine_run SET status = 'running', last_remote_seq = 0, ended_at = NULL", []).unwrap();
+        h.conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE routine_run SET status = 'running', last_remote_seq = 0, ended_at = NULL",
+                [],
+            )
+            .unwrap();
         h.events.lock().unwrap().clear();
         h.finished.lock().unwrap().clear();
         follow(&*h, &fast(), run_id, &stop);
         assert_eq!(stored_seqs(&h, run_id), [1, 2, 3], "no duplicate rows");
-        assert!(h.events.lock().unwrap().is_empty(), "nothing announced twice");
+        assert!(
+            h.events.lock().unwrap().is_empty(),
+            "nothing announced twice"
+        );
         assert_eq!(status_of(&h, run_id).0, "ok");
     }
 
@@ -463,7 +624,15 @@ mod tests {
         let (srv, h, run_id, remote_id) = setup(QUICK);
         // the run completes on the host with nobody watching
         for _ in 0..200 {
-            if h.proxy.client().unwrap().get_run(remote_id).unwrap().unwrap().status == "ok" {
+            if h.proxy
+                .client()
+                .unwrap()
+                .get_run(remote_id)
+                .unwrap()
+                .unwrap()
+                .status
+                == "ok"
+            {
                 break;
             }
             std::thread::sleep(Duration::from_millis(10));
@@ -480,11 +649,18 @@ mod tests {
         let (srv, h, run_id, remote_id) = setup("sleep 30");
         // the host pruned it (or its data was wiped)
         let conn = crate::worker::store::open(&srv.state.worker_db_path).unwrap();
-        conn.execute("DELETE FROM worker_run WHERE id = ?1", params![remote_id]).unwrap();
-        assert_eq!(follow(&*h, &fast(), run_id, &AtomicBool::new(false)), Followed::Settled);
+        conn.execute("DELETE FROM worker_run WHERE id = ?1", params![remote_id])
+            .unwrap();
+        assert_eq!(
+            follow(&*h, &fast(), run_id, &AtomicBool::new(false)),
+            Followed::Settled
+        );
         let (status, _, error) = status_of(&h, run_id);
         assert_eq!(status, "error");
-        assert!(error.unwrap().contains("does not know this run"), "explicit message");
+        assert!(
+            error.unwrap().contains("does not know this run"),
+            "explicit message"
+        );
         assert_eq!(h.finished.lock().unwrap().len(), 1);
     }
 
@@ -495,7 +671,9 @@ mod tests {
         follow(&*h, &fast(), run_id, &AtomicBool::new(false));
         let (status, _, error) = status_of(&h, run_id);
         assert_eq!(status, "ok");
-        assert!(error.unwrap().contains("1 op(s) from the remote run could not be applied here: board_link (1:1)"));
+        assert!(error
+            .unwrap()
+            .contains("1 op(s) from the remote run could not be applied here: board_link (1:1)"));
     }
 
     #[test]
@@ -525,13 +703,28 @@ mod tests {
         assert_eq!(status_of(&h, run_id).0, "running");
         stop.store(true, Ordering::Relaxed);
         assert_eq!(worker.join().unwrap(), Followed::Abandoned);
-        assert_eq!(status_of(&h, run_id).0, "running", "abandoning does not settle the row");
+        assert_eq!(
+            status_of(&h, run_id).0,
+            "running",
+            "abandoning does not settle the row"
+        );
     }
 
     #[test]
     fn usage_is_read_from_the_remote_status() {
-        let u = usage_of(&Some(serde_json::json!({"num_turns": 3, "input_tokens": 10, "output_tokens": 20, "cost_usd": 0.25, "session_id": "s"})));
-        assert_eq!((u.num_turns, u.input_tokens, u.output_tokens, u.cost_usd, u.session_id.as_deref()), (3, 10, 20, 0.25, Some("s")));
+        let u = usage_of(&Some(
+            serde_json::json!({"num_turns": 3, "input_tokens": 10, "output_tokens": 20, "cost_usd": 0.25, "session_id": "s"}),
+        ));
+        assert_eq!(
+            (
+                u.num_turns,
+                u.input_tokens,
+                u.output_tokens,
+                u.cost_usd,
+                u.session_id.as_deref()
+            ),
+            (3, 10, 20, 0.25, Some("s"))
+        );
         assert_eq!(usage_of(&None).cost_usd, 0.0);
     }
 }

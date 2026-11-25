@@ -8,7 +8,9 @@ use crate::commands::worktree::resolve_checkout;
 use crate::db::Db;
 use crate::error::AppResult;
 use crate::git;
-use crate::graph::{self, ops, CommitDetail, GraphCommit, RefInfo, Scope, StashEntry, WipKind, WipStatus};
+use crate::graph::{
+    self, ops, CommitDetail, GraphCommit, RefInfo, Scope, StashEntry, WipKind, WipStatus,
+};
 
 const GONE_FETCH_MIN_INTERVAL: Duration = Duration::from_secs(30);
 
@@ -154,7 +156,10 @@ pub async fn git_checkout_branch(
     name: String,
     db: State<'_, Db>,
 ) -> AppResult<()> {
-    mutate(&db, repo_id, worktree_path, move |c| ops::checkout_branch(c, &name)).await
+    mutate(&db, repo_id, worktree_path, move |c| {
+        ops::checkout_branch(c, &name)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -164,7 +169,10 @@ pub async fn git_checkout_remote_branch(
     remote_ref: String,
     db: State<'_, Db>,
 ) -> AppResult<()> {
-    mutate(&db, repo_id, worktree_path, move |c| ops::checkout_remote_branch(c, &remote_ref)).await
+    mutate(&db, repo_id, worktree_path, move |c| {
+        ops::checkout_remote_branch(c, &remote_ref)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -174,7 +182,10 @@ pub async fn git_checkout_detached(
     rev: String,
     db: State<'_, Db>,
 ) -> AppResult<()> {
-    mutate(&db, repo_id, worktree_path, move |c| ops::checkout_detached(c, &rev)).await
+    mutate(&db, repo_id, worktree_path, move |c| {
+        ops::checkout_detached(c, &rev)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -186,7 +197,10 @@ pub async fn git_create_branch(
     switch: bool,
     db: State<'_, Db>,
 ) -> AppResult<()> {
-    mutate(&db, repo_id, worktree_path, move |c| ops::create_branch(c, &name, &at, switch)).await
+    mutate(&db, repo_id, worktree_path, move |c| {
+        ops::create_branch(c, &name, &at, switch)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -197,7 +211,10 @@ pub async fn git_delete_branch(
     force: bool,
     db: State<'_, Db>,
 ) -> AppResult<()> {
-    mutate(&db, repo_id, worktree_path, move |c| ops::delete_branch(c, &name, force)).await
+    mutate(&db, repo_id, worktree_path, move |c| {
+        ops::delete_branch(c, &name, force)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -208,7 +225,10 @@ pub async fn git_rename_branch(
     new: String,
     db: State<'_, Db>,
 ) -> AppResult<()> {
-    mutate(&db, repo_id, worktree_path, move |c| ops::rename_branch(c, &old, &new)).await
+    mutate(&db, repo_id, worktree_path, move |c| {
+        ops::rename_branch(c, &old, &new)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -234,7 +254,10 @@ pub async fn git_delete_tag(
     name: String,
     db: State<'_, Db>,
 ) -> AppResult<()> {
-    mutate(&db, repo_id, worktree_path, move |c| ops::delete_tag(c, &name)).await
+    mutate(&db, repo_id, worktree_path, move |c| {
+        ops::delete_tag(c, &name)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -254,7 +277,10 @@ pub async fn git_unstage(
     paths: Vec<String>,
     db: State<'_, Db>,
 ) -> AppResult<()> {
-    mutate(&db, repo_id, worktree_path, move |c| ops::unstage(c, &paths)).await
+    mutate(&db, repo_id, worktree_path, move |c| {
+        ops::unstage(c, &paths)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -265,7 +291,10 @@ pub async fn git_discard(
     kind: WipKind,
     db: State<'_, Db>,
 ) -> AppResult<()> {
-    mutate(&db, repo_id, worktree_path, move |c| ops::discard(c, &paths, kind)).await
+    mutate(&db, repo_id, worktree_path, move |c| {
+        ops::discard(c, &paths, kind)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -276,7 +305,10 @@ pub async fn git_commit(
     amend: bool,
     db: State<'_, Db>,
 ) -> AppResult<()> {
-    mutate(&db, repo_id, worktree_path, move |c| ops::commit(c, &message, amend)).await
+    mutate(&db, repo_id, worktree_path, move |c| {
+        ops::commit(c, &message, amend)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -295,7 +327,10 @@ pub async fn git_push(
     force_with_lease: bool,
     db: State<'_, Db>,
 ) -> AppResult<String> {
-    mutate(&db, repo_id, worktree_path, move |c| ops::push(c, force_with_lease)).await
+    mutate(&db, repo_id, worktree_path, move |c| {
+        ops::push(c, force_with_lease)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -328,7 +363,10 @@ pub async fn git_stash_apply(
     index: u32,
     db: State<'_, Db>,
 ) -> AppResult<()> {
-    mutate(&db, repo_id, worktree_path, move |c| ops::stash_apply(c, index)).await
+    mutate(&db, repo_id, worktree_path, move |c| {
+        ops::stash_apply(c, index)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -338,7 +376,10 @@ pub async fn git_stash_pop(
     index: u32,
     db: State<'_, Db>,
 ) -> AppResult<()> {
-    mutate(&db, repo_id, worktree_path, move |c| ops::stash_pop(c, index)).await
+    mutate(&db, repo_id, worktree_path, move |c| {
+        ops::stash_pop(c, index)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -348,7 +389,10 @@ pub async fn git_stash_drop(
     index: u32,
     db: State<'_, Db>,
 ) -> AppResult<()> {
-    mutate(&db, repo_id, worktree_path, move |c| ops::stash_drop(c, index)).await
+    mutate(&db, repo_id, worktree_path, move |c| {
+        ops::stash_drop(c, index)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -358,5 +402,8 @@ pub async fn git_stash_diff(
     index: u32,
     db: State<'_, Db>,
 ) -> AppResult<String> {
-    mutate(&db, repo_id, worktree_path, move |c| ops::stash_diff(c, index)).await
+    mutate(&db, repo_id, worktree_path, move |c| {
+        ops::stash_diff(c, index)
+    })
+    .await
 }

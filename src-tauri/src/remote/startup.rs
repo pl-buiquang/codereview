@@ -39,15 +39,30 @@ pub fn init(app: &AppHandle) {
                         host::record_seen(&db.0.lock().unwrap(), host_id, *protocol, version);
                     }
                 }
-                ConnState::ProtocolMismatch { remote_protocol, remote_version, .. } => {
+                ConnState::ProtocolMismatch {
+                    remote_protocol,
+                    remote_version,
+                    ..
+                } => {
                     if let Some(db) = app.try_state::<Db>() {
-                        host::record_mismatch(&db.0.lock().unwrap(), host_id, *remote_protocol, remote_version);
+                        host::record_mismatch(
+                            &db.0.lock().unwrap(),
+                            host_id,
+                            *remote_protocol,
+                            remote_version,
+                        );
                     }
                 }
                 _ => {}
             }
             log::info!(target: "remote", "host {host_id}: {state:?}");
-            let _ = app.emit("host-state", HostStateEvent { host_id, state: state.clone() });
+            let _ = app.emit(
+                "host-state",
+                HostStateEvent {
+                    host_id,
+                    state: state.clone(),
+                },
+            );
         })
     };
     let tunnels = TunnelManager::new(SshConfig::new(dir), Arc::new(InfoHealth), on_state);

@@ -79,10 +79,21 @@ pub fn render_markdown(detail: &ReviewDetail, repo_label: &str) -> String {
                 continue; // draft reply to a GitHub thread, not review content
             }
             let folded = fold_replies(&c.body, replies.get(&c.id).map_or(&[][..], Vec::as_slice));
-            let resolved = if c.resolved_at.is_some() { " (resolved)" } else { "" };
-            let tag = c.tag.as_deref().map(|t| format!(" [{t}]")).unwrap_or_default();
+            let resolved = if c.resolved_at.is_some() {
+                " (resolved)"
+            } else {
+                ""
+            };
+            let tag = c
+                .tag
+                .as_deref()
+                .map(|t| format!(" [{t}]"))
+                .unwrap_or_default();
             if c.subject_type == "file" {
-                out.push_str(&format!("### {} (whole file){resolved}{tag}\n\n", c.file_path));
+                out.push_str(&format!(
+                    "### {} (whole file){resolved}{tag}\n\n",
+                    c.file_path
+                ));
                 out.push_str(&folded);
                 out.push_str("\n\n");
                 continue;
@@ -203,7 +214,11 @@ pub fn render_vscode(detail: &ReviewDetail, repo_path: &Path) -> serde_json::Val
             let (before, anchor, after) = if c.subject_type == "file" {
                 (vec![], vec![], vec![])
             } else {
-                let sha_opt = if c.side == "LEFT" { &r.base_sha } else { &r.head_sha };
+                let sha_opt = if c.side == "LEFT" {
+                    &r.base_sha
+                } else {
+                    &r.head_sha
+                };
                 sha_opt.as_ref().map_or((vec![], vec![], vec![]), |sha| {
                     let key = (sha.clone(), c.file_path.clone());
                     let lines = file_cache.entry(key).or_insert_with(|| {
@@ -419,7 +434,10 @@ mod tests {
 
     #[test]
     fn markdown_renders_file_comment_as_whole_file() {
-        let md = render_markdown(&detail(vec![file_comment("Module needs a doc comment.")]), "owner/repo");
+        let md = render_markdown(
+            &detail(vec![file_comment("Module needs a doc comment.")]),
+            "owner/repo",
+        );
         assert!(md.contains("### src/main.rs (whole file)"), "got: {md}");
         assert!(md.contains("Module needs a doc comment."));
         // No line range and no diff hunk for file-level comments.
@@ -462,12 +480,18 @@ mod tests {
             &detail(vec![file_view_comment(9, Some(7), "range note")]),
             "owner/repo",
         );
-        assert!(md.contains("### src/main.rs:L7-L9 (file view)"), "got: {md}");
+        assert!(
+            md.contains("### src/main.rs:L7-L9 (file view)"),
+            "got: {md}"
+        );
     }
 
     #[test]
     fn json_carries_origin() {
-        let json = render_json(&detail(vec![file_view_comment(7, None, "note")]), "owner/repo");
+        let json = render_json(
+            &detail(vec![file_view_comment(7, None, "note")]),
+            "owner/repo",
+        );
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(v["comments"][0]["origin"], "file_view");
     }
@@ -548,7 +572,10 @@ mod tests {
             &detail(vec![resolved(comment(3, None), "2026-01-01T00:00:00Z")]),
             "owner/repo",
         );
-        assert!(md.contains("### src/main.rs:3 (RIGHT) (resolved)"), "got: {md}");
+        assert!(
+            md.contains("### src/main.rs:3 (RIGHT) (resolved)"),
+            "got: {md}"
+        );
         assert!(md.contains("Consider renaming this."));
     }
 
@@ -558,7 +585,10 @@ mod tests {
             &detail(vec![resolved(file_comment("note"), "2026-01-01T00:00:00Z")]),
             "owner/repo",
         );
-        assert!(md.contains("### src/main.rs (whole file) (resolved)"), "got: {md}");
+        assert!(
+            md.contains("### src/main.rs (whole file) (resolved)"),
+            "got: {md}"
+        );
     }
 
     #[test]
@@ -575,7 +605,10 @@ mod tests {
         c.body = "fix:\n\n```suggestion\nlet x = 1;\n```".into();
         let md = render_markdown(&detail(vec![c]), "owner/repo");
         // The fence must survive character-for-character (no escaping/re-fencing).
-        assert!(md.contains("fix:\n\n```suggestion\nlet x = 1;\n```"), "got: {md}");
+        assert!(
+            md.contains("fix:\n\n```suggestion\nlet x = 1;\n```"),
+            "got: {md}"
+        );
     }
 
     #[test]

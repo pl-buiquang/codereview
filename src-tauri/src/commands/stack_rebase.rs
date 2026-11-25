@@ -69,14 +69,17 @@ fn load_stack(db: &Db, card_id: &str) -> AppResult<StackCtx> {
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .map_err(|_| AppError::Other("this card isn't a synced PR".into()))?;
-    let stack_number = stack_number.ok_or_else(|| AppError::Other("this PR isn't part of a stack".into()))?;
+    let stack_number =
+        stack_number.ok_or_else(|| AppError::Other("this PR isn't part of a stack".into()))?;
     let (owner, name, path, default_branch): (Option<String>, Option<String>, Option<String>, Option<String>) = conn
         .query_row(
             "SELECT remote_owner, remote_name, local_path, default_branch FROM repository WHERE id = ?1",
             params![repo_id],
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
         )?;
-    let path = path.ok_or_else(|| AppError::Other("rebasing a stack needs a local clone of the repo".into()))?;
+    let path = path.ok_or_else(|| {
+        AppError::Other("rebasing a stack needs a local clone of the repo".into())
+    })?;
     let mut stmt = conn.prepare(
         "SELECT p.number, s.stack_position, COALESCE(p.state, ''), COALESCE(p.head_ref, ''),
                 COALESCE(p.base_ref, ''), COALESCE(s.viewer_can_update_branch, 0)
@@ -107,14 +110,21 @@ fn load_stack(db: &Db, card_id: &str) -> AppResult<StackCtx> {
 
 /// The trunk and the branches bottom-first, or every reason the stack's shape
 /// rules out a local rebase.
-fn shape(entries: &[StackEntry], default_branch: Option<&str>) -> Result<(String, Vec<String>), Vec<String>> {
+fn shape(
+    entries: &[StackEntry],
+    default_branch: Option<&str>,
+) -> Result<(String, Vec<String>), Vec<String>> {
     let mut reasons = Vec::new();
     let Some(bottom) = entries.first() else {
         return Err(vec!["the stack isn't synced yet — sync the board".into()]);
     };
     for e in entries {
         if !e.state.eq_ignore_ascii_case("open") {
-            reasons.push(format!("#{} is {} — rebase on GitHub", e.number, e.state.to_lowercase()));
+            reasons.push(format!(
+                "#{} is {} — rebase on GitHub",
+                e.number,
+                e.state.to_lowercase()
+            ));
         }
         if !e.can_update {
             reasons.push(format!("you can't push to #{}'s branch", e.number));
@@ -128,22 +138,35 @@ fn shape(entries: &[StackEntry], default_branch: Option<&str>) -> Result<(String
     }
     for w in entries.windows(2) {
         if w[1].base_ref != w[0].head_ref {
-            reasons.push(format!("#{} isn't based on #{}'s branch", w[1].number, w[0].number));
+            reasons.push(format!(
+                "#{} isn't based on #{}'s branch",
+                w[1].number, w[0].number
+            ));
         }
     }
     if let Some(def) = default_branch {
         if bottom.base_ref != def {
-            reasons.push(format!("#{} targets {}, not {def}", bottom.number, bottom.base_ref));
+            reasons.push(format!(
+                "#{} targets {}, not {def}",
+                bottom.number, bottom.base_ref
+            ));
         }
     }
     if reasons.is_empty() {
-        Ok((bottom.base_ref.clone(), entries.iter().map(|e| e.head_ref.clone()).collect()))
+        Ok((
+            bottom.base_ref.clone(),
+            entries.iter().map(|e| e.head_ref.clone()).collect(),
+        ))
     } else {
         Err(reasons)
     }
 }
 
-fn preview_of(ctx: &StackCtx, plan: Result<Plan, Vec<String>>, trunk: Option<String>) -> StackRebasePreview {
+fn preview_of(
+    ctx: &StackCtx,
+    plan: Result<Plan, Vec<String>>,
+    trunk: Option<String>,
+) -> StackRebasePreview {
     match plan {
         Ok(plan) => StackRebasePreview {
             ok: true,
@@ -163,13 +186,22 @@ fn preview_of(ctx: &StackCtx, plan: Result<Plan, Vec<String>>, trunk: Option<Str
                 })
                 .collect(),
         },
-        Err(reasons) => StackRebasePreview { ok: false, reasons, noop: false, trunk, branches: vec![] },
+        Err(reasons) => StackRebasePreview {
+            ok: false,
+            reasons,
+            noop: false,
+            trunk,
+            branches: vec![],
+        },
     }
 }
 
 fn compute(ctx: &StackCtx) -> (Result<Plan, Vec<String>>, Option<String>) {
     match shape(&ctx.entries, ctx.default_branch.as_deref()) {
-        Ok((trunk, branches)) => (stack_rebase::plan(&ctx.path, &trunk, &branches), Some(trunk)),
+        Ok((trunk, branches)) => (
+            stack_rebase::plan(&ctx.path, &trunk, &branches),
+            Some(trunk),
+        ),
         Err(reasons) => (Err(reasons), None),
     }
 }
@@ -177,7 +209,10 @@ fn compute(ctx: &StackCtx) -> (Result<Plan, Vec<String>>, Option<String>) {
 /// Dry run: fetches, then reports whether (and how) the stack would be rebased.
 /// Changes nothing.
 #[tauri::command]
-pub async fn board_stack_rebase_preview(card_id: String, db: State<'_, Db>) -> AppResult<StackRebasePreview> {
+pub async fn board_stack_rebase_preview(
+    card_id: String,
+    db: State<'_, Db>,
+) -> AppResult<StackRebasePreview> {
     let ctx = load_stack(&db, &card_id)?;
     repo_sync::fetch_repo(&db, ctx.repo_id, Duration::ZERO)?;
     let (plan, trunk) = compute(&ctx);
@@ -188,7 +223,10 @@ pub async fn board_stack_rebase_preview(card_id: String, db: State<'_, Db>) -> A
 /// local branches. Re-plans from fresh GitHub + git state first, and refuses
 /// (changing nothing) if anything no longer qualifies.
 #[tauri::command]
-pub async fn board_stack_rebase(card_id: String, db: State<'_, Db>) -> AppResult<StackRebaseResult> {
+pub async fn board_stack_rebase(
+    card_id: String,
+    db: State<'_, Db>,
+) -> AppResult<StackRebaseResult> {
     let ctx = load_stack(&db, &card_id)?;
     for e in &ctx.entries {
         refetch_card(&db, &ctx.owner, &ctx.name, e.number)?;

@@ -264,8 +264,14 @@ mod tests {
 
     #[test]
     fn merged_or_closed_pr_is_done_regardless_of_owner() {
-        assert_eq!(lane_for(&card("pr", Some("merged"), false, true), false), Some(Lane::Done));
-        assert_eq!(lane_for(&card("pr", Some("closed"), false, false), false), Some(Lane::Done));
+        assert_eq!(
+            lane_for(&card("pr", Some("merged"), false, true), false),
+            Some(Lane::Done)
+        );
+        assert_eq!(
+            lane_for(&card("pr", Some("closed"), false, false), false),
+            Some(Lane::Done)
+        );
     }
 
     #[test]
@@ -315,9 +321,9 @@ mod tests {
     #[test]
     fn mine_counts_unresolved_threads_not_last_authored_by_viewer() {
         let threads = vec![
-            thread(false, &["reviewer"]),            // last=reviewer -> counts
-            thread(false, &["reviewer", "me"]),       // last=me -> doesn't count
-            thread(true, &["reviewer"]),              // resolved -> never counts
+            thread(false, &["reviewer"]),       // last=reviewer -> counts
+            thread(false, &["reviewer", "me"]), // last=me -> doesn't count
+            thread(true, &["reviewer"]),        // resolved -> never counts
         ];
         assert_eq!(pending_threads(&threads, "me", ThreadMode::Mine), 1);
     }
@@ -325,9 +331,9 @@ mod tests {
     #[test]
     fn reviewing_only_counts_threads_i_started() {
         let threads = vec![
-            thread(false, &["me", "author"]),   // I started it, author replied -> counts
+            thread(false, &["me", "author"]), // I started it, author replied -> counts
             thread(false, &["someone_else", "author"]), // not mine -> doesn't count
-            thread(false, &["me", "me"]),        // I started it but I spoke last -> doesn't count
+            thread(false, &["me", "me"]),     // I started it but I spoke last -> doesn't count
         ];
         assert_eq!(pending_threads(&threads, "me", ThreadMode::Reviewing), 1);
     }
@@ -363,7 +369,10 @@ mod tests {
             parse_ref("https://github.com/acme/widget/pull/7/files").unwrap(),
             ("acme".into(), "widget".into(), 7)
         );
-        assert_eq!(parse_ref("acme/widget#42").unwrap(), ("acme".into(), "widget".into(), 42));
+        assert_eq!(
+            parse_ref("acme/widget#42").unwrap(),
+            ("acme".into(), "widget".into(), 42)
+        );
         assert!(parse_ref("not a ref").is_err());
         assert!(parse_ref("https://example.com/acme/widget/issues/42").is_err());
     }

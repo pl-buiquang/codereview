@@ -21,11 +21,17 @@ pub fn is_valid_symbol(symbol: &str) -> bool {
         Some('?') | Some('!') => &rest[..rest.len() - 1],
         _ => &rest[..],
     };
-    body.iter().all(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '$')
+    body.iter()
+        .all(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '$')
 }
 
 /// `(path, line)` of one-line declarations of `symbol` in the grep-only files of `lang`.
-pub fn exact_hits(repo: &Path, sha: &str, lang: &Language, symbol: &str) -> AppResult<Vec<(String, u32)>> {
+pub fn exact_hits(
+    repo: &Path,
+    sha: &str,
+    lang: &Language,
+    symbol: &str,
+) -> AppResult<Vec<(String, u32)>> {
     if lang.grep_globs.is_empty() {
         return Ok(vec![]);
     }

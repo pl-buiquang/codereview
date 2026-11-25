@@ -41,7 +41,10 @@ pub struct RoutineOption {
 
 /// Routines the context satisfies, each with its active run, for the launch modal.
 #[tauri::command]
-pub fn routine_list_for_context(context: ContextRef, db: State<Db>) -> AppResult<Vec<RoutineOption>> {
+pub fn routine_list_for_context(
+    context: ContextRef,
+    db: State<Db>,
+) -> AppResult<Vec<RoutineOption>> {
     let light = context::light(&db, &context)?;
     let conn = db.0.lock().unwrap();
     let mut out = Vec::new();
@@ -50,7 +53,10 @@ pub fn routine_list_for_context(context: ContextRef, db: State<Db>) -> AppResult
             continue;
         }
         let active_run = manager::active_run(&conn, routine.id, &light.key)?;
-        out.push(RoutineOption { routine, active_run });
+        out.push(RoutineOption {
+            routine,
+            active_run,
+        });
     }
     Ok(out)
 }
@@ -75,7 +81,10 @@ pub fn launch(
         // worker, not on this command's thread; a failure there fails the run with its reason.
         let light = context::light(&db, context)?;
         if !context::eligible(routine, &light) {
-            return Err(AppError::Other(format!("“{}” can't run on {}", routine.name, light.label)));
+            return Err(AppError::Other(format!(
+                "“{}” can't run on {}",
+                routine.name, light.label
+            )));
         }
         return app.state::<RoutineManager>().launch_remote(
             app,
@@ -92,10 +101,17 @@ pub fn launch(
     if let Some(reason) = harness.unavailable_reason() {
         return Err(AppError::Other(reason));
     }
-    crate::ai::check_caps(harness, &format!("“{}”", routine.name), &routines::launch_needs(routine, harness.id()))?;
+    crate::ai::check_caps(
+        harness,
+        &format!("“{}”", routine.name),
+        &routines::launch_needs(routine, harness.id()),
+    )?;
     let light = context::light(&db, context)?;
     if !context::eligible(routine, &light) {
-        return Err(AppError::Other(format!("“{}” can't run on {}", routine.name, light.label)));
+        return Err(AppError::Other(format!(
+            "“{}” can't run on {}",
+            routine.name, light.label
+        )));
     }
     handlers::pre_launch(app, routine, context, &light, model)?;
     app.state::<RoutineManager>()
@@ -121,7 +137,13 @@ pub fn routine_launch(
     db: State<Db>,
 ) -> AppResult<RoutineRun> {
     let routine = routines::get(&db.0.lock().unwrap(), routine_id)?;
-    launch(&app, &routine, &context, note.as_deref().unwrap_or(""), model.as_deref().unwrap_or(""))
+    launch(
+        &app,
+        &routine,
+        &context,
+        note.as_deref().unwrap_or(""),
+        model.as_deref().unwrap_or(""),
+    )
 }
 
 #[tauri::command]
@@ -140,18 +162,29 @@ pub fn routine_run_unseen(db: State<Db>) -> AppResult<Vec<RoutineRun>> {
 pub fn routine_run_mark_seen(run_id: Option<i64>, app: AppHandle, db: State<Db>) -> AppResult<()> {
     let n = manager::mark_runs_seen(&db.0.lock().unwrap(), run_id)?;
     if n > 0 {
-        let _ = app.emit("routine-run-updated", serde_json::json!({ "run_id": run_id, "status": "seen" }));
+        let _ = app.emit(
+            "routine-run-updated",
+            serde_json::json!({ "run_id": run_id, "status": "seen" }),
+        );
     }
     Ok(())
 }
 
 #[tauri::command]
-pub fn routine_run_events(run_id: i64, after_seq: Option<i64>, db: State<Db>) -> AppResult<Vec<RunEvent>> {
+pub fn routine_run_events(
+    run_id: i64,
+    after_seq: Option<i64>,
+    db: State<Db>,
+) -> AppResult<Vec<RunEvent>> {
     manager::run_events(&db.0.lock().unwrap(), run_id, after_seq.unwrap_or(0))
 }
 
 #[tauri::command]
-pub fn routine_run_stop(run_id: i64, app: AppHandle, manager: State<RoutineManager>) -> AppResult<()> {
+pub fn routine_run_stop(
+    run_id: i64,
+    app: AppHandle,
+    manager: State<RoutineManager>,
+) -> AppResult<()> {
     manager.stop(&app, run_id)
 }
 
@@ -159,7 +192,14 @@ pub fn routine_run_stop(run_id: i64, app: AppHandle, manager: State<RoutineManag
 #[tauri::command]
 pub fn routine_run_relaunch(run_id: i64, app: AppHandle, db: State<Db>) -> AppResult<RoutineRun> {
     let run = manager::get_run(&db.0.lock().unwrap(), run_id)?;
-    routine_launch(run.routine_id, run.context, Some(run.note), Some(run.model), app, db)
+    routine_launch(
+        run.routine_id,
+        run.context,
+        Some(run.note),
+        Some(run.model),
+        app,
+        db,
+    )
 }
 
 #[tauri::command]
@@ -178,7 +218,12 @@ pub fn routine_set_settings(settings: manager::RoutineSettings, db: State<Db>) -
 }
 
 #[tauri::command]
-pub fn routine_set_max_concurrency(n: i64, app: AppHandle, db: State<Db>, manager: State<RoutineManager>) -> AppResult<()> {
+pub fn routine_set_max_concurrency(
+    n: i64,
+    app: AppHandle,
+    db: State<Db>,
+    manager: State<RoutineManager>,
+) -> AppResult<()> {
     manager::set_max_concurrency(&db.0.lock().unwrap(), n)?;
     // A higher cap may let queued runs start.
     manager.pump(&app);

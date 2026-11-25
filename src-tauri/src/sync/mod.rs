@@ -60,7 +60,12 @@ pub struct SyncRequest {
 
 impl SyncRequest {
     pub fn new(scope: Scope, mode: Mode) -> Self {
-        Self { scope, mode, visible_ids: Vec::new(), discover: false }
+        Self {
+            scope,
+            mode,
+            visible_ids: Vec::new(),
+            discover: false,
+        }
     }
 }
 

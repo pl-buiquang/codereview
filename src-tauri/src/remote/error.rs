@@ -16,7 +16,10 @@ pub struct RemoteError {
 
 impl RemoteError {
     pub fn new(code: impl Into<String>, message: impl Into<String>) -> Self {
-        Self { code: code.into(), message: message.into() }
+        Self {
+            code: code.into(),
+            message: message.into(),
+        }
     }
 
     pub fn unreachable(message: impl Into<String>) -> Self {
@@ -88,9 +91,18 @@ mod tests {
         let e = RemoteError::unreachable("ssh: connection refused");
         assert_eq!(e.to_string(), "host_unreachable: ssh: connection refused");
         assert!(e.is_connection() && !RemoteError::new("queue_full", "x").is_connection());
-        assert_eq!(readable(&e.to_string()), "The host could not be reached: ssh: connection refused");
-        assert_eq!(readable("unknown_repo: acme/x"), "The repository is not registered on the host: acme/x");
+        assert_eq!(
+            readable(&e.to_string()),
+            "The host could not be reached: ssh: connection refused"
+        );
+        assert_eq!(
+            readable("unknown_repo: acme/x"),
+            "The repository is not registered on the host: acme/x"
+        );
         assert_eq!(readable("something else"), "something else");
-        assert_eq!(AppError::from(e).to_string(), "host_unreachable: ssh: connection refused");
+        assert_eq!(
+            AppError::from(e).to_string(),
+            "host_unreachable: ssh: connection refused"
+        );
     }
 }

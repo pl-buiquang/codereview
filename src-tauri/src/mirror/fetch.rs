@@ -265,7 +265,10 @@ impl Node {
     }
 
     pub fn is_closed(&self) -> bool {
-        matches!(self.normalized_state().as_deref(), Some("closed") | Some("merged"))
+        matches!(
+            self.normalized_state().as_deref(),
+            Some("closed") | Some("merged")
+        )
     }
 
     /// The head commit's combined CI state, in GitHub casing (`SUCCESS`, ...).
@@ -338,9 +341,12 @@ pub fn search(q: &str, limit: i64) -> AppResult<Vec<Node>> {
     let mut nodes = Vec::new();
     let mut after: Option<String> = None;
     while (nodes.len() as i64) < limit {
-        let vars = json!({ "q": q, "first": SEARCH_PAGE.min(limit - nodes.len() as i64), "after": after });
+        let vars =
+            json!({ "q": q, "first": SEARCH_PAGE.min(limit - nodes.len() as i64), "after": after });
         let page = gh::graphql::<SearchData>(&query, vars.clone()).or_else(|e| {
-            crate::logging::warn(&format!("[mirror.search] q={q:?} page failed, retrying: {e}"));
+            crate::logging::warn(&format!(
+                "[mirror.search] q={q:?} page failed, retrying: {e}"
+            ));
             gh::graphql::<SearchData>(&query, vars)
         });
         let page = match page {
@@ -349,7 +355,11 @@ pub fn search(q: &str, limit: i64) -> AppResult<Vec<Node>> {
             Err(_) => break,
         };
         nodes.extend(page.nodes.into_iter().filter(Node::is_supported));
-        match page.page_info.filter(|p| p.has_next_page).and_then(|p| p.end_cursor) {
+        match page
+            .page_info
+            .filter(|p| p.has_next_page)
+            .and_then(|p| p.end_cursor)
+        {
             Some(cursor) => after = Some(cursor),
             None => break,
         }
@@ -376,7 +386,11 @@ struct NodesOf<T> {
 
 /// One `nodes(ids:)` batch. A failed batch (usually a GitHub timeout) is
 /// split in half and retried once; ids that still fail are left out.
-fn nodes_batch<T: Fetched>(query: &str, ids: &[String], may_split: bool) -> HashMap<String, Option<T>> {
+fn nodes_batch<T: Fetched>(
+    query: &str,
+    ids: &[String],
+    may_split: bool,
+) -> HashMap<String, Option<T>> {
     match gh::graphql::<NodesOf<T>>(query, json!({ "ids": ids })) {
         Ok(data) => {
             let mut found: HashMap<String, T> = data
@@ -385,17 +399,25 @@ fn nodes_batch<T: Fetched>(query: &str, ids: &[String], may_split: bool) -> Hash
                 .flatten()
                 .filter_map(|n| Some((n.supported_id()?.to_string(), n)))
                 .collect();
-            ids.iter().map(|id| (id.clone(), found.remove(id))).collect()
+            ids.iter()
+                .map(|id| (id.clone(), found.remove(id)))
+                .collect()
         }
         Err(e) if may_split && ids.len() > 1 => {
-            crate::logging::warn(&format!("[mirror.nodes] batch of {} failed, splitting: {e}", ids.len()));
+            crate::logging::warn(&format!(
+                "[mirror.nodes] batch of {} failed, splitting: {e}",
+                ids.len()
+            ));
             let (a, b) = ids.split_at(ids.len() / 2);
             let mut out = nodes_batch(query, a, false);
             out.extend(nodes_batch(query, b, false));
             out
         }
         Err(e) => {
-            crate::logging::warn(&format!("[mirror.nodes] batch of {} failed: {e}", ids.len()));
+            crate::logging::warn(&format!(
+                "[mirror.nodes] batch of {} failed: {e}",
+                ids.len()
+            ));
             HashMap::new()
         }
     }
@@ -404,12 +426,18 @@ fn nodes_batch<T: Fetched>(query: &str, ids: &[String], may_split: bool) -> Hash
 /// Every id of a successful batch is present: `None` when GitHub no longer
 /// returns it (deleted or inaccessible). Ids of a failed batch are absent,
 /// since their state is unknown.
-fn nodes_by_id<T: Fetched + Send>(query: &str, ids: &[String], batch: usize) -> HashMap<String, Option<T>> {
+fn nodes_by_id<T: Fetched + Send>(
+    query: &str,
+    ids: &[String],
+    batch: usize,
+) -> HashMap<String, Option<T>> {
     let chunks: Vec<&[String]> = ids.chunks(batch).collect();
-    crate::inbox::concurrent_map(chunks, REFETCH_CONCURRENCY, |chunk| nodes_batch(query, chunk, true))
-        .into_iter()
-        .flatten()
-        .collect()
+    crate::inbox::concurrent_map(chunks, REFETCH_CONCURRENCY, |chunk| {
+        nodes_batch(query, chunk, true)
+    })
+    .into_iter()
+    .flatten()
+    .collect()
 }
 
 /// Refetch nodes by id with the full fragment, in concurrent batches.
@@ -489,7 +517,9 @@ pub struct Probe {
 
 impl Fetched for Probe {
     fn supported_id(&self) -> Option<&str> {
-        matches!(self.typename.as_str(), "PullRequest" | "Issue").then_some(self.id.as_deref()).flatten()
+        matches!(self.typename.as_str(), "PullRequest" | "Issue")
+            .then_some(self.id.as_deref())
+            .flatten()
     }
 }
 
@@ -527,8 +557,13 @@ impl Probe {
 /// ids (closed PRs, issues, ids not mirrored yet) only get `updatedAt` + `state`.
 pub fn probe(full: &[String], cheap: &[String]) -> HashMap<String, Option<Probe>> {
     let mut out = nodes_by_id(PROBE_QUERY, full, PROBE_BATCH_SIZE);
-    let cheap: HashMap<String, Option<Probe>> = nodes_by_id(CHEAP_PROBE_QUERY, cheap, CHEAP_PROBE_BATCH_SIZE);
-    out.extend(cheap.into_iter().map(|(id, p)| (id, p.map(|p| Probe { cheap: true, ..p }))));
+    let cheap: HashMap<String, Option<Probe>> =
+        nodes_by_id(CHEAP_PROBE_QUERY, cheap, CHEAP_PROBE_BATCH_SIZE);
+    out.extend(
+        cheap
+            .into_iter()
+            .map(|(id, p)| (id, p.map(|p| Probe { cheap: true, ..p }))),
+    );
     out
 }
 
@@ -537,7 +572,10 @@ pub fn resolve(owner: &str, name: &str, number: i64) -> AppResult<Node> {
     let query = with_fragments(format!(
         "query MirrorResolve($owner: String!, $name: String!, $number: Int!) {{\n  repository(owner: $owner, name: $name) {{ issueOrPullRequest(number: $number) {{ {SELECTION} }} }}\n}}"
     ));
-    let data: ResolveData = gh::graphql(&query, json!({ "owner": owner, "name": name, "number": number }))?;
+    let data: ResolveData = gh::graphql(
+        &query,
+        json!({ "owner": owner, "name": name, "number": number }),
+    )?;
     data.repository
         .and_then(|r| r.issue_or_pull_request)
         .filter(Node::is_supported)
@@ -578,15 +616,25 @@ pub fn prs_by_head(owner: &str, name: &str, branches: &[String]) -> (Vec<Node>, 
         for (i, b) in chunk.iter().enumerate() {
             vars[format!("b{i}")] = json!(b);
         }
-        (chunk.to_vec(), gh::graphql::<ByHeadData>(&prs_by_head_query(chunk.len()), vars))
+        (
+            chunk.to_vec(),
+            gh::graphql::<ByHeadData>(&prs_by_head_query(chunk.len()), vars),
+        )
     });
     let mut nodes = Vec::new();
     let mut failed = Vec::new();
     for (chunk, r) in results {
         match r {
-            Ok(data) => nodes.extend(data.repository.into_iter().flat_map(|m| m.into_values()).flat_map(|c| c.nodes)),
+            Ok(data) => nodes.extend(
+                data.repository
+                    .into_iter()
+                    .flat_map(|m| m.into_values())
+                    .flat_map(|c| c.nodes),
+            ),
             Err(e) => {
-                crate::logging::warn(&format!("[mirror.by_head] {owner}/{name} batch failed: {e}"));
+                crate::logging::warn(&format!(
+                    "[mirror.by_head] {owner}/{name} batch failed: {e}"
+                ));
                 failed.extend(chunk);
             }
         }
@@ -684,7 +732,12 @@ impl Discussion {
     /// Comments and non-empty review bodies, oldest first.
     pub fn into_comments(self) -> Vec<DiscussionComment> {
         let comments = self.comments.nodes.into_iter().map(|c| ("comment", c));
-        let reviews = self.reviews.nodes.into_iter().filter(|r| !r.body.trim().is_empty()).map(|r| ("review", r));
+        let reviews = self
+            .reviews
+            .nodes
+            .into_iter()
+            .filter(|r| !r.body.trim().is_empty())
+            .map(|r| ("review", r));
         let mut out: Vec<DiscussionComment> = comments
             .chain(reviews)
             .map(|(kind, c)| DiscussionComment {
@@ -715,7 +768,9 @@ pub fn resolve_many(subjects: Vec<(String, String, i64)>) -> HashMap<(String, St
     crate::inbox::concurrent_map(subjects, REFETCH_CONCURRENCY, |(owner, name, number)| {
         let node = resolve(owner, name, *number);
         if let Err(e) = &node {
-            crate::logging::warn(&format!("[mirror.resolve_many] {owner}/{name}#{number}: {e}"));
+            crate::logging::warn(&format!(
+                "[mirror.resolve_many] {owner}/{name}#{number}: {e}"
+            ));
         }
         ((owner.clone(), name.clone(), *number), node.ok())
     })
@@ -728,7 +783,9 @@ pub fn resolve_many(subjects: Vec<(String, String, i64)>) -> HashMap<(String, St
 pub fn resolve_pr(owner: &str, name: &str, number: i64) -> AppResult<Node> {
     let node = resolve(owner, name, number)?;
     if !node.is_pr() {
-        return Err(AppError::Other(format!("{owner}/{name}#{number} is not a pull request")));
+        return Err(AppError::Other(format!(
+            "{owner}/{name}#{number} is not a pull request"
+        )));
     }
     Ok(node)
 }
@@ -751,9 +808,15 @@ mod tests {
         }))
         .unwrap();
         let got = d.into_comments();
-        assert_eq!(got.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(), vec!["R1", "C2"]);
+        assert_eq!(
+            got.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(),
+            vec!["R1", "C2"]
+        );
         assert_eq!(got[0].review_state.as_deref(), Some("APPROVED"));
-        assert_eq!(got[1].author.as_ref().unwrap().typename.as_deref(), Some("Bot"));
+        assert_eq!(
+            got[1].author.as_ref().unwrap().typename.as_deref(),
+            Some("Bot")
+        );
     }
 
     #[test]
@@ -770,7 +833,11 @@ mod tests {
         let got = d.into_comments();
         assert_eq!(
             got[0].reactions,
-            vec![gh::ReactionGroup { content: "THUMBS_UP".into(), count: 2, viewer_has_reacted: true }]
+            vec![gh::ReactionGroup {
+                content: "THUMBS_UP".into(),
+                count: 2,
+                viewer_has_reacted: true
+            }]
         );
     }
 
@@ -780,7 +847,10 @@ mod tests {
         assert!(q.contains("$b0: String!, $b1: String!"));
         assert!(q.contains("b1: pullRequests(headRefName: $b1"));
         assert!(q.contains("fragment PrCore"));
-        assert!(!q.contains("IssueCore"), "an unused fragment fails the whole query");
+        assert!(
+            !q.contains("IssueCore"),
+            "an unused fragment fails the whole query"
+        );
         assert!(FRAGMENTS.contains("fragment IssueCore") && FRAGMENTS.contains("fragment PrCore"));
     }
 
@@ -790,7 +860,12 @@ mod tests {
             "repository": { "b0": { "nodes": [] }, "b1": { "nodes": [serde_json::from_str::<serde_json::Value>(PR_NODE_FIXTURE).unwrap()] } }
         }))
         .unwrap();
-        let n: usize = data.repository.unwrap().into_values().map(|c| c.nodes.len()).sum();
+        let n: usize = data
+            .repository
+            .unwrap()
+            .into_values()
+            .map(|c| c.nodes.len())
+            .sum();
         assert_eq!(n, 1);
     }
 
@@ -836,7 +911,10 @@ mod tests {
         assert_eq!(node.reviews.as_ref().map(|r| r.total_count), Some(2));
         assert_eq!(node.auto_merge_method().as_deref(), Some("SQUASH"));
         assert_eq!(node.stack.as_ref().map(|s| s.number), Some(40));
-        assert_eq!(node.latest_comment().and_then(|c| c.body_text.as_deref()), Some("hi"));
+        assert_eq!(
+            node.latest_comment().and_then(|c| c.body_text.as_deref()),
+            Some("hi")
+        );
         assert_eq!(node.closing_issues_references.unwrap().nodes[0].id, "I_1");
     }
 
@@ -863,7 +941,11 @@ mod tests {
             ] }"#,
         )
         .unwrap();
-        let ids: Vec<Option<&str>> = data.nodes.iter().map(|n| n.as_ref().and_then(Fetched::supported_id)).collect();
+        let ids: Vec<Option<&str>> = data
+            .nodes
+            .iter()
+            .map(|n| n.as_ref().and_then(Fetched::supported_id))
+            .collect();
         assert_eq!(ids, vec![Some("PR_1"), Some("I_1"), None, None]);
         let pr = data.nodes[0].as_ref().unwrap();
         assert_eq!(pr.normalized_state().as_deref(), Some("merged"));

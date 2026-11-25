@@ -68,7 +68,10 @@ pub fn classify(git_dir: &Path, path: &Path) -> Option<ChangeKind> {
 /// The repository's common git dir (shared by all its worktrees), with
 /// symlinks resolved so it prefixes the paths the OS reports.
 pub fn git_common_dir(checkout: &Path) -> AppResult<PathBuf> {
-    let out = run_git(checkout, &["rev-parse", "--path-format=absolute", "--git-common-dir"])?;
+    let out = run_git(
+        checkout,
+        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+    )?;
     Ok(std::fs::canonicalize(out.trim())?)
 }
 
@@ -77,11 +80,19 @@ pub type OnChange = Arc<dyn Fn(i64, Vec<ChangeKind>) + Send + Sync>;
 /// inotify also reports opens and reads, so the app's own `git status` /
 /// `rev-parse` calls would otherwise look like changes and refetch forever.
 fn is_relevant(kind: &EventKind) -> bool {
-    matches!(kind, EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_))
+    matches!(
+        kind,
+        EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_)
+    )
 }
 
 /// Ends when the watcher (and with it the sender) is dropped.
-fn debounce_loop(repo_id: i64, git_dir: &Path, rx: mpsc::Receiver<notify::Event>, on_change: OnChange) {
+fn debounce_loop(
+    repo_id: i64,
+    git_dir: &Path,
+    rx: mpsc::Receiver<notify::Event>,
+    on_change: OnChange,
+) {
     while let Ok(first) = rx.recv() {
         let mut events = vec![first];
         let deadline = Instant::now() + DEBOUNCE;
@@ -134,7 +145,10 @@ impl Default for Watchers {
 
 impl Watchers {
     pub fn new(linger: Duration) -> Self {
-        Self { entries: Arc::default(), linger }
+        Self {
+            entries: Arc::default(),
+            linger,
+        }
     }
 
     /// Adds a holder for `repo_id`, starting a watcher on `checkout`'s git dir
@@ -162,7 +176,15 @@ impl Watchers {
         std::thread::spawn(move || debounce_loop(repo_id, &watched, rx, on_change));
         log::info!("[watch] start repo {repo_id} ({})", git_dir.display());
         let epoch = NEXT_EPOCH.fetch_add(1, Ordering::Relaxed);
-        entries.insert(repo_id, Entry { epoch, refs: 1, generation: 0, _watcher: watcher });
+        entries.insert(
+            repo_id,
+            Entry {
+                epoch,
+                refs: 1,
+                generation: 0,
+                _watcher: watcher,
+            },
+        );
         Ok(())
     }
 
@@ -170,7 +192,9 @@ impl Watchers {
     pub fn release(&self, repo_id: i64) {
         let generation = {
             let mut entries = self.entries.lock().unwrap();
-            let Some(entry) = entries.get_mut(&repo_id) else { return };
+            let Some(entry) = entries.get_mut(&repo_id) else {
+                return;
+            };
             entry.refs = entry.refs.saturating_sub(1);
             if entry.refs > 0 {
                 return;
@@ -182,7 +206,10 @@ impl Watchers {
         std::thread::spawn(move || {
             std::thread::sleep(linger);
             let mut entries = entries.lock().unwrap();
-            if entries.get(&repo_id).is_some_and(|e| e.refs == 0 && e.generation == generation) {
+            if entries
+                .get(&repo_id)
+                .is_some_and(|e| e.refs == 0 && e.generation == generation)
+            {
                 entries.remove(&repo_id);
                 log::info!("[watch] stop repo {repo_id}");
             }
@@ -207,8 +234,17 @@ mod tests {
     use tempfile::TempDir;
 
     fn git(dir: &Path, args: &[&str]) {
-        let out = Command::new("git").arg("-C").arg(dir).args(args).output().unwrap();
-        assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        let out = Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
     }
 
     #[test]
@@ -233,7 +269,20 @@ mod tests {
     fn repo() -> TempDir {
         let dir = TempDir::new().unwrap();
         git(dir.path(), &["init", "-q", "-b", "main"]);
-        git(dir.path(), &["-c", "user.email=t@e", "-c", "user.name=T", "commit", "-q", "--allow-empty", "-m", "c"]);
+        git(
+            dir.path(),
+            &[
+                "-c",
+                "user.email=t@e",
+                "-c",
+                "user.name=T",
+                "commit",
+                "-q",
+                "--allow-empty",
+                "-m",
+                "c",
+            ],
+        );
         dir
     }
 
@@ -262,15 +311,22 @@ mod tests {
         let w = Watchers::new(Duration::from_millis(100));
         let (tx, rx) = mpsc::channel();
         let tx = Mutex::new(tx);
-        w.acquire(8, dir.path(), Arc::new(move |id, kinds| {
-            let _ = tx.lock().unwrap().send((id, kinds));
-        }))
+        w.acquire(
+            8,
+            dir.path(),
+            Arc::new(move |id, kinds| {
+                let _ = tx.lock().unwrap().send((id, kinds));
+            }),
+        )
         .unwrap();
         std::thread::sleep(Duration::from_millis(300));
         git(dir.path(), &["rev-parse", "HEAD"]);
         git(dir.path(), &["for-each-ref"]);
         git(dir.path(), &["status", "--porcelain"]);
-        assert!(rx.recv_timeout(Duration::from_millis(1000)).is_err(), "reads must not emit");
+        assert!(
+            rx.recv_timeout(Duration::from_millis(1000)).is_err(),
+            "reads must not emit"
+        );
     }
 
     #[test]
@@ -279,9 +335,13 @@ mod tests {
         let w = Watchers::new(Duration::from_millis(100));
         let (tx, rx) = mpsc::channel();
         let tx = Mutex::new(tx);
-        w.acquire(7, dir.path(), Arc::new(move |id, kinds| {
-            let _ = tx.lock().unwrap().send((id, kinds));
-        }))
+        w.acquire(
+            7,
+            dir.path(),
+            Arc::new(move |id, kinds| {
+                let _ = tx.lock().unwrap().send((id, kinds));
+            }),
+        )
         .unwrap();
         // FSEvents can take a moment to start delivering.
         std::thread::sleep(Duration::from_millis(300));

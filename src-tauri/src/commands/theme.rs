@@ -2,17 +2,22 @@
 
 use tauri::State;
 
-use crate::run_usage::RunTag;
 use crate::ai::profiles::{self, Feature};
 use crate::ai::{Access, OneShot, SessionMode, SystemPrompt, SystemPromptMode, ToolPolicy};
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
+use crate::run_usage::RunTag;
 
 const MODEL: &str = "sonnet";
 const SCOPES: [&str; 5] = ["all", "colours", "syntax", "typography", "shape"];
 
 /// The user message of a suggestion run.
-fn user_message(current: &serde_json::Value, scope: &str, inspiration: &str, feedback: Option<&str>) -> String {
+fn user_message(
+    current: &serde_json::Value,
+    scope: &str,
+    inspiration: &str,
+    feedback: Option<&str>,
+) -> String {
     let fix = feedback
         .filter(|f| !f.trim().is_empty())
         .map(|f| format!("Fix: your previous suggestion had these problems, correct them:\n{f}\n"))
@@ -44,7 +49,10 @@ fn suggest_request<'a>(
         effort: Some("medium"),
         env: vec![("CLAUDE_SUMMARY_RUNNING".into(), "1".into())],
         extra_args: Vec::new(),
-        usage_tag: RunTag::new("theme_suggest").variant(scope).label(inspiration.to_string()).harness(harness),
+        usage_tag: RunTag::new("theme_suggest")
+            .variant(scope)
+            .label(inspiration.to_string())
+            .harness(harness),
     }
 }
 
@@ -77,7 +85,15 @@ pub async fn theme_suggest(
     let turn = tauri::async_runtime::spawn_blocking(move || {
         let cwd = std::env::temp_dir().join("codereview_theme_suggest");
         std::fs::create_dir_all(&cwd)?;
-        let mut req = suggest_request(&system, &cwd, &prompt, &scope, inspiration.trim(), &model, harness.id());
+        let mut req = suggest_request(
+            &system,
+            &cwd,
+            &prompt,
+            &scope,
+            inspiration.trim(),
+            &model,
+            harness.id(),
+        );
         req.extra_args.extend(harness.settings_args(&settings));
         harness.one_shot(&req)
     })
@@ -102,7 +118,10 @@ mod tests {
     #[test]
     fn feedback_is_added_only_when_not_blank() {
         let current = serde_json::json!({});
-        assert!(user_message(&current, "all", "x", Some("dark: text on surface is 3.1:1")).contains("Fix:"));
+        assert!(
+            user_message(&current, "all", "x", Some("dark: text on surface is 3.1:1"))
+                .contains("Fix:")
+        );
         assert!(!user_message(&current, "all", "x", Some("  ")).contains("Fix:"));
     }
 
@@ -111,16 +130,37 @@ mod tests {
         use crate::test_support::{argv, envs, strs};
         let cwd = std::path::Path::new("/tmp/codereview_theme_suggest");
         let req = suggest_request("sys", cwd, "prompt", "syntax", "nordic", "sonnet", "claude");
-        let cmd = crate::ai::claude::command(&req, false, Some(std::path::Path::new("/tmp/codereview_theme_suggest.txt")));
+        let cmd = crate::ai::claude::command(
+            &req,
+            false,
+            Some(std::path::Path::new("/tmp/codereview_theme_suggest.txt")),
+        );
         assert_eq!(
             argv(&cmd),
             strs(&[
-                "-p", "--output-format", "json", "--strict-mcp-config", "--permission-mode", "default",
-                "--add-dir", "/tmp/codereview_theme_suggest", "--model", "sonnet", "--tools", "", "--effort",
-                "medium", "--no-session-persistence", "--system-prompt-file", "/tmp/codereview_theme_suggest.txt",
+                "-p",
+                "--output-format",
+                "json",
+                "--strict-mcp-config",
+                "--permission-mode",
+                "default",
+                "--add-dir",
+                "/tmp/codereview_theme_suggest",
+                "--model",
+                "sonnet",
+                "--tools",
+                "",
+                "--effort",
+                "medium",
+                "--no-session-persistence",
+                "--system-prompt-file",
+                "/tmp/codereview_theme_suggest.txt",
             ])
         );
-        assert_eq!(envs(&cmd), vec![("CLAUDE_SUMMARY_RUNNING".to_string(), "1".to_string())]);
+        assert_eq!(
+            envs(&cmd),
+            vec![("CLAUDE_SUMMARY_RUNNING".to_string(), "1".to_string())]
+        );
         assert_eq!(cmd.get_current_dir(), Some(cwd));
     }
 }

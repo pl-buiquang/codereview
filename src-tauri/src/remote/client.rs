@@ -141,11 +141,23 @@ impl EventStream {
     /// The next event or status; `None` when the daemon closed the stream (after the status).
     pub fn next_item(&mut self) -> RemoteResult<Option<StreamItem>> {
         loop {
-            let Some(e) = self.reader.next_event()? else { return Ok(None) };
-            let bad = |what: &str, err: serde_json::Error| RemoteError::protocol(format!("bad {what} event: {err}"));
+            let Some(e) = self.reader.next_event()? else {
+                return Ok(None);
+            };
+            let bad = |what: &str, err: serde_json::Error| {
+                RemoteError::protocol(format!("bad {what} event: {err}"))
+            };
             match e.event.as_str() {
-                "event" => return Ok(Some(StreamItem::Event(serde_json::from_str(&e.data).map_err(|x| bad("run", x))?))),
-                "status" => return Ok(Some(StreamItem::Status(serde_json::from_str(&e.data).map_err(|x| bad("status", x))?))),
+                "event" => {
+                    return Ok(Some(StreamItem::Event(
+                        serde_json::from_str(&e.data).map_err(|x| bad("run", x))?,
+                    )))
+                }
+                "status" => {
+                    return Ok(Some(StreamItem::Status(
+                        serde_json::from_str(&e.data).map_err(|x| bad("status", x))?,
+                    )))
+                }
                 _ => continue,
             }
         }
@@ -159,7 +171,13 @@ pub struct RemoteClient {
 
 fn encode(s: &str) -> String {
     s.bytes()
-        .map(|b| if b.is_ascii_alphanumeric() || b"-._~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") })
+        .map(|b| {
+            if b.is_ascii_alphanumeric() || b"-._~".contains(&b) {
+                (b as char).to_string()
+            } else {
+                format!("%{b:02X}")
+            }
+        })
         .collect()
 }
 
@@ -176,7 +194,13 @@ fn api_error(status: u16, body: &[u8]) -> RemoteError {
     }
     match serde_json::from_slice::<Body>(body) {
         Ok(b) => RemoteError::new(b.error.code, b.error.message),
-        Err(_) => RemoteError::protocol(format!("unexpected HTTP {status}: {}", String::from_utf8_lossy(body).chars().take(200).collect::<String>())),
+        Err(_) => RemoteError::protocol(format!(
+            "unexpected HTTP {status}: {}",
+            String::from_utf8_lossy(body)
+                .chars()
+                .take(200)
+                .collect::<String>()
+        )),
     }
 }
 
@@ -185,13 +209,23 @@ impl RemoteClient {
         Self { addr }
     }
 
-    fn call<T: DeserializeOwned>(&self, method: &str, path: &str, body: Option<&impl Serialize>, timeout: Duration) -> RemoteResult<T> {
-        let bytes = body.map(serde_json::to_vec).transpose().map_err(|e| RemoteError::protocol(e.to_string()))?;
+    fn call<T: DeserializeOwned>(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<&impl Serialize>,
+        timeout: Duration,
+    ) -> RemoteResult<T> {
+        let bytes = body
+            .map(serde_json::to_vec)
+            .transpose()
+            .map_err(|e| RemoteError::protocol(e.to_string()))?;
         let resp = http::request(&self.addr, method, path, bytes.as_deref(), timeout)?;
         if !(200..300).contains(&resp.status) {
             return Err(api_error(resp.status, &resp.body));
         }
-        serde_json::from_slice(&resp.body).map_err(|e| RemoteError::protocol(format!("bad answer from {path}: {e}")))
+        serde_json::from_slice(&resp.body)
+            .map_err(|e| RemoteError::protocol(format!("bad answer from {path}: {e}")))
     }
 
     fn get<T: DeserializeOwned>(&self, path: &str) -> RemoteResult<T> {
@@ -199,12 +233,18 @@ impl RemoteClient {
     }
 
     /// A GET whose answer is capped in size and total time (for hosts that are not trusted to behave).
-    pub(super) fn get_limited<T: DeserializeOwned>(&self, path: &str, timeout: Duration, limits: http::Limits) -> RemoteResult<T> {
+    pub(super) fn get_limited<T: DeserializeOwned>(
+        &self,
+        path: &str,
+        timeout: Duration,
+        limits: http::Limits,
+    ) -> RemoteResult<T> {
         let resp = http::request_limited(&self.addr, "GET", path, None, timeout, limits)?;
         if !(200..300).contains(&resp.status) {
             return Err(api_error(resp.status, &resp.body));
         }
-        serde_json::from_slice(&resp.body).map_err(|e| RemoteError::protocol(format!("bad answer from {path}: {e}")))
+        serde_json::from_slice(&resp.body)
+            .map_err(|e| RemoteError::protocol(format!("bad answer from {path}: {e}")))
     }
 
     pub fn info(&self) -> RemoteResult<Info> {
@@ -216,7 +256,9 @@ impl RemoteClient {
         struct Models {
             models: Vec<String>,
         }
-        Ok(self.get::<Models>(&format!("/v1/harnesses/{}/models", encode(harness)))?.models)
+        Ok(self
+            .get::<Models>(&format!("/v1/harnesses/{}/models", encode(harness)))?
+            .models)
     }
 
     pub fn oneshot(&self, req: &OneShotRequest) -> RemoteResult<OneShotResponse> {
@@ -251,14 +293,24 @@ impl RemoteClient {
 
     /// Follow a run: replay events after `after_seq`, then live ones, then the terminal status.
     pub fn events(&self, id: i64, after_seq: i64) -> RemoteResult<EventStream> {
-        match http::open_sse(&self.addr, &format!("/v1/runs/{id}/events?after_seq={after_seq}"), STREAM_SILENCE)? {
+        match http::open_sse(
+            &self.addr,
+            &format!("/v1/runs/{id}/events?after_seq={after_seq}"),
+            STREAM_SILENCE,
+        )? {
             Ok(reader) => Ok(EventStream { reader }),
             Err(resp) => Err(api_error(resp.status, &resp.body)),
         }
     }
 
     pub fn stop(&self, id: i64) -> RemoteResult<()> {
-        self.call::<Value>("POST", &format!("/v1/runs/{id}/stop"), Some(&Value::Null), QUICK).map(|_| ())
+        self.call::<Value>(
+            "POST",
+            &format!("/v1/runs/{id}/stop"),
+            Some(&Value::Null),
+            QUICK,
+        )
+        .map(|_| ())
     }
 
     /// The unacknowledged outbox ops after `after`.
@@ -267,11 +319,19 @@ impl RemoteClient {
         struct Ops {
             ops: Vec<OutboxOp>,
         }
-        Ok(self.get::<Ops>(&format!("/v1/runs/{id}/outbox?after={after}"))?.ops)
+        Ok(self
+            .get::<Ops>(&format!("/v1/runs/{id}/outbox?after={after}"))?
+            .ops)
     }
 
     pub fn ack(&self, id: i64, upto: i64) -> RemoteResult<()> {
-        self.call::<Value>("POST", &format!("/v1/runs/{id}/outbox/ack"), Some(&serde_json::json!({ "upto": upto })), QUICK).map(|_| ())
+        self.call::<Value>(
+            "POST",
+            &format!("/v1/runs/{id}/outbox/ack"),
+            Some(&serde_json::json!({ "upto": upto })),
+            QUICK,
+        )
+        .map(|_| ())
     }
 }
 
@@ -285,8 +345,12 @@ impl Health for InfoHealth {
         if !(200..300).contains(&resp.status) {
             return Err(api_error(resp.status, &resp.body));
         }
-        let info: Info = serde_json::from_slice(&resp.body).map_err(|e| RemoteError::protocol(format!("bad /v1/info: {e}")))?;
-        Ok(HealthInfo { protocol: info.protocol, version: info.version })
+        let info: Info = serde_json::from_slice(&resp.body)
+            .map_err(|e| RemoteError::protocol(format!("bad /v1/info: {e}")))?;
+        Ok(HealthInfo {
+            protocol: info.protocol,
+            version: info.version,
+        })
     }
 }
 
@@ -325,7 +389,10 @@ mod tests {
         let c = client(&srv);
         let info = c.info().unwrap();
         assert_eq!(info.protocol, i64::from(PROTOCOL));
-        assert_eq!((info.max_concurrency, info.load.clone()), (2, Load::default()));
+        assert_eq!(
+            (info.max_concurrency, info.load.clone()),
+            (2, Load::default())
+        );
         assert_eq!(info.harnesses[0].id, "fake");
         assert!(info.harnesses[0].available && info.harnesses[0].caps.streaming);
         assert!(c.models("fake").unwrap().is_empty());
@@ -337,7 +404,8 @@ mod tests {
     fn oneshot_returns_text_and_usage_and_api_errors_keep_their_code() {
         let srv = TestServer::start(2);
         let c = client(&srv);
-        let mut req: OneShotRequest = serde_json::from_value(serde_json::json!({"harness": "fake", "prompt": "hi"})).unwrap();
+        let mut req: OneShotRequest =
+            serde_json::from_value(serde_json::json!({"harness": "fake", "prompt": "hi"})).unwrap();
         let r = c.oneshot(&req).unwrap();
         assert!(r.text.starts_with("echo:hi@"), "{}", r.text);
         assert_eq!(r.usage.unwrap().cost_usd, 0.5);
@@ -345,7 +413,10 @@ mod tests {
         let err = c.oneshot(&req).unwrap_err();
         assert_eq!(err.code, "harness_unavailable");
         req.harness = "fake".into();
-        req.workspace = serde_json::from_value(serde_json::json!({"repo": "acme/nothere", "kind": "main-clone"})).unwrap();
+        req.workspace = serde_json::from_value(
+            serde_json::json!({"repo": "acme/nothere", "kind": "main-clone"}),
+        )
+        .unwrap();
         assert_eq!(c.oneshot(&req).unwrap_err().code, "unknown_repo");
     }
 
@@ -353,7 +424,10 @@ mod tests {
     fn a_run_is_created_idempotently_streamed_and_finished() {
         let srv = TestServer::start(2);
         let c = client(&srv);
-        let req = run_request("k1", r#"echo '{"type":"a"}'; echo '{"type":"result","result":"done"}'"#);
+        let req = run_request(
+            "k1",
+            r#"echo '{"type":"a"}'; echo '{"type":"result","result":"done"}'"#,
+        );
         let first = c.create_run(&req).unwrap();
         assert!(first.created);
         let again = c.create_run(&req).unwrap();
@@ -365,13 +439,24 @@ mod tests {
         let mut stream = c.events(first.id, 0).unwrap();
         let mut seqs = Vec::new();
         let status = loop {
-            match stream.next_item().unwrap().expect("a status ends the stream") {
+            match stream
+                .next_item()
+                .unwrap()
+                .expect("a status ends the stream")
+            {
                 StreamItem::Event(e) => seqs.push(e.seq),
                 StreamItem::Status(s) => break s,
             }
         };
         assert_eq!(seqs, [1, 2]);
-        assert_eq!((status.status.as_str(), status.text.as_deref(), status.last_seq), ("ok", Some("done"), 2));
+        assert_eq!(
+            (
+                status.status.as_str(),
+                status.text.as_deref(),
+                status.last_seq
+            ),
+            ("ok", Some("done"), 2)
+        );
         assert_eq!(stream.next_item().unwrap(), None);
 
         // resuming after seq 1 replays only the second event
@@ -382,7 +467,10 @@ mod tests {
         assert_eq!(c.list_runs(None, 10).unwrap().len(), 1);
         assert!(c.list_runs(Some(&run.updated_at), 10).unwrap().len() <= 1);
         assert!(c.get_run(9999).unwrap().is_none());
-        assert_eq!(c.events(9999, 0).err().map(|e| e.code), Some("not_found".into()));
+        assert_eq!(
+            c.events(9999, 0).err().map(|e| e.code),
+            Some("not_found".into())
+        );
     }
 
     #[test]
@@ -400,11 +488,28 @@ mod tests {
         let sdb = srv.state.db.clone();
         let conn = crate::worker::store::open(&srv.state.worker_db_path).unwrap();
         conn.busy_timeout(Duration::from_secs(5)).unwrap();
-        crate::worker::store::append_outbox(&conn, created.id, "notify", &serde_json::json!({"message": "m"})).unwrap();
-        crate::worker::store::append_outbox(&conn, created.id, "board_track", &serde_json::json!({"reference": "a/b#1"})).unwrap();
+        crate::worker::store::append_outbox(
+            &conn,
+            created.id,
+            "notify",
+            &serde_json::json!({"message": "m"}),
+        )
+        .unwrap();
+        crate::worker::store::append_outbox(
+            &conn,
+            created.id,
+            "board_track",
+            &serde_json::json!({"reference": "a/b#1"}),
+        )
+        .unwrap();
         drop(sdb);
         let ops = c.outbox(created.id, 0).unwrap();
-        assert_eq!(ops.iter().map(|o| (o.seq, o.op_type.as_str())).collect::<Vec<_>>(), [(1, "notify"), (2, "board_track")]);
+        assert_eq!(
+            ops.iter()
+                .map(|o| (o.seq, o.op_type.as_str()))
+                .collect::<Vec<_>>(),
+            [(1, "notify"), (2, "board_track")]
+        );
         assert_eq!(ops[0].op_id, format!("{}:1", created.id));
         c.ack(created.id, 1).unwrap();
         assert_eq!(c.outbox(created.id, 0).unwrap().len(), 1);

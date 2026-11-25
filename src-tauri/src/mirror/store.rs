@@ -63,7 +63,12 @@ fn upsert_user(conn: &Connection, actor: Option<&Actor>, ts: &str) -> AppResult<
             fetched_at = excluded.fetched_at,
             -- Only the author selection carries the type; other actors keep what's known.
             is_bot = MAX(gh_user.is_bot, excluded.is_bot)",
-        params![login, actor.and_then(|a| a.avatar_url.as_deref()), ts, actor.is_some_and(Actor::is_bot)],
+        params![
+            login,
+            actor.and_then(|a| a.avatar_url.as_deref()),
+            ts,
+            actor.is_some_and(Actor::is_bot)
+        ],
     )?;
     Ok(())
 }
@@ -78,7 +83,9 @@ pub fn upsert_node(conn: &Connection, node: &Node, ts: &str) -> AppResult<()> {
     let body = snippet(node.body_text.as_deref(), 280);
     let last = node.latest_comment();
     let latest_comment = snippet(last.and_then(|c| c.body_text.as_deref()), 280);
-    let latest_actor = last.and_then(|c| c.author.as_ref()).and_then(|a| a.login.clone());
+    let latest_actor = last
+        .and_then(|c| c.author.as_ref())
+        .and_then(|a| a.login.clone());
     let table = if node.is_pr() { "gh_pr" } else { "gh_issue" };
     // A number can only belong to one node per repo; a stale row (e.g. a
     // recreated repo) would otherwise fail the UNIQUE constraint.
@@ -208,7 +215,10 @@ pub fn upsert_node(conn: &Connection, node: &Node, ts: &str) -> AppResult<()> {
 pub fn upsert_pr_detail(conn: &Connection, detail: &PrDetail, ts: &str) -> AppResult<()> {
     upsert_node(conn, &detail.node, ts)?;
     let m = &detail.meta;
-    conn.execute("UPDATE gh_pr SET body = ?1 WHERE node_id = ?2", params![m.body, detail.node.id])?;
+    conn.execute(
+        "UPDATE gh_pr SET body = ?1 WHERE node_id = ?2",
+        params![m.body, detail.node.id],
+    )?;
     for r in &m.reviews {
         upsert_user(conn, r.author.as_ref().map(actor_of).as_ref(), ts)?;
     }
@@ -226,21 +236,34 @@ pub fn upsert_pr_detail(conn: &Connection, detail: &PrDetail, ts: &str) -> AppRe
 }
 
 fn actor_of(a: &PrActor) -> Actor {
-    Actor { type_name: None, login: a.login.clone(), avatar_url: a.avatar_url.clone() }
+    Actor {
+        type_name: None,
+        login: a.login.clone(),
+        avatar_url: a.avatar_url.clone(),
+    }
 }
 
 /// The viewer login cached by the inbox (`meta.viewer_login`).
 pub fn viewer_login(conn: &Connection) -> Option<String> {
-    conn.query_row("SELECT value FROM meta WHERE key = 'viewer_login'", [], |r| r.get(0))
-        .optional()
-        .ok()
-        .flatten()
+    conn.query_row(
+        "SELECT value FROM meta WHERE key = 'viewer_login'",
+        [],
+        |r| r.get(0),
+    )
+    .optional()
+    .ok()
+    .flatten()
 }
 
 /// Store a PR's review threads, keyed by the PR's mirrored `updatedAt`, with
 /// the viewer's pending-threads count (mine: last word isn't mine; others':
 /// threads I started that someone answered).
-pub fn upsert_threads(conn: &Connection, pr_id: &str, threads: &[PrThread], ts: &str) -> AppResult<()> {
+pub fn upsert_threads(
+    conn: &Connection,
+    pr_id: &str,
+    threads: &[PrThread],
+    ts: &str,
+) -> AppResult<()> {
     let pr: Option<(Option<String>, Option<String>)> = conn
         .query_row(
             "SELECT gh_updated_at, author_login FROM gh_pr WHERE node_id = ?1",
@@ -252,7 +275,11 @@ pub fn upsert_threads(conn: &Connection, pr_id: &str, threads: &[PrThread], ts: 
         return Ok(());
     };
     let pending = viewer_login(conn).map(|viewer| {
-        let mode = if author.as_deref() == Some(viewer.as_str()) { ThreadMode::Mine } else { ThreadMode::Reviewing };
+        let mode = if author.as_deref() == Some(viewer.as_str()) {
+            ThreadMode::Mine
+        } else {
+            ThreadMode::Reviewing
+        };
         board::pending_threads(threads, &viewer, mode) as i64
     });
     conn.execute(
@@ -261,13 +288,24 @@ pub fn upsert_threads(conn: &Connection, pr_id: &str, threads: &[PrThread], ts: 
          ON CONFLICT(pr_id) DO UPDATE SET
             gh_updated_at = excluded.gh_updated_at, pending_count = excluded.pending_count,
             threads_json = excluded.threads_json, fetched_at = excluded.fetched_at",
-        params![pr_id, updated_at, pending, serde_json::to_string(threads)?, ts],
+        params![
+            pr_id,
+            updated_at,
+            pending,
+            serde_json::to_string(threads)?,
+            ts
+        ],
     )?;
     Ok(())
 }
 
 /// The mirrored node id of `owner/name#number`, if the mirror has it.
-pub fn pr_node_id(conn: &Connection, owner: &str, name: &str, number: i64) -> AppResult<Option<String>> {
+pub fn pr_node_id(
+    conn: &Connection,
+    owner: &str,
+    name: &str,
+    number: i64,
+) -> AppResult<Option<String>> {
     conn.query_row(
         "SELECT p.node_id FROM gh_pr p JOIN repository r ON r.id = p.repo_id
          WHERE r.remote_owner = ?1 COLLATE NOCASE AND r.remote_name = ?2 COLLATE NOCASE
@@ -280,11 +318,17 @@ pub fn pr_node_id(conn: &Connection, owner: &str, name: &str, number: i64) -> Ap
 }
 
 fn parse_json<T: serde::de::DeserializeOwned>(s: Option<String>) -> Vec<T> {
-    s.and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
+    s.and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
 }
 
 /// The review header's PR metadata as last mirrored, if the mirror has the PR.
-pub fn read_pr_meta(conn: &Connection, owner: &str, name: &str, number: i64) -> AppResult<Option<PrMeta>> {
+pub fn read_pr_meta(
+    conn: &Connection,
+    owner: &str,
+    name: &str,
+    number: i64,
+) -> AppResult<Option<PrMeta>> {
     let Some(id) = pr_node_id(conn, owner, name, number)? else {
         return Ok(None);
     };
@@ -309,7 +353,10 @@ pub fn read_pr_meta(conn: &Connection, owner: &str, name: &str, number: i64) -> 
                 url: r.get(2)?,
                 body: r.get::<_, Option<String>>(3)?.unwrap_or_default(),
                 body_images: Default::default(),
-                state: r.get::<_, Option<String>>(4)?.unwrap_or_default().to_uppercase(),
+                state: r
+                    .get::<_, Option<String>>(4)?
+                    .unwrap_or_default()
+                    .to_uppercase(),
                 is_draft: r.get::<_, i64>(5)? != 0,
                 head_ref_oid: r.get(6)?,
                 mergeable: r.get(7)?,
@@ -318,12 +365,20 @@ pub fn read_pr_meta(conn: &Connection, owner: &str, name: &str, number: i64) -> 
                 review_decision: r.get(10)?,
                 auto_merge: auto_merge_method.map(|m| PrAutoMerge {
                     merge_method: Some(m),
-                    enabled_by: auto_merge_by.map(|login| PrActor { login: Some(login), avatar_url: None, typename: None }),
+                    enabled_by: auto_merge_by.map(|login| PrActor {
+                        login: Some(login),
+                        avatar_url: None,
+                        typename: None,
+                    }),
                 }),
                 additions: r.get::<_, Option<i64>>(13)?.unwrap_or(0),
                 deletions: r.get::<_, Option<i64>>(14)?.unwrap_or(0),
                 changed_files: r.get::<_, Option<i64>>(15)?.unwrap_or(0),
-                author: author_login.map(|login| PrActor { login: Some(login), avatar_url: r.get(17).ok().flatten(), typename: None }),
+                author: author_login.map(|login| PrActor {
+                    login: Some(login),
+                    avatar_url: r.get(17).ok().flatten(),
+                    typename: None,
+                }),
                 labels: parse_json(r.get(18)?),
                 reviews: parse_json(r.get(19)?),
                 review_requests: Vec::new(),
@@ -341,12 +396,21 @@ pub fn read_pr_meta(conn: &Connection, owner: &str, name: &str, number: i64) -> 
 }
 
 /// A PR's review threads as last mirrored, if they were ever fetched.
-pub fn read_threads(conn: &Connection, owner: &str, name: &str, number: i64) -> AppResult<Option<Vec<PrThread>>> {
+pub fn read_threads(
+    conn: &Connection,
+    owner: &str,
+    name: &str,
+    number: i64,
+) -> AppResult<Option<Vec<PrThread>>> {
     let Some(id) = pr_node_id(conn, owner, name, number)? else {
         return Ok(None);
     };
     let json: Option<String> = conn
-        .query_row("SELECT threads_json FROM gh_pr_threads WHERE pr_id = ?1", params![id], |r| r.get(0))
+        .query_row(
+            "SELECT threads_json FROM gh_pr_threads WHERE pr_id = ?1",
+            params![id],
+            |r| r.get(0),
+        )
         .optional()?
         .flatten();
     Ok(json.and_then(|s| serde_json::from_str(&s).ok()))
@@ -367,14 +431,24 @@ pub fn upsert_discussion(
          VALUES (?1, ?2, ?3, ?4)
          ON CONFLICT(subject_id) DO UPDATE SET gh_updated_at = excluded.gh_updated_at,
            comments_json = excluded.comments_json, fetched_at = excluded.fetched_at",
-        params![subject_id, gh_updated_at, serde_json::to_string(comments).unwrap_or_else(|_| "[]".into()), ts],
+        params![
+            subject_id,
+            gh_updated_at,
+            serde_json::to_string(comments).unwrap_or_else(|_| "[]".into()),
+            ts
+        ],
     )?;
     Ok(())
 }
 
 /// Store the notified PRs/issues; `subject_node_id` is filled in by the caller
 /// once the subject is resolved into the mirror.
-pub fn upsert_notification(conn: &Connection, n: &crate::gh::Notification, subject_node_id: Option<&str>, ts: &str) -> AppResult<()> {
+pub fn upsert_notification(
+    conn: &Connection,
+    n: &crate::gh::Notification,
+    subject_node_id: Option<&str>,
+    ts: &str,
+) -> AppResult<()> {
     conn.execute(
         "INSERT INTO gh_notification (id, subject_type, subject_node_id, repo, number, title, reason, unread, updated_at, last_read_at, fetched_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
@@ -418,7 +492,10 @@ pub fn gc(conn: &Connection) -> AppResult<usize> {
            AND node_id NOT IN (SELECT subject_node_id FROM gh_notification WHERE subject_node_id IS NOT NULL)",
         params![cutoff],
     )?;
-    n += conn.execute("DELETE FROM gh_notification WHERE updated_at < ?1", params![cutoff])?;
+    n += conn.execute(
+        "DELETE FROM gh_notification WHERE updated_at < ?1",
+        params![cutoff],
+    )?;
     n += conn.execute(
         "DELETE FROM gh_discussion
          WHERE subject_id NOT IN (SELECT node_id FROM gh_pr) AND subject_id NOT IN (SELECT node_id FROM gh_issue)",
@@ -475,7 +552,13 @@ mod tests {
         let conn = open_memory();
         upsert_node(&conn, &pr_node("PR_1", "acme/widget", 1), "now").unwrap();
         upsert_node(&conn, &pr_node("PR_2", "Acme/Widget", 2), "now").unwrap();
-        assert_eq!(count(&conn, "SELECT COUNT(*) FROM repository WHERE registered_at IS NULL"), 1);
+        assert_eq!(
+            count(
+                &conn,
+                "SELECT COUNT(*) FROM repository WHERE registered_at IS NULL"
+            ),
+            1
+        );
         assert_eq!(count(&conn, "SELECT COUNT(*) FROM gh_pr"), 2);
         let (body, ci): (String, String) = conn
             .query_row(
@@ -492,13 +575,26 @@ mod tests {
     fn a_new_head_drops_the_detail_checks() {
         let conn = open_memory();
         upsert_node(&conn, &pr_node("PR_1", "acme/widget", 1), "now").unwrap();
-        conn.execute("UPDATE gh_pr_status SET checks_json = '[]'", []).unwrap();
+        conn.execute("UPDATE gh_pr_status SET checks_json = '[]'", [])
+            .unwrap();
         upsert_node(&conn, &pr_node("PR_1", "acme/widget", 1), "now").unwrap();
-        assert_eq!(count(&conn, "SELECT COUNT(*) FROM gh_pr_status WHERE checks_json IS NOT NULL"), 1);
+        assert_eq!(
+            count(
+                &conn,
+                "SELECT COUNT(*) FROM gh_pr_status WHERE checks_json IS NOT NULL"
+            ),
+            1
+        );
         let mut moved = pr_node("PR_1", "acme/widget", 1);
         moved.head_ref_oid = Some("h2".into());
         upsert_node(&conn, &moved, "now").unwrap();
-        assert_eq!(count(&conn, "SELECT COUNT(*) FROM gh_pr_status WHERE checks_json IS NOT NULL"), 0);
+        assert_eq!(
+            count(
+                &conn,
+                "SELECT COUNT(*) FROM gh_pr_status WHERE checks_json IS NOT NULL"
+            ),
+            0
+        );
     }
 
     #[test]
@@ -510,28 +606,56 @@ mod tests {
         assert_eq!(meta.state, "OPEN");
         assert_eq!(meta.head_ref_oid.as_deref(), Some("h1"));
         assert_eq!(meta.ci_state.as_deref(), Some("SUCCESS"));
-        assert_eq!(meta.author.and_then(|a| a.avatar_url).as_deref(), Some("https://a/o.png"));
+        assert_eq!(
+            meta.author.and_then(|a| a.avatar_url).as_deref(),
+            Some("https://a/o.png")
+        );
     }
 
     #[test]
     fn gc_keeps_referenced_rows_and_drops_old_unreferenced_ones() {
         let conn = open_memory();
-        for (id, n) in [("PR_inbox", 1), ("PR_board", 2), ("PR_target", 3), ("PR_orphan", 4), ("PR_fresh", 5)] {
-            upsert_node(&conn, &pr_node(id, "acme/widget", n), "2000-01-01T00:00:00Z").unwrap();
+        for (id, n) in [
+            ("PR_inbox", 1),
+            ("PR_board", 2),
+            ("PR_target", 3),
+            ("PR_orphan", 4),
+            ("PR_fresh", 5),
+        ] {
+            upsert_node(
+                &conn,
+                &pr_node(id, "acme/widget", n),
+                "2000-01-01T00:00:00Z",
+            )
+            .unwrap();
         }
-        conn.execute("UPDATE gh_pr SET fetched_at = ?1 WHERE node_id = 'PR_fresh'", params![Utc::now().to_rfc3339()])
-            .unwrap();
-        conn.execute("INSERT INTO inbox_entry (id, type, first_seen_at) VALUES ('PR_inbox', 'pr', 'now')", [])
-            .unwrap();
-        conn.execute("INSERT INTO board_card (id, type, tracked_at) VALUES ('PR_board', 'pr', 'now')", [])
-            .unwrap();
+        conn.execute(
+            "UPDATE gh_pr SET fetched_at = ?1 WHERE node_id = 'PR_fresh'",
+            params![Utc::now().to_rfc3339()],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO inbox_entry (id, type, first_seen_at) VALUES ('PR_inbox', 'pr', 'now')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO board_card (id, type, tracked_at) VALUES ('PR_board', 'pr', 'now')",
+            [],
+        )
+        .unwrap();
         conn.execute(
             "INSERT INTO target (repo_id, kind, github_pr_number, gh_pr_id, title, base_ref, head_ref, created_at)
              VALUES (1, 'github_pr', 3, 'PR_target', 't', 'main', 'feat', 'now')",
             [],
         )
         .unwrap();
-        upsert_node(&conn, &pr_node("PR_gone", "other/repo", 9), "2000-01-01T00:00:00Z").unwrap();
+        upsert_node(
+            &conn,
+            &pr_node("PR_gone", "other/repo", 9),
+            "2000-01-01T00:00:00Z",
+        )
+        .unwrap();
 
         gc(&conn).unwrap();
 
@@ -544,10 +668,17 @@ mod tests {
             .unwrap();
         assert_eq!(left, vec!["PR_board", "PR_fresh", "PR_inbox", "PR_target"]);
         assert_eq!(
-            count(&conn, "SELECT COUNT(*) FROM repository WHERE remote_owner = 'other'"),
+            count(
+                &conn,
+                "SELECT COUNT(*) FROM repository WHERE remote_owner = 'other'"
+            ),
             0,
             "auto-added repo with nothing left is dropped"
         );
-        assert_eq!(count(&conn, "SELECT COUNT(*) FROM gh_pr_status"), 4, "facets cascade");
+        assert_eq!(
+            count(&conn, "SELECT COUNT(*) FROM gh_pr_status"),
+            4,
+            "facets cascade"
+        );
     }
 }

@@ -38,7 +38,10 @@ fn updated(scope: Scope, ids: impl IntoIterator<Item = String>) -> MirrorUpdated
         Scope::All => vec![Scope::Inbox, Scope::Board],
         s => vec![s],
     };
-    MirrorUpdated { scopes, ids: ids.into_iter().collect() }
+    MirrorUpdated {
+        scopes,
+        ids: ids.into_iter().collect(),
+    }
 }
 
 /// Run one sync. `notify` is called whenever mirror rows of the scope were
@@ -48,7 +51,10 @@ pub fn run(db: &Db, req: &SyncRequest, notify: &dyn Fn(MirrorUpdated)) -> AppRes
     let scope = req.scope;
     log::debug!(target: "pipeline", "run {scope:?} {:?} discover={}", req.mode, req.discover);
     let viewer = inbox_cmd::cached_or_fetch_viewer(db)?;
-    let mut report = SyncReport { viewer_login: viewer.login.clone(), ..Default::default() };
+    let mut report = SyncReport {
+        viewer_login: viewer.login.clone(),
+        ..Default::default()
+    };
     // Fetched with the full fragment during this run, so not probed again.
     let mut fresh: HashSet<String> = HashSet::new();
     // Whose core facet changed in this run.
@@ -61,7 +67,9 @@ pub fn run(db: &Db, req: &SyncRequest, notify: &dyn Fn(MirrorUpdated)) -> AppRes
         }
     }
 
-    if scope.inbox() && (req.discover || req.mode != Mode::Light || notifications_stale(&db.0.lock().unwrap())) {
+    if scope.inbox()
+        && (req.discover || req.mode != Mode::Light || notifications_stale(&db.0.lock().unwrap()))
+    {
         let ids = sync_notifications(db)?;
         if !ids.is_empty() {
             notify(updated(scope, ids.iter().cloned()));
@@ -72,9 +80,21 @@ pub fn run(db: &Db, req: &SyncRequest, notify: &dyn Fn(MirrorUpdated)) -> AppRes
     let (inbox_ids, board_ids, target_ids) = {
         let conn = db.0.lock().unwrap();
         (
-            if scope.inbox() { inbox_cmd::active_inbox_ids(&conn)? } else { Vec::new() },
-            if scope.board() { board_cmd::tracked_ids(&conn)? } else { Vec::new() },
-            if req.mode == Mode::Full { target_pr_ids(&conn)? } else { Vec::new() },
+            if scope.inbox() {
+                inbox_cmd::active_inbox_ids(&conn)?
+            } else {
+                Vec::new()
+            },
+            if scope.board() {
+                board_cmd::tracked_ids(&conn)?
+            } else {
+                Vec::new()
+            },
+            if req.mode == Mode::Full {
+                target_pr_ids(&conn)?
+            } else {
+                Vec::new()
+            },
         )
     };
     let mut seen = HashSet::new();
@@ -95,12 +115,16 @@ pub fn run(db: &Db, req: &SyncRequest, notify: &dyn Fn(MirrorUpdated)) -> AppRes
         entities.clone()
     } else {
         // Visible ids of a Forced sync are refetched anyway, so not probed.
-        let (mut out, probed): (Vec<String>, Vec<String>) =
-            entities.iter().cloned().partition(|id| visible.contains(id.as_str()));
+        let (mut out, probed): (Vec<String>, Vec<String>) = entities
+            .iter()
+            .cloned()
+            .partition(|id| visible.contains(id.as_str()));
         report.probed = probed.len();
         let keys = mirror_keys(&db.0.lock().unwrap(), &probed)?;
-        let (full, cheap): (Vec<String>, Vec<String>) =
-            probed.iter().cloned().partition(|id| keys.get(id).is_some_and(MirrorKey::is_open_pr));
+        let (full, cheap): (Vec<String>, Vec<String>) = probed
+            .iter()
+            .cloned()
+            .partition(|id| keys.get(id).is_some_and(MirrorKey::is_open_pr));
         let probes = mirror::fetch::probe(&full, &cheap);
         for id in &probed {
             match probes.get(id) {
@@ -127,7 +151,10 @@ pub fn run(db: &Db, req: &SyncRequest, notify: &dyn Fn(MirrorUpdated)) -> AppRes
         let mut conn = db.0.lock().unwrap();
         let tx = conn.transaction()?;
         let closed = closed_in_mirror(&tx, &inbox_ids)?;
-        for id in inbox_ids.iter().filter(|id| closed.contains(*id) || gone.contains(id)) {
+        for id in inbox_ids
+            .iter()
+            .filter(|id| closed.contains(*id) || gone.contains(id))
+        {
             if inbox_cmd::archive_closed_item(&tx, id, &ts)? {
                 report.closed_count += 1;
             }
@@ -155,8 +182,11 @@ pub fn run(db: &Db, req: &SyncRequest, notify: &dyn Fn(MirrorUpdated)) -> AppRes
         }
         if scope.board() {
             inbox_cmd::set_meta(&conn, "board_last_refresh_at", &ts)?;
-            report.card_count =
-                conn.query_row("SELECT COUNT(*) FROM board_card WHERE archived_at IS NULL", [], |r| r.get(0))?;
+            report.card_count = conn.query_row(
+                "SELECT COUNT(*) FROM board_card WHERE archived_at IS NULL",
+                [],
+                |r| r.get(0),
+            )?;
         }
     }
     if req.mode == Mode::Full {
@@ -205,16 +235,20 @@ fn discover(
             .collect();
         (merged, authored)
     } else {
-        let authored = mirror::fetch::search(AUTHORED_SEARCH, AUTHORED_SEARCH_LIMIT).unwrap_or_else(|e| {
-            crate::logging::warn(&format!("[sync.discover] authored search failed: {e}"));
-            Vec::new()
-        });
+        let authored = mirror::fetch::search(AUTHORED_SEARCH, AUTHORED_SEARCH_LIMIT)
+            .unwrap_or_else(|e| {
+                crate::logging::warn(&format!("[sync.discover] authored search failed: {e}"));
+                Vec::new()
+            });
         (Vec::new(), authored)
     };
 
     let excluded = super::exclude::ExcludedRepos::load(&db.0.lock().unwrap());
     let is_excluded = |n: &Node| n.repo().is_some_and(|r| excluded.matches(r));
-    let merged: Vec<inbox::ReasonedNode> = merged.into_iter().filter(|r| !is_excluded(&r.node)).collect();
+    let merged: Vec<inbox::ReasonedNode> = merged
+        .into_iter()
+        .filter(|r| !is_excluded(&r.node))
+        .collect();
     let authored: Vec<Node> = authored.into_iter().filter(|n| !is_excluded(n)).collect();
 
     let nodes: Vec<&Node> = merged.iter().map(|r| &r.node).chain(&authored).collect();
@@ -264,13 +298,18 @@ fn updated_at_of(conn: &Connection, ids: &[String]) -> AppResult<HashMap<String,
          UNION ALL SELECT node_id, gh_updated_at FROM gh_issue WHERE node_id IN ({ph})"
     );
     let mut stmt = conn.prepare(&sql)?;
-    let rows = stmt.query_map(params_from_iter(ids.iter().chain(ids)), |r| Ok((r.get(0)?, r.get(1)?)))?;
+    let rows = stmt.query_map(params_from_iter(ids.iter().chain(ids)), |r| {
+        Ok((r.get(0)?, r.get(1)?))
+    })?;
     rows.collect::<rusqlite::Result<_>>().map_err(Into::into)
 }
 
 fn target_pr_ids(conn: &Connection) -> AppResult<Vec<String>> {
-    let mut stmt = conn.prepare("SELECT DISTINCT gh_pr_id FROM target WHERE gh_pr_id IS NOT NULL")?;
-    let ids = stmt.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
+    let mut stmt =
+        conn.prepare("SELECT DISTINCT gh_pr_id FROM target WHERE gh_pr_id IS NOT NULL")?;
+    let ids = stmt
+        .query_map([], |r| r.get(0))?
+        .collect::<rusqlite::Result<_>>()?;
     Ok(ids)
 }
 
@@ -429,17 +468,41 @@ fn sync_threads(db: &Db, scope: Scope, mode: Mode, visible: &HashSet<&str>) -> A
         number: i64,
     }
 
-    type Row = (String, String, i64, String, Option<String>, bool, Option<String>);
-    fn split(rows: Vec<Row>, started: DateTime<Utc>, force_all: bool, visible: &HashSet<&str>) -> Vec<Job> {
+    type Row = (
+        String,
+        String,
+        i64,
+        String,
+        Option<String>,
+        bool,
+        Option<String>,
+    );
+    fn split(
+        rows: Vec<Row>,
+        started: DateTime<Utc>,
+        force_all: bool,
+        visible: &HashSet<&str>,
+    ) -> Vec<Job> {
         rows.into_iter()
             .filter(|(id, _, _, updated_at, stored, has_count, fetched_at)| {
                 force_all
                     || visible.contains(id.as_str())
-                    || threads_need_fetch(stored.as_deref(), updated_at, *has_count, fetched_at.as_deref(), started)
+                    || threads_need_fetch(
+                        stored.as_deref(),
+                        updated_at,
+                        *has_count,
+                        fetched_at.as_deref(),
+                        started,
+                    )
             })
             .filter_map(|(id, repo, number, ..)| {
                 let (owner, name) = repo.split_once('/')?;
-                Some(Job { id, owner: owner.to_string(), name: name.to_string(), number })
+                Some(Job {
+                    id,
+                    owner: owner.to_string(),
+                    name: name.to_string(),
+                    number,
+                })
             })
             .collect()
     }
@@ -458,7 +521,17 @@ fn sync_threads(db: &Db, scope: Scope, mode: Mode, visible: &HashSet<&str>) -> A
                 board_cmd::CARD_VIEW
             ))?;
             let rows: Vec<Row> = stmt
-                .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?)))?
+                .query_map([], |r| {
+                    Ok((
+                        r.get(0)?,
+                        r.get(1)?,
+                        r.get(2)?,
+                        r.get(3)?,
+                        r.get(4)?,
+                        r.get(5)?,
+                        r.get(6)?,
+                    ))
+                })?
                 .collect::<rusqlite::Result<_>>()?;
             jobs.extend(split(rows, started, mode == Mode::Full, visible));
         }
@@ -473,7 +546,17 @@ fn sync_threads(db: &Db, scope: Scope, mode: Mode, visible: &HashSet<&str>) -> A
                  WHERE p.state = 'open' OR th.pr_id IS NULL",
             )?;
             let rows: Vec<Row> = stmt
-                .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?)))?
+                .query_map([], |r| {
+                    Ok((
+                        r.get(0)?,
+                        r.get(1)?,
+                        r.get(2)?,
+                        r.get(3)?,
+                        r.get(4)?,
+                        r.get(5)?,
+                        r.get(6)?,
+                    ))
+                })?
                 .collect::<rusqlite::Result<_>>()?;
             jobs.extend(split(rows, started, false, visible));
         }
@@ -488,7 +571,10 @@ fn sync_threads(db: &Db, scope: Scope, mode: Mode, visible: &HashSet<&str>) -> A
     let mine: HashSet<String> = mine.into_iter().collect();
     let jobs: Vec<Job> = jobs.into_iter().filter(|j| mine.contains(&j.id)).collect();
     let results = inbox::concurrent_map(jobs, THREADS_CONCURRENCY, |job| {
-        (job.id.clone(), crate::gh::pr_review_threads(&job.owner, &job.name, job.number).ok())
+        (
+            job.id.clone(),
+            crate::gh::pr_review_threads(&job.owner, &job.name, job.number).ok(),
+        )
     });
     let n = results.len();
     {
@@ -523,7 +609,12 @@ fn notifications_stale(conn: &Connection) -> bool {
 }
 
 /// `(node id, fetched_at)` of a PR/issue the mirror already knows.
-fn mirror_subject(conn: &Connection, owner: &str, name: &str, number: i64) -> Option<(String, String)> {
+fn mirror_subject(
+    conn: &Connection,
+    owner: &str,
+    name: &str,
+    number: i64,
+) -> Option<(String, String)> {
     ["gh_pr", "gh_issue"].iter().find_map(|table| {
         conn.query_row(
             &format!(
@@ -551,8 +642,12 @@ fn sync_notifications(db: &Db) -> AppResult<Vec<String>> {
 
     let since = {
         let conn = db.0.lock().unwrap();
-        let newest: Option<String> =
-            conn.query_row("SELECT MAX(updated_at) FROM gh_notification", [], |r| r.get(0)).ok().flatten();
+        let newest: Option<String> = conn
+            .query_row("SELECT MAX(updated_at) FROM gh_notification", [], |r| {
+                r.get(0)
+            })
+            .ok()
+            .flatten();
         newest
             .and_then(|t| DateTime::parse_from_rfc3339(&t).ok())
             .map(|t| (t - chrono::Duration::minutes(1)).with_timezone(&Utc))
@@ -562,7 +657,10 @@ fn sync_notifications(db: &Db) -> AppResult<Vec<String>> {
     };
     let excluded = super::exclude::ExcludedRepos::load(&db.0.lock().unwrap());
     let notifications = match crate::gh::fetch_notifications(&since) {
-        Ok(n) => n.into_iter().filter(|n| !excluded.matches(&format!("{}/{}", n.owner, n.name))).collect::<Vec<_>>(),
+        Ok(n) => n
+            .into_iter()
+            .filter(|n| !excluded.matches(&format!("{}/{}", n.owner, n.name)))
+            .collect::<Vec<_>>(),
         Err(e) => {
             crate::logging::warn(&format!("[sync.notifications] fetch failed: {e}"));
             drop(claim);
@@ -645,8 +743,12 @@ fn sync_discussions(db: &Db, mode: Mode, visible: &HashSet<&str>) -> AppResult<u
     let flight = inflight::global();
     let (claim, mine, others) = flight.claim("discussion", &ids);
     let mine: HashSet<String> = mine.into_iter().collect();
-    let jobs: Vec<(String, Option<String>)> = jobs.into_iter().filter(|(id, _)| mine.contains(id)).collect();
-    let fetched = mirror::fetch::discussions(&jobs.iter().map(|(id, _)| id.clone()).collect::<Vec<_>>());
+    let jobs: Vec<(String, Option<String>)> = jobs
+        .into_iter()
+        .filter(|(id, _)| mine.contains(id))
+        .collect();
+    let fetched =
+        mirror::fetch::discussions(&jobs.iter().map(|(id, _)| id.clone()).collect::<Vec<_>>());
     let n = fetched.len();
     {
         let conn = db.0.lock().unwrap();
@@ -655,7 +757,13 @@ fn sync_discussions(db: &Db, mode: Mode, visible: &HashSet<&str>) -> AppResult<u
         for (id, current) in &jobs {
             // A failed batch is absent from the map: keep the previous rows.
             if let Some(Some(d)) = fetched.remove(id) {
-                mirror::store::upsert_discussion(&conn, id, current.as_deref(), &d.into_comments(), &ts)?;
+                mirror::store::upsert_discussion(
+                    &conn,
+                    id,
+                    current.as_deref(),
+                    &d.into_comments(),
+                    &ts,
+                )?;
             }
         }
     }
@@ -676,11 +784,16 @@ fn full_extras(db: &Db) -> AppResult<()> {
         let conn = db.0.lock().unwrap();
         conn.execute("UPDATE repo_sync SET default_branch_checked_at = NULL", [])?;
         let mut stmt = conn.prepare("SELECT id FROM repository WHERE local_path IS NOT NULL")?;
-        let ids = stmt.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
+        let ids = stmt
+            .query_map([], |r| r.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
         ids
     };
     let results = inbox::concurrent_map(repo_ids, FETCH_CONCURRENCY, |id| {
-        (*id, crate::repo_sync::fetch_repo(db, *id, FULL_FETCH_MIN_INTERVAL))
+        (
+            *id,
+            crate::repo_sync::fetch_repo(db, *id, FULL_FETCH_MIN_INTERVAL),
+        )
     });
     for (id, r) in results {
         if let Err(e) = r {
@@ -740,9 +853,15 @@ mod tests {
             ("state", |k| k.state = Some("closed".into())),
             ("draft", |k| k.is_draft = true),
             ("review decision", |k| k.review_decision = None),
-            ("merge state", |k| k.merge_state_status = Some("BEHIND".into())),
-            ("auto-merge", |k| k.auto_merge_method = Some("SQUASH".into())),
-            ("CI, which updatedAt misses", |k| k.ci_state = Some("PENDING".into())),
+            ("merge state", |k| {
+                k.merge_state_status = Some("BEHIND".into())
+            }),
+            ("auto-merge", |k| {
+                k.auto_merge_method = Some("SQUASH".into())
+            }),
+            ("CI, which updatedAt misses", |k| {
+                k.ci_state = Some("PENDING".into())
+            }),
             ("closing refs never stored", |k| k.has_closing = false),
         ];
         for (what, change) in cases {
@@ -754,21 +873,50 @@ mod tests {
 
     #[test]
     fn a_cheap_probe_compares_only_updated_at_and_state() {
-        let p = Probe { cheap: true, ..probe(serde_json::json!({
-            "__typename": "PullRequest", "id": "PR_1", "updatedAt": "t1", "state": "OPEN", "merged": false
-        })) };
-        let stale_keys = MirrorKey { ci_state: Some("PENDING".into()), has_closing: false, ..pr_key() };
+        let p = Probe {
+            cheap: true,
+            ..probe(serde_json::json!({
+                "__typename": "PullRequest", "id": "PR_1", "updatedAt": "t1", "state": "OPEN", "merged": false
+            }))
+        };
+        let stale_keys = MirrorKey {
+            ci_state: Some("PENDING".into()),
+            has_closing: false,
+            ..pr_key()
+        };
         assert!(!needs_refetch(&p, Some(&stale_keys)));
-        assert!(needs_refetch(&p, Some(&MirrorKey { updated_at: Some("t0".into()), ..pr_key() })));
+        assert!(needs_refetch(
+            &p,
+            Some(&MirrorKey {
+                updated_at: Some("t0".into()),
+                ..pr_key()
+            })
+        ));
     }
 
     #[test]
     fn issues_compare_only_updated_at_and_state() {
-        let p = probe(serde_json::json!({ "__typename": "Issue", "id": "I_1", "updatedAt": "t1", "state": "OPEN" }));
-        let key = MirrorKey { updated_at: Some("t1".into()), state: Some("open".into()), has_closing: true, ..Default::default() };
+        let p = probe(
+            serde_json::json!({ "__typename": "Issue", "id": "I_1", "updatedAt": "t1", "state": "OPEN" }),
+        );
+        let key = MirrorKey {
+            updated_at: Some("t1".into()),
+            state: Some("open".into()),
+            has_closing: true,
+            ..Default::default()
+        };
         assert!(!needs_refetch(&p, Some(&key)));
-        assert!(needs_refetch(&p, Some(&MirrorKey { state: Some("closed".into()), ..key.clone() })));
-        assert!(needs_refetch(&p, Some(&MirrorKey { is_pr: true, ..key })), "type changed");
+        assert!(needs_refetch(
+            &p,
+            Some(&MirrorKey {
+                state: Some("closed".into()),
+                ..key.clone()
+            })
+        ));
+        assert!(
+            needs_refetch(&p, Some(&MirrorKey { is_pr: true, ..key })),
+            "type changed"
+        );
     }
 
     #[test]
@@ -785,7 +933,10 @@ mod tests {
         mirror::store::upsert_node(&conn, &node, "now").unwrap();
         let keys = mirror_keys(&conn, &["PR_1".to_string(), "missing".to_string()]).unwrap();
         assert_eq!(keys.len(), 1);
-        assert!(!needs_refetch(&pr_probe(), keys.get("PR_1")), "a fresh upsert matches its own probe");
+        assert!(
+            !needs_refetch(&pr_probe(), keys.get("PR_1")),
+            "a fresh upsert matches its own probe"
+        );
     }
 
     #[test]
@@ -806,9 +957,15 @@ mod tests {
             [repo],
         )
         .unwrap();
-        let ids: Vec<String> = ["PR_open", "PR_merged", "I_closed"].iter().map(|s| s.to_string()).collect();
+        let ids: Vec<String> = ["PR_open", "PR_merged", "I_closed"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
         let closed = closed_in_mirror(&conn, &ids).unwrap();
-        assert_eq!(closed, HashSet::from(["PR_merged".to_string(), "I_closed".to_string()]));
+        assert_eq!(
+            closed,
+            HashSet::from(["PR_merged".to_string(), "I_closed".to_string()])
+        );
     }
 
     #[test]
@@ -817,11 +974,26 @@ mod tests {
         let recent = now.to_rfc3339();
         let recent = Some(recent.as_str());
         assert!(!threads_need_fetch(Some("t1"), "t1", true, recent, now));
-        assert!(threads_need_fetch(Some("t0"), "t1", true, recent, now), "PR updated");
-        assert!(threads_need_fetch(None, "t1", true, recent, now), "newly tracked");
-        assert!(threads_need_fetch(Some("t1"), "t1", false, recent, now), "never counted");
-        assert!(threads_need_fetch(Some("t1"), "t1", true, None, now), "never fetched");
+        assert!(
+            threads_need_fetch(Some("t0"), "t1", true, recent, now),
+            "PR updated"
+        );
+        assert!(
+            threads_need_fetch(None, "t1", true, recent, now),
+            "newly tracked"
+        );
+        assert!(
+            threads_need_fetch(Some("t1"), "t1", false, recent, now),
+            "never counted"
+        );
+        assert!(
+            threads_need_fetch(Some("t1"), "t1", true, None, now),
+            "never fetched"
+        );
         let later = now + THREADS_MAX_AGE;
-        assert!(threads_need_fetch(Some("t1"), "t1", true, recent, later), "resolutions don't bump updatedAt");
+        assert!(
+            threads_need_fetch(Some("t1"), "t1", true, recent, later),
+            "resolutions don't bump updatedAt"
+        );
     }
 }

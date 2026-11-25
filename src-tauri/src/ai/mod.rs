@@ -18,8 +18,8 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::run_usage::{RunTag, RunUsage};
 use crate::error::{AppError, AppResult};
+use crate::run_usage::{RunTag, RunUsage};
 
 pub mod claude;
 pub mod codex;
@@ -145,11 +145,26 @@ pub struct StreamRun<'a> {
 pub enum Event {
     Text(String),
     /// `id` pairs the call with its [`Event::ToolResult`]; empty when the harness has none.
-    ToolCall { id: String, name: String, input: Value },
-    ToolResult { id: String, ok: bool, text: String },
-    Final { ok: bool, text: String, usage: RunUsage },
+    ToolCall {
+        id: String,
+        name: String,
+        input: Value,
+    },
+    ToolResult {
+        id: String,
+        ok: bool,
+        text: String,
+    },
+    Final {
+        ok: bool,
+        text: String,
+        usage: RunUsage,
+    },
     /// Anything else (system lines, unknown types, unparseable lines as kind `raw`).
-    Other { kind: String, raw: Value },
+    Other {
+        kind: String,
+        raw: Value,
+    },
 }
 
 /// Version of the normalized shape (`{"v":1,"events":[..]}`); bump on an incompatible change.
@@ -183,7 +198,11 @@ impl Event {
             }
             Event::ToolCall { id, name, input } => {
                 let raw = input.to_string();
-                let (input, cut) = if raw.len() > max_bytes { (text(&raw).0, true) } else { (input.clone(), false) };
+                let (input, cut) = if raw.len() > max_bytes {
+                    (text(&raw).0, true)
+                } else {
+                    (input.clone(), false)
+                };
                 json!({ "type": "tool_call", "id": id, "name": name, "input": input, "truncated": cut })
             }
             Event::ToolResult { id, ok, text: t } => {
@@ -206,7 +225,11 @@ impl Event {
             }
             Event::Other { kind, raw } => {
                 let s = raw.to_string();
-                let (raw, cut) = if s.len() > max_bytes { (text(&s).0, true) } else { (raw.clone(), false) };
+                let (raw, cut) = if s.len() > max_bytes {
+                    (text(&s).0, true)
+                } else {
+                    (raw.clone(), false)
+                };
                 json!({ "type": "other", "kind": kind, "raw": raw, "truncated": cut })
             }
         };
@@ -220,9 +243,11 @@ impl Event {
     /// The final status, text and usage, when this is the final event.
     pub fn as_final(&self) -> Option<FinalResult> {
         match self {
-            Event::Final { ok, text, usage } => {
-                Some(FinalResult { is_error: !ok, text: Some(text.clone()), usage: usage.clone() })
-            }
+            Event::Final { ok, text, usage } => Some(FinalResult {
+                is_error: !ok,
+                text: Some(text.clone()),
+                usage: usage.clone(),
+            }),
             _ => None,
         }
     }
@@ -386,8 +411,16 @@ impl RunAcc {
         if fin.text.as_deref().is_none_or(str::is_empty) {
             fin.text = Some(self.text.clone());
         }
-        let session_id = fin.usage.session_id.take().or_else(|| self.session_id.clone());
-        fin.usage = RunUsage { num_turns: self.steps, session_id, ..self.usage.clone() };
+        let session_id = fin
+            .usage
+            .session_id
+            .take()
+            .or_else(|| self.session_id.clone());
+        fin.usage = RunUsage {
+            num_turns: self.steps,
+            session_id,
+            ..self.usage.clone()
+        };
         fin
     }
 }
@@ -411,7 +444,11 @@ pub fn live_sessions_except(skip: &str) -> Vec<AgentSession> {
 }
 
 fn live_sessions_of(harnesses: &[&dyn Harness], skip: &str) -> Vec<AgentSession> {
-    harnesses.iter().filter(|h| h.id() != skip && h.available()).flat_map(|h| h.live_sessions()).collect()
+    harnesses
+        .iter()
+        .filter(|h| h.id() != skip && h.available())
+        .flat_map(|h| h.live_sessions())
+        .collect()
 }
 
 /// The harness with this id (`"claude"`).
@@ -428,9 +465,14 @@ pub fn harness_for() -> &'static dyn Harness {
 
 /// The harness an interactive session launches on: `requested` (the picker's choice) when given,
 /// else the one the `sessions` feature profile selects.
-pub fn sessions_harness(conn: &rusqlite::Connection, requested: Option<&str>) -> AppResult<&'static dyn Harness> {
+pub fn sessions_harness(
+    conn: &rusqlite::Connection,
+    requested: Option<&str>,
+) -> AppResult<&'static dyn Harness> {
     match requested.map(str::trim).filter(|h| !h.is_empty()) {
-        Some(id) => harness_by_id(id).ok_or_else(|| AppError::Other(format!("unknown harness '{id}'"))),
+        Some(id) => {
+            harness_by_id(id).ok_or_else(|| AppError::Other(format!("unknown harness '{id}'")))
+        }
         None => {
             let resolved = profiles::resolve_feature(conn, profiles::Feature::Sessions);
             resolved.ensure_local("An interactive session")?;
@@ -441,9 +483,12 @@ pub fn sessions_harness(conn: &rusqlite::Connection, requested: Option<&str>) ->
 
 /// The argv that opens an interactive session on `harness`.
 pub fn argv_of(harness: &dyn Harness, opts: &Interactive<'_>) -> AppResult<Vec<String>> {
-    harness
-        .interactive_argv(opts)
-        .ok_or_else(|| AppError::Other(format!("{} cannot open an interactive session like this", harness.name())))
+    harness.interactive_argv(opts).ok_or_else(|| {
+        AppError::Other(format!(
+            "{} cannot open an interactive session like this",
+            harness.name()
+        ))
+    })
 }
 
 /// The argv of an interactive session of the harness the `sessions` feature profile selects.
@@ -452,7 +497,11 @@ pub fn interactive_argv(db: &crate::db::Db, opts: &Interactive<'_>) -> AppResult
 }
 
 /// Like [`interactive_argv`], on the harness `requested` (a launch-time pick) when given.
-pub fn interactive_argv_with(db: &crate::db::Db, requested: Option<&str>, opts: &Interactive<'_>) -> AppResult<Vec<String>> {
+pub fn interactive_argv_with(
+    db: &crate::db::Db,
+    requested: Option<&str>,
+    opts: &Interactive<'_>,
+) -> AppResult<Vec<String>> {
     let harness = sessions_harness(&db.0.lock().unwrap(), requested)?;
     argv_of(harness, opts)
 }
@@ -487,7 +536,10 @@ pub fn check_caps(harness: &dyn Harness, what: &str, needs: &Needs) -> AppResult
         None
     };
     match missing {
-        Some(missing) => Err(AppError::Other(format!("{} can't run {what}: it does not support {missing}", harness.name()))),
+        Some(missing) => Err(AppError::Other(format!(
+            "{} can't run {what}: it does not support {missing}",
+            harness.name()
+        ))),
         None => Ok(()),
     }
 }
@@ -592,8 +644,26 @@ mod tests {
 
     #[test]
     fn live_sessions_merge_available_harnesses_in_order_minus_the_skipped() {
-        let (a, b, c) = (Listing { id: "a", available: true }, Listing { id: "b", available: false }, Listing { id: "c", available: true });
-        let ids = |skip| live_sessions_of(&[&a, &b, &c], skip).iter().map(|s| s.harness.clone()).collect::<Vec<_>>();
+        let (a, b, c) = (
+            Listing {
+                id: "a",
+                available: true,
+            },
+            Listing {
+                id: "b",
+                available: false,
+            },
+            Listing {
+                id: "c",
+                available: true,
+            },
+        );
+        let ids = |skip| {
+            live_sessions_of(&[&a, &b, &c], skip)
+                .iter()
+                .map(|s| s.harness.clone())
+                .collect::<Vec<_>>()
+        };
         assert_eq!(ids("none"), ["a", "c"]);
         assert_eq!(ids("a"), ["c"]);
     }
@@ -603,7 +673,10 @@ mod tests {
         let conn = crate::db::open_memory();
         assert_eq!(sessions_harness(&conn, None).unwrap().id(), "claude");
         assert_eq!(sessions_harness(&conn, Some("")).unwrap().id(), "claude");
-        assert_eq!(sessions_harness(&conn, Some("claude")).unwrap().id(), "claude");
+        assert_eq!(
+            sessions_harness(&conn, Some("claude")).unwrap().id(),
+            "claude"
+        );
         assert!(sessions_harness(&conn, Some("nope")).is_err());
     }
 
@@ -612,19 +685,41 @@ mod tests {
         let mut conn = crate::db::open_memory();
         let host = crate::remote::host::save(
             &conn,
-            crate::remote::host::HostInput { id: None, name: "koza".into(), ssh_target: "koza".into(), remote_endpoint: "7777".into(), enabled: true },
+            crate::remote::host::HostInput {
+                id: None,
+                name: "koza".into(),
+                ssh_target: "koza".into(),
+                remote_endpoint: "7777".into(),
+                enabled: true,
+            },
         )
         .unwrap();
         let input = profiles::AiProfileInput {
-            id: None, name: "R".into(), harness: "claude".into(), model: String::new(), settings: serde_json::json!({}), host_id: Some(host.id), is_default: false,
+            id: None,
+            name: "R".into(),
+            harness: "claude".into(),
+            model: String::new(),
+            settings: serde_json::json!({}),
+            host_id: Some(host.id),
+            is_default: false,
         };
         let id = profiles::save(&mut conn, input).unwrap().id;
         // The mapping is refused now; data written before that rule must still not reach a remote host.
-        conn.execute("INSERT INTO meta (key, value) VALUES ('ai_profile.sessions', ?1)", [id.to_string()]).unwrap();
+        conn.execute(
+            "INSERT INTO meta (key, value) VALUES ('ai_profile.sessions', ?1)",
+            [id.to_string()],
+        )
+        .unwrap();
         let err = sessions_harness(&conn, None).err().unwrap().to_string();
-        assert!(err.contains("An interactive session runs on this machine only"), "{err}");
+        assert!(
+            err.contains("An interactive session runs on this machine only"),
+            "{err}"
+        );
         // an explicit pick in the launch menu is a local harness
-        assert_eq!(sessions_harness(&conn, Some("claude")).unwrap().id(), "claude");
+        assert_eq!(
+            sessions_harness(&conn, Some("claude")).unwrap().id(),
+            "claude"
+        );
     }
 
     #[test]
@@ -672,16 +767,30 @@ mod tests {
     }
 
     fn limited(access_levels: Vec<Access>, tools: bool, tool_allowlist: bool) -> Limited {
-        Limited(Caps { tools, tool_allowlist, access_levels, ..ClaudeCode.caps() })
+        Limited(Caps {
+            tools,
+            tool_allowlist,
+            access_levels,
+            ..ClaudeCode.caps()
+        })
     }
 
     fn needs(access: Access, tools: bool, tool_allowlist: bool) -> Needs {
-        Needs { access, tools, tool_allowlist }
+        Needs {
+            access,
+            tools,
+            tool_allowlist,
+        }
     }
 
     #[test]
     fn claude_satisfies_every_neutral_need() {
-        for access in [Access::ReadOnly, Access::Edit, Access::Full, Access::Native("plan".into())] {
+        for access in [
+            Access::ReadOnly,
+            Access::Edit,
+            Access::Full,
+            Access::Native("plan".into()),
+        ] {
             check_caps(&ClaudeCode, "r", &needs(access, true, true)).unwrap();
         }
     }
@@ -693,7 +802,10 @@ mod tests {
         assert!(err(needs(Access::Full, false, false)).contains("full access"));
         assert!(err(needs(Access::ReadOnly, true, false)).contains("tools"));
         let e = err(needs(Access::ReadOnly, false, true));
-        assert!(e.contains("a tool allowlist") && e.contains("Limited") && e.contains("“Babysit”"), "{e}");
+        assert!(
+            e.contains("a tool allowlist") && e.contains("Limited") && e.contains("“Babysit”"),
+            "{e}"
+        );
         check_caps(&h, "r", &needs(Access::ReadOnly, false, false)).unwrap();
     }
 }

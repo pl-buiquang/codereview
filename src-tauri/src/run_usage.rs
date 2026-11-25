@@ -22,7 +22,16 @@ pub struct RunTag {
 
 impl RunTag {
     pub fn new(feature: &'static str) -> Self {
-        Self { feature, variant: None, review_id: None, target_id: None, label: String::new(), model: String::new(), harness: "claude", host_id: None }
+        Self {
+            feature,
+            variant: None,
+            review_id: None,
+            target_id: None,
+            label: String::new(),
+            model: String::new(),
+            harness: "claude",
+            host_id: None,
+        }
     }
 
     pub fn variant(mut self, variant: impl Into<String>) -> Self {

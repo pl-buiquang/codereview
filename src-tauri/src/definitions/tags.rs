@@ -68,7 +68,10 @@ pub fn definitions_in(parser: &Parser, source: &str, symbol: &str) -> AppResult<
         }
         let line = node.start_position().row as u32 + 1;
         if !defs.iter().any(|d| d.line == line) {
-            defs.push(Def { line, kind: kind.to_string() });
+            defs.push(Def {
+                line,
+                kind: kind.to_string(),
+            });
         }
     }
     defs.sort_by_key(|d| d.line);
@@ -126,7 +129,10 @@ end
         assert_eq!(defs("a.rb", src, "paid"), vec![(5, "macro".into())]);
         assert_eq!(defs("a.rb", src, "items"), vec![(6, "macro".into())]);
         assert_eq!(defs("a.rb", src, "build"), vec![(8, "method".into())]);
-        assert_eq!(defs("a.rb", src, "total_with_tax?"), vec![(11, "method".into())]);
+        assert_eq!(
+            defs("a.rb", src, "total_with_tax?"),
+            vec![(11, "method".into())]
+        );
         assert!(defs("a.rb", src, "fake_in_comment").is_empty());
         assert!(defs("a.rb", src, "FakeInString").is_empty());
         assert!(defs("a.rb", src, "where").is_empty());
@@ -156,13 +162,19 @@ function helper() {}
         assert_eq!(defs("a.ts", src, "helper"), vec![(10, "function".into())]);
         assert!(defs("a.ts", src, "local").is_empty()); // function-local
         assert!(defs("a.ts", src, "inComment").is_empty());
-        assert_eq!(defs("b.tsx", "export function App() { return <div/>; }", "App").len(), 1);
+        assert_eq!(
+            defs("b.tsx", "export function App() { return <div/>; }", "App").len(),
+            1
+        );
         assert_eq!(defs("c.jsx", "export class A { run() {} }", "run").len(), 1);
     }
 
     #[test]
     fn python_rust_csharp_declarations() {
-        assert_eq!(defs("a.py", "X = 1\nclass A:\n    def run(self): pass\n", "run").len(), 1);
+        assert_eq!(
+            defs("a.py", "X = 1\nclass A:\n    def run(self): pass\n", "run").len(),
+            1
+        );
         assert_eq!(defs("a.py", "X = 1\nclass A:\n    pass\n", "X").len(), 1);
         let rs = "pub struct Foo;\nimpl Foo { pub fn go(&self) {} }\nconst N: u8 = 1;\n";
         assert_eq!(defs("a.rs", rs, "Foo"), vec![(1, "struct".into())]);

@@ -7,11 +7,13 @@ use serde::Serialize;
 use tauri::State;
 
 use crate::ai::profiles::{self, Feature, Resolved};
-use crate::ai::{Access, OneShot, SessionMode, SystemPrompt, SystemPromptMode, ToolPolicy, TurnResult};
-use crate::run_usage::RunTag;
+use crate::ai::{
+    Access, OneShot, SessionMode, SystemPrompt, SystemPromptMode, ToolPolicy, TurnResult,
+};
 use crate::db::models::{Chat, ChatMessage, Target};
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
+use crate::run_usage::RunTag;
 use crate::worktree;
 
 fn now() -> String {
@@ -60,9 +62,19 @@ fn call_turn(
     text: &str,
 ) -> AppResult<TurnResult> {
     let file_tag = format!("chat_{session_id}");
-    let mut req = turn_request(review_id, session_id, &file_tag, is_first_turn, model, system_prompt, worktree_path, text);
+    let mut req = turn_request(
+        review_id,
+        session_id,
+        &file_tag,
+        is_first_turn,
+        model,
+        system_prompt,
+        worktree_path,
+        text,
+    );
     req.usage_tag = req.usage_tag.harness(resolved.harness.id());
-    req.extra_args.extend(resolved.harness.settings_args(&resolved.settings));
+    req.extra_args
+        .extend(resolved.harness.settings_args(&resolved.settings));
     resolved.harness.one_shot(&req)
 }
 
@@ -79,17 +91,29 @@ fn turn_request<'a>(
 ) -> OneShot<'a> {
     OneShot {
         model,
-        system_prompt: if is_first_turn { system_prompt.map(SystemPrompt::Text) } else { None },
+        system_prompt: if is_first_turn {
+            system_prompt.map(SystemPrompt::Text)
+        } else {
+            None
+        },
         system_prompt_mode: SystemPromptMode::Append,
         file_tag,
         prompt: text,
         cwd: worktree_path,
         extra_dirs: Vec::new(),
-        tools: ToolPolicy::Allowlist(["Bash", "Read", "Glob", "Grep", "Edit", "Write"].map(String::from).to_vec()),
+        tools: ToolPolicy::Allowlist(
+            ["Bash", "Read", "Glob", "Grep", "Edit", "Write"]
+                .map(String::from)
+                .to_vec(),
+        ),
         // Explicit, so the user's own `~/.claude/settings.json` (e.g. a `defaultMode: plan`)
         // never leaks into this non-interactive session.
         access: Access::Edit,
-        session: if is_first_turn { SessionMode::New(session_id) } else { SessionMode::Resume(session_id) },
+        session: if is_first_turn {
+            SessionMode::New(session_id)
+        } else {
+            SessionMode::Resume(session_id)
+        },
         max_turns: None,
         effort: None,
         env: Vec::new(),
@@ -225,8 +249,11 @@ fn diff_file_summary(diff: &str) -> String {
 
 /// `(role, content)` of every message of a chat, oldest first.
 fn earlier_messages(conn: &rusqlite::Connection, chat_id: i64) -> AppResult<Vec<(String, String)>> {
-    let mut stmt = conn.prepare("SELECT role, content FROM chat_message WHERE chat_id = ?1 ORDER BY id")?;
-    let rows = stmt.query_map(params![chat_id], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<_>>()?;
+    let mut stmt =
+        conn.prepare("SELECT role, content FROM chat_message WHERE chat_id = ?1 ORDER BY id")?;
+    let rows = stmt
+        .query_map(params![chat_id], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<rusqlite::Result<_>>()?;
     Ok(rows)
 }
 
@@ -246,7 +273,11 @@ fn replay_block(messages: &[(String, String)], cap: usize) -> Option<String> {
         return None;
     }
     let entry = |role: &str, content: &str| {
-        let who = if role == "assistant" { "Assistant" } else { "User" };
+        let who = if role == "assistant" {
+            "Assistant"
+        } else {
+            "User"
+        };
         format!("\n### {who}\n{}\n", content.trim())
     };
     // The room for messages, assuming the marker is needed (it is only shown when something is dropped).
@@ -285,7 +316,11 @@ fn replay_block(messages: &[(String, String)], cap: usize) -> Option<String> {
 /// profile picked in the chat pane. Order: the request, the profile the chat is pinned to, the chat
 /// feature profile, the default. A switch is a request for a profile other than the one the chat
 /// currently runs on (a chat that was never pinned counts as running on the one it would resolve to).
-fn chat_profile(conn: &rusqlite::Connection, chat: Option<&Chat>, requested: Option<i64>) -> (Resolved, bool) {
+fn chat_profile(
+    conn: &rusqlite::Connection,
+    chat: Option<&Chat>,
+    requested: Option<i64>,
+) -> (Resolved, bool) {
     let feature = profiles::feature_profiles(conn).chat;
     let pinned = chat.and_then(|c| c.profile_id);
     let resolved = profiles::resolve(conn, &[requested, pinned, feature]);
@@ -305,7 +340,11 @@ fn chat_profile(conn: &rusqlite::Connection, chat: Option<&Chat>, requested: Opt
 pub fn chat_profile_id(review_id: i64, db: State<Db>) -> AppResult<Option<i64>> {
     let conn = db.0.lock().unwrap();
     let chat: Option<Chat> = conn
-        .query_row("SELECT * FROM chat WHERE review_id = ?1", params![review_id], Chat::from_row)
+        .query_row(
+            "SELECT * FROM chat WHERE review_id = ?1",
+            params![review_id],
+            Chat::from_row,
+        )
         .optional()?;
     Ok(chat_profile(&conn, chat.as_ref(), None).0.profile_id)
 }
@@ -343,11 +382,21 @@ pub async fn chat_send(
         resolved.ensure_local("A review chat")?;
         // A switch starts a new session, so the conversation so far goes into its first prompt.
         let replay = match (&existing_chat, switched) {
-            (Some(chat), true) => replay_block(&earlier_messages(&conn, chat.id)?, REPLAY_CAP_BYTES),
+            (Some(chat), true) => {
+                replay_block(&earlier_messages(&conn, chat.id)?, REPLAY_CAP_BYTES)
+            }
             _ => None,
         };
 
-        (detail, existing_chat, diff_source, chat_template, resolved, switched, replay)
+        (
+            detail,
+            existing_chat,
+            diff_source,
+            chat_template,
+            resolved,
+            switched,
+            replay,
+        )
     };
     let diff = diff_source.and_then(|s| s.load().ok()).unwrap_or_default();
 
@@ -360,7 +409,12 @@ pub async fn chat_send(
     let repo_path = Path::new(local_path_str);
 
     let stored_path = existing_chat.as_ref().and_then(|c| c.worktree_path.clone());
-    let worktree_path = resolve_chat_worktree(repo_path, &detail.target, detail.review.head_sha.as_deref(), stored_path.as_deref())?;
+    let worktree_path = resolve_chat_worktree(
+        repo_path,
+        &detail.target,
+        detail.review.head_sha.as_deref(),
+        stored_path.as_deref(),
+    )?;
 
     // `claude --resume` looks sessions up by cwd, so a chat that moved to a
     // different checkout starts a fresh session there.
@@ -516,8 +570,7 @@ pub fn chat_messages(review_id: i64, db: State<Db>) -> AppResult<Vec<ChatMessage
         return Ok(vec![]);
     };
 
-    let mut stmt =
-        conn.prepare("SELECT * FROM chat_message WHERE chat_id = ?1 ORDER BY id")?;
+    let mut stmt = conn.prepare("SELECT * FROM chat_message WHERE chat_id = ?1 ORDER BY id")?;
     let messages = stmt
         .query_map(params![chat_id], ChatMessage::from_row)?
         .collect::<rusqlite::Result<_>>()?;
@@ -664,9 +717,26 @@ mod tests {
         assert_eq!(
             argv(&cmd),
             strs(&[
-                "-p", "--output-format", "json", "--strict-mcp-config", "--permission-mode", "acceptEdits",
-                "--add-dir", WORKTREE, "--allowedTools", "Bash", "Read", "Glob", "Grep", "Edit", "Write",
-                "--model", "opus", "--session-id", "sid", "--append-system-prompt-file",
+                "-p",
+                "--output-format",
+                "json",
+                "--strict-mcp-config",
+                "--permission-mode",
+                "acceptEdits",
+                "--add-dir",
+                WORKTREE,
+                "--allowedTools",
+                "Bash",
+                "Read",
+                "Glob",
+                "Grep",
+                "Edit",
+                "Write",
+                "--model",
+                "opus",
+                "--session-id",
+                "sid",
+                "--append-system-prompt-file",
                 "/tmp/codereview_chat_sid.txt",
             ])
         );
@@ -683,9 +753,23 @@ mod tests {
         assert_eq!(
             argv(&cmd),
             strs(&[
-                "-p", "--output-format", "json", "--strict-mcp-config", "--permission-mode", "acceptEdits",
-                "--add-dir", WORKTREE, "--allowedTools", "Bash", "Read", "Glob", "Grep", "Edit", "Write",
-                "--resume", "sid",
+                "-p",
+                "--output-format",
+                "json",
+                "--strict-mcp-config",
+                "--permission-mode",
+                "acceptEdits",
+                "--add-dir",
+                WORKTREE,
+                "--allowedTools",
+                "Bash",
+                "Read",
+                "Glob",
+                "Grep",
+                "Edit",
+                "Write",
+                "--resume",
+                "sid",
             ])
         );
         assert!(envs(&cmd).is_empty());
@@ -699,8 +783,14 @@ mod tests {
         req.system_prompt_mode = SystemPromptMode::Replace;
         let cmd = claude::command(&req, false, Some(Path::new("/p.txt")));
         let a = argv(&cmd);
-        assert_eq!(&a[6..10], &strs(&["--add-dir", WORKTREE, "--add-dir", "/other"])[..]);
-        assert_eq!(&a[a.len() - 2..], &strs(&["--system-prompt-file", "/p.txt"])[..]);
+        assert_eq!(
+            &a[6..10],
+            &strs(&["--add-dir", WORKTREE, "--add-dir", "/other"])[..]
+        );
+        assert_eq!(
+            &a[a.len() - 2..],
+            &strs(&["--system-prompt-file", "/p.txt"])[..]
+        );
     }
 
     fn chat_row(conn: &rusqlite::Connection, session: Option<&str>, profile: Option<i64>) -> Chat {
@@ -712,7 +802,8 @@ mod tests {
             params![session, profile],
         )
         .unwrap();
-        conn.query_row("SELECT * FROM chat", [], Chat::from_row).unwrap()
+        conn.query_row("SELECT * FROM chat", [], Chat::from_row)
+            .unwrap()
     }
 
     fn profile(conn: &mut rusqlite::Connection, name: &str) -> i64 {
@@ -734,7 +825,14 @@ mod tests {
         let default = profiles::default_profile(&conn).unwrap().unwrap().id;
         assert_eq!(chat_profile(&conn, None, None).0.profile_id, Some(default));
         let mapped = profile(&mut conn, "Chat");
-        profiles::set_feature_profiles(&mut conn, &profiles::FeatureProfiles { chat: Some(mapped), ..Default::default() }).unwrap();
+        profiles::set_feature_profiles(
+            &mut conn,
+            &profiles::FeatureProfiles {
+                chat: Some(mapped),
+                ..Default::default()
+            },
+        )
+        .unwrap();
         let (r, switched) = chat_profile(&conn, None, None);
         assert_eq!((r.profile_id, switched), (Some(mapped), false));
     }
@@ -773,9 +871,15 @@ mod tests {
         // The same profile again is not a switch.
         assert!(!chat_profile(&conn, Some(&chat), Some(a)).1);
 
-        conn.execute("UPDATE chat SET session_id = NULL", []).unwrap();
-        let fresh: Chat = conn.query_row("SELECT * FROM chat", [], Chat::from_row).unwrap();
-        assert!(!chat_profile(&conn, Some(&fresh), Some(b)).1, "nothing to restart");
+        conn.execute("UPDATE chat SET session_id = NULL", [])
+            .unwrap();
+        let fresh: Chat = conn
+            .query_row("SELECT * FROM chat", [], Chat::from_row)
+            .unwrap();
+        assert!(
+            !chat_profile(&conn, Some(&fresh), Some(b)).1,
+            "nothing to restart"
+        );
     }
 
     #[test]
@@ -799,12 +903,21 @@ mod tests {
         let (r, switched) = chat_profile(&conn, Some(&chat), None);
         assert_eq!((r.profile_id, switched), (Some(oc.id), true));
         // the same chat recorded as started on opencode resumes
-        conn.execute("UPDATE chat SET session_harness = 'opencode'", []).unwrap();
-        let chat: Chat = conn.query_row("SELECT * FROM chat", [], Chat::from_row).unwrap();
+        conn.execute("UPDATE chat SET session_harness = 'opencode'", [])
+            .unwrap();
+        let chat: Chat = conn
+            .query_row("SELECT * FROM chat", [], Chat::from_row)
+            .unwrap();
         assert!(!chat_profile(&conn, Some(&chat), None).1);
         // nothing to restart without a session
-        conn.execute("UPDATE chat SET session_id = NULL, session_harness = NULL", []).unwrap();
-        let chat: Chat = conn.query_row("SELECT * FROM chat", [], Chat::from_row).unwrap();
+        conn.execute(
+            "UPDATE chat SET session_id = NULL, session_harness = NULL",
+            [],
+        )
+        .unwrap();
+        let chat: Chat = conn
+            .query_row("SELECT * FROM chat", [], Chat::from_row)
+            .unwrap();
         assert!(!chat_profile(&conn, Some(&chat), None).1);
     }
 
@@ -818,7 +931,10 @@ mod tests {
     }
 
     fn msgs(items: &[(&str, &str)]) -> Vec<(String, String)> {
-        items.iter().map(|(r, c)| (r.to_string(), c.to_string())).collect()
+        items
+            .iter()
+            .map(|(r, c)| (r.to_string(), c.to_string()))
+            .collect()
     }
 
     #[test]
@@ -828,7 +944,15 @@ mod tests {
 
     #[test]
     fn replay_lists_messages_oldest_first_with_their_roles() {
-        let block = replay_block(&msgs(&[("user", "first q"), ("assistant", "first a"), ("user", "second q")]), REPLAY_CAP_BYTES).unwrap();
+        let block = replay_block(
+            &msgs(&[
+                ("user", "first q"),
+                ("assistant", "first a"),
+                ("user", "second q"),
+            ]),
+            REPLAY_CAP_BYTES,
+        )
+        .unwrap();
         assert!(block.starts_with("## Previous conversation"));
         let q1 = block.find("### User\nfirst q").unwrap();
         let a1 = block.find("### Assistant\nfirst a").unwrap();
@@ -840,7 +964,12 @@ mod tests {
     #[test]
     fn replay_drops_the_oldest_messages_first_and_says_so() {
         let big = "x".repeat(400);
-        let messages = msgs(&[("user", "OLDEST"), ("assistant", &big), ("user", &big), ("assistant", "NEWEST")]);
+        let messages = msgs(&[
+            ("user", "OLDEST"),
+            ("assistant", &big),
+            ("user", &big),
+            ("assistant", "NEWEST"),
+        ]);
         let cap = REPLAY_HEADER.len() + REPLAY_TRUNCATED.len() + 2 * 420;
         let block = replay_block(&messages, cap).unwrap();
         assert!(block.len() <= cap, "{} > {cap}", block.len());
@@ -854,10 +983,17 @@ mod tests {
     #[test]
     fn replay_never_exceeds_the_cap_even_for_one_huge_message() {
         let huge = format!("{}END", "é".repeat(300_000));
-        let block = replay_block(&msgs(&[("user", "old"), ("assistant", &huge)]), REPLAY_CAP_BYTES).unwrap();
+        let block = replay_block(
+            &msgs(&[("user", "old"), ("assistant", &huge)]),
+            REPLAY_CAP_BYTES,
+        )
+        .unwrap();
         assert!(block.len() <= REPLAY_CAP_BYTES, "{}", block.len());
         assert!(block.contains("Earlier messages were dropped"));
-        assert!(block.contains("END"), "the tail of the newest message is kept");
+        assert!(
+            block.contains("END"),
+            "the tail of the newest message is kept"
+        );
         assert!(!block.contains("### User\nold"));
     }
 
@@ -868,6 +1004,9 @@ mod tests {
         for (role, content) in [("user", "a"), ("assistant", "b"), ("user", "c")] {
             conn.execute("INSERT INTO chat_message (chat_id, role, content, created_at) VALUES (?1, ?2, ?3, 'n')", params![c.id, role, content]).unwrap();
         }
-        assert_eq!(earlier_messages(&conn, c.id).unwrap(), msgs(&[("user", "a"), ("assistant", "b"), ("user", "c")]));
+        assert_eq!(
+            earlier_messages(&conn, c.id).unwrap(),
+            msgs(&[("user", "a"), ("assistant", "b"), ("user", "c")])
+        );
     }
 }

@@ -42,12 +42,18 @@ impl Bound {
                     Ok(meta) if meta.file_type().is_socket() => {
                         // A live daemon answers; a socket nobody listens on is left by a crash.
                         if UnixStream::connect(path).await.is_ok() {
-                            return Err(AppError::Other(format!("another cr worker is already listening on {}", path.display())));
+                            return Err(AppError::Other(format!(
+                                "another cr worker is already listening on {}",
+                                path.display()
+                            )));
                         }
                         std::fs::remove_file(path)?;
                     }
                     Ok(_) => {
-                        return Err(AppError::Other(format!("{} exists and is not a socket; refusing to replace it", path.display())));
+                        return Err(AppError::Other(format!(
+                            "{} exists and is not a socket; refusing to replace it",
+                            path.display()
+                        )));
                     }
                     Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
                     Err(e) => return Err(e.into()),
@@ -68,7 +74,11 @@ impl Bound {
 }
 
 /// Serve the API on `bound` until `shutdown` completes. Open event streams do not hold it back.
-pub async fn serve(state: SharedState, bound: Bound, shutdown: impl Future<Output = ()>) -> std::io::Result<()> {
+pub async fn serve(
+    state: SharedState,
+    bound: Bound,
+    shutdown: impl Future<Output = ()>,
+) -> std::io::Result<()> {
     let app = http::router(state, matches!(bound, Bound::Tcp(_)));
     match bound {
         Bound::Tcp(l) => {
@@ -95,9 +105,14 @@ pub fn start_engine(state: &SharedState) {
 
 /// Remove scratch directories of runs that are over or gone (a queued run stopped before it launched).
 pub fn sweep_scratch(state: &SharedState) {
-    let Ok(entries) = std::fs::read_dir(state.runs_base.join("scratch")) else { return };
+    let Ok(entries) = std::fs::read_dir(state.runs_base.join("scratch")) else {
+        return;
+    };
     for entry in entries.flatten() {
-        let id = entry.file_name().to_str().and_then(|n| n.parse::<i64>().ok());
+        let id = entry
+            .file_name()
+            .to_str()
+            .and_then(|n| n.parse::<i64>().ok());
         let over = match id.and_then(|id| state.db.status(id)) {
             Some(status) => is_terminal(&status),
             None => true,
@@ -115,7 +130,10 @@ pub fn detach(state: &SharedState) {
 
 async fn wait_for_signal() {
     use tokio::signal::unix::{signal, SignalKind};
-    let (Ok(mut term), Ok(mut int)) = (signal(SignalKind::terminate()), signal(SignalKind::interrupt())) else {
+    let (Ok(mut term), Ok(mut int)) = (
+        signal(SignalKind::terminate()),
+        signal(SignalKind::interrupt()),
+    ) else {
         std::future::pending::<()>().await;
         return;
     };
@@ -126,9 +144,16 @@ async fn wait_for_signal() {
 pub fn run(cfg: Config) -> AppResult<()> {
     crate::path_env::ensure_login_path();
     crate::tools::init();
-    let data_dir = cfg.worker_db.parent().map(Path::to_path_buf).unwrap_or_else(|| PathBuf::from("."));
+    let data_dir = cfg
+        .worker_db
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."));
     if let Err(e) = crate::logging::init(&data_dir) {
-        eprintln!("warning: cannot open the log file in {}: {e}", data_dir.display());
+        eprintln!(
+            "warning: cannot open the log file in {}: {e}",
+            data_dir.display()
+        );
     }
     if let Some(level) = cfg.log_level.as_deref() {
         match crate::logging::parse_level(level) {
@@ -148,7 +173,9 @@ pub fn run(cfg: Config) -> AppResult<()> {
         },
         crate::ai::harnesses().to_vec(),
     )?;
-    let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?;
     runtime.block_on(async {
         let bound = Bound::bind(&cfg.listen).await?;
         start_engine(&state);
@@ -176,7 +203,11 @@ mod tests {
         // a regular file, a directory and a symlink at the listen path are never touched
         let file = dir.path().join("precious.db");
         std::fs::write(&file, "data").unwrap();
-        let err = Bound::bind(&Listen::Unix(file.clone())).await.err().expect("must refuse").to_string();
+        let err = Bound::bind(&Listen::Unix(file.clone()))
+            .await
+            .err()
+            .expect("must refuse")
+            .to_string();
         assert!(err.contains("not a socket"), "{err}");
         assert_eq!(std::fs::read_to_string(&file).unwrap(), "data");
         let sub = dir.path().join("sub");

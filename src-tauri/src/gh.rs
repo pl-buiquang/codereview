@@ -47,7 +47,12 @@ impl GhRepo {
 /// Run a `gh` command in the given repo context. Returns stdout on success.
 pub fn run_gh(ctx: &GhRepo, args: &[&str]) -> AppResult<String> {
     let started = std::time::Instant::now();
-    let output = crate::cmd_deadline::output(Command::new(crate::tools::gh_bin()).current_dir(ctx.cwd()).args(args)).map_err(|e| {
+    let output = crate::cmd_deadline::output(
+        Command::new(crate::tools::gh_bin())
+            .current_dir(ctx.cwd())
+            .args(args),
+    )
+    .map_err(|e| {
         if crate::cmd_deadline::is_timeout(&e) {
             AppError::Gh(format!("`gh {}` {e}", args.first().copied().unwrap_or("")))
         } else {
@@ -184,7 +189,12 @@ pub fn submit_pending_review(
 }
 
 /// Delete a PENDING (never-submitted) review. GitHub rejects this for submitted reviews.
-pub fn delete_pending_review(owner: &str, name: &str, number: i64, review_id: i64) -> AppResult<()> {
+pub fn delete_pending_review(
+    owner: &str,
+    name: &str,
+    number: i64,
+    review_id: i64,
+) -> AppResult<()> {
     let endpoint = format!("repos/{owner}/{name}/pulls/{number}/reviews/{review_id}");
     let ctx = GhRepo::Remote {
         owner: owner.to_string(),
@@ -268,14 +278,21 @@ pub fn file_at_ref(owner: &str, name: &str, file_path: &str, git_ref: &str) -> A
 }
 
 /// [`file_at_ref`] as raw bytes, for binary files (images).
-pub fn file_bytes_at_ref(owner: &str, name: &str, file_path: &str, git_ref: &str) -> AppResult<Vec<u8>> {
+pub fn file_bytes_at_ref(
+    owner: &str,
+    name: &str,
+    file_path: &str,
+    git_ref: &str,
+) -> AppResult<Vec<u8>> {
     let endpoint = format!("repos/{owner}/{name}/contents/{file_path}?ref={git_ref}");
     let output = Command::new(crate::tools::gh_bin())
         .args(["api", &endpoint, "-H", "Accept: application/vnd.github.raw"])
         .output()
         .map_err(|e| AppError::Gh(format!("failed to spawn gh: {e}")))?;
     if !output.status.success() {
-        return Err(AppError::Gh(String::from_utf8_lossy(&output.stderr).trim().to_string()));
+        return Err(AppError::Gh(
+            String::from_utf8_lossy(&output.stderr).trim().to_string(),
+        ));
     }
     Ok(output.stdout)
 }
@@ -295,7 +312,10 @@ pub fn auth_token() -> AppResult<String> {
         .map_err(|e| AppError::Gh(format!("failed to spawn gh: {e}")))?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(AppError::Gh(format!("gh auth token failed: {}", stderr.trim())));
+        return Err(AppError::Gh(format!(
+            "gh auth token failed: {}",
+            stderr.trim()
+        )));
     }
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
@@ -414,7 +434,9 @@ pub async fn fetch_authenticated_url(raw_url: &str) -> AppResult<Vec<u8>> {
             .and_then(|v| v.to_str().ok())
             .is_some_and(|t| t.starts_with("text/html"))
         {
-            return Err(AppError::Gh("image URL returned HTML (sign-in page?)".into()));
+            return Err(AppError::Gh(
+                "image URL returned HTML (sign-in page?)".into(),
+            ));
         }
         if response
             .content_length()
@@ -539,8 +561,8 @@ pub fn compare(owner: &str, name: &str, base: &str, head: &str) -> AppResult<Vec
         name: name.to_string(),
     };
     let out = run_gh(&ctx, &["api", &endpoint])?;
-    let raw: CompareRaw =
-        serde_json::from_str(&out).map_err(|e| AppError::Gh(format!("failed to parse compare: {e}")))?;
+    let raw: CompareRaw = serde_json::from_str(&out)
+        .map_err(|e| AppError::Gh(format!("failed to parse compare: {e}")))?;
     Ok(raw.files)
 }
 
@@ -554,8 +576,8 @@ pub fn merge_base_sha(owner: &str, name: &str, base: &str, head: &str) -> AppRes
         name: name.to_string(),
     };
     let out = run_gh(&ctx, &["api", &endpoint])?;
-    let raw: CompareRaw =
-        serde_json::from_str(&out).map_err(|e| AppError::Gh(format!("failed to parse compare: {e}")))?;
+    let raw: CompareRaw = serde_json::from_str(&out)
+        .map_err(|e| AppError::Gh(format!("failed to parse compare: {e}")))?;
     raw.merge_base_commit
         .map(|c| c.sha)
         .ok_or_else(|| AppError::Gh("compare response missing merge_base_commit".into()))
@@ -569,7 +591,15 @@ pub fn compare_diff(owner: &str, name: &str, base: &str, head: &str) -> AppResul
         owner: owner.to_string(),
         name: name.to_string(),
     };
-    run_gh(&ctx, &["api", &endpoint, "-H", "Accept: application/vnd.github.diff"])
+    run_gh(
+        &ctx,
+        &[
+            "api",
+            &endpoint,
+            "-H",
+            "Accept: application/vnd.github.diff",
+        ],
+    )
 }
 
 pub fn pr_diff(ctx: &GhRepo, number: i64) -> AppResult<String> {
@@ -731,7 +761,11 @@ pub struct PrActor {
     pub avatar_url: Option<String>,
     /// GraphQL `__typename` (`User`, `Bot`, …); only the threads/discussion
     /// queries select it. Used to tell bot comments from human ones.
-    #[serde(default, rename = "__typename", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        rename = "__typename",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub typename: Option<String>,
 }
 
@@ -1009,7 +1043,9 @@ fn map_pr_meta(pr: PrMetaPr, default_branch: Option<&str>) -> PrMeta {
         .map(|ref_name| PrBase {
             ref_name,
             oid: pr.base_ref_oid,
-            pr: pr.base_ref.and_then(|b| b.associated_pull_requests.nodes.into_iter().next()),
+            pr: pr
+                .base_ref
+                .and_then(|b| b.associated_pull_requests.nodes.into_iter().next()),
         });
     let labels = pr
         .labels
@@ -1037,7 +1073,11 @@ fn map_pr_meta(pr: PrMetaPr, default_branch: Option<&str>) -> PrMeta {
         .filter_map(|r| {
             let is_team = r.typename == "Team";
             let login = if is_team { r.slug } else { r.login }?;
-            Some(PrReviewRequest { login, avatar_url: r.avatar_url, is_team })
+            Some(PrReviewRequest {
+                login,
+                avatar_url: r.avatar_url,
+                is_team,
+            })
         })
         .collect();
     // A pending (unsubmitted) review isn't activity yet.
@@ -1049,7 +1089,10 @@ fn map_pr_meta(pr: PrMetaPr, default_branch: Option<&str>) -> PrMeta {
         .filter(|n| n.state.as_deref() != Some("PENDING"))
         .find_map(|n| {
             let at = n.submitted_at.or(n.created_at)?;
-            Some(PrActivity { at, author: n.author })
+            Some(PrActivity {
+                at,
+                author: n.author,
+            })
         });
     let last_commit = pr.commits.nodes.into_iter().next().map(|c| c.commit);
     let last_commit_at = last_commit.as_ref().and_then(|c| c.committed_date.clone());
@@ -1085,7 +1128,11 @@ fn map_pr_meta(pr: PrMetaPr, default_branch: Option<&str>) -> PrMeta {
         title: pr.title,
         url: pr.url,
         body: pr.body.unwrap_or_default(),
-        body_images: pr.body_html.as_deref().map(signed_image_urls).unwrap_or_default(),
+        body_images: pr
+            .body_html
+            .as_deref()
+            .map(signed_image_urls)
+            .unwrap_or_default(),
         state: pr.state,
         is_draft: pr.is_draft,
         head_ref_oid: pr.head_ref_oid,
@@ -1125,7 +1172,10 @@ pub fn signed_image_urls(html: &str) -> HashMap<String, String> {
         let file = path.rsplit('/').next().unwrap_or("");
         let stem = file.split('.').next().unwrap_or("");
         // `<id>-<uuid>`: the UUID is the last 36 chars.
-        if let Some(uuid) = stem.get(stem.len().saturating_sub(36)..).filter(|u| is_uuid(u)) {
+        if let Some(uuid) = stem
+            .get(stem.len().saturating_sub(36)..)
+            .filter(|u| is_uuid(u))
+        {
             out.insert(uuid.to_string(), url.clone());
         }
     }
@@ -1169,11 +1219,18 @@ pub fn pr_detail(owner: &str, name: &str, number: i64) -> AppResult<PrDetail> {
         .pointer("/repository/pullRequest")
         .filter(|v| !v.is_null())
         .ok_or_else(|| AppError::Gh(format!("PR {owner}/{name}#{number} not found")))?;
-    let parse_err = |e: serde_json::Error| AppError::Gh(format!("failed to parse PR {owner}/{name}#{number}: {e}"));
+    let parse_err = |e: serde_json::Error| {
+        AppError::Gh(format!("failed to parse PR {owner}/{name}#{number}: {e}"))
+    };
     let node: crate::mirror::Node = serde_json::from_value(pr.clone()).map_err(parse_err)?;
     let raw: PrMetaPr = serde_json::from_value(pr.clone()).map_err(parse_err)?;
-    let default_branch = data.pointer("/repository/defaultBranchRef/name").and_then(|v| v.as_str());
-    Ok(PrDetail { node, meta: map_pr_meta(raw, default_branch) })
+    let default_branch = data
+        .pointer("/repository/defaultBranchRef/name")
+        .and_then(|v| v.as_str());
+    Ok(PrDetail {
+        node,
+        meta: map_pr_meta(raw, default_branch),
+    })
 }
 
 /// Flip a PR's draft status. Clone-less (owner/name/number), like `pr_meta`.
@@ -1266,9 +1323,16 @@ pub fn set_pr_label(owner: &str, name: &str, number: i64, label: &str, on: bool)
     if on {
         let endpoint = format!("repos/{owner}/{name}/issues/{number}/labels");
         let payload = serde_json::json!({ "labels": [label] }).to_string();
-        run_gh_stdin(&ctx, &["api", &endpoint, "--method", "POST", "--input", "-"], &payload)?;
+        run_gh_stdin(
+            &ctx,
+            &["api", &endpoint, "--method", "POST", "--input", "-"],
+            &payload,
+        )?;
     } else {
-        let endpoint = format!("repos/{owner}/{name}/issues/{number}/labels/{}", path_segment(label));
+        let endpoint = format!(
+            "repos/{owner}/{name}/issues/{number}/labels/{}",
+            path_segment(label)
+        );
         run_gh(&ctx, &["api", &endpoint, "--method", "DELETE"])?;
     }
     Ok(())
@@ -1276,7 +1340,14 @@ pub fn set_pr_label(owner: &str, name: &str, number: i64, label: &str, on: bool)
 
 /// Request (`on`) or withdraw a review request. A team is passed as its slug.
 /// Requesting someone who already reviewed re-requests their review.
-pub fn set_pr_reviewer(owner: &str, name: &str, number: i64, reviewer: &str, team: bool, on: bool) -> AppResult<()> {
+pub fn set_pr_reviewer(
+    owner: &str,
+    name: &str,
+    number: i64,
+    reviewer: &str,
+    team: bool,
+    on: bool,
+) -> AppResult<()> {
     let endpoint = format!("repos/{owner}/{name}/pulls/{number}/requested_reviewers");
     let key = if team { "team_reviewers" } else { "reviewers" };
     let payload = serde_json::json!({ key: [reviewer] }).to_string();
@@ -1292,10 +1363,22 @@ pub fn set_pr_reviewer(owner: &str, name: &str, number: i64, reviewer: &str, tea
 /// Every label defined on the repo, for the label picker.
 pub fn repo_labels(owner: &str, name: &str) -> AppResult<Vec<PrLabel>> {
     let endpoint = format!("repos/{owner}/{name}/labels?per_page=100");
-    let out = run_gh(&remote_ctx(&format!("{owner}/{name}")), &["api", &endpoint, "--paginate", "--jq", ".[] | {name, color}"])?;
+    let out = run_gh(
+        &remote_ctx(&format!("{owner}/{name}")),
+        &[
+            "api",
+            &endpoint,
+            "--paginate",
+            "--jq",
+            ".[] | {name, color}",
+        ],
+    )?;
     out.lines()
         .filter(|l| !l.trim().is_empty())
-        .map(|l| serde_json::from_str(l).map_err(|e| AppError::Gh(format!("failed to parse labels: {e}"))))
+        .map(|l| {
+            serde_json::from_str(l)
+                .map_err(|e| AppError::Gh(format!("failed to parse labels: {e}")))
+        })
         .collect()
 }
 
@@ -1317,7 +1400,8 @@ pub fn repo_assignable_users(owner: &str, name: &str, query: &str) -> AppResult<
         .pointer("/repository/assignableUsers/nodes")
         .cloned()
         .unwrap_or(serde_json::Value::Array(vec![]));
-    serde_json::from_value(nodes).map_err(|e| AppError::Gh(format!("failed to parse assignable users: {e}")))
+    serde_json::from_value(nodes)
+        .map_err(|e| AppError::Gh(format!("failed to parse assignable users: {e}")))
 }
 
 // ---------------------------------------------------------------------------
@@ -1387,8 +1471,17 @@ fn failing_runs_from(pr: FailingRunsPr) -> Vec<FailingRun> {
         .flat_map(|r| r.contexts.nodes);
     for node in contexts {
         let failed = node.typename == "CheckRun"
-            && node.conclusion.as_deref().is_some_and(|c| FAILING_CONCLUSIONS.contains(&c));
-        let Some(run) = node.check_suite.and_then(|s| s.workflow_run).filter(|_| failed) else { continue };
+            && node
+                .conclusion
+                .as_deref()
+                .is_some_and(|c| FAILING_CONCLUSIONS.contains(&c));
+        let Some(run) = node
+            .check_suite
+            .and_then(|s| s.workflow_run)
+            .filter(|_| failed)
+        else {
+            continue;
+        };
         if out.iter().all(|r| r.run_id != run.database_id) {
             out.push(FailingRun {
                 run_id: run.database_id,
@@ -1620,7 +1713,10 @@ pub struct PrChecks {
 
 fn check_bucket(state: Option<&str>) -> CheckBucket {
     match state {
-        Some(s) if FAILING_CONCLUSIONS.contains(&s) || matches!(s, "ACTION_REQUIRED" | "FAILURE" | "ERROR") => {
+        Some(s)
+            if FAILING_CONCLUSIONS.contains(&s)
+                || matches!(s, "ACTION_REQUIRED" | "FAILURE" | "ERROR") =>
+        {
             CheckBucket::Failed
         }
         Some("SUCCESS" | "NEUTRAL" | "SKIPPED" | "COMPLETED") => CheckBucket::Passed,
@@ -1635,7 +1731,12 @@ fn duration_secs(start: Option<&str>, end: Option<&str>) -> Option<i64> {
 }
 
 fn checks_from(pr: ChecksPr) -> PrChecks {
-    let rollup = pr.commits.nodes.into_iter().next().and_then(|c| c.commit.status_check_rollup);
+    let rollup = pr
+        .commits
+        .nodes
+        .into_iter()
+        .next()
+        .and_then(|c| c.commit.status_check_rollup);
     let state = rollup.as_ref().and_then(|r| r.state.clone());
     let mut checks: Vec<CiCheck> = rollup
         .map(|r| r.contexts.nodes)
@@ -1651,7 +1752,11 @@ fn checks_from(pr: ChecksPr) -> PrChecks {
                     .map(|s| s.nodes)
                     .unwrap_or_default()
                     .into_iter()
-                    .filter(|s| s.conclusion.as_deref().is_some_and(|c| check_bucket(Some(c)) == CheckBucket::Failed))
+                    .filter(|s| {
+                        s.conclusion
+                            .as_deref()
+                            .is_some_and(|c| check_bucket(Some(c)) == CheckBucket::Failed)
+                    })
                     .map(|s| s.name)
                     .collect();
                 let annotations = c
@@ -1660,7 +1765,12 @@ fn checks_from(pr: ChecksPr) -> PrChecks {
                     .unwrap_or_default()
                     .into_iter()
                     .filter(|a| a.annotation_level.as_deref() == Some("FAILURE"))
-                    .filter_map(|a| Some(CiAnnotation { path: a.path, message: a.message? }))
+                    .filter_map(|a| {
+                        Some(CiAnnotation {
+                            path: a.path,
+                            message: a.message?,
+                        })
+                    })
                     .collect();
                 let run = c.check_suite.and_then(|s| s.workflow_run);
                 CiCheck {
@@ -1672,7 +1782,10 @@ fn checks_from(pr: ChecksPr) -> PrChecks {
                     bucket,
                     url: c.details_url,
                     required: c.is_required,
-                    duration_secs: duration_secs(c.started_at.as_deref(), c.completed_at.as_deref()),
+                    duration_secs: duration_secs(
+                        c.started_at.as_deref(),
+                        c.completed_at.as_deref(),
+                    ),
                     failed_steps,
                     annotations,
                 }
@@ -1681,7 +1794,10 @@ fn checks_from(pr: ChecksPr) -> PrChecks {
                 let annotations = c
                     .description
                     .filter(|_| bucket == CheckBucket::Failed)
-                    .map(|message| CiAnnotation { path: None, message })
+                    .map(|message| CiAnnotation {
+                        path: None,
+                        message,
+                    })
                     .into_iter()
                     .collect();
                 CiCheck {
@@ -1702,7 +1818,11 @@ fn checks_from(pr: ChecksPr) -> PrChecks {
         .collect();
     // Stable: keeps GitHub's order within a bucket.
     checks.sort_by_key(|c| c.bucket);
-    PrChecks { state, pr_url: pr.url, checks }
+    PrChecks {
+        state,
+        pr_url: pr.url,
+        checks,
+    }
 }
 
 pub fn pr_checks(owner: &str, name: &str, number: i64) -> AppResult<PrChecks> {
@@ -1719,23 +1839,34 @@ pub fn pr_checks(owner: &str, name: &str, number: i64) -> AppResult<PrChecks> {
 
 fn remote_ctx(repo: &str) -> GhRepo {
     let (owner, name) = repo.split_once('/').unwrap_or((repo, ""));
-    GhRepo::Remote { owner: owner.to_string(), name: name.to_string() }
+    GhRepo::Remote {
+        owner: owner.to_string(),
+        name: name.to_string(),
+    }
 }
 
 /// The run's attempt number (1 for the first run, +1 per rerun).
 pub fn run_attempt(repo: &str, run_id: i64) -> AppResult<i64> {
     let id = run_id.to_string();
-    let out = run_gh(&remote_ctx(repo), &["run", "view", &id, "--repo", repo, "--json", "attempt"])?;
-    let v: serde_json::Value =
-        serde_json::from_str(&out).map_err(|e| AppError::Gh(format!("failed to parse gh run view: {e}")))?;
-    v["attempt"].as_i64().ok_or_else(|| AppError::Gh("gh run view returned no attempt".into()))
+    let out = run_gh(
+        &remote_ctx(repo),
+        &["run", "view", &id, "--repo", repo, "--json", "attempt"],
+    )?;
+    let v: serde_json::Value = serde_json::from_str(&out)
+        .map_err(|e| AppError::Gh(format!("failed to parse gh run view: {e}")))?;
+    v["attempt"]
+        .as_i64()
+        .ok_or_else(|| AppError::Gh("gh run view returned no attempt".into()))
 }
 
 /// Rerun a workflow run: only its failed jobs when `failed_only`, else all jobs.
 /// Rerun a single Actions job (`gh run rerun --job`), not its whole run.
 pub fn rerun_job(repo: &str, job_id: i64) -> AppResult<()> {
     let id = job_id.to_string();
-    run_gh(&remote_ctx(repo), &["run", "rerun", "--job", &id, "--repo", repo])?;
+    run_gh(
+        &remote_ctx(repo),
+        &["run", "rerun", "--job", &id, "--repo", repo],
+    )?;
     Ok(())
 }
 
@@ -1758,7 +1889,9 @@ pub fn rerun_run(repo: &str, run_id: i64, failed_only: bool) -> AppResult<()> {
 /// `(owner, name, number)`; PRs that fail to resolve (deleted repo, bad
 /// number, ...) are simply absent from the map, since `graphql()` tolerates
 /// partial errors.
-pub fn pr_states(prs: &[(String, String, i64)]) -> AppResult<HashMap<(String, String, i64), String>> {
+pub fn pr_states(
+    prs: &[(String, String, i64)],
+) -> AppResult<HashMap<(String, String, i64), String>> {
     let mut out = HashMap::new();
     for chunk in prs.chunks(50) {
         let mut fields = String::new();
@@ -2081,9 +2214,16 @@ pub fn reply_to_thread(
 /// Post a top-level comment on a PR or issue (the issues API serves both).
 pub fn comment_on_issue(owner: &str, name: &str, number: i64, body: &str) -> AppResult<i64> {
     let endpoint = format!("repos/{owner}/{name}/issues/{number}/comments");
-    let ctx = GhRepo::Remote { owner: owner.to_string(), name: name.to_string() };
+    let ctx = GhRepo::Remote {
+        owner: owner.to_string(),
+        name: name.to_string(),
+    };
     let payload = serde_json::json!({ "body": body }).to_string();
-    let out = run_gh_stdin(&ctx, &["api", &endpoint, "--method", "POST", "--input", "-"], &payload)?;
+    let out = run_gh_stdin(
+        &ctx,
+        &["api", &endpoint, "--method", "POST", "--input", "-"],
+        &payload,
+    )?;
     parse_rest_id(&out, "comment")
 }
 
@@ -2138,8 +2278,16 @@ pub fn set_thread_resolved(thread_id: &str, resolved: bool) -> AppResult<bool> {
         .ok_or_else(|| AppError::Gh("thread mutation returned no thread".into()))
 }
 
-const REACTION_CONTENTS: [&str; 8] =
-    ["THUMBS_UP", "THUMBS_DOWN", "LAUGH", "HOORAY", "CONFUSED", "HEART", "ROCKET", "EYES"];
+const REACTION_CONTENTS: [&str; 8] = [
+    "THUMBS_UP",
+    "THUMBS_DOWN",
+    "LAUGH",
+    "HOORAY",
+    "CONFUSED",
+    "HEART",
+    "ROCKET",
+    "EYES",
+];
 
 // Both mutations alias their payload to `result` so one deserializer serves add and remove.
 const ADD_REACTION_MUTATION: &str = r#"
@@ -2181,9 +2329,15 @@ pub fn set_reaction(subject_id: &str, content: &str, on: bool) -> AppResult<Vec<
     if !REACTION_CONTENTS.contains(&content) {
         return Err(AppError::Other(format!("unsupported reaction: {content}")));
     }
-    let query = if on { ADD_REACTION_MUTATION } else { REMOVE_REACTION_MUTATION };
-    let data: ReactionMutationData =
-        graphql(query, serde_json::json!({ "id": subject_id, "content": content }))?;
+    let query = if on {
+        ADD_REACTION_MUTATION
+    } else {
+        REMOVE_REACTION_MUTATION
+    };
+    let data: ReactionMutationData = graphql(
+        query,
+        serde_json::json!({ "id": subject_id, "content": content }),
+    )?;
     data.result
         .and_then(|r| r.subject)
         .map(|s| map_reactions(s.reaction_groups))
@@ -2194,7 +2348,10 @@ pub fn set_reaction(subject_id: &str, content: &str, on: bool) -> AppResult<Vec<
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NotificationsPoll {
     NotModified,
-    Changed { last_modified: Option<String>, poll_interval: Option<u64> },
+    Changed {
+        last_modified: Option<String>,
+        poll_interval: Option<u64>,
+    },
 }
 
 /// Parse `gh api -i` output: the status code and the lower-cased headers.
@@ -2210,8 +2367,12 @@ fn parse_http_head(out: &str) -> Option<(u16, HashMap<String, String>)> {
 }
 
 fn notifications_poll_from(out: &str) -> AppResult<NotificationsPoll> {
-    let (status, headers) = parse_http_head(out)
-        .ok_or_else(|| AppError::Gh(format!("unreadable notifications response: {}", out.lines().next().unwrap_or(""))))?;
+    let (status, headers) = parse_http_head(out).ok_or_else(|| {
+        AppError::Gh(format!(
+            "unreadable notifications response: {}",
+            out.lines().next().unwrap_or("")
+        ))
+    })?;
     match status {
         304 => Ok(NotificationsPoll::NotModified),
         200..=299 => Ok(NotificationsPoll::Changed {
@@ -2239,7 +2400,9 @@ pub fn poll_notifications(if_modified_since: Option<&str>) -> AppResult<Notifica
         .map_err(|e| AppError::Gh(format!("failed to spawn gh: {e}")))?;
     let stdout = String::from_utf8_lossy(&output.stdout);
     if stdout.trim().is_empty() {
-        return Err(AppError::Gh(String::from_utf8_lossy(&output.stderr).trim().to_string()));
+        return Err(AppError::Gh(
+            String::from_utf8_lossy(&output.stderr).trim().to_string(),
+        ));
     }
     notifications_poll_from(&stdout)
 }
@@ -2294,8 +2457,8 @@ pub fn parse_subject_url(url: &str) -> Option<(String, String, i64)> {
 }
 
 fn notifications_from(json: &str) -> AppResult<Vec<Notification>> {
-    let raw: Vec<RawNotification> =
-        serde_json::from_str(json).map_err(|e| AppError::Gh(format!("failed to parse notifications: {e}")))?;
+    let raw: Vec<RawNotification> = serde_json::from_str(json)
+        .map_err(|e| AppError::Gh(format!("failed to parse notifications: {e}")))?;
     Ok(raw
         .into_iter()
         .filter(|n| n.subject.kind == "PullRequest" || n.subject.kind == "Issue")
@@ -2323,12 +2486,19 @@ const NOTIFICATIONS_MAX_PAGES: usize = 6;
 /// PR/issue notifications (read ones included) updated since `since`, newest
 /// first. Pages until a short page or [`NOTIFICATIONS_MAX_PAGES`].
 pub fn fetch_notifications(since: &str) -> AppResult<Vec<Notification>> {
-    let ctx = GhRepo::Remote { owner: String::new(), name: String::new() };
+    let ctx = GhRepo::Remote {
+        owner: String::new(),
+        name: String::new(),
+    };
     let mut out = Vec::new();
     for page in 1..=NOTIFICATIONS_MAX_PAGES {
-        let endpoint = format!("notifications?all=true&per_page={NOTIFICATIONS_PAGE}&since={since}&page={page}");
+        let endpoint = format!(
+            "notifications?all=true&per_page={NOTIFICATIONS_PAGE}&since={since}&page={page}"
+        );
         let raw = run_gh(&ctx, &["api", &endpoint])?;
-        let count = serde_json::from_str::<Vec<serde_json::Value>>(&raw).map(|v| v.len()).unwrap_or(0);
+        let count = serde_json::from_str::<Vec<serde_json::Value>>(&raw)
+            .map(|v| v.len())
+            .unwrap_or(0);
         out.extend(notifications_from(&raw)?);
         if count < NOTIFICATIONS_PAGE {
             break;
@@ -2362,7 +2532,10 @@ mod tests {
             parse_subject_url("https://api.github.com/repos/acme/widget/issues/7"),
             Some(("acme".into(), "widget".into(), 7))
         );
-        assert_eq!(parse_subject_url("https://api.github.com/repos/acme/widget/commits/abc"), None);
+        assert_eq!(
+            parse_subject_url("https://api.github.com/repos/acme/widget/commits/abc"),
+            None
+        );
     }
 
     #[test]
@@ -2375,9 +2548,13 @@ mod tests {
           {"id":"3","reason":"mention","unread":true,"updated_at":"2026-10-21T13:41:21Z",
            "subject":{"title":"i","url":"https://api.github.com/repos/a/b/issues/6","type":"Issue"}}]"#;
         let got = notifications_from(json).unwrap();
-        assert_eq!(got.iter().map(|n| (n.id.as_str(), n.number)).collect::<Vec<_>>(), vec![("1", 5), ("3", 6)]);
+        assert_eq!(
+            got.iter()
+                .map(|n| (n.id.as_str(), n.number))
+                .collect::<Vec<_>>(),
+            vec![("1", 5), ("3", 6)]
+        );
     }
-
 
     #[test]
     fn notifications_200_carries_last_modified_and_poll_interval() {
@@ -2394,7 +2571,10 @@ mod tests {
     #[test]
     fn notifications_304_is_not_modified() {
         let out = "HTTP/2.0 304 Not Modified\nX-Poll-Interval: 60\n\n";
-        assert_eq!(notifications_poll_from(out).unwrap(), NotificationsPoll::NotModified);
+        assert_eq!(
+            notifications_poll_from(out).unwrap(),
+            NotificationsPoll::NotModified
+        );
     }
 
     #[test]
@@ -2406,7 +2586,10 @@ mod tests {
     #[test]
     fn pr_meta_query_sends_only_the_fragment_it_uses() {
         assert!(PR_META_QUERY.contains("...PrCore") && !PR_META_QUERY.contains("...IssueCore"));
-        assert!(!crate::mirror::PR_FRAGMENT.contains("IssueCore"), "GitHub rejects unused fragments");
+        assert!(
+            !crate::mirror::PR_FRAGMENT.contains("IssueCore"),
+            "GitHub rejects unused fragments"
+        );
     }
 
     #[test]
@@ -2571,9 +2754,16 @@ mod tests {
         assert_eq!(meta.review_decision, None);
         assert_eq!(meta.additions, 120);
         assert_eq!(meta.changed_files, 5);
-        let requests: Vec<_> = meta.review_requests.iter().map(|r| (r.login.as_str(), r.is_team)).collect();
+        let requests: Vec<_> = meta
+            .review_requests
+            .iter()
+            .map(|r| (r.login.as_str(), r.is_team))
+            .collect();
         assert_eq!(requests, [("rev3", false), ("core", true)]);
-        assert_eq!(meta.author.as_ref().and_then(|a| a.login.as_deref()), Some("octocat"));
+        assert_eq!(
+            meta.author.as_ref().and_then(|a| a.login.as_deref()),
+            Some("octocat")
+        );
 
         let labels: Vec<&str> = meta.labels.iter().map(|l| l.name.as_str()).collect();
         assert_eq!(labels, vec!["bug", "wip"]);
@@ -2628,7 +2818,10 @@ mod tests {
 
     #[test]
     fn pr_meta_omits_base_on_default_branch() {
-        let json = FIXTURE.replace("\"baseRefName\": \"feat/parent\"", "\"baseRefName\": \"main\"");
+        let json = FIXTURE.replace(
+            "\"baseRefName\": \"feat/parent\"",
+            "\"baseRefName\": \"main\"",
+        );
         let data: PrMetaData = serde_json::from_str(&json).expect("parses");
         let meta = map_pr_meta(data.repository.unwrap().pull_request.unwrap(), Some("main"));
         assert!(meta.base.is_none());
@@ -2717,7 +2910,13 @@ mod tests {
         assert_eq!(names, ["e2e", "sonar", "build", "queued", "lint"]);
         let e2e = &out.checks[0];
         assert_eq!(e2e.failed_steps, ["Run e2e"]);
-        assert_eq!(e2e.annotations, [CiAnnotation { path: Some(".github".into()), message: "exit code 1".into() }]);
+        assert_eq!(
+            e2e.annotations,
+            [CiAnnotation {
+                path: Some(".github".into()),
+                message: "exit code 1".into()
+            }]
+        );
         assert_eq!(e2e.workflow.as_deref(), Some("CI"));
         assert_eq!((e2e.job_id, e2e.run_id), (Some(99), Some(1)));
         assert_eq!((out.checks[1].job_id, out.checks[1].run_id), (None, None));
@@ -2752,8 +2951,14 @@ mod tests {
         assert_eq!(
             runs,
             vec![
-                FailingRun { run_id: 11, workflow: "CI".into() },
-                FailingRun { run_id: 13, workflow: "E2E".into() },
+                FailingRun {
+                    run_id: 11,
+                    workflow: "CI".into()
+                },
+                FailingRun {
+                    run_id: 13,
+                    workflow: "E2E".into()
+                },
             ]
         );
     }
@@ -2833,7 +3038,12 @@ mod tests {
     #[test]
     fn pr_threads_maps_fixture() {
         let data: PrThreadsData = serde_json::from_str(THREADS_FIXTURE).expect("fixture parses");
-        let conn = data.repository.unwrap().pull_request.unwrap().review_threads;
+        let conn = data
+            .repository
+            .unwrap()
+            .pull_request
+            .unwrap()
+            .review_threads;
         assert!(!conn.page_info.has_next_page);
         let threads: Vec<PrThread> = conn.nodes.into_iter().map(map_thread).collect();
 
@@ -2849,7 +3059,10 @@ mod tests {
         assert_eq!(resolved.comments[0].body, "Looks good to **me**.");
         assert_eq!(resolved.comments[0].database_id, Some(1001));
         assert_eq!(
-            resolved.comments[0].author.as_ref().and_then(|a| a.login.as_deref()),
+            resolved.comments[0]
+                .author
+                .as_ref()
+                .and_then(|a| a.login.as_deref()),
             Some("rev1")
         );
 
@@ -2898,8 +3111,7 @@ mod tests {
 
     #[test]
     fn thread_mutation_null_result_is_none() {
-        let data: ThreadMutationData =
-            serde_json::from_str(r#"{"result": null}"#).expect("parses");
+        let data: ThreadMutationData = serde_json::from_str(r#"{"result": null}"#).expect("parses");
         assert!(data.result.is_none());
     }
 

@@ -128,9 +128,18 @@ mod tests {
 
     #[test]
     fn enums_serialize_to_spec_literals() {
-        assert_eq!(serde_json::to_string(&RefKind::Remote).unwrap(), "\"remote\"");
-        assert_eq!(serde_json::to_string(&ChangeStatus::Renamed).unwrap(), "\"R\"");
-        assert_eq!(serde_json::to_string(&ChangeStatus::TypeChanged).unwrap(), "\"T\"");
+        assert_eq!(
+            serde_json::to_string(&RefKind::Remote).unwrap(),
+            "\"remote\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ChangeStatus::Renamed).unwrap(),
+            "\"R\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ChangeStatus::TypeChanged).unwrap(),
+            "\"T\""
+        );
         let s: Scope = serde_json::from_str("\"local\"").unwrap();
         assert_eq!(s, Scope::Local);
         let k: WipKind = serde_json::from_str("\"untracked\"").unwrap();

@@ -96,7 +96,10 @@ impl IgnoreRule {
             || self.subject_mine.is_some()
             || self.i_commented.is_some()
             || self.involved.is_some()
-            || self.body_contains.as_deref().is_some_and(|b| !b.trim().is_empty())
+            || self
+                .body_contains
+                .as_deref()
+                .is_some_and(|b| !b.trim().is_empty())
             || !self.authors.is_empty()
             || self.approvals_only.is_some()
     }
@@ -117,7 +120,9 @@ impl IgnoreRule {
             && self.outdated.is_none_or(|v| v == f.outdated)
             && self.last_author.as_deref().is_none_or(|a| a == last_kind)
             && self.subject_closed.is_none_or(|v| v == f.subject_closed)
-            && self.older_than_days.is_none_or(|d| f.age_days.is_some_and(|a| a >= d))
+            && self
+                .older_than_days
+                .is_none_or(|d| f.age_days.is_some_and(|a| a >= d))
             && self.subject_mine.is_none_or(|v| v == f.subject_mine)
             && self.i_commented.is_none_or(|v| v == f.i_commented)
             && self.involved.is_none_or(|v| v == f.subject_involved)
@@ -128,9 +133,11 @@ impl IgnoreRule {
                 .filter(|b| !b.is_empty())
                 .is_none_or(|b| f.last_body.to_lowercase().contains(&b.to_lowercase()))
             && (self.authors.is_empty()
-                || f.last_author
-                    .as_deref()
-                    .is_some_and(|a| self.authors.iter().any(|x| x.trim().eq_ignore_ascii_case(a))))
+                || f.last_author.as_deref().is_some_and(|a| {
+                    self.authors
+                        .iter()
+                        .any(|x| x.trim().eq_ignore_ascii_case(a))
+                }))
             && self.approvals_only.is_none_or(|v| v == f.approvals_only)
     }
 }
@@ -212,7 +219,9 @@ pub struct ConversationList {
 }
 
 fn ts(s: &str) -> Option<DateTime<Utc>> {
-    DateTime::parse_from_rfc3339(s).ok().map(|t| t.with_timezone(&Utc))
+    DateTime::parse_from_rfc3339(s)
+        .ok()
+        .map(|t| t.with_timezone(&Utc))
 }
 
 struct SubjectRow {
@@ -295,38 +304,66 @@ impl Ctx {
         let Some(a) = a else { return false };
         let login = a.login.as_deref().map(str::to_lowercase);
         a.typename.as_deref() == Some("Bot")
-            || login.as_ref().is_some_and(|l| self.bot_logins.contains(l) || self.db_bots.contains(l))
+            || login
+                .as_ref()
+                .is_some_and(|l| self.bot_logins.contains(l) || self.db_bots.contains(l))
     }
 
     fn meta(&self, created_at: &str, a: Option<&gh::PrActor>) -> Meta {
-        Meta { created_at: created_at.to_string(), author: a.and_then(|a| a.login.clone()), is_bot: self.is_bot(a) }
+        Meta {
+            created_at: created_at.to_string(),
+            author: a.and_then(|a| a.login.clone()),
+            is_bot: self.is_bot(a),
+        }
     }
 
     fn unread(&self, seen: Option<DateTime<Utc>>, metas: &[Meta]) -> usize {
         metas
             .iter()
             .filter(|m| {
-                let mine = self.viewer.as_deref().is_some_and(|v| m.author.as_deref().is_some_and(|a| a.eq_ignore_ascii_case(v)));
+                let mine = self.viewer.as_deref().is_some_and(|v| {
+                    m.author
+                        .as_deref()
+                        .is_some_and(|a| a.eq_ignore_ascii_case(v))
+                });
                 !mine && ts(&m.created_at).is_some_and(|t| seen.is_none_or(|s| t > s))
             })
             .count()
     }
 }
 
-fn facts_of(c: &Conversation, ctx: &Ctx, subject_mine: bool, subject_involved: bool, now: DateTime<Utc>) -> Facts {
+fn facts_of(
+    c: &Conversation,
+    ctx: &Ctx,
+    subject_mine: bool,
+    subject_involved: bool,
+    now: DateTime<Utc>,
+) -> Facts {
     // (author login, bot?, body, review approving?) of every comment, oldest first.
     let comments: Vec<(Option<String>, bool, &str, bool)> = match &c.thread {
         Some(t) => t
             .comments
             .iter()
-            .map(|x| (x.author.as_ref().and_then(|a| a.login.clone()), ctx.is_bot(x.author.as_ref()), x.body.as_str(), false))
+            .map(|x| {
+                (
+                    x.author.as_ref().and_then(|a| a.login.clone()),
+                    ctx.is_bot(x.author.as_ref()),
+                    x.body.as_str(),
+                    false,
+                )
+            })
             .collect(),
         None => c
             .comments
             .iter()
             .map(|x| {
                 let approving = x.kind == "review" && x.review_state.as_deref() == Some("APPROVED");
-                (x.author.as_ref().and_then(|a| a.login.clone()), ctx.is_bot(x.author.as_ref()), x.body.as_str(), approving)
+                (
+                    x.author.as_ref().and_then(|a| a.login.clone()),
+                    ctx.is_bot(x.author.as_ref()),
+                    x.body.as_str(),
+                    approving,
+                )
             })
             .collect(),
     };
@@ -344,7 +381,10 @@ fn facts_of(c: &Conversation, ctx: &Ctx, subject_mine: bool, subject_involved: b
         last_is_me: last.is_some_and(|x| is_me(&x.0)),
         last_is_bot: last.is_some_and(|x| x.1),
         last_body: last.map(|x| x.2.to_string()).unwrap_or_default(),
-        subject_closed: matches!(c.subject.state.as_deref().map(str::to_lowercase).as_deref(), Some("closed" | "merged")),
+        subject_closed: matches!(
+            c.subject.state.as_deref().map(str::to_lowercase).as_deref(),
+            Some("closed" | "merged")
+        ),
         subject_mine,
         i_commented: comments.iter().any(|x| is_me(&x.0)),
         subject_involved,
@@ -353,10 +393,15 @@ fn facts_of(c: &Conversation, ctx: &Ctx, subject_mine: bool, subject_involved: b
     }
 }
 
-pub fn list_conversations_impl(conn: &Connection, f: &ConversationFilters, limit: usize) -> AppResult<ConversationList> {
+pub fn list_conversations_impl(
+    conn: &Connection,
+    f: &ConversationFilters,
+    limit: usize,
+) -> AppResult<ConversationList> {
     let ctx = Ctx {
         viewer: mirror::store::viewer_login(conn).map(|v| v.to_lowercase()),
-        baseline: crate::commands::inbox::get_meta(conn, "conversations_seen_baseline").and_then(|t| ts(&t)),
+        baseline: crate::commands::inbox::get_meta(conn, "conversations_seen_baseline")
+            .and_then(|t| ts(&t)),
         bot_logins: f.bot_logins.iter().map(|l| l.to_lowercase()).collect(),
         db_bots: conn
             .prepare("SELECT LOWER(login) FROM gh_user WHERE is_bot = 1")?
@@ -372,32 +417,53 @@ pub fn list_conversations_impl(conn: &Connection, f: &ConversationFilters, limit
     let mut bots = 0usize;
     let mut mine_subject: HashMap<String, bool> = HashMap::new();
     let mut involved_subject: HashMap<String, bool> = HashMap::new();
-    let is_viewer = |a: Option<&gh::PrActor>| {
-        matches!((a.and_then(|a| a.login.as_deref()), &ctx.viewer), (Some(l), Some(v)) if l.eq_ignore_ascii_case(v))
-    };
+    let is_viewer = |a: Option<&gh::PrActor>| matches!((a.and_then(|a| a.login.as_deref()), &ctx.viewer), (Some(l), Some(v)) if l.eq_ignore_ascii_case(v));
     for row in read_subjects(conn)? {
         let mine = matches!((&row.author_login, &ctx.viewer), (Some(a), Some(v)) if a.eq_ignore_ascii_case(v));
         mine_subject.insert(row.subject.id.clone(), mine);
-        let threads: Vec<PrThread> = row.threads_json.as_deref().and_then(|j| serde_json::from_str(j).ok()).unwrap_or_default();
-        let discussion: Vec<DiscussionComment> =
-            row.discussion_json.as_deref().and_then(|j| serde_json::from_str(j).ok()).unwrap_or_default();
+        let threads: Vec<PrThread> = row
+            .threads_json
+            .as_deref()
+            .and_then(|j| serde_json::from_str(j).ok())
+            .unwrap_or_default();
+        let discussion: Vec<DiscussionComment> = row
+            .discussion_json
+            .as_deref()
+            .and_then(|j| serde_json::from_str(j).ok())
+            .unwrap_or_default();
         let involved = mine
             || row.subject.on_board
             || row.inbox_direct
-            || row.subject.reason.as_deref().is_some_and(|r| DIRECT_NOTIFICATION_REASONS.contains(&r))
-            || threads.iter().flat_map(|t| &t.comments).any(|c| is_viewer(c.author.as_ref()))
+            || row
+                .subject
+                .reason
+                .as_deref()
+                .is_some_and(|r| DIRECT_NOTIFICATION_REASONS.contains(&r))
+            || threads
+                .iter()
+                .flat_map(|t| &t.comments)
+                .any(|c| is_viewer(c.author.as_ref()))
             || discussion.iter().any(|c| is_viewer(c.author.as_ref()));
         involved_subject.insert(row.subject.id.clone(), involved);
         let notif_read = row.last_read_at.as_deref().and_then(ts);
         let seen_of = |id: &str| {
             let own = state.get(id).and_then(|(_, s)| s.as_deref()).and_then(ts);
-            [own.or(ctx.baseline), notif_read].into_iter().flatten().max()
+            [own.or(ctx.baseline), notif_read]
+                .into_iter()
+                .flatten()
+                .max()
         };
         let pinned_of = |id: &str| state.get(id).is_some_and(|(p, _)| *p);
 
         for t in threads {
-            let Some(last) = t.comments.last() else { continue };
-            let metas: Vec<Meta> = t.comments.iter().map(|c| ctx.meta(&c.created_at, c.author.as_ref())).collect();
+            let Some(last) = t.comments.last() else {
+                continue;
+            };
+            let metas: Vec<Meta> = t
+                .comments
+                .iter()
+                .map(|c| ctx.meta(&c.created_at, c.author.as_ref()))
+                .collect();
             let is_bot = metas.iter().all(|m| m.is_bot);
             if is_bot {
                 bots += 1;
@@ -438,7 +504,10 @@ pub fn list_conversations_impl(conn: &Connection, f: &ConversationFilters, limit
                 .filter(|c| f.show_bots || !ctx.is_bot(c.author.as_ref()))
                 .collect();
             if let Some(last) = visible.last() {
-                let metas: Vec<Meta> = visible.iter().map(|c| ctx.meta(&c.created_at, c.author.as_ref())).collect();
+                let metas: Vec<Meta> = visible
+                    .iter()
+                    .map(|c| ctx.meta(&c.created_at, c.author.as_ref()))
+                    .collect();
                 all.push(Conversation {
                     id: id.clone(),
                     kind: "discussion",
@@ -470,7 +539,10 @@ pub fn list_conversations_impl(conn: &Connection, f: &ConversationFilters, limit
             c,
             &ctx,
             mine_subject.get(&c.subject.id).copied().unwrap_or(false),
-            involved_subject.get(&c.subject.id).copied().unwrap_or(false),
+            involved_subject
+                .get(&c.subject.id)
+                .copied()
+                .unwrap_or(false),
             now,
         );
         for r in f.rules.iter().filter(|r| r.matches(&facts)) {
@@ -485,22 +557,38 @@ pub fn list_conversations_impl(conn: &Connection, f: &ConversationFilters, limit
         all.retain(|c| c.ignored_by.is_empty());
     }
 
-    let mut facets = ConversationFacets { bots, ignored, rule_hits, ..Default::default() };
+    let mut facets = ConversationFacets {
+        bots,
+        ignored,
+        rule_hits,
+        ..Default::default()
+    };
     let mut by_subject: HashMap<&str, SubjectFacet> = HashMap::new();
     let mut by_repo: HashMap<String, usize> = HashMap::new();
     for c in &all {
         let e = by_subject
             .entry(c.subject.id.as_str())
-            .or_insert_with(|| SubjectFacet { subject: c.subject.clone(), count: 0, unread: 0 });
+            .or_insert_with(|| SubjectFacet {
+                subject: c.subject.clone(),
+                count: 0,
+                unread: 0,
+            });
         e.count += 1;
         e.unread += usize::from(c.unread_count > 0);
-        *by_repo.entry(format!("{}/{}", c.subject.owner, c.subject.name)).or_default() += 1;
+        *by_repo
+            .entry(format!("{}/{}", c.subject.owner, c.subject.name))
+            .or_default() += 1;
         facets.pinned += usize::from(c.pinned);
         facets.unread += usize::from(c.unread_count > 0);
         facets.unresolved += usize::from(c.kind == "thread" && !c.is_resolved);
     }
     facets.subjects = by_subject.into_values().collect();
-    facets.subjects.sort_by(|a, b| a.subject.title.to_lowercase().cmp(&b.subject.title.to_lowercase()));
+    facets.subjects.sort_by(|a, b| {
+        a.subject
+            .title
+            .to_lowercase()
+            .cmp(&b.subject.title.to_lowercase())
+    });
     facets.repos = by_repo.into_iter().collect();
     facets.repos.sort();
 
@@ -508,7 +596,10 @@ pub fn list_conversations_impl(conn: &Connection, f: &ConversationFilters, limit
     let mut items: Vec<Conversation> = all
         .into_iter()
         .filter(|c| f.subject_ids.is_empty() || f.subject_ids.contains(&c.subject.id))
-        .filter(|c| repos.is_empty() || repos.contains(&format!("{}/{}", c.subject.owner, c.subject.name).to_lowercase()))
+        .filter(|c| {
+            repos.is_empty()
+                || repos.contains(&format!("{}/{}", c.subject.owner, c.subject.name).to_lowercase())
+        })
         .filter(|c| !f.pinned || c.pinned)
         .filter(|c| !f.unread || c.unread_count > 0 || f.keep_ids.contains(&c.id))
         .filter(|c| !f.unresolved || (c.kind == "thread" && !c.is_resolved))
@@ -516,15 +607,28 @@ pub fn list_conversations_impl(conn: &Connection, f: &ConversationFilters, limit
     items.sort_by(|a, b| b.last_comment_at.cmp(&a.last_comment_at));
     let total = items.len();
     items.truncate(limit.max(1));
-    Ok(ConversationList { items, total, facets })
+    Ok(ConversationList {
+        items,
+        total,
+        facets,
+    })
 }
 
 #[tauri::command]
-pub fn list_conversations(filters: ConversationFilters, limit: Option<usize>, db: State<Db>) -> AppResult<ConversationList> {
+pub fn list_conversations(
+    filters: ConversationFilters,
+    limit: Option<usize>,
+    db: State<Db>,
+) -> AppResult<ConversationList> {
     list_conversations_impl(&db.0.lock().unwrap(), &filters, limit.unwrap_or(100))
 }
 
-pub fn set_pinned_impl(conn: &Connection, id: &str, subject_id: &str, pinned: bool) -> AppResult<()> {
+pub fn set_pinned_impl(
+    conn: &Connection,
+    id: &str,
+    subject_id: &str,
+    pinned: bool,
+) -> AppResult<()> {
     conn.execute(
         "INSERT INTO conversation_state (id, subject_id, pinned_at) VALUES (?1, ?2, ?3)
          ON CONFLICT(id) DO UPDATE SET pinned_at = excluded.pinned_at",
@@ -533,8 +637,15 @@ pub fn set_pinned_impl(conn: &Connection, id: &str, subject_id: &str, pinned: bo
     Ok(())
 }
 
-pub fn set_seen_impl(conn: &Connection, id: &str, subject_id: &str, seen_at: Option<&str>) -> AppResult<()> {
-    let seen_at = seen_at.map(str::to_string).unwrap_or_else(|| Utc::now().to_rfc3339());
+pub fn set_seen_impl(
+    conn: &Connection,
+    id: &str,
+    subject_id: &str,
+    seen_at: Option<&str>,
+) -> AppResult<()> {
+    let seen_at = seen_at
+        .map(str::to_string)
+        .unwrap_or_else(|| Utc::now().to_rfc3339());
     conn.execute(
         "INSERT INTO conversation_state (id, subject_id, last_seen_at) VALUES (?1, ?2, ?3)
          ON CONFLICT(id) DO UPDATE SET last_seen_at = excluded.last_seen_at",
@@ -544,14 +655,24 @@ pub fn set_seen_impl(conn: &Connection, id: &str, subject_id: &str, seen_at: Opt
 }
 
 #[tauri::command]
-pub fn set_conversation_pinned(id: String, subject_id: String, pinned: bool, db: State<Db>) -> AppResult<()> {
+pub fn set_conversation_pinned(
+    id: String,
+    subject_id: String,
+    pinned: bool,
+    db: State<Db>,
+) -> AppResult<()> {
     set_pinned_impl(&db.0.lock().unwrap(), &id, &subject_id, pinned)
 }
 
 /// Mark a conversation read up to `seen_at` (the time of its latest comment),
 /// or unread by passing an earlier time. `None` means now.
 #[tauri::command]
-pub fn set_conversation_seen(id: String, subject_id: String, seen_at: Option<String>, db: State<Db>) -> AppResult<()> {
+pub fn set_conversation_seen(
+    id: String,
+    subject_id: String,
+    seen_at: Option<String>,
+    db: State<Db>,
+) -> AppResult<()> {
     set_seen_impl(&db.0.lock().unwrap(), &id, &subject_id, seen_at.as_deref())
 }
 
@@ -577,7 +698,13 @@ pub(crate) fn refresh_discussion(app: &AppHandle, db: &Db, subject_id: &str) -> 
     if let Some(Some(d)) = mirror::fetch::discussions(&ids).remove(subject_id) {
         let updated_at = d.updated_at.clone();
         let conn = db.0.lock().unwrap();
-        mirror::store::upsert_discussion(&conn, subject_id, updated_at.as_deref(), &d.into_comments(), &Utc::now().to_rfc3339())?;
+        mirror::store::upsert_discussion(
+            &conn,
+            subject_id,
+            updated_at.as_deref(),
+            &d.into_comments(),
+            &Utc::now().to_rfc3339(),
+        )?;
     }
     crate::commands::gh::notify_mirror(app, subject_id);
     Ok(())
@@ -611,13 +738,21 @@ mod tests {
 
     fn seed(conn: &Connection, threads: Vec<serde_json::Value>) {
         mirror::store::upsert_node(conn, &pr_node("PR_1", 1), "2026-01-01T00:00:00Z").unwrap();
-        conn.execute("INSERT INTO board_card (id, type, tracked_at) VALUES ('PR_1', 'pr', 'now')", []).unwrap();
+        conn.execute(
+            "INSERT INTO board_card (id, type, tracked_at) VALUES ('PR_1', 'pr', 'now')",
+            [],
+        )
+        .unwrap();
         conn.execute(
             "INSERT INTO gh_pr_threads (pr_id, threads_json, fetched_at) VALUES ('PR_1', ?1, 'now')",
             params![serde_json::Value::Array(threads).to_string()],
         )
         .unwrap();
-        conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('viewer_login', 'me')", []).unwrap();
+        conn.execute(
+            "INSERT OR REPLACE INTO meta (key, value) VALUES ('viewer_login', 'me')",
+            [],
+        )
+        .unwrap();
         conn.execute("UPDATE meta SET value = '2026-01-01T00:00:00Z' WHERE key = 'conversations_seen_baseline'", []).unwrap();
     }
 
@@ -628,12 +763,25 @@ mod tests {
     #[test]
     fn unread_counts_comments_after_the_baseline_that_are_not_mine() {
         let conn = open_memory();
-        seed(&conn, vec![
-            thread("T_old", &[("bob", "User", "2025-12-31T00:00:00Z")]),
-            thread("T_new", &[("bob", "User", "2026-01-02T00:00:00Z"), ("me", "User", "2026-01-03T00:00:00Z")]),
-        ]);
+        seed(
+            &conn,
+            vec![
+                thread("T_old", &[("bob", "User", "2025-12-31T00:00:00Z")]),
+                thread(
+                    "T_new",
+                    &[
+                        ("bob", "User", "2026-01-02T00:00:00Z"),
+                        ("me", "User", "2026-01-03T00:00:00Z"),
+                    ],
+                ),
+            ],
+        );
         let got = list(&conn, ConversationFilters::default(), 10);
-        let unread: Vec<(&str, usize)> = got.items.iter().map(|c| (c.id.as_str(), c.unread_count)).collect();
+        let unread: Vec<(&str, usize)> = got
+            .items
+            .iter()
+            .map(|c| (c.id.as_str(), c.unread_count))
+            .collect();
         assert_eq!(unread, vec![("T_new", 1), ("T_old", 0)]);
         assert_eq!(got.facets.unread, 1);
     }
@@ -641,40 +789,104 @@ mod tests {
     #[test]
     fn seen_state_clears_unread_and_unread_filter_follows() {
         let conn = open_memory();
-        seed(&conn, vec![thread("T", &[("bob", "User", "2026-01-02T00:00:00Z")])]);
-        let unread = ConversationFilters { unread: true, ..Default::default() };
-        assert_eq!(list(&conn, ConversationFilters { unread: true, ..Default::default() }, 10).total, 1);
+        seed(
+            &conn,
+            vec![thread("T", &[("bob", "User", "2026-01-02T00:00:00Z")])],
+        );
+        let unread = ConversationFilters {
+            unread: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            list(
+                &conn,
+                ConversationFilters {
+                    unread: true,
+                    ..Default::default()
+                },
+                10
+            )
+            .total,
+            1
+        );
         set_seen_impl(&conn, "T", "PR_1", Some("2026-01-02T00:00:00Z")).unwrap();
         assert_eq!(list(&conn, unread, 10).total, 0);
         set_seen_impl(&conn, "T", "PR_1", Some("1970-01-01T00:00:00Z")).unwrap();
-        assert_eq!(list(&conn, ConversationFilters { unread: true, ..Default::default() }, 10).total, 1);
+        assert_eq!(
+            list(
+                &conn,
+                ConversationFilters {
+                    unread: true,
+                    ..Default::default()
+                },
+                10
+            )
+            .total,
+            1
+        );
     }
 
     #[test]
     fn keep_ids_survive_the_unread_filter_once_read() {
         let conn = open_memory();
-        seed(&conn, vec![thread("T", &[("bob", "User", "2026-01-02T00:00:00Z")])]);
+        seed(
+            &conn,
+            vec![thread("T", &[("bob", "User", "2026-01-02T00:00:00Z")])],
+        );
         set_seen_impl(&conn, "T", "PR_1", Some("2026-01-02T00:00:00Z")).unwrap();
-        let kept = ConversationFilters { unread: true, keep_ids: vec!["T".into()], ..Default::default() };
+        let kept = ConversationFilters {
+            unread: true,
+            keep_ids: vec!["T".into()],
+            ..Default::default()
+        };
         let got = list(&conn, kept, 10);
         assert_eq!(got.total, 1);
         assert_eq!(got.items[0].unread_count, 0);
-        assert_eq!(list(&conn, ConversationFilters { unread: true, ..Default::default() }, 10).total, 0);
+        assert_eq!(
+            list(
+                &conn,
+                ConversationFilters {
+                    unread: true,
+                    ..Default::default()
+                },
+                10
+            )
+            .total,
+            0
+        );
     }
 
     #[test]
     fn bot_only_conversations_are_hidden_unless_shown() {
         let conn = open_memory();
-        seed(&conn, vec![
-            thread("T_bot", &[("copilot", "Bot", "2026-01-02T00:00:00Z")]),
-            thread("T_cfg", &[("sonar-x", "User", "2026-01-02T00:00:00Z")]),
-            thread("T_human", &[("bob", "User", "2026-01-02T00:00:00Z"), ("copilot", "Bot", "2026-01-03T00:00:00Z")]),
-        ]);
-        let hidden = ConversationFilters { bot_logins: vec!["Sonar-X".into()], ..Default::default() };
+        seed(
+            &conn,
+            vec![
+                thread("T_bot", &[("copilot", "Bot", "2026-01-02T00:00:00Z")]),
+                thread("T_cfg", &[("sonar-x", "User", "2026-01-02T00:00:00Z")]),
+                thread(
+                    "T_human",
+                    &[
+                        ("bob", "User", "2026-01-02T00:00:00Z"),
+                        ("copilot", "Bot", "2026-01-03T00:00:00Z"),
+                    ],
+                ),
+            ],
+        );
+        let hidden = ConversationFilters {
+            bot_logins: vec!["Sonar-X".into()],
+            ..Default::default()
+        };
         let got = list(&conn, hidden, 10);
-        assert_eq!(got.items.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(), vec!["T_human"]);
+        assert_eq!(
+            got.items.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(),
+            vec!["T_human"]
+        );
         assert_eq!(got.facets.bots, 2);
-        let shown = ConversationFilters { show_bots: true, ..Default::default() };
+        let shown = ConversationFilters {
+            show_bots: true,
+            ..Default::default()
+        };
         assert_eq!(list(&conn, shown, 10).total, 3);
     }
 
@@ -690,18 +902,64 @@ mod tests {
         conn.execute("INSERT INTO gh_discussion (subject_id, comments_json, fetched_at) VALUES ('PR_1', ?1, 'now')", params![comments.to_string()]).unwrap();
         let got = list(&conn, ConversationFilters::default(), 10);
         assert_eq!(got.items.len(), 1);
-        assert_eq!((got.items[0].kind, got.items[0].comments.len()), ("discussion", 1));
-        assert_eq!(list(&conn, ConversationFilters { pinned: true, ..Default::default() }, 10).total, 0);
+        assert_eq!(
+            (got.items[0].kind, got.items[0].comments.len()),
+            ("discussion", 1)
+        );
+        assert_eq!(
+            list(
+                &conn,
+                ConversationFilters {
+                    pinned: true,
+                    ..Default::default()
+                },
+                10
+            )
+            .total,
+            0
+        );
         set_pinned_impl(&conn, "discussion:PR_1", "PR_1", true).unwrap();
-        assert_eq!(list(&conn, ConversationFilters { pinned: true, ..Default::default() }, 10).total, 1);
+        assert_eq!(
+            list(
+                &conn,
+                ConversationFilters {
+                    pinned: true,
+                    ..Default::default()
+                },
+                10
+            )
+            .total,
+            1
+        );
         set_pinned_impl(&conn, "discussion:PR_1", "PR_1", false).unwrap();
-        assert_eq!(list(&conn, ConversationFilters { pinned: true, ..Default::default() }, 10).total, 0);
+        assert_eq!(
+            list(
+                &conn,
+                ConversationFilters {
+                    pinned: true,
+                    ..Default::default()
+                },
+                10
+            )
+            .total,
+            0
+        );
     }
 
     #[test]
     fn limit_applies_after_filters_and_total_counts_all() {
         let conn = open_memory();
-        seed(&conn, (0..5).map(|i| thread(&format!("T{i}"), &[("bob", "User", &format!("2026-01-0{}T00:00:00Z", i + 2))])).collect());
+        seed(
+            &conn,
+            (0..5)
+                .map(|i| {
+                    thread(
+                        &format!("T{i}"),
+                        &[("bob", "User", &format!("2026-01-0{}T00:00:00Z", i + 2))],
+                    )
+                })
+                .collect(),
+        );
         let got = list(&conn, ConversationFilters::default(), 2);
         assert_eq!((got.items.len(), got.total), (2, 5));
         assert_eq!(got.items[0].id, "T4", "newest first");
@@ -709,23 +967,43 @@ mod tests {
     }
 
     fn rule(id: &str) -> IgnoreRule {
-        IgnoreRule { id: id.into(), enabled: true, ..Default::default() }
+        IgnoreRule {
+            id: id.into(),
+            enabled: true,
+            ..Default::default()
+        }
     }
 
     #[test]
     fn rules_hide_matching_conversations_and_count_hits() {
         let conn = open_memory();
-        seed(&conn, vec![
-            {
-                let mut t = thread("T_resolved", &[("bob", "User", "2026-01-02T00:00:00Z")]);
-                t["isResolved"] = true.into();
-                t
-            },
-            thread("T_mine", &[("bob", "User", "2026-01-02T00:00:00Z"), ("me", "User", "2026-01-03T00:00:00Z")]),
-            thread("T_open", &[("bob", "User", "2026-01-02T00:00:00Z")]),
-        ]);
-        let resolved = IgnoreRule { resolved: Some(true), ..rule("resolved") };
-        let mine_last = IgnoreRule { last_author: Some("me".into()), enabled: false, ..rule("mine") };
+        seed(
+            &conn,
+            vec![
+                {
+                    let mut t = thread("T_resolved", &[("bob", "User", "2026-01-02T00:00:00Z")]);
+                    t["isResolved"] = true.into();
+                    t
+                },
+                thread(
+                    "T_mine",
+                    &[
+                        ("bob", "User", "2026-01-02T00:00:00Z"),
+                        ("me", "User", "2026-01-03T00:00:00Z"),
+                    ],
+                ),
+                thread("T_open", &[("bob", "User", "2026-01-02T00:00:00Z")]),
+            ],
+        );
+        let resolved = IgnoreRule {
+            resolved: Some(true),
+            ..rule("resolved")
+        };
+        let mine_last = IgnoreRule {
+            last_author: Some("me".into()),
+            enabled: false,
+            ..rule("mine")
+        };
         let empty = rule("empty");
         let filters = |show_ignored| ConversationFilters {
             rules: vec![resolved.clone(), mine_last.clone(), empty.clone()],
@@ -735,10 +1013,18 @@ mod tests {
 
         let got = list(&conn, filters(false), 10);
         let ids: Vec<&str> = got.items.iter().map(|c| c.id.as_str()).collect();
-        assert_eq!(ids, vec!["T_mine", "T_open"], "only the enabled rule hides; a rule with no conditions matches nothing");
+        assert_eq!(
+            ids,
+            vec!["T_mine", "T_open"],
+            "only the enabled rule hides; a rule with no conditions matches nothing"
+        );
         assert_eq!(got.facets.ignored, 1);
         assert_eq!(got.facets.rule_hits.get("resolved"), Some(&1));
-        assert_eq!(got.facets.rule_hits.get("mine"), Some(&1), "disabled rules still get hit counts");
+        assert_eq!(
+            got.facets.rule_hits.get("mine"),
+            Some(&1),
+            "disabled rules still get hit counts"
+        );
         assert_eq!(got.facets.rule_hits.get("empty"), None);
 
         let shown = list(&conn, filters(true), 10);
@@ -750,21 +1036,58 @@ mod tests {
     #[test]
     fn rules_match_age_state_body_and_approvals() {
         let conn = open_memory();
-        seed(&conn, vec![thread("T_old", &[("bob", "User", "2026-01-02T00:00:00Z")])]);
-        conn.execute("UPDATE gh_pr SET state = 'merged' WHERE node_id = 'PR_1'", []).unwrap();
+        seed(
+            &conn,
+            vec![thread("T_old", &[("bob", "User", "2026-01-02T00:00:00Z")])],
+        );
+        conn.execute(
+            "UPDATE gh_pr SET state = 'merged' WHERE node_id = 'PR_1'",
+            [],
+        )
+        .unwrap();
         let comments = serde_json::json!([
             { "id": "R1", "kind": "review", "reviewState": "APPROVED", "author": { "login": "bob", "__typename": "User" },
               "body": "lgtm", "createdAt": "2026-01-03T00:00:00Z", "url": "u1" }]);
         conn.execute("INSERT INTO gh_discussion (subject_id, comments_json, fetched_at) VALUES ('PR_1', ?1, 'now')", params![comments.to_string()]).unwrap();
-        let hits = |r: IgnoreRule| list(&conn, ConversationFilters { rules: vec![r], show_ignored: true, ..Default::default() }, 10).facets.rule_hits;
+        let hits = |r: IgnoreRule| {
+            list(
+                &conn,
+                ConversationFilters {
+                    rules: vec![r],
+                    show_ignored: true,
+                    ..Default::default()
+                },
+                10,
+            )
+            .facets
+            .rule_hits
+        };
 
-        let stale = IgnoreRule { subject_closed: Some(true), older_than_days: Some(30), ..rule("stale") };
-        assert_eq!(hits(stale).get("stale"), Some(&2), "both conversations of a merged PR quiet for 30+ days");
-        let approvals = IgnoreRule { approvals_only: Some(true), ..rule("approvals") };
+        let stale = IgnoreRule {
+            subject_closed: Some(true),
+            older_than_days: Some(30),
+            ..rule("stale")
+        };
+        assert_eq!(
+            hits(stale).get("stale"),
+            Some(&2),
+            "both conversations of a merged PR quiet for 30+ days"
+        );
+        let approvals = IgnoreRule {
+            approvals_only: Some(true),
+            ..rule("approvals")
+        };
         assert_eq!(hits(approvals).get("approvals"), Some(&1));
-        let body = IgnoreRule { body_contains: Some("LGTM".into()), kind: Some("discussion".into()), ..rule("body") };
+        let body = IgnoreRule {
+            body_contains: Some("LGTM".into()),
+            kind: Some("discussion".into()),
+            ..rule("body")
+        };
         assert_eq!(hits(body).get("body"), Some(&1));
-        let author = IgnoreRule { authors: vec!["BOB".into()], ..rule("author") };
+        let author = IgnoreRule {
+            authors: vec!["BOB".into()],
+            ..rule("author")
+        };
         assert_eq!(hits(author).get("author"), Some(&2));
     }
 
@@ -773,7 +1096,12 @@ mod tests {
         let conn = open_memory();
         seed(&conn, vec![]);
         // PR_1 is on the Board; PR_2..PR_5 only come from notifications.
-        for (id, n, reason) in [("PR_2", 2, "review_requested"), ("PR_3", 3, "review_requested"), ("PR_4", 4, "review_requested"), ("PR_5", 5, "mention")] {
+        for (id, n, reason) in [
+            ("PR_2", 2, "review_requested"),
+            ("PR_3", 3, "review_requested"),
+            ("PR_4", 4, "review_requested"),
+            ("PR_5", 5, "mention"),
+        ] {
             mirror::store::upsert_node(&conn, &pr_node(id, n), "2026-01-01T00:00:00Z").unwrap();
             conn.execute(
                 "INSERT INTO gh_notification (id, subject_type, subject_node_id, repo, number, title, reason, updated_at, fetched_at)
@@ -782,8 +1110,16 @@ mod tests {
             )
             .unwrap();
         }
-        conn.execute("INSERT INTO inbox_entry (id, type, first_seen_at) VALUES ('PR_3', 'pr', 'now')", []).unwrap();
-        conn.execute("INSERT INTO item_reasons (item_id, reason) VALUES ('PR_3', 'direct_review')", []).unwrap();
+        conn.execute(
+            "INSERT INTO inbox_entry (id, type, first_seen_at) VALUES ('PR_3', 'pr', 'now')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO item_reasons (item_id, reason) VALUES ('PR_3', 'direct_review')",
+            [],
+        )
+        .unwrap();
         let threads = |id: &str, t: serde_json::Value| {
             conn.execute(
                 "INSERT OR REPLACE INTO gh_pr_threads (pr_id, threads_json, fetched_at) VALUES (?1, ?2, 'now')",
@@ -791,9 +1127,18 @@ mod tests {
             )
             .unwrap();
         };
-        threads("PR_1", thread("T1", &[("bob", "User", "2026-01-02T00:00:00Z")]));
-        threads("PR_2", thread("T2", &[("bob", "User", "2026-01-02T00:00:00Z")]));
-        threads("PR_3", thread("T3", &[("bob", "User", "2026-01-02T00:00:00Z")]));
+        threads(
+            "PR_1",
+            thread("T1", &[("bob", "User", "2026-01-02T00:00:00Z")]),
+        );
+        threads(
+            "PR_2",
+            thread("T2", &[("bob", "User", "2026-01-02T00:00:00Z")]),
+        );
+        threads(
+            "PR_3",
+            thread("T3", &[("bob", "User", "2026-01-02T00:00:00Z")]),
+        );
         // Commenting on another thread of the PR makes this one count too.
         conn.execute(
             "INSERT OR REPLACE INTO gh_pr_threads (pr_id, threads_json, fetched_at) VALUES ('PR_4', ?1, 'now')",
@@ -804,13 +1149,30 @@ mod tests {
             .to_string()],
         )
         .unwrap();
-        threads("PR_5", thread("T5", &[("bob", "User", "2026-01-02T00:00:00Z")]));
+        threads(
+            "PR_5",
+            thread("T5", &[("bob", "User", "2026-01-02T00:00:00Z")]),
+        );
 
-        let rule = IgnoreRule { involved: Some(false), ..rule("not-involved") };
-        let got = list(&conn, ConversationFilters { rules: vec![rule], ..Default::default() }, 10);
+        let rule = IgnoreRule {
+            involved: Some(false),
+            ..rule("not-involved")
+        };
+        let got = list(
+            &conn,
+            ConversationFilters {
+                rules: vec![rule],
+                ..Default::default()
+            },
+            10,
+        );
         let mut ids: Vec<&str> = got.items.iter().map(|c| c.id.as_str()).collect();
         ids.sort();
-        assert_eq!(ids, vec!["T1", "T3", "T4", "T4b", "T5"], "only the team-only review request is hidden");
+        assert_eq!(
+            ids,
+            vec!["T1", "T3", "T4", "T4b", "T5"],
+            "only the team-only review request is hidden"
+        );
         assert_eq!(got.facets.ignored, 1);
     }
 }

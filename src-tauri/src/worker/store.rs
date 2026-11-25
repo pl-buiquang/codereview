@@ -67,7 +67,10 @@ CREATE TABLE worker_outbox (
 #[cfg(unix)]
 pub fn create_private_dir(dir: &Path) -> std::io::Result<()> {
     use std::os::unix::fs::DirBuilderExt;
-    std::fs::DirBuilder::new().recursive(true).mode(0o700).create(dir)
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(dir)
 }
 
 #[cfg(not(unix))]
@@ -98,14 +101,22 @@ pub fn open(path: &Path) -> AppResult<Connection> {
     {
         use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
         if !path.exists() {
-            std::fs::OpenOptions::new().write(true).create(true).truncate(false).mode(0o600).open(path)?;
+            std::fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(false)
+                .mode(0o600)
+                .open(path)?;
         } else if std::fs::metadata(path)?.permissions().mode() & 0o077 != 0 {
             std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
         }
     }
     let conn = Connection::open(path)?;
-    conn.execute_batch("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;")?;
-    let mut version = conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))? as usize;
+    conn.execute_batch(
+        "PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;",
+    )?;
+    let mut version =
+        conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))? as usize;
     while version < MIGRATIONS.len() {
         conn.execute_batch(MIGRATIONS[version])?;
         version += 1;
@@ -223,13 +234,22 @@ impl WorkerDb {
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7) ON CONFLICT(idem_key) DO NOTHING",
             params![idem_key, harness, model, request_json, cwd.to_string_lossy(), timeout_secs as i64, now],
         )?;
-        let id = conn.query_row("SELECT id FROM worker_run WHERE idem_key = ?1", params![idem_key], |r| r.get(0))?;
+        let id = conn.query_row(
+            "SELECT id FROM worker_run WHERE idem_key = ?1",
+            params![idem_key],
+            |r| r.get(0),
+        )?;
         Ok((id, n == 1))
     }
 
     pub fn run_by_key(&self, idem_key: &str) -> Option<i64> {
         let conn = self.0.lock().unwrap();
-        conn.query_row("SELECT id FROM worker_run WHERE idem_key = ?1", params![idem_key], |r| r.get(0)).ok()
+        conn.query_row(
+            "SELECT id FROM worker_run WHERE idem_key = ?1",
+            params![idem_key],
+            |r| r.get(0),
+        )
+        .ok()
     }
 
     /// The run is fully prepared (attachments written): the engine may start it. False when it is no
@@ -246,7 +266,10 @@ impl WorkerDb {
 
     /// Remove a run whose preparation failed. Only a `preparing` row goes: once queued the engine owns it.
     pub fn delete_run(&self, id: i64) {
-        let _ = self.0.lock().unwrap().execute("DELETE FROM worker_run WHERE id = ?1 AND status = 'preparing'", params![id]);
+        let _ = self.0.lock().unwrap().execute(
+            "DELETE FROM worker_run WHERE id = ?1 AND status = 'preparing'",
+            params![id],
+        );
     }
 
     /// Startup: rows a crashed daemon left `preparing` never became runs. Returns their ids.
@@ -263,19 +286,30 @@ impl WorkerDb {
     /// Rows left `preparing` for longer than `ttl` (a panic between insert and queue): no request is
     /// still preparing them. Deletes them and returns their ids so the caller can sweep their scratch.
     pub fn purge_stale_preparing(&self, ttl: Duration) -> Vec<i64> {
-        let cutoff = crate::run_usage::stamp(chrono::Utc::now() - chrono::Duration::from_std(ttl).unwrap_or_default());
+        let cutoff = crate::run_usage::stamp(
+            chrono::Utc::now() - chrono::Duration::from_std(ttl).unwrap_or_default(),
+        );
         let conn = self.0.lock().unwrap();
         let ids: Vec<i64> = conn
             .prepare("SELECT id FROM worker_run WHERE status = 'preparing' AND updated_at < ?1")
             .and_then(|mut st| st.query_map(params![cutoff], |r| r.get(0))?.collect())
             .unwrap_or_default();
-        let _ = conn.execute("DELETE FROM worker_run WHERE status = 'preparing' AND updated_at < ?1", params![cutoff]);
+        let _ = conn.execute(
+            "DELETE FROM worker_run WHERE status = 'preparing' AND updated_at < ?1",
+            params![cutoff],
+        );
         ids
     }
 
     pub fn get_run(&self, id: i64) -> AppResult<Option<RunRow>> {
         let conn = self.0.lock().unwrap();
-        Ok(conn.query_row(&format!("SELECT {RUN_COLS} FROM worker_run WHERE id = ?1"), params![id], run_from_row).optional()?)
+        Ok(conn
+            .query_row(
+                &format!("SELECT {RUN_COLS} FROM worker_run WHERE id = ?1"),
+                params![id],
+                run_from_row,
+            )
+            .optional()?)
     }
 
     /// Runs updated after `since` (an RFC 3339 stamp as reported in `updated_at`), oldest first.
@@ -284,27 +318,44 @@ impl WorkerDb {
         let mut stmt = conn.prepare(&format!(
             "SELECT {RUN_COLS} FROM worker_run WHERE (?1 IS NULL OR updated_at > ?1) ORDER BY updated_at, id LIMIT ?2"
         ))?;
-        let rows = stmt.query_map(params![since, limit], run_from_row)?.collect::<Result<Vec<_>, _>>()?;
+        let rows = stmt
+            .query_map(params![since, limit], run_from_row)?
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(rows)
     }
 
     /// The stored request (attachment bytes are never kept).
     pub fn request_json(&self, id: i64) -> AppResult<Option<String>> {
         let conn = self.0.lock().unwrap();
-        Ok(conn.query_row("SELECT request FROM worker_run WHERE id = ?1", params![id], |r| r.get(0)).optional()?)
+        Ok(conn
+            .query_row(
+                "SELECT request FROM worker_run WHERE id = ?1",
+                params![id],
+                |r| r.get(0),
+            )
+            .optional()?)
     }
 
     pub fn cwd(&self, id: i64) -> AppResult<Option<PathBuf>> {
         let conn = self.0.lock().unwrap();
         Ok(conn
-            .query_row("SELECT cwd FROM worker_run WHERE id = ?1", params![id], |r| r.get::<_, String>(0))
+            .query_row(
+                "SELECT cwd FROM worker_run WHERE id = ?1",
+                params![id],
+                |r| r.get::<_, String>(0),
+            )
             .optional()?
             .map(PathBuf::from))
     }
 
     pub fn status(&self, id: i64) -> Option<String> {
         let conn = self.0.lock().unwrap();
-        conn.query_row("SELECT status FROM worker_run WHERE id = ?1", params![id], |r| r.get(0)).ok()
+        conn.query_row(
+            "SELECT status FROM worker_run WHERE id = ?1",
+            params![id],
+            |r| r.get(0),
+        )
+        .ok()
     }
 
     pub fn events_after(&self, id: i64, after_seq: i64, limit: i64) -> AppResult<Vec<EventRow>> {
@@ -359,18 +410,29 @@ impl WorkerDb {
     /// Mark every op up to `upto` as applied by the client, so the run can be pruned. Returns how many.
     pub fn ack_outbox(&self, id: i64, upto: i64) -> AppResult<usize> {
         let conn = self.0.lock().unwrap();
-        Ok(conn.execute("UPDATE worker_outbox SET acked = 1 WHERE run_id = ?1 AND seq <= ?2 AND acked = 0", params![id, upto])?)
+        Ok(conn.execute(
+            "UPDATE worker_outbox SET acked = 1 WHERE run_id = ?1 AND seq <= ?2 AND acked = 0",
+            params![id, upto],
+        )?)
     }
 }
 
 /// Append an op to a run's outbox on an open connection. The op id (`<run>:<seq>`) is unique, so a
 /// client re-applying after a reconnect can recognise ops it already applied.
-pub fn append_outbox(conn: &Connection, run_id: i64, op_type: &str, args: &Value) -> AppResult<String> {
+pub fn append_outbox(
+    conn: &Connection,
+    run_id: i64,
+    op_type: &str,
+    args: &Value,
+) -> AppResult<String> {
     // Immediate: take the write lock first, so the busy timeout applies. A deferred transaction that reads
     // and then writes fails at once (SQLITE_BUSY_SNAPSHOT) when the daemon commits in between.
     let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)?;
-    let seq: i64 =
-        tx.query_row("SELECT COALESCE(MAX(seq), 0) + 1 FROM worker_outbox WHERE run_id = ?1", params![run_id], |r| r.get(0))?;
+    let seq: i64 = tx.query_row(
+        "SELECT COALESCE(MAX(seq), 0) + 1 FROM worker_outbox WHERE run_id = ?1",
+        params![run_id],
+        |r| r.get(0),
+    )?;
     let op_id = format!("{run_id}:{seq}");
     tx.execute(
         "INSERT INTO worker_outbox (run_id, seq, op_id, type, args, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
@@ -397,12 +459,27 @@ pub const MAX_FINISHED_RUNS: i64 = 5000;
 
 impl WorkerStore {
     pub fn new(db: Arc<WorkerDb>, cap: Arc<AtomicI64>, root: PathBuf) -> Arc<Self> {
-        Arc::new(Self { db, cap, root, retention: RETENTION })
+        Arc::new(Self {
+            db,
+            cap,
+            root,
+            retention: RETENTION,
+        })
     }
 
     #[cfg(test)]
-    pub fn with_retention(db: Arc<WorkerDb>, cap: Arc<AtomicI64>, root: PathBuf, retention: Duration) -> Arc<Self> {
-        Arc::new(Self { db, cap, root, retention })
+    pub fn with_retention(
+        db: Arc<WorkerDb>,
+        cap: Arc<AtomicI64>,
+        root: PathBuf,
+        retention: Duration,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            db,
+            cap,
+            root,
+            retention,
+        })
     }
 
     fn exec(&self, sql: &str, p: impl rusqlite::Params) -> AppResult<usize> {
@@ -469,7 +546,9 @@ impl RunStore for WorkerStore {
 
     fn active_count(&self) -> AppResult<usize> {
         // A `preparing` row that outlived its request does not take a slot of the queue.
-        let cutoff = crate::run_usage::stamp(chrono::Utc::now() - chrono::Duration::from_std(PREPARING_TTL).unwrap_or_default());
+        let cutoff = crate::run_usage::stamp(
+            chrono::Utc::now() - chrono::Duration::from_std(PREPARING_TTL).unwrap_or_default(),
+        );
         let fresh: i64 = self.db.0.lock().unwrap().query_row(
             "SELECT COUNT(*) FROM worker_run WHERE status = 'preparing' AND updated_at >= ?1",
             params![cutoff],
@@ -495,19 +574,37 @@ impl RunStore for WorkerStore {
     }
 
     fn set_process(&self, id: i64, pid: u32, _cwd: &Path, session_id: &str) {
-        let _ = self.exec("UPDATE worker_run SET pid = ?2, session_id = ?3 WHERE id = ?1", params![id, pid as i64, session_id]);
+        let _ = self.exec(
+            "UPDATE worker_run SET pid = ?2, session_id = ?3 WHERE id = ?1",
+            params![id, pid as i64, session_id],
+        );
     }
 
     fn set_cleanup(&self, id: i64, dirs: &[PathBuf]) {
-        let list: Vec<String> = dirs.iter().map(|d| d.to_string_lossy().into_owned()).collect();
-        let _ = self.exec("UPDATE worker_run SET cleanup = ?2 WHERE id = ?1", params![id, json!(list).to_string()]);
+        let list: Vec<String> = dirs
+            .iter()
+            .map(|d| d.to_string_lossy().into_owned())
+            .collect();
+        let _ = self.exec(
+            "UPDATE worker_run SET cleanup = ?2 WHERE id = ?1",
+            params![id, json!(list).to_string()],
+        );
     }
 
     fn cleanup_dirs(&self, id: i64) -> Vec<PathBuf> {
         let conn = self.db.0.lock().unwrap();
-        let raw: Option<String> =
-            conn.query_row("SELECT cleanup FROM worker_run WHERE id = ?1", params![id], |r| r.get(0)).ok();
-        raw.and_then(|s| serde_json::from_str::<Vec<String>>(&s).ok()).unwrap_or_default().into_iter().map(PathBuf::from).collect()
+        let raw: Option<String> = conn
+            .query_row(
+                "SELECT cleanup FROM worker_run WHERE id = ?1",
+                params![id],
+                |r| r.get(0),
+            )
+            .ok();
+        raw.and_then(|s| serde_json::from_str::<Vec<String>>(&s).ok())
+            .unwrap_or_default()
+            .into_iter()
+            .map(PathBuf::from)
+            .collect()
     }
 
     fn append_event(&self, id: i64, seq: i64, kind: &str, json: &str, norm: &str) {
@@ -519,7 +616,12 @@ impl RunStore for WorkerStore {
 
     fn last_seq(&self, id: i64) -> i64 {
         let conn = self.db.0.lock().unwrap();
-        conn.query_row("SELECT COALESCE(MAX(seq), 0) FROM worker_event WHERE run_id = ?1", params![id], |r| r.get(0)).unwrap_or(0)
+        conn.query_row(
+            "SELECT COALESCE(MAX(seq), 0) FROM worker_event WHERE run_id = ?1",
+            params![id],
+            |r| r.get(0),
+        )
+        .unwrap_or(0)
     }
 
     fn running_runs(&self) -> AppResult<Vec<RunningRun>> {
@@ -555,7 +657,9 @@ impl RunStore for WorkerStore {
     /// never while its outbox has unacknowledged ops, so no op is lost.
     fn prune(&self, _keep: i64) {
         let cutoff = crate::run_usage::stamp(
-            chrono::Utc::now() - chrono::Duration::from_std(self.retention).unwrap_or_else(|_| chrono::Duration::days(14)),
+            chrono::Utc::now()
+                - chrono::Duration::from_std(self.retention)
+                    .unwrap_or_else(|_| chrono::Duration::days(14)),
         );
         let _ = self.exec(
             "DELETE FROM worker_run WHERE status NOT IN ('preparing', 'queued', 'running')
@@ -598,7 +702,8 @@ mod tests {
         let data = dir.path().join("fresh").join("data");
         let path = data.join("worker.db");
         let db = WorkerDb::open(&path).unwrap();
-        db.insert_run("k", "claude", "", "{}", Path::new("/tmp"), 60).unwrap();
+        db.insert_run("k", "claude", "", "{}", Path::new("/tmp"), 60)
+            .unwrap();
         assert_eq!(mode(&data), 0o700);
         assert_eq!(mode(&path), 0o600);
         let wal = data.join("worker.db-wal");
@@ -619,19 +724,38 @@ mod tests {
 
     fn finish_ok(store: &WorkerStore, id: i64) {
         assert!(store.mark_running(id).unwrap());
-        store.finish(id, &Finished {
-            status: "ok", text: String::new(), error: None, usage: Default::default(), usage_error: None,
-            shutting_down: false, started_at: now_stamp(), elapsed: Default::default(),
-        });
+        store.finish(
+            id,
+            &Finished {
+                status: "ok",
+                text: String::new(),
+                error: None,
+                usage: Default::default(),
+                usage_error: None,
+                shutting_down: false,
+                started_at: now_stamp(),
+                elapsed: Default::default(),
+            },
+        );
     }
 
     #[test]
     fn finished_runs_are_kept_for_the_retention_not_for_a_count() {
         let (d, db) = temp_db("retain");
-        let store = WorkerStore::new(db.clone(), Arc::new(AtomicI64::new(5)), d.path().join("runs"));
-        let (old, _) = db.insert_run("old", "claude", "", "{}", Path::new("/tmp"), 60).unwrap();
-        let (recent, _) = db.insert_run("recent", "claude", "", "{}", Path::new("/tmp"), 60).unwrap();
-        let (queued, _) = db.insert_run("queued", "claude", "", "{}", Path::new("/tmp"), 60).unwrap();
+        let store = WorkerStore::new(
+            db.clone(),
+            Arc::new(AtomicI64::new(5)),
+            d.path().join("runs"),
+        );
+        let (old, _) = db
+            .insert_run("old", "claude", "", "{}", Path::new("/tmp"), 60)
+            .unwrap();
+        let (recent, _) = db
+            .insert_run("recent", "claude", "", "{}", Path::new("/tmp"), 60)
+            .unwrap();
+        let (queued, _) = db
+            .insert_run("queued", "claude", "", "{}", Path::new("/tmp"), 60)
+            .unwrap();
         for id in [old, recent, queued] {
             db.mark_queued(id);
         }
@@ -640,26 +764,55 @@ mod tests {
         // the engine asks for a count of 0: a finished run of today must stay
         store.prune(0);
         assert!(db.get_run(old).unwrap().is_some() && db.get_run(recent).unwrap().is_some());
-        assert_eq!(db.run_by_key("recent"), Some(recent), "a retry still finds its run");
+        assert_eq!(
+            db.run_by_key("recent"),
+            Some(recent),
+            "a retry still finds its run"
+        );
         // 30 days later the first one is past the retention (an unacked op still protects a run)
         let long_ago = crate::run_usage::stamp(chrono::Utc::now() - chrono::Duration::days(30));
-        db.0.lock().unwrap().execute("UPDATE worker_run SET finished_at = ?1 WHERE id = ?2", params![long_ago, old]).unwrap();
-        append_outbox(&db.0.lock().unwrap(), old, "notify", &json!({"message": "m"})).unwrap();
+        db.0.lock()
+            .unwrap()
+            .execute(
+                "UPDATE worker_run SET finished_at = ?1 WHERE id = ?2",
+                params![long_ago, old],
+            )
+            .unwrap();
+        append_outbox(
+            &db.0.lock().unwrap(),
+            old,
+            "notify",
+            &json!({"message": "m"}),
+        )
+        .unwrap();
         store.prune(0);
-        assert!(db.get_run(old).unwrap().is_some(), "unacked ops keep an old run");
+        assert!(
+            db.get_run(old).unwrap().is_some(),
+            "unacked ops keep an old run"
+        );
         db.ack_outbox(old, 1).unwrap();
         store.prune(0);
         assert!(db.get_run(old).unwrap().is_none());
         assert!(db.get_run(recent).unwrap().is_some());
-        assert_eq!(db.status(queued).as_deref(), Some("queued"), "live rows are never pruned");
+        assert_eq!(
+            db.status(queued).as_deref(),
+            Some("queued"),
+            "live rows are never pruned"
+        );
     }
 
     #[test]
     fn a_detach_keeps_the_queue() {
         let (d, db) = temp_db("detach");
-        let (id, _) = db.insert_run("k", "claude", "", "{}", Path::new("/tmp"), 60).unwrap();
+        let (id, _) = db
+            .insert_run("k", "claude", "", "{}", Path::new("/tmp"), 60)
+            .unwrap();
         db.mark_queued(id);
-        let store = WorkerStore::new(db.clone(), Arc::new(AtomicI64::new(1)), d.path().join("runs"));
+        let store = WorkerStore::new(
+            db.clone(),
+            Arc::new(AtomicI64::new(1)),
+            d.path().join("runs"),
+        );
         store.kill_queued().unwrap();
         assert_eq!(db.status(id).as_deref(), Some("queued"));
         assert_eq!(store.next_queued().unwrap(), Some(id));
@@ -668,22 +821,40 @@ mod tests {
     #[test]
     fn insert_is_idempotent_on_the_key() {
         let (_d, db) = temp_db("idem");
-        let (a, created) = db.insert_run("k1", "claude", "m", "{}", Path::new("/tmp"), 60).unwrap();
+        let (a, created) = db
+            .insert_run("k1", "claude", "m", "{}", Path::new("/tmp"), 60)
+            .unwrap();
         assert!(created);
-        let (b, created) = db.insert_run("k1", "claude", "m", "{}", Path::new("/tmp"), 60).unwrap();
+        let (b, created) = db
+            .insert_run("k1", "claude", "m", "{}", Path::new("/tmp"), 60)
+            .unwrap();
         assert!(!created);
         assert_eq!(a, b);
-        let (c, _) = db.insert_run("k2", "claude", "m", "{}", Path::new("/tmp"), 60).unwrap();
+        let (c, _) = db
+            .insert_run("k2", "claude", "m", "{}", Path::new("/tmp"), 60)
+            .unwrap();
         assert_ne!(a, c);
     }
 
     #[test]
     fn events_replay_after_a_seq_and_are_idempotent() {
         let (d, db) = temp_db("ev");
-        let (id, _) = db.insert_run("k", "claude", "", "{}", Path::new("/tmp"), 60).unwrap();
-        let store = WorkerStore::new(db.clone(), Arc::new(AtomicI64::new(2)), d.path().join("runs"));
+        let (id, _) = db
+            .insert_run("k", "claude", "", "{}", Path::new("/tmp"), 60)
+            .unwrap();
+        let store = WorkerStore::new(
+            db.clone(),
+            Arc::new(AtomicI64::new(2)),
+            d.path().join("runs"),
+        );
         for seq in 1..=3 {
-            store.append_event(id, seq, "assistant", &format!(r#"{{"n":{seq}}}"#), r#"{"v":1,"events":[]}"#);
+            store.append_event(
+                id,
+                seq,
+                "assistant",
+                &format!(r#"{{"n":{seq}}}"#),
+                r#"{"v":1,"events":[]}"#,
+            );
         }
         store.append_event(id, 2, "assistant", r#"{"n":99}"#, "");
         let after = db.events_after(id, 1, 10).unwrap();
@@ -697,10 +868,24 @@ mod tests {
     #[test]
     fn lifecycle_transitions_are_guarded() {
         let (d, db) = temp_db("life");
-        let (id, _) = db.insert_run("k", "claude", "", "{}", Path::new("/tmp"), 60).unwrap();
-        let store = WorkerStore::new(db.clone(), Arc::new(AtomicI64::new(1)), d.path().join("runs"));
-        assert_eq!(store.next_queued().unwrap(), None, "a preparing run is invisible to the engine");
-        assert_eq!(store.active_count().unwrap(), 1, "but it counts against the queue limit");
+        let (id, _) = db
+            .insert_run("k", "claude", "", "{}", Path::new("/tmp"), 60)
+            .unwrap();
+        let store = WorkerStore::new(
+            db.clone(),
+            Arc::new(AtomicI64::new(1)),
+            d.path().join("runs"),
+        );
+        assert_eq!(
+            store.next_queued().unwrap(),
+            None,
+            "a preparing run is invisible to the engine"
+        );
+        assert_eq!(
+            store.active_count().unwrap(),
+            1,
+            "but it counts against the queue limit"
+        );
         assert!(db.mark_queued(id));
         assert!(!db.mark_queued(id));
         assert_eq!(store.next_queued().unwrap(), Some(id));
@@ -711,32 +896,70 @@ mod tests {
         store.mark_lost(id);
         assert_eq!(db.status(id).as_deref(), Some("interrupted"));
         // a settled row is left alone
-        store.finish(id, &Finished {
-            status: "ok", text: "x".into(), error: None, usage: Default::default(), usage_error: None,
-            shutting_down: false, started_at: now_stamp(), elapsed: Default::default(),
-        });
+        store.finish(
+            id,
+            &Finished {
+                status: "ok",
+                text: "x".into(),
+                error: None,
+                usage: Default::default(),
+                usage_error: None,
+                shutting_down: false,
+                started_at: now_stamp(),
+                elapsed: Default::default(),
+            },
+        );
         assert_eq!(db.status(id).as_deref(), Some("interrupted"));
     }
 
     #[test]
     fn outbox_ops_are_numbered_acked_and_keep_the_run_from_pruning() {
         let (d, db) = temp_db("out");
-        let (id, _) = db.insert_run("k", "claude", "", "{}", Path::new("/tmp"), 60).unwrap();
-        let store = WorkerStore::new(db.clone(), Arc::new(AtomicI64::new(1)), d.path().join("runs"));
+        let (id, _) = db
+            .insert_run("k", "claude", "", "{}", Path::new("/tmp"), 60)
+            .unwrap();
+        let store = WorkerStore::new(
+            db.clone(),
+            Arc::new(AtomicI64::new(1)),
+            d.path().join("runs"),
+        );
         db.mark_queued(id);
         {
             let conn = db.0.lock().unwrap();
-            assert_eq!(append_outbox(&conn, id, "board_link", &json!({"a": 1})).unwrap(), format!("{id}:1"));
-            assert_eq!(append_outbox(&conn, id, "notify", &json!({"message": "m"})).unwrap(), format!("{id}:2"));
+            assert_eq!(
+                append_outbox(&conn, id, "board_link", &json!({"a": 1})).unwrap(),
+                format!("{id}:1")
+            );
+            assert_eq!(
+                append_outbox(&conn, id, "notify", &json!({"message": "m"})).unwrap(),
+                format!("{id}:2")
+            );
         }
         assert!(store.mark_running(id).unwrap());
-        store.finish(id, &Finished {
-            status: "ok", text: String::new(), error: None, usage: Default::default(), usage_error: None,
-            shutting_down: false, started_at: now_stamp(), elapsed: Default::default(),
-        });
-        let store = WorkerStore::with_retention(db.clone(), Arc::new(AtomicI64::new(1)), d.path().join("runs"), Duration::ZERO);
+        store.finish(
+            id,
+            &Finished {
+                status: "ok",
+                text: String::new(),
+                error: None,
+                usage: Default::default(),
+                usage_error: None,
+                shutting_down: false,
+                started_at: now_stamp(),
+                elapsed: Default::default(),
+            },
+        );
+        let store = WorkerStore::with_retention(
+            db.clone(),
+            Arc::new(AtomicI64::new(1)),
+            d.path().join("runs"),
+            Duration::ZERO,
+        );
         store.prune(0);
-        assert!(db.get_run(id).unwrap().is_some(), "unacked ops keep the run");
+        assert!(
+            db.get_run(id).unwrap().is_some(),
+            "unacked ops keep the run"
+        );
         let ops = db.outbox_after(id, 0).unwrap();
         assert_eq!(ops.len(), 2);
         assert_eq!(ops[1].op_type, "notify");
@@ -745,6 +968,9 @@ mod tests {
         assert_eq!(db.outbox_after(id, 0).unwrap().len(), 1);
         assert_eq!(db.ack_outbox(id, 2).unwrap(), 1);
         store.prune(0);
-        assert!(db.get_run(id).unwrap().is_none(), "acked runs past the retention are pruned");
+        assert!(
+            db.get_run(id).unwrap().is_none(),
+            "acked runs past the retention are pruned"
+        );
     }
 }

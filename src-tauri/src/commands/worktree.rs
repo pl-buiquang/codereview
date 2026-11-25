@@ -14,7 +14,9 @@ use crate::repo_sync;
 use crate::sync::{MirrorUpdated, Scope, MIRROR_UPDATED_EVENT};
 use crate::watch::Watchers;
 use crate::worktree::{self, WorktreeInfo};
-use crate::worktree_gc::{self, CacheEntry, GcOptions, GcReport, PrFact, RepoCache, RepoCtx, ScanHooks};
+use crate::worktree_gc::{
+    self, CacheEntry, GcOptions, GcReport, PrFact, RepoCache, RepoCtx, ScanHooks,
+};
 
 const SCAN_FETCH_MIN_INTERVAL: Duration = Duration::from_secs(120);
 const ROW_SYNC_FETCH_MIN_INTERVAL: Duration = Duration::from_secs(60);
@@ -105,26 +107,51 @@ fn scan_inputs(conn: &Connection) -> AppResult<(Vec<RepoCtx>, Vec<String>)> {
 fn load_cache(conn: &Connection) -> AppResult<HashMap<String, CacheEntry>> {
     let mut stmt = conn.prepare("SELECT path, cache_key, facts_json FROM worktree_state")?;
     let rows = stmt
-        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?)))?
+        .query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+            ))
+        })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(rows
         .into_iter()
-        .filter_map(|(path, key, facts)| Some((path, CacheEntry { key, facts: serde_json::from_str(&facts).ok()? })))
+        .filter_map(|(path, key, facts)| {
+            Some((
+                path,
+                CacheEntry {
+                    key,
+                    facts: serde_json::from_str(&facts).ok()?,
+                },
+            ))
+        })
         .collect())
 }
 
 /// Replaces the cache rows of every scanned repo and stores the report.
 /// `prune_others` (full scan) also drops rows of repos that weren't scanned.
-fn store_scan(conn: &mut Connection, caches: &[RepoCache], report: &GcReport, prune_others: bool) -> AppResult<()> {
+fn store_scan(
+    conn: &mut Connection,
+    caches: &[RepoCache],
+    report: &GcReport,
+    prune_others: bool,
+) -> AppResult<()> {
     let tx = conn.transaction()?;
     let now = chrono::Utc::now().to_rfc3339();
     if prune_others {
         let ids: Vec<i64> = caches.iter().map(|c| c.repo_id).collect();
         let ph = vec!["?"; ids.len()].join(",");
-        tx.execute(&format!("DELETE FROM worktree_state WHERE repo_id NOT IN ({ph})"), params_from_iter(&ids))?;
+        tx.execute(
+            &format!("DELETE FROM worktree_state WHERE repo_id NOT IN ({ph})"),
+            params_from_iter(&ids),
+        )?;
     }
     for c in caches {
-        tx.execute("DELETE FROM worktree_state WHERE repo_id = ?1", params![c.repo_id])?;
+        tx.execute(
+            "DELETE FROM worktree_state WHERE repo_id = ?1",
+            params![c.repo_id],
+        )?;
         for (path, e) in &c.entries {
             tx.execute(
                 "INSERT INTO worktree_state (path, repo_id, cache_key, facts_json, computed_at)
@@ -162,7 +189,12 @@ fn attach_reviews(conn: &Connection, report: &mut GcReport) -> AppResult<()> {
          WHERE t.kind = 'github_pr' AND t.github_pr_number IS NOT NULL
          GROUP BY t.repo_id, t.github_pr_number",
     )?;
-    for row in stmt.query_map([], |r| Ok(((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?), r.get::<_, i64>(2)?)))? {
+    for row in stmt.query_map([], |r| {
+        Ok((
+            (r.get::<_, i64>(0)?, r.get::<_, i64>(1)?),
+            r.get::<_, i64>(2)?,
+        ))
+    })? {
         let (key, id) = row?;
         by_pr.insert(key, id);
     }
@@ -170,7 +202,11 @@ fn attach_reviews(conn: &Connection, report: &mut GcReport) -> AppResult<()> {
         for wt in &mut repo.worktrees {
             wt.review_id = by_chat
                 .get(&wt.path)
-                .or_else(|| wt.pr.as_ref().and_then(|pr| by_pr.get(&(repo.repo_id, pr.number))))
+                .or_else(|| {
+                    wt.pr
+                        .as_ref()
+                        .and_then(|pr| by_pr.get(&(repo.repo_id, pr.number)))
+                })
                 .copied();
         }
     }
@@ -178,7 +214,9 @@ fn attach_reviews(conn: &Connection, report: &mut GcReport) -> AppResult<()> {
 }
 
 fn with_reviews(db: &Db, report: Option<GcReport>) -> AppResult<Option<GcReport>> {
-    let Some(mut report) = report else { return Ok(None) };
+    let Some(mut report) = report else {
+        return Ok(None);
+    };
     attach_reviews(&db.0.lock().unwrap(), &mut report)?;
     Ok(Some(report))
 }
@@ -188,7 +226,11 @@ fn load_last_report(conn: &Connection) -> AppResult<Option<GcReport>> {
         return Ok(Some(report));
     }
     let stored: Option<String> = conn
-        .query_row("SELECT report FROM worktree_gc_report WHERE id = 1", [], |r| r.get(0))
+        .query_row(
+            "SELECT report FROM worktree_gc_report WHERE id = 1",
+            [],
+            |r| r.get(0),
+        )
         .optional()?;
     Ok(stored.and_then(|s| serde_json::from_str(&s).ok()))
 }
@@ -201,7 +243,11 @@ struct MirrorPr {
 
 /// PR facts per branch from the mirror: an open PR wins over closed ones,
 /// then the newest.
-fn mirror_pr_facts(conn: &Connection, repo_id: i64, branches: &[String]) -> AppResult<HashMap<String, MirrorPr>> {
+fn mirror_pr_facts(
+    conn: &Connection,
+    repo_id: i64,
+    branches: &[String],
+) -> AppResult<HashMap<String, MirrorPr>> {
     if branches.is_empty() {
         return Ok(HashMap::new());
     }
@@ -212,8 +258,9 @@ fn mirror_pr_facts(conn: &Connection, repo_id: i64, branches: &[String]) -> AppR
         vec!["?"; branches.len()].join(",")
     );
     let mut stmt = conn.prepare(&sql)?;
-    let args: Vec<rusqlite::types::Value> =
-        std::iter::once(repo_id.into()).chain(branches.iter().map(|b| b.clone().into())).collect();
+    let args: Vec<rusqlite::types::Value> = std::iter::once(repo_id.into())
+        .chain(branches.iter().map(|b| b.clone().into()))
+        .collect();
     let rows = stmt.query_map(params_from_iter(args), |r| {
         Ok(MirrorPr {
             id: r.get(0)?,
@@ -221,7 +268,10 @@ fn mirror_pr_facts(conn: &Connection, repo_id: i64, branches: &[String]) -> AppR
             fact: PrFact {
                 head_ref: r.get(2)?,
                 number: r.get(3)?,
-                state: r.get::<_, Option<String>>(4)?.unwrap_or_default().to_uppercase(),
+                state: r
+                    .get::<_, Option<String>>(4)?
+                    .unwrap_or_default()
+                    .to_uppercase(),
                 head_oid: r.get::<_, Option<String>>(5)?.unwrap_or_default(),
             },
         })
@@ -239,8 +289,16 @@ fn worktree_branches(repos: &[RepoCtx]) -> Vec<(&RepoCtx, Vec<String>)> {
     repos
         .iter()
         .filter_map(|r| {
-            let wts = worktree::list_worktrees(&r.path).ok().filter(|w| w.len() > 1)?;
-            Some((r, wts.into_iter().filter(|w| !w.is_main).filter_map(|w| w.branch).collect()))
+            let wts = worktree::list_worktrees(&r.path)
+                .ok()
+                .filter(|w| w.len() > 1)?;
+            Some((
+                r,
+                wts.into_iter()
+                    .filter(|w| !w.is_main)
+                    .filter_map(|w| w.branch)
+                    .collect(),
+            ))
         })
         .collect()
 }
@@ -265,16 +323,27 @@ type RepoPrFacts = HashMap<i64, HashMap<String, PrFact>>;
 /// few batched GitHub calls across all repos. Branches the mirror doesn't know
 /// are looked up by head branch and upserted. Also returns the ids of mirrored
 /// PRs that were refetched.
-fn resolve_prs(db: &Db, wanted: &[(&RepoCtx, Vec<String>)], lookup: PrLookup) -> (RepoPrFacts, Vec<String>) {
+fn resolve_prs(
+    db: &Db,
+    wanted: &[(&RepoCtx, Vec<String>)],
+    lookup: PrLookup,
+) -> (RepoPrFacts, Vec<String>) {
     let read = || -> HashMap<i64, HashMap<String, MirrorPr>> {
         let conn = db.0.lock().unwrap();
         wanted
             .iter()
-            .map(|(r, branches)| (r.repo_id, mirror_pr_facts(&conn, r.repo_id, branches).unwrap_or_default()))
+            .map(|(r, branches)| {
+                (
+                    r.repo_id,
+                    mirror_pr_facts(&conn, r.repo_id, branches).unwrap_or_default(),
+                )
+            })
             .collect()
     };
     let facts = |m: HashMap<i64, HashMap<String, MirrorPr>>| -> RepoPrFacts {
-        m.into_iter().map(|(id, prs)| (id, prs.into_iter().map(|(b, pr)| (b, pr.fact)).collect())).collect()
+        m.into_iter()
+            .map(|(id, prs)| (id, prs.into_iter().map(|(b, pr)| (b, pr.fact)).collect()))
+            .collect()
     };
     let known = read();
 
@@ -282,13 +351,20 @@ fn resolve_prs(db: &Db, wanted: &[(&RepoCtx, Vec<String>)], lookup: PrLookup) ->
     let mut refreshed = Vec::new();
     if lookup == PrLookup::Scan {
         // `updatedAt` moves on a push, close or merge: what the janitor needs.
-        let open: Vec<&MirrorPr> = known.values().flat_map(|m| m.values()).filter(|p| p.fact.state == "OPEN").collect();
+        let open: Vec<&MirrorPr> = known
+            .values()
+            .flat_map(|m| m.values())
+            .filter(|p| p.fact.state == "OPEN")
+            .collect();
         let ids: Vec<String> = open.iter().map(|p| p.id.clone()).collect();
         let probes = mirror::fetch::probe(&[], &ids);
         refreshed = open
             .iter()
             .filter(|p| match probes.get(&p.id) {
-                Some(Some(probe)) => probe.normalized_state().as_deref() != Some("open") || probe.updated_at != p.updated_at,
+                Some(Some(probe)) => {
+                    probe.normalized_state().as_deref() != Some("open")
+                        || probe.updated_at != p.updated_at
+                }
                 _ => false,
             })
             .map(|p| p.id.clone())
@@ -312,7 +388,9 @@ fn resolve_prs(db: &Db, wanted: &[(&RepoCtx, Vec<String>)], lookup: PrLookup) ->
                     .filter(|b| !known.is_some_and(|k| k.contains_key(*b)))
                     .filter(|b| {
                         lookup == PrLookup::Scan
-                            || no_pr.get(&(r.repo_id, (*b).clone())).is_none_or(|at| now.duration_since(*at) >= NO_PR_TTL)
+                            || no_pr
+                                .get(&(r.repo_id, (*b).clone()))
+                                .is_none_or(|at| now.duration_since(*at) >= NO_PR_TTL)
                     })
                     .cloned()
                     .collect();
@@ -320,14 +398,25 @@ fn resolve_prs(db: &Db, wanted: &[(&RepoCtx, Vec<String>)], lookup: PrLookup) ->
             })
             .collect()
     };
-    let looked_up = crate::inbox::concurrent_map(jobs, LOOKUP_CONCURRENCY, |(repo_id, owner, name, unknown)| {
-        (*repo_id, unknown.clone(), mirror::fetch::prs_by_head(owner, name, unknown))
-    });
+    let looked_up = crate::inbox::concurrent_map(
+        jobs,
+        LOOKUP_CONCURRENCY,
+        |(repo_id, owner, name, unknown)| {
+            (
+                *repo_id,
+                unknown.clone(),
+                mirror::fetch::prs_by_head(owner, name, unknown),
+            )
+        },
+    );
     {
         let mut no_pr = NO_PR.lock().unwrap();
         let no_pr = no_pr.get_or_insert_with(HashMap::new);
         for (repo_id, unknown, (found, failed)) in looked_up {
-            let found_refs: HashSet<&str> = found.iter().filter_map(|n| n.head_ref_name.as_deref()).collect();
+            let found_refs: HashSet<&str> = found
+                .iter()
+                .filter_map(|n| n.head_ref_name.as_deref())
+                .collect();
             for b in unknown {
                 if found_refs.contains(b.as_str()) {
                     no_pr.remove(&(repo_id, b));
@@ -361,7 +450,13 @@ fn resolve_prs(db: &Db, wanted: &[(&RepoCtx, Vec<String>)], lookup: PrLookup) ->
 fn emit_refreshed(app: &tauri::AppHandle, ids: Vec<String>) {
     if !ids.is_empty() {
         log::debug!(target: "mirror", "emit {MIRROR_UPDATED_EVENT} from a worktree scan: {} ids", ids.len());
-        let _ = app.emit(MIRROR_UPDATED_EVENT, MirrorUpdated { scopes: vec![Scope::Inbox, Scope::Board], ids });
+        let _ = app.emit(
+            MIRROR_UPDATED_EVENT,
+            MirrorUpdated {
+                scopes: vec![Scope::Inbox, Scope::Board],
+                ids,
+            },
+        );
     }
 }
 
@@ -369,7 +464,12 @@ fn emit_refreshed(app: &tauri::AppHandle, ids: Vec<String>) {
 /// (`remove`/`sync` = also apply those actions). Unchanged worktrees reuse
 /// their cached git facts. Blocking. Also returns the ids of mirrored PRs it
 /// refetched.
-pub fn scan_all(db: &Db, watchers: &Watchers, remove: bool, sync: bool) -> AppResult<(GcReport, Vec<String>)> {
+pub fn scan_all(
+    db: &Db,
+    watchers: &Watchers,
+    remove: bool,
+    sync: bool,
+) -> AppResult<(GcReport, Vec<String>)> {
     let (repos, chat_paths, cache) = {
         let conn = db.0.lock().unwrap();
         let (repos, chat_paths) = scan_inputs(&conn)?;
@@ -377,12 +477,29 @@ pub fn scan_all(db: &Db, watchers: &Watchers, remove: bool, sync: bool) -> AppRe
     };
     let (pr_facts, refreshed) = resolve_prs(db, &worktree_branches(&repos), PrLookup::Scan);
     let fetch = |repo: &RepoCtx| {
-        repo_sync::fetch_repo(db, repo.repo_id, SCAN_FETCH_MIN_INTERVAL).map(|_| ()).map_err(|e| e.to_string())
+        repo_sync::fetch_repo(db, repo.repo_id, SCAN_FETCH_MIN_INTERVAL)
+            .map(|_| ())
+            .map_err(|e| e.to_string())
     };
-    let prs = |repo: &RepoCtx, _: &[String]| pr_facts.get(&repo.repo_id).cloned().unwrap_or_default();
+    let prs =
+        |repo: &RepoCtx, _: &[String]| pr_facts.get(&repo.repo_id).cloned().unwrap_or_default();
     let epoch = |id: i64| watchers.epoch(id);
-    let hooks = ScanHooks { fetch: Some(&fetch), prs: &prs, watch_epoch: &epoch };
-    let out = worktree_gc::run(&repos, chat_paths, GcOptions { remove, sync, wait: true }, &cache, &hooks)?;
+    let hooks = ScanHooks {
+        fetch: Some(&fetch),
+        prs: &prs,
+        watch_epoch: &epoch,
+    };
+    let out = worktree_gc::run(
+        &repos,
+        chat_paths,
+        GcOptions {
+            remove,
+            sync,
+            wait: true,
+        },
+        &cache,
+        &hooks,
+    )?;
     store_scan(&mut db.0.lock().unwrap(), &out.caches, &out.report, true)?;
     worktree_gc::set_last_report(out.report.clone());
     Ok((out.report, refreshed))
@@ -396,23 +513,39 @@ pub fn reload_dirty(db: &Db, watchers: &Watchers) -> AppResult<Option<GcReport>>
     let (repos, chat_paths, cache, prev) = {
         let conn = db.0.lock().unwrap();
         let (repos, chat_paths) = scan_inputs(&conn)?;
-        (repos, chat_paths, load_cache(&conn)?, load_last_report(&conn)?)
+        (
+            repos,
+            chat_paths,
+            load_cache(&conn)?,
+            load_last_report(&conn)?,
+        )
     };
     if worktree_gc::is_running() {
         return Ok(prev);
     }
     let known: HashSet<i64> = repos.iter().map(|r| r.repo_id).collect();
-    let dirty: Vec<RepoCtx> =
-        repos.into_iter().filter(|r| worktree_gc::is_dirty(r.repo_id, watchers.epoch(r.repo_id))).collect();
+    let dirty: Vec<RepoCtx> = repos
+        .into_iter()
+        .filter(|r| worktree_gc::is_dirty(r.repo_id, watchers.epoch(r.repo_id)))
+        .collect();
     if dirty.is_empty() {
         return Ok(prev);
     }
     let scanned: HashSet<i64> = dirty.iter().map(|r| r.repo_id).collect();
     let (pr_facts, _) = resolve_prs(db, &worktree_branches(&dirty), PrLookup::Reload);
-    let prs = |repo: &RepoCtx, _: &[String]| pr_facts.get(&repo.repo_id).cloned().unwrap_or_default();
+    let prs =
+        |repo: &RepoCtx, _: &[String]| pr_facts.get(&repo.repo_id).cloned().unwrap_or_default();
     let epoch = |id: i64| watchers.epoch(id);
-    let hooks = ScanHooks { fetch: None, prs: &prs, watch_epoch: &epoch };
-    let opts = GcOptions { remove: false, sync: false, wait: false };
+    let hooks = ScanHooks {
+        fetch: None,
+        prs: &prs,
+        watch_epoch: &epoch,
+    };
+    let opts = GcOptions {
+        remove: false,
+        sync: false,
+        wait: false,
+    };
     let out = worktree_gc::run(&dirty, chat_paths, opts, &cache, &hooks)?;
     let report = worktree_gc::merge_reports(prev, out.report, &scanned, &known);
     store_scan(&mut db.0.lock().unwrap(), &out.caches, &report, false)?;
@@ -421,10 +554,19 @@ pub fn reload_dirty(db: &Db, watchers: &Watchers) -> AppResult<Option<GcReport>>
 }
 
 #[tauri::command]
-pub async fn worktree_gc_run(app: tauri::AppHandle, remove: bool, sync: bool) -> AppResult<GcReport> {
+pub async fn worktree_gc_run(
+    app: tauri::AppHandle,
+    remove: bool,
+    sync: bool,
+) -> AppResult<GcReport> {
     let handle = app.clone();
     let (report, refreshed) = tauri::async_runtime::spawn_blocking(move || {
-        scan_all(&handle.state::<Db>(), &handle.state::<Watchers>(), remove, sync)
+        scan_all(
+            &handle.state::<Db>(),
+            &handle.state::<Watchers>(),
+            remove,
+            sync,
+        )
     })
     .await
     .map_err(|e| AppError::Other(format!("worktree gc task failed: {e}")))??;
@@ -452,7 +594,11 @@ pub fn worktree_gc_last(db: State<Db>) -> AppResult<Option<GcReport>> {
 /// rewrite) one registered worktree. A failed fetch still syncs to the
 /// upstream already known locally, and says so.
 #[tauri::command]
-pub async fn worktree_sync(repo_id: i64, worktree_path: String, db: State<'_, Db>) -> AppResult<String> {
+pub async fn worktree_sync(
+    repo_id: i64,
+    worktree_path: String,
+    db: State<'_, Db>,
+) -> AppResult<String> {
     let path = resolve_checkout(&db, repo_id, Some(worktree_path))?;
     let fetch = repo_sync::fetch_repo(&db, repo_id, ROW_SYNC_FETCH_MIN_INTERVAL);
     let outcome = worktree_gc::sync_one(&path)?;
@@ -496,11 +642,15 @@ pub fn checkout_open_claude(
         &repo,
         &window_name,
         &path,
-        &crate::ai::interactive_argv_with(&db, harness.as_deref(), &crate::ai::Interactive {
-            session: crate::ai::SessionMode::Ephemeral,
-            system_prompt_file: None,
-            system_prompt_mode: crate::ai::SystemPromptMode::Append,
-        })?,
+        &crate::ai::interactive_argv_with(
+            &db,
+            harness.as_deref(),
+            &crate::ai::Interactive {
+                session: crate::ai::SessionMode::Ephemeral,
+                system_prompt_file: None,
+                system_prompt_mode: crate::ai::SystemPromptMode::Append,
+            },
+        )?,
     )
 }
 
@@ -516,7 +666,12 @@ fn terminal_target(
         conn.query_row(
             "SELECT remote_owner, remote_name FROM repository WHERE id = ?1",
             rusqlite::params![repo_id],
-            |r| Ok((r.get::<_, Option<String>>(0)?, r.get::<_, Option<String>>(1)?)),
+            |r| {
+                Ok((
+                    r.get::<_, Option<String>>(0)?,
+                    r.get::<_, Option<String>>(1)?,
+                ))
+            },
         )?
     };
     let repo = match repo_label {
@@ -524,7 +679,9 @@ fn terminal_target(
         _ => repo_local_path(db, repo_id)?,
     };
     let window_name = worktree::current_branch(&path).unwrap_or_else(|| {
-        path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
+        path.file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default()
     });
     Ok((path.to_string_lossy().into_owned(), repo, window_name))
 }
@@ -537,7 +694,8 @@ pub fn open_in_vscode(path: String, file: Option<String>, line: Option<u32>) -> 
         let target = Path::new(&path).join(file);
         match line {
             Some(line) => {
-                cmd.arg("--goto").arg(format!("{}:{line}", target.display()));
+                cmd.arg("--goto")
+                    .arg(format!("{}:{line}", target.display()));
             }
             None => {
                 cmd.arg(target);
@@ -571,16 +729,23 @@ mod tests {
     #[test]
     fn match_worktree_accepts_registered_path() {
         let list = [wt("/repo"), wt("/repo-wt")];
-        assert_eq!(match_worktree(&list, "/repo-wt").unwrap(), PathBuf::from("/repo-wt"));
+        assert_eq!(
+            match_worktree(&list, "/repo-wt").unwrap(),
+            PathBuf::from("/repo-wt")
+        );
     }
 
     #[test]
     fn mirror_pr_facts_prefer_open_then_newest() {
         let conn = crate::db::open_memory();
         let repo = mirror::store::ensure_repo(&conn, "acme", "widget", "now").unwrap();
-        for (id, n, head, state) in
-            [("A", 1, "feat", "merged"), ("B", 2, "feat", "open"), ("C", 3, "feat", "closed"), ("D", 4, "old", "closed"), ("E", 5, "old", "merged")]
-        {
+        for (id, n, head, state) in [
+            ("A", 1, "feat", "merged"),
+            ("B", 2, "feat", "open"),
+            ("C", 3, "feat", "closed"),
+            ("D", 4, "old", "closed"),
+            ("E", 5, "old", "merged"),
+        ] {
             conn.execute(
                 "INSERT INTO gh_pr (node_id, repo_id, number, title, url, state, head_ref, head_sha, fetched_at)
                  VALUES (?1, ?2, ?3, 't', 'u', ?4, ?5, 'sha', 'now')",
@@ -600,25 +765,62 @@ mod tests {
     fn scan_cache_round_trips_and_replaces_per_repo() {
         let mut conn = crate::db::open_memory();
         for id in [1, 2] {
-            conn.execute("INSERT INTO repository (id, local_path, added_at) VALUES (?1, ?2, 'now')", params![id, format!("/r{id}")])
-                .unwrap();
+            conn.execute(
+                "INSERT INTO repository (id, local_path, added_at) VALUES (?1, ?2, 'now')",
+                params![id, format!("/r{id}")],
+            )
+            .unwrap();
         }
-        let entry = |key: &str| CacheEntry { key: key.into(), facts: Default::default() };
-        let report = GcReport { ran_at: "t".into(), repos: vec![], actions: vec![] };
+        let entry = |key: &str| CacheEntry {
+            key: key.into(),
+            facts: Default::default(),
+        };
+        let report = GcReport {
+            ran_at: "t".into(),
+            repos: vec![],
+            actions: vec![],
+        };
         let caches = [
-            RepoCache { repo_id: 1, entries: vec![("/r1/a".into(), entry("k1")), ("/r1/b".into(), entry("k2"))] },
-            RepoCache { repo_id: 2, entries: vec![("/r2/a".into(), entry("k3"))] },
+            RepoCache {
+                repo_id: 1,
+                entries: vec![("/r1/a".into(), entry("k1")), ("/r1/b".into(), entry("k2"))],
+            },
+            RepoCache {
+                repo_id: 2,
+                entries: vec![("/r2/a".into(), entry("k3"))],
+            },
         ];
         store_scan(&mut conn, &caches, &report, true).unwrap();
         assert_eq!(load_cache(&conn).unwrap().len(), 3);
 
-        store_scan(&mut conn, &[RepoCache { repo_id: 1, entries: vec![("/r1/a".into(), entry("k4"))] }], &report, false).unwrap();
+        store_scan(
+            &mut conn,
+            &[RepoCache {
+                repo_id: 1,
+                entries: vec![("/r1/a".into(), entry("k4"))],
+            }],
+            &report,
+            false,
+        )
+        .unwrap();
         let cache = load_cache(&conn).unwrap();
         assert_eq!(cache.len(), 2, "/r1/b is gone, repo 2 untouched");
         assert_eq!(cache["/r1/a"].key, "k4");
 
-        store_scan(&mut conn, &[RepoCache { repo_id: 1, entries: vec![] }], &report, true).unwrap();
-        assert!(load_cache(&conn).unwrap().is_empty(), "a full scan drops repos it didn't scan");
+        store_scan(
+            &mut conn,
+            &[RepoCache {
+                repo_id: 1,
+                entries: vec![],
+            }],
+            &report,
+            true,
+        )
+        .unwrap();
+        assert!(
+            load_cache(&conn).unwrap().is_empty(),
+            "a full scan drops repos it didn't scan"
+        );
     }
 
     #[test]

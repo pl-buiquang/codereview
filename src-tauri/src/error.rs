@@ -57,7 +57,10 @@ mod tests {
             AppError::NotARepo("/tmp/x".into()).to_string(),
             "not a git repository: /tmp/x"
         );
-        assert_eq!(AppError::Git("bad ref".into()).to_string(), "git error: bad ref");
+        assert_eq!(
+            AppError::Git("bad ref".into()).to_string(),
+            "git error: bad ref"
+        );
         assert_eq!(AppError::Gh("nope".into()).to_string(), "gh error: nope");
     }
 

@@ -6,10 +6,17 @@ use crate::db::Db;
 use crate::error::AppResult;
 use crate::mirror;
 use crate::sync::scheduler::{SyncConfig, SyncStatus};
-use crate::sync::{Mode, MirrorUpdated, Scope, SyncEngine, SyncReport, SyncRequest, MIRROR_UPDATED_EVENT};
+use crate::sync::{
+    MirrorUpdated, Mode, Scope, SyncEngine, SyncReport, SyncRequest, MIRROR_UPDATED_EVENT,
+};
 
 #[tauri::command]
-pub fn sync_hint(scope: Scope, active: bool, visible_ids: Option<Vec<String>>, engine: State<SyncEngine>) {
+pub fn sync_hint(
+    scope: Scope,
+    active: bool,
+    visible_ids: Option<Vec<String>>,
+    engine: State<SyncEngine>,
+) {
     engine.hint(scope, active, visible_ids.unwrap_or_default());
 }
 
@@ -42,7 +49,10 @@ pub async fn sync_now(
     visible_ids: Option<Vec<String>>,
     engine: State<'_, SyncEngine>,
 ) -> AppResult<SyncReport> {
-    engine.run_now(SyncRequest { visible_ids: visible_ids.unwrap_or_default(), ..SyncRequest::new(scope, mode) })
+    engine.run_now(SyncRequest {
+        visible_ids: visible_ids.unwrap_or_default(),
+        ..SyncRequest::new(scope, mode)
+    })
 }
 
 /// Wipe the mirror, then let a light sync rebuild what the views reference.
@@ -50,7 +60,13 @@ pub async fn sync_now(
 pub fn reset_mirror(app: AppHandle, db: State<Db>, engine: State<SyncEngine>) -> AppResult<()> {
     mirror::store::reset(&db.0.lock().unwrap())?;
     log::debug!(target: "mirror", "reset_mirror: emit {MIRROR_UPDATED_EVENT}");
-    let _ = app.emit(MIRROR_UPDATED_EVENT, MirrorUpdated { scopes: vec![Scope::Inbox, Scope::Board], ids: vec![] });
+    let _ = app.emit(
+        MIRROR_UPDATED_EVENT,
+        MirrorUpdated {
+            scopes: vec![Scope::Inbox, Scope::Board],
+            ids: vec![],
+        },
+    );
     engine.spawn(SyncRequest::new(Scope::All, Mode::Light));
     Ok(())
 }

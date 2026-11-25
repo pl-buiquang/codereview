@@ -6,6 +6,7 @@ mod avatar;
 pub mod board;
 pub mod board_monitor;
 pub mod claude_sessions;
+pub mod cmd_deadline;
 pub mod commands;
 mod cr_install;
 pub mod db;
@@ -15,7 +16,6 @@ mod definitions;
 mod diff_cache;
 pub mod error;
 pub mod export;
-pub mod cmd_deadline;
 pub mod gh;
 pub mod git;
 pub mod graph;
@@ -24,22 +24,22 @@ pub mod inbox;
 pub mod logging;
 pub mod mirror;
 pub mod path_env;
-pub mod provider;
 pub mod prompts;
+pub mod provider;
 pub mod remote;
 pub mod repo_sync;
 pub mod routines;
 pub mod run_engine;
 pub mod run_usage;
-pub mod stack_rebase;
-pub mod worker;
 pub mod session_summaries;
+pub mod stack_rebase;
 pub mod sync;
+pub mod terminal;
 #[cfg(test)]
 mod test_support;
-pub mod terminal;
 pub mod tools;
 pub mod watch;
+pub mod worker;
 pub mod worktree;
 pub mod worktree_gc;
 
@@ -86,7 +86,9 @@ fn cr_install_note(note: tauri::State<CrNote>) -> Option<String> {
 
 #[tauri::command]
 fn log_path(dir: tauri::State<logging::LogDir>) -> String {
-    logging::log_file_path(&dir.0).to_string_lossy().into_owned()
+    logging::log_file_path(&dir.0)
+        .to_string_lossy()
+        .into_owned()
 }
 
 #[tauri::command]
@@ -101,7 +103,8 @@ fn get_log_level() -> &'static str {
 
 #[tauri::command]
 fn set_log_level(level: String, dir: tauri::State<logging::LogDir>) -> Result<(), String> {
-    let parsed = logging::parse_level(&level).ok_or_else(|| format!("unknown log level {level:?}"))?;
+    let parsed =
+        logging::parse_level(&level).ok_or_else(|| format!("unknown log level {level:?}"))?;
     logging::set_level(&dir.0, parsed);
     Ok(())
 }
@@ -166,7 +169,10 @@ pub fn run() {
             // running routines without asking: ⌘Q goes through the same prompt instead.
             #[cfg(target_os = "macos")]
             if event.id() == QUIT_MENU_ID {
-                match app.state::<routines::manager::RoutineManager>().active_count(app) {
+                match app
+                    .state::<routines::manager::RoutineManager>()
+                    .active_count(app)
+                {
                     0 => app.exit(0),
                     active => show_quit_prompt(app, active),
                 }
@@ -177,7 +183,8 @@ pub fn run() {
             let db_path = ctx.app_handle().state::<db::DbPath>().0.clone();
             let path = request.uri().path().to_string();
             std::thread::spawn(move || {
-                let png = image_diff::store::resolve_asset(&db_path, &path).and_then(|file| std::fs::read(file).ok());
+                let png = image_diff::store::resolve_asset(&db_path, &path)
+                    .and_then(|file| std::fs::read(file).ok());
                 let response = match png {
                     Some(bytes) => tauri::http::Response::builder()
                         .status(200)
@@ -185,7 +192,9 @@ pub fn run() {
                         .header("Cache-Control", "no-cache")
                         .header("Access-Control-Allow-Origin", "*")
                         .body(bytes),
-                    None => tauri::http::Response::builder().status(404).body(Vec::new()),
+                    None => tauri::http::Response::builder()
+                        .status(404)
+                        .body(Vec::new()),
                 };
                 responder.respond(response.expect("static response parts are valid"));
             });
@@ -232,7 +241,10 @@ pub fn run() {
                 .map(std::path::Path::to_path_buf)
                 .unwrap_or_else(|| std::path::PathBuf::from("."));
             if let Err(e) = logging::init(&log_dir) {
-                eprintln!("[logging] failed to open log file in {}: {e}", log_dir.display());
+                eprintln!(
+                    "[logging] failed to open log file in {}: {e}",
+                    log_dir.display()
+                );
             }
             log::info!(
                 "codereview starting (version {}, debug_assertions={}, db={})",
@@ -521,7 +533,9 @@ pub fn run() {
             match event {
                 // A user-initiated quit (no exit code) with routines running asks first.
                 // `app.exit(..)` and the updater's restart carry a code and go straight through.
-                tauri::RunEvent::ExitRequested { code: None, api, .. } => {
+                tauri::RunEvent::ExitRequested {
+                    code: None, api, ..
+                } => {
                     let manager = app.state::<routines::manager::RoutineManager>();
                     let active = manager.active_count(app);
                     if active == 0 {
@@ -535,7 +549,8 @@ pub fn run() {
                     if let Some(rt) = remote::runtime::global() {
                         rt.shutdown();
                     }
-                    app.state::<routines::manager::RoutineManager>().kill_all(app)
+                    app.state::<routines::manager::RoutineManager>()
+                        .kill_all(app)
                 }
                 _ => {}
             }
@@ -581,9 +596,7 @@ fn show_quit_prompt(app: &tauri::AppHandle, active: usize) {
         });
 }
 
-fn app_menu<R: tauri::Runtime>(
-    app: &tauri::AppHandle<R>,
-) -> tauri::Result<tauri::menu::Menu<R>> {
+fn app_menu<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<tauri::menu::Menu<R>> {
     use tauri::menu::{
         AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu, HELP_SUBMENU_ID,
         WINDOW_SUBMENU_ID,

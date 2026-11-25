@@ -51,8 +51,15 @@ fn write_png(path: &Path, rgba: &[u8], w: u32, h: u32) -> Result<(), String> {
 }
 
 fn resize(rgba: &[u8], w: u32, h: u32, nw: u32, nh: u32) -> Vec<u8> {
-    let view = image::ImageBuffer::<image::Rgba<u8>, &[u8]>::from_raw(w, h, rgba).expect("rgba matches its size");
-    image::imageops::resize(&view, nw.max(1), nh.max(1), image::imageops::FilterType::Triangle).into_raw()
+    let view = image::ImageBuffer::<image::Rgba<u8>, &[u8]>::from_raw(w, h, rgba)
+        .expect("rgba matches its size");
+    image::imageops::resize(
+        &view,
+        nw.max(1),
+        nh.max(1),
+        image::imageops::FilterType::Triangle,
+    )
+    .into_raw()
 }
 
 /// A `cw`×`ch` window of an image, white where it falls outside.
@@ -94,19 +101,38 @@ fn rasterize_svg(bytes: &[u8], opt: &resvg::usvg::Options) -> Result<Raster, Str
     let tree = resvg::usvg::Tree::from_data(bytes, opt).map_err(|e| format!("invalid SVG: {e}"))?;
     let size = tree.size();
     let (w, h) = (size.width() as f64, size.height() as f64);
-    let scale = if w * h > MAX_SVG_PIXELS { (MAX_SVG_PIXELS / (w * h)).sqrt() } else { 1.0 };
-    let (pw, ph) = (((w * scale).ceil() as u32).max(1), ((h * scale).ceil() as u32).max(1));
+    let scale = if w * h > MAX_SVG_PIXELS {
+        (MAX_SVG_PIXELS / (w * h)).sqrt()
+    } else {
+        1.0
+    };
+    let (pw, ph) = (
+        ((w * scale).ceil() as u32).max(1),
+        ((h * scale).ceil() as u32).max(1),
+    );
     let mut pixmap = resvg::tiny_skia::Pixmap::new(pw, ph).ok_or("SVG has no drawable size")?;
-    resvg::render(&tree, resvg::tiny_skia::Transform::from_scale(scale as f32, scale as f32), &mut pixmap.as_mut());
+    resvg::render(
+        &tree,
+        resvg::tiny_skia::Transform::from_scale(scale as f32, scale as f32),
+        &mut pixmap.as_mut(),
+    );
     let mut rgba = pixmap.take();
     demultiply(&mut rgba);
     Ok(Raster { w: pw, h: ph, rgba })
 }
 
-fn decode(bytes: Vec<u8>, path: &str, svg: &mut Option<resvg::usvg::Options<'static>>) -> Result<Loaded, String> {
+fn decode(
+    bytes: Vec<u8>,
+    path: &str,
+    svg: &mut Option<resvg::usvg::Options<'static>>,
+) -> Result<Loaded, String> {
     if let Some((w, h)) = probe_dimensions(&bytes, path) {
         if w as u64 * h as u64 > MAX_PIXELS && !is_svg_path(path) {
-            return Err(format!("too large to compare ({} MP, limit {} MP)", w as u64 * h as u64 / 1_000_000, MAX_PIXELS / 1_000_000));
+            return Err(format!(
+                "too large to compare ({} MP, limit {} MP)",
+                w as u64 * h as u64 / 1_000_000,
+                MAX_PIXELS / 1_000_000
+            ));
         }
     }
     if is_svg_path(path) {
@@ -115,7 +141,10 @@ fn decode(bytes: Vec<u8>, path: &str, svg: &mut Option<resvg::usvg::Options<'sta
             opt.fontdb_mut().load_system_fonts();
             opt
         });
-        return Ok(Loaded { raster: rasterize_svg(&bytes, opt)?, png: None });
+        return Ok(Loaded {
+            raster: rasterize_svg(&bytes, opt)?,
+            png: None,
+        });
     }
     let is_png = bytes.starts_with(&[0x89, b'P', b'N', b'G']);
     let img = image::ImageReader::new(Cursor::new(&bytes))
@@ -125,7 +154,14 @@ fn decode(bytes: Vec<u8>, path: &str, svg: &mut Option<resvg::usvg::Options<'sta
         .map_err(|e| format!("cannot decode: {e}"))?
         .into_rgba8();
     let (w, h) = img.dimensions();
-    Ok(Loaded { raster: Raster { w, h, rgba: img.into_raw() }, png: is_png.then_some(bytes) })
+    Ok(Loaded {
+        raster: Raster {
+            w,
+            h,
+            rgba: img.into_raw(),
+        },
+        png: is_png.then_some(bytes),
+    })
 }
 
 fn load(
@@ -134,8 +170,14 @@ fn load(
     path: &str,
     svg: &mut Option<resvg::usvg::Options<'static>>,
 ) -> Result<Loaded, String> {
-    let which = if side == Side::Left { "before" } else { "after" };
-    let bytes = blobs.read(side, path).map_err(|e| format!("cannot read the {which} image: {e}"))?;
+    let which = if side == Side::Left {
+        "before"
+    } else {
+        "after"
+    };
+    let bytes = blobs
+        .read(side, path)
+        .map_err(|e| format!("cannot read the {which} image: {e}"))?;
     decode(bytes, path, svg).map_err(|e| format!("{which}: {e}"))
 }
 
@@ -148,7 +190,10 @@ fn write_side(fdir: &Path, name: &str, loaded: &Loaded) -> Result<Dim, String> {
         None => write_png(&full, &r.rgba, r.w, r.h)?,
     }
     write_preview(fdir, name, &r.rgba, r.w, r.h)?;
-    Ok(Dim { width: r.w, height: r.h })
+    Ok(Dim {
+        width: r.w,
+        height: r.h,
+    })
 }
 
 fn write_preview(fdir: &Path, name: &str, rgba: &[u8], w: u32, h: u32) -> Result<(), String> {
@@ -156,12 +201,23 @@ fn write_preview(fdir: &Path, name: &str, rgba: &[u8], w: u32, h: u32) -> Result
         return Ok(());
     }
     let nh = (h as u64 * PREVIEW_WIDTH as u64 / w as u64).max(1) as u32;
-    write_png(&fdir.join(format!("preview-{name}.png")), &resize(rgba, w, h, PREVIEW_WIDTH, nh), PREVIEW_WIDTH, nh)
+    write_png(
+        &fdir.join(format!("preview-{name}.png")),
+        &resize(rgba, w, h, PREVIEW_WIDTH, nh),
+        PREVIEW_WIDTH,
+        nh,
+    )
 }
 
 /// Write the window around `bbox` (x, y, w, h) with [`CROP_PADDING`] of context, scaled down when
 /// big, to `path`.
-pub fn write_window(path: &Path, bbox: (u32, u32, u32, u32), rgba: &[u8], w: u32, h: u32) -> Result<(), String> {
+pub fn write_window(
+    path: &Path,
+    bbox: (u32, u32, u32, u32),
+    rgba: &[u8],
+    w: u32,
+    h: u32,
+) -> Result<(), String> {
     let (bx, by, bw, bh) = bbox;
     let x = bx.saturating_sub(CROP_PADDING);
     let y = by.saturating_sub(CROP_PADDING);
@@ -169,25 +225,43 @@ pub fn write_window(path: &Path, bbox: (u32, u32, u32, u32), rgba: &[u8], w: u32
     let y1 = (by + bh + CROP_PADDING).min(h);
     let (cw, ch) = (x1.saturating_sub(x).max(1), y1.saturating_sub(y).max(1));
     let window = crop(rgba, w, h, x, y, cw, ch);
-    let scale = (CROP_MAX_WIDTH as f64 / cw as f64).min(CROP_MAX_HEIGHT as f64 / ch as f64).min(1.0);
+    let scale = (CROP_MAX_WIDTH as f64 / cw as f64)
+        .min(CROP_MAX_HEIGHT as f64 / ch as f64)
+        .min(1.0);
     if scale < 1.0 {
-        let (nw, nh) = (((cw as f64 * scale) as u32).max(1), ((ch as f64 * scale) as u32).max(1));
+        let (nw, nh) = (
+            ((cw as f64 * scale) as u32).max(1),
+            ((ch as f64 * scale) as u32).max(1),
+        );
         write_png(path, &resize(&window, cw, ch, nw, nh), nw, nh)
     } else {
         write_png(path, &window, cw, ch)
     }
 }
 
-fn write_crop(fdir: &Path, region: &Region, name: &str, rgba: &[u8], w: u32, h: u32) -> Result<(), String> {
+fn write_crop(
+    fdir: &Path,
+    region: &Region,
+    name: &str,
+    rgba: &[u8],
+    w: u32,
+    h: u32,
+) -> Result<(), String> {
     let path = fdir.join(format!("crop-{}-{name}.png", region.id));
     write_window(&path, (region.x, region.y, region.w, region.h), rgba, w, h)
 }
 
 /// Decode a PNG written by [`generate`] back to pixels.
 pub fn read_png(path: &Path) -> Result<Raster, String> {
-    let img = image::open(path).map_err(|e| format!("{}: {e}", path.display()))?.into_rgba8();
+    let img = image::open(path)
+        .map_err(|e| format!("{}: {e}", path.display()))?
+        .into_rgba8();
     let (w, h) = img.dimensions();
-    Ok(Raster { w, h, rgba: img.into_raw() })
+    Ok(Raster {
+        w,
+        h,
+        rgba: img.into_raw(),
+    })
 }
 
 fn process(
@@ -214,16 +288,25 @@ fn process(
     let fdir = dir.join(format!("f{index}"));
     let mut run = |e: &mut FileEntry| -> Result<(), String> {
         std::fs::create_dir_all(&fdir).map_err(io)?;
-        let before = (f.change != Change::Added).then(|| load(blobs, Side::Left, f.left_path(), svg)).transpose()?;
-        let after = (f.change != Change::Deleted).then(|| load(blobs, Side::Right, &f.path, svg)).transpose()?;
+        let before = (f.change != Change::Added)
+            .then(|| load(blobs, Side::Left, f.left_path(), svg))
+            .transpose()?;
+        let after = (f.change != Change::Deleted)
+            .then(|| load(blobs, Side::Right, &f.path, svg))
+            .transpose()?;
         if let Some(b) = &before {
             e.before = Some(write_side(&fdir, "before", b)?);
         }
         if let Some(a) = &after {
             e.after = Some(write_side(&fdir, "after", a)?);
         }
-        let (Some(before), Some(after)) = (before, after) else { return Ok(()) };
-        let (w, h) = (before.raster.w.max(after.raster.w), before.raster.h.max(after.raster.h));
+        let (Some(before), Some(after)) = (before, after) else {
+            return Ok(());
+        };
+        let (w, h) = (
+            before.raster.w.max(after.raster.w),
+            before.raster.h.max(after.raster.h),
+        );
         let (a, b) = (pad(before.raster, w, h), pad(after.raster, w, h));
         let cmp = pixelmatch::compare(&a, &b, w as usize, h as usize);
         let found = regions::detect(&cmp.mask, w as usize, h as usize);
@@ -305,12 +388,18 @@ mod tests {
             }
         }
         let mut out = Vec::new();
-        image::DynamicImage::ImageRgba8(img).write_to(&mut Cursor::new(&mut out), image::ImageFormat::Png).unwrap();
+        image::DynamicImage::ImageRgba8(img)
+            .write_to(&mut Cursor::new(&mut out), image::ImageFormat::Png)
+            .unwrap();
         out
     }
 
     fn file(path: &str, change: Change) -> ImageFile {
-        ImageFile { path: path.into(), old_path: None, change }
+        ImageFile {
+            path: path.into(),
+            old_path: None,
+            change,
+        }
     }
 
     fn tmp(name: &str) -> std::path::PathBuf {
@@ -326,18 +415,42 @@ mod tests {
         blobs.put(Side::Right, "a.png", png(80, 60, &[(10, 10, 5)]));
         let dir = tmp("mod");
         let mut seen = vec![];
-        let out = generate(&blobs, &[file("a.png", Change::Modified)], &dir, &AtomicBool::new(false), |d, t| seen.push((d, t))).unwrap();
+        let out = generate(
+            &blobs,
+            &[file("a.png", Change::Modified)],
+            &dir,
+            &AtomicBool::new(false),
+            |d, t| seen.push((d, t)),
+        )
+        .unwrap();
         let e = &out[0];
         assert_eq!(e.skipped, None);
         assert_eq!(e.mismatch_px, 25);
         assert_eq!(e.regions.len(), 1);
-        assert_eq!((e.regions[0].x, e.regions[0].y, e.regions[0].w, e.regions[0].h), (10, 10, 5, 5));
-        assert_eq!(e.before, Some(Dim { width: 80, height: 60 }));
+        assert_eq!(
+            (
+                e.regions[0].x,
+                e.regions[0].y,
+                e.regions[0].w,
+                e.regions[0].h
+            ),
+            (10, 10, 5, 5)
+        );
+        assert_eq!(
+            e.before,
+            Some(Dim {
+                width: 80,
+                height: 60
+            })
+        );
         assert!((e.diff_pct - 25.0 / 4800.0 * 100.0).abs() < 1e-9);
         for f in ["before", "after", "diff"] {
             assert!(dir.join(format!("f0/{f}.png")).exists(), "{f}.png");
             assert!(dir.join(format!("f0/crop-0-{f}.png")).exists(), "crop {f}");
-            assert!(!dir.join(format!("f0/preview-{f}.png")).exists(), "narrow images need no preview");
+            assert!(
+                !dir.join(format!("f0/preview-{f}.png")).exists(),
+                "narrow images need no preview"
+            );
         }
         assert_eq!(seen, vec![(1, 1)]);
         std::fs::remove_dir_all(&dir).unwrap();
@@ -349,7 +462,14 @@ mod tests {
         blobs.put(Side::Left, "w.png", png(1200, 40, &[]));
         blobs.put(Side::Right, "w.png", png(1200, 40, &[]));
         let dir = tmp("wide");
-        let out = generate(&blobs, &[file("w.png", Change::Modified)], &dir, &AtomicBool::new(false), |_, _| {}).unwrap();
+        let out = generate(
+            &blobs,
+            &[file("w.png", Change::Modified)],
+            &dir,
+            &AtomicBool::new(false),
+            |_, _| {},
+        )
+        .unwrap();
         assert_eq!((out[0].mismatch_px, out[0].regions.len()), (0, 0));
         for f in ["before", "after", "diff"] {
             let (w, _) = image::image_dimensions(dir.join(format!("f0/preview-{f}.png"))).unwrap();
@@ -364,9 +484,22 @@ mod tests {
         blobs.put(Side::Left, "s.png", png(20, 20, &[]));
         blobs.put(Side::Right, "s.png", png(20, 30, &[(0, 22, 4)]));
         let dir = tmp("size");
-        let out = generate(&blobs, &[file("s.png", Change::Modified)], &dir, &AtomicBool::new(false), |_, _| {}).unwrap();
-        assert_eq!(out[0].mismatch_px, 16, "only the black square differs from the white padding");
-        assert_eq!(image::image_dimensions(dir.join("f0/diff.png")).unwrap(), (20, 30));
+        let out = generate(
+            &blobs,
+            &[file("s.png", Change::Modified)],
+            &dir,
+            &AtomicBool::new(false),
+            |_, _| {},
+        )
+        .unwrap();
+        assert_eq!(
+            out[0].mismatch_px, 16,
+            "only the black square differs from the white padding"
+        );
+        assert_eq!(
+            image::image_dimensions(dir.join("f0/diff.png")).unwrap(),
+            (20, 30)
+        );
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -378,14 +511,35 @@ mod tests {
         let dir = tmp("addel");
         let out = generate(
             &blobs,
-            &[file("new.png", Change::Added), file("old.png", Change::Deleted)],
+            &[
+                file("new.png", Change::Added),
+                file("old.png", Change::Deleted),
+            ],
             &dir,
             &AtomicBool::new(false),
             |_, _| {},
         )
         .unwrap();
-        assert_eq!((out[0].before, out[0].after), (None, Some(Dim { width: 10, height: 10 })));
-        assert_eq!((out[1].before, out[1].after), (Some(Dim { width: 12, height: 8 }), None));
+        assert_eq!(
+            (out[0].before, out[0].after),
+            (
+                None,
+                Some(Dim {
+                    width: 10,
+                    height: 10
+                })
+            )
+        );
+        assert_eq!(
+            (out[1].before, out[1].after),
+            (
+                Some(Dim {
+                    width: 12,
+                    height: 8
+                }),
+                None
+            )
+        );
         assert!(dir.join("f0/after.png").exists() && !dir.join("f0/diff.png").exists());
         std::fs::remove_dir_all(&dir).unwrap();
     }
@@ -400,14 +554,26 @@ mod tests {
         let dir = tmp("skip");
         let out = generate(
             &blobs,
-            &[file("bad.png", Change::Modified), file("gone.png", Change::Modified), file("ok.png", Change::Modified)],
+            &[
+                file("bad.png", Change::Modified),
+                file("gone.png", Change::Modified),
+                file("ok.png", Change::Modified),
+            ],
             &dir,
             &AtomicBool::new(false),
             |_, _| {},
         )
         .unwrap();
-        assert!(out[0].skipped.as_deref().unwrap().starts_with("before: cannot decode"));
-        assert!(out[1].skipped.as_deref().unwrap().contains("cannot read the before image"));
+        assert!(out[0]
+            .skipped
+            .as_deref()
+            .unwrap()
+            .starts_with("before: cannot decode"));
+        assert!(out[1]
+            .skipped
+            .as_deref()
+            .unwrap()
+            .contains("cannot read the before image"));
         assert_eq!((out[2].skipped.as_deref(), out[2].mismatch_px), (None, 4));
         std::fs::remove_dir_all(&dir).unwrap();
     }
@@ -416,21 +582,43 @@ mod tests {
     fn cancelling_stops_the_run() {
         let blobs = Fake::default();
         let dir = tmp("cancel");
-        let err = generate(&blobs, &[file("a.png", Change::Added)], &dir, &AtomicBool::new(true), |_, _| {}).unwrap_err();
+        let err = generate(
+            &blobs,
+            &[file("a.png", Change::Added)],
+            &dir,
+            &AtomicBool::new(true),
+            |_, _| {},
+        )
+        .unwrap_err();
         assert!(err.to_string().contains("cancelled"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn svgs_are_rasterized_and_compared() {
-        let svg = |fill: &str| format!(r#"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="10"><rect width="10" height="10" fill="{fill}"/></svg>"#).into_bytes();
+        let svg = |fill: &str| {
+            format!(r#"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="10"><rect width="10" height="10" fill="{fill}"/></svg>"#).into_bytes()
+        };
         let mut blobs = Fake::default();
         blobs.put(Side::Left, "l.svg", svg("red"));
         blobs.put(Side::Right, "l.svg", svg("blue"));
         let dir = tmp("svg");
-        let out = generate(&blobs, &[file("l.svg", Change::Modified)], &dir, &AtomicBool::new(false), |_, _| {}).unwrap();
+        let out = generate(
+            &blobs,
+            &[file("l.svg", Change::Modified)],
+            &dir,
+            &AtomicBool::new(false),
+            |_, _| {},
+        )
+        .unwrap();
         assert_eq!(out[0].skipped, None);
-        assert_eq!(out[0].before, Some(Dim { width: 20, height: 10 }));
+        assert_eq!(
+            out[0].before,
+            Some(Dim {
+                width: 20,
+                height: 10
+            })
+        );
         assert_eq!(out[0].mismatch_px, 100, "the 10x10 square changed colour");
         std::fs::remove_dir_all(&dir).unwrap();
     }
@@ -441,6 +629,10 @@ mod tests {
         let c = crop(&rgba, 10, 10, 8, 8, 4, 4);
         assert_eq!(c.len(), 4 * 4 * 4);
         assert_eq!(&c[..4], &[7, 7, 7, 7], "inside");
-        assert_eq!(&c[(3 * 4 + 3) * 4..(3 * 4 + 3) * 4 + 4], &[255, 255, 255, 255], "outside is white");
+        assert_eq!(
+            &c[(3 * 4 + 3) * 4..(3 * 4 + 3) * 4 + 4],
+            &[255, 255, 255, 255],
+            "outside is white"
+        );
     }
 }

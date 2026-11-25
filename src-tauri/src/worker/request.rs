@@ -167,12 +167,16 @@ mod tests {
         assert_eq!(req.timeout_secs, 1800);
         assert_eq!(req.workspace.kind, WorkspaceKind::MainClone);
         assert_eq!(req.tools.policy(&[]), ToolPolicy::ReadOnly);
-        assert_eq!(ToolsWire::Allowlist.policy(&["Bash".into()]), ToolPolicy::Allowlist(vec!["Bash".into()]));
+        assert_eq!(
+            ToolsWire::Allowlist.policy(&["Bash".into()]),
+            ToolPolicy::Allowlist(vec!["Bash".into()])
+        );
     }
 
     #[test]
     fn unknown_workspace_kind_is_rejected() {
-        let r: Result<WorkspaceSpec, _> = serde_json::from_str(r#"{"repo":"a/b","kind":"clone-it"}"#);
+        let r: Result<WorkspaceSpec, _> =
+            serde_json::from_str(r#"{"repo":"a/b","kind":"clone-it"}"#);
         assert!(r.is_err());
     }
 }

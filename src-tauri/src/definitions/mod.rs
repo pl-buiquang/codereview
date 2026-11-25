@@ -64,7 +64,10 @@ struct Permit<'a>(&'a Gate);
 
 impl Gate {
     const fn new(n: usize) -> Self {
-        Gate { free: Mutex::new(n), cv: Condvar::new() }
+        Gate {
+            free: Mutex::new(n),
+            cv: Condvar::new(),
+        }
     }
 
     fn acquire(&self) -> Permit<'_> {
@@ -139,9 +142,7 @@ pub fn find(
 
     // 1+2: shortlist, then confirm with tree-sitter.
     let mut files = grep::shortlist(repo, sha, lang, symbol)?;
-    files.sort_by(|a, b| {
-        (a != from_file, !in_diff(a), a).cmp(&(b != from_file, !in_diff(b), b))
-    });
+    files.sort_by(|a, b| (a != from_file, !in_diff(a), a).cmp(&(b != from_file, !in_diff(b), b)));
     files.truncate(MAX_PARSED_FILES);
     if !files.is_empty() {
         let sources = git::cat_files(repo, sha, &files, MAX_FILE_BYTES)?;
@@ -173,12 +174,21 @@ pub fn find(
         return Err(AppError::Other(CANCELLED.into()));
     }
     for (path, line) in grep::exact_hits(repo, sha, lang, symbol)? {
-        found.push(Candidate { path, line, kind: "declaration".into(), source: None });
+        found.push(Candidate {
+            path,
+            line,
+            kind: "declaration".into(),
+            source: None,
+        });
     }
 
     found.sort_by(|a, b| {
-        (a.path != from_file, !in_diff(&a.path), &a.path, a.line)
-            .cmp(&(b.path != from_file, !in_diff(&b.path), &b.path, b.line))
+        (a.path != from_file, !in_diff(&a.path), &a.path, a.line).cmp(&(
+            b.path != from_file,
+            !in_diff(&b.path),
+            &b.path,
+            b.line,
+        ))
     });
     found.dedup_by(|b, a| a.path == b.path && a.line == b.line);
     found.truncate(MAX_HITS);
@@ -214,7 +224,12 @@ pub fn find(
                     snippet_of(&read[&c.path])
                 }
             };
-            Ok(DefinitionHit { path: c.path, line: c.line, kind: c.kind, snippet })
+            Ok(DefinitionHit {
+                path: c.path,
+                line: c.line,
+                kind: c.kind,
+                snippet,
+            })
         })
         .collect()
 }
@@ -227,7 +242,12 @@ mod tests {
     fn repo_with(files: &[(&str, &str)]) -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap();
         let run = |args: &[&str]| {
-            let st = Command::new("git").arg("-C").arg(dir.path()).args(args).status().unwrap();
+            let st = Command::new("git")
+                .arg("-C")
+                .arg(dir.path())
+                .args(args)
+                .status()
+                .unwrap();
             assert!(st.success(), "{args:?}");
         };
         run(&["init", "-q", "-b", "main"]);
@@ -264,7 +284,10 @@ mod tests {
             lookup_at(repo.path(), "compute", "b/other.rs", &[]),
             vec![("b/other.rs".into(), 2), ("a/lib.rs".into(), 2)]
         );
-        assert_eq!(lookup_at(repo.path(), "load", "web/x.ts", &[]), vec![("web/x.ts".into(), 3)]);
+        assert_eq!(
+            lookup_at(repo.path(), "load", "web/x.ts", &[]),
+            vec![("web/x.ts".into(), 3)]
+        );
     }
 
     #[test]
@@ -275,20 +298,41 @@ mod tests {
             ("app/use.rb", "Billing::Invoice.new.pay!\n"),
         ]);
         let got = lookup_at(repo.path(), "pay!", "app/use.rb", &["lib/zzz.rb"]);
-        assert_eq!(got, vec![("lib/zzz.rb".into(), 2), ("app/models/invoice.rb".into(), 4)]);
-        assert_eq!(lookup_at(repo.path(), "total", "app/use.rb", &[]), vec![("app/models/invoice.rb".into(), 3)]);
-        assert_eq!(lookup_at(repo.path(), "Invoice", "app/use.rb", &[]).len(), 2); // both `class`es
+        assert_eq!(
+            got,
+            vec![
+                ("lib/zzz.rb".into(), 2),
+                ("app/models/invoice.rb".into(), 4)
+            ]
+        );
+        assert_eq!(
+            lookup_at(repo.path(), "total", "app/use.rb", &[]),
+            vec![("app/models/invoice.rb".into(), 3)]
+        );
+        assert_eq!(
+            lookup_at(repo.path(), "Invoice", "app/use.rb", &[]).len(),
+            2
+        ); // both `class`es
     }
 
     #[test]
     fn grep_only_languages_and_unknown_files() {
         let repo = repo_with(&[
             ("a.go", "package a\nfunc Run(x int) {}\n"),
-            ("x.vue", "<script>\nexport function helper() {}\n</script>\n"),
+            (
+                "x.vue",
+                "<script>\nexport function helper() {}\n</script>\n",
+            ),
             ("y.ts", "export const other = 1;\n"),
         ]);
-        assert_eq!(lookup_at(repo.path(), "Run", "a.go", &[]), vec![("a.go".into(), 2)]);
-        assert_eq!(lookup_at(repo.path(), "helper", "y.ts", &[]), vec![("x.vue".into(), 2)]);
+        assert_eq!(
+            lookup_at(repo.path(), "Run", "a.go", &[]),
+            vec![("a.go".into(), 2)]
+        );
+        assert_eq!(
+            lookup_at(repo.path(), "helper", "y.ts", &[]),
+            vec![("x.vue".into(), 2)]
+        );
         assert!(lookup_at(repo.path(), "Run", "notes.txt", &[]).is_empty());
         assert!(lookup_at(repo.path(), "nope", "a.go", &[]).is_empty());
     }
@@ -299,7 +343,10 @@ mod tests {
             .map(|i| (format!("f{i:02}.rb"), "def shared\nend\n".to_string()))
             .collect();
         files.push(("z_clicked.rb".into(), "shared\n".into()));
-        let refs: Vec<(&str, &str)> = files.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
+        let refs: Vec<(&str, &str)> = files
+            .iter()
+            .map(|(a, b)| (a.as_str(), b.as_str()))
+            .collect();
         let repo = repo_with(&refs);
         let hits = lookup_at(repo.path(), "shared", "z_clicked.rb", &[]);
         assert_eq!(hits.len(), MAX_HITS);
@@ -320,17 +367,32 @@ mod tests {
         ) else {
             return;
         };
-        for sym in ["user", "perform", "call", "initialize", "RuleProcessing", "nope_nope"] {
+        for sym in [
+            "user",
+            "perform",
+            "call",
+            "initialize",
+            "RuleProcessing",
+            "nope_nope",
+        ] {
             let t = std::time::Instant::now();
             let hits = find(Path::new(&repo), &rev, sym, &from, &[], &|| false).unwrap();
-            println!("{sym:>16}: {:>4} ms, {} hits", t.elapsed().as_millis(), hits.len());
+            println!(
+                "{sym:>16}: {:>4} ms, {} hits",
+                t.elapsed().as_millis(),
+                hits.len()
+            );
         }
     }
 
     #[test]
     fn cat_files_returns_none_for_missing_and_oversized() {
         let repo = repo_with(&[("a.txt", "hello\n"), ("big.txt", &"x".repeat(100))]);
-        let paths = ["a.txt".to_string(), "nope.txt".to_string(), "big.txt".to_string()];
+        let paths = [
+            "a.txt".to_string(),
+            "nope.txt".to_string(),
+            "big.txt".to_string(),
+        ];
         let got = git::cat_files(repo.path(), "main", &paths, 50).unwrap();
         assert_eq!(got, vec![Some("hello\n".to_string()), None, None]);
     }

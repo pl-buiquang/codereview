@@ -104,7 +104,9 @@ impl FileAcc {
 
 fn unquote(p: &str) -> &str {
     let p = p.trim_end_matches('\t');
-    p.strip_prefix('"').and_then(|s| s.strip_suffix('"')).unwrap_or(p)
+    p.strip_prefix('"')
+        .and_then(|s| s.strip_suffix('"'))
+        .unwrap_or(p)
 }
 
 fn strip_side_prefix(p: &str) -> Option<String> {
@@ -132,7 +134,10 @@ pub(crate) fn split_git_paths(rest: &str) -> (Option<String>, Option<String>) {
         }
     }
     match rest.rfind(" b/") {
-        Some(i) => (strip_side_prefix(&rest[..i]), strip_side_prefix(&rest[i + 1..])),
+        Some(i) => (
+            strip_side_prefix(&rest[..i]),
+            strip_side_prefix(&rest[i + 1..]),
+        ),
         None => (None, None),
     }
 }
@@ -180,7 +185,11 @@ fn split_files(diff: &str) -> Vec<FileAcc> {
                     *new_rem -= 1;
                 }
             }
-            hunk.body.push(if line.is_empty() { " ".into() } else { line.to_string() });
+            hunk.body.push(if line.is_empty() {
+                " ".into()
+            } else {
+                line.to_string()
+            });
             if *old_rem <= 0 && *new_rem <= 0 {
                 remaining = None;
             }
@@ -364,14 +373,20 @@ pub(crate) fn review_local_path(conn: &Connection, review_id: i64) -> AppResult<
 /// The review's current hunks, with `.gitattributes` `linguist-generated`
 /// applied when a local clone is linked.
 fn current_hunks(conn: &Connection, review_id: i64) -> AppResult<Vec<DiffHunk>> {
-    hunks_from(&diff_source(conn, review_id)?, review_local_path(conn, review_id)?)
+    hunks_from(
+        &diff_source(conn, review_id)?,
+        review_local_path(conn, review_id)?,
+    )
 }
 
 /// [`current_hunks`] without holding the DB lock across `gh`/`git`.
 fn current_hunks_unlocked(db: &Db, review_id: i64) -> AppResult<Vec<DiffHunk>> {
     let (source, local) = {
         let conn = db.0.lock().unwrap();
-        (diff_source(&conn, review_id)?, review_local_path(&conn, review_id)?)
+        (
+            diff_source(&conn, review_id)?,
+            review_local_path(&conn, review_id)?,
+        )
     };
     hunks_from(&source, local)
 }
@@ -603,7 +618,10 @@ pub fn get_focus_from(
                     reason: s.reason.clone(),
                     ..base
                 },
-                None if planned => FocusEntry { is_new: true, ..base },
+                None if planned => FocusEntry {
+                    is_new: true,
+                    ..base
+                },
                 None => base,
             }
         })
@@ -687,7 +705,10 @@ pub fn set_focus_plan_from(
         for id in ai_ids {
             tx.execute("DELETE FROM comment WHERE id = ?1", params![id])?;
         }
-        tx.execute("DELETE FROM focus_comment WHERE focus_id = ?1", params![fid])?;
+        tx.execute(
+            "DELETE FROM focus_comment WHERE focus_id = ?1",
+            params![fid],
+        )?;
     }
 
     tx.execute("DELETE FROM focus_hunk WHERE focus_id = ?1", params![fid])?;
@@ -790,7 +811,9 @@ pub fn raise_focus_from(
     let view = get_focus_from(conn, review_id, hunks)?
         .ok_or_else(|| AppError::Other(format!("review {review_id} has no focus")))?;
     if view.focus.planned_at.is_none() {
-        return Err(AppError::Other(format!("review {review_id} has no planned focus")));
+        return Err(AppError::Other(format!(
+            "review {review_id} has no planned focus"
+        )));
     }
     if view.stale {
         return Err(AppError::Other(
@@ -830,7 +853,11 @@ pub fn raise_focus_from(
         }
         let visible = tier_rank(&r.tier) >= tier_rank("review");
         let was_hidden = tier_rank(&entry.tier) < tier_rank("review");
-        let reason = if visible && was_hidden { None } else { entry.reason.clone() };
+        let reason = if visible && was_hidden {
+            None
+        } else {
+            entry.reason.clone()
+        };
         let h = by_id[r.id.as_str()];
         tx.execute(
             "INSERT INTO focus_hunk
@@ -838,7 +865,15 @@ pub fn raise_focus_from(
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'ai', ?7)
              ON CONFLICT(focus_id, hunk_id) DO UPDATE SET
                tier = excluded.tier, source = 'ai', reason = excluded.reason",
-            params![fid, h.hunk_id, h.file_path, h.old_start, h.new_start, r.tier, reason],
+            params![
+                fid,
+                h.hunk_id,
+                h.file_path,
+                h.old_start,
+                h.new_start,
+                r.tier,
+                reason
+            ],
         )?;
     }
     let lines: Vec<&str> = raise
@@ -853,7 +888,10 @@ pub fn raise_focus_from(
         for line in lines {
             summary = Some(with_summary_line(summary.as_deref(), line));
         }
-        tx.execute("UPDATE focus SET summary = ?1 WHERE id = ?2", params![summary, fid])?;
+        tx.execute(
+            "UPDATE focus SET summary = ?1 WHERE id = ?2",
+            params![summary, fid],
+        )?;
     }
     tx.commit()?;
     get_focus_from(conn, review_id, hunks)?
@@ -868,7 +906,10 @@ pub fn raise_focus_impl(conn: &Connection, review_id: i64, raise: Raise) -> AppR
 pub fn set_focus_level_impl(conn: &Connection, review_id: i64, level: &str) -> AppResult<()> {
     validate_level(level)?;
     let fid = focus_id(conn, review_id)?;
-    conn.execute("UPDATE focus SET level = ?1 WHERE id = ?2", params![level, fid])?;
+    conn.execute(
+        "UPDATE focus SET level = ?1 WHERE id = ?2",
+        params![level, fid],
+    )?;
     Ok(())
 }
 
@@ -973,9 +1014,13 @@ fn first_changed_line(h: &DiffHunk) -> Option<(&'static str, i64, usize)> {
 /// caller can link it in `focus_comment`.
 fn note_comment(conn: &Connection, review_id: i64, h: &DiffHunk, note: &str) -> AppResult<i64> {
     let comment = match first_changed_line(h) {
-        None => {
-            add_file_comment_impl(conn, review_id, h.file_path.clone(), note.into(), Some("ai:explain"))?
-        }
+        None => add_file_comment_impl(
+            conn,
+            review_id,
+            h.file_path.clone(),
+            note.into(),
+            Some("ai:explain"),
+        )?,
         Some((side, line, idx)) => {
             let lo = idx.saturating_sub(SNIPPET_CONTEXT);
             let hi = (idx + SNIPPET_CONTEXT).min(h.body.len() - 1);
@@ -1073,12 +1118,15 @@ pub(crate) const FOCUS_TOOLS: &[&str] = &[
     "Glob",
     "Grep",
 ];
-const NO_PLAN_ERROR: &str = "the model finished without submitting a plan (`cr focus set` was never called)";
+const NO_PLAN_ERROR: &str =
+    "the model finished without submitting a plan (`cr focus set` was never called)";
 
 /// Mark the review's focus as generating (creating the row if needed).
 pub fn begin_generation(conn: &Connection, review_id: i64, model: &str) -> AppResult<()> {
     if load_focus(conn, review_id)?.is_some_and(|f| f.status == "generating") {
-        return Err(AppError::Other("a focus is already being generated for this review".into()));
+        return Err(AppError::Other(
+            "a focus is already being generated for this review".into(),
+        ));
     }
     let model = (!model.is_empty()).then_some(model);
     conn.execute(
@@ -1091,7 +1139,11 @@ pub fn begin_generation(conn: &Connection, review_id: i64, model: &str) -> AppRe
 
 /// Close a run. `cr focus set` already flips the status to ready on success, so
 /// a row still `generating` means the run failed or never submitted a plan.
-pub fn finish_generation(conn: &Connection, review_id: i64, error: Option<String>) -> AppResult<()> {
+pub fn finish_generation(
+    conn: &Connection,
+    review_id: i64,
+    error: Option<String>,
+) -> AppResult<()> {
     conn.execute(
         "UPDATE focus SET status = 'failed', error = ?2 WHERE review_id = ?1 AND status = 'generating'",
         params![review_id, error.unwrap_or_else(|| NO_PLAN_ERROR.into())],
@@ -1116,9 +1168,18 @@ pub(crate) fn child_path() -> Option<std::ffi::OsString> {
 /// Start a background focus run (the built-in `focus` routine); `focus-updated` is emitted when
 /// it starts and ends.
 #[tauri::command]
-pub fn generate_focus(app: tauri::AppHandle, review_id: i64, model: Option<String>, db: State<Db>) -> AppResult<()> {
+pub fn generate_focus(
+    app: tauri::AppHandle,
+    review_id: i64,
+    model: Option<String>,
+    db: State<Db>,
+) -> AppResult<()> {
     let routine = crate::commands::routines::builtin(&db, "focus")?;
-    let ctx = crate::routines::context::ContextRef { kind: "review".into(), id: review_id.to_string(), base_paths: vec![] };
+    let ctx = crate::routines::context::ContextRef {
+        kind: "review".into(),
+        id: review_id.to_string(),
+        base_paths: vec![],
+    };
     crate::commands::routines::launch(&app, &routine, &ctx, "", model.as_deref().unwrap_or(""))?;
     Ok(())
 }
@@ -1216,7 +1277,10 @@ mod tests {
             ]
         );
         let starts: Vec<(i64, i64)> = hunks.iter().map(|h| (h.old_start, h.new_start)).collect();
-        assert_eq!(starts, [(1, 1), (10, 11), (1, 0), (0, 0), (0, 0), (5, 5), (0, 1)]);
+        assert_eq!(
+            starts,
+            [(1, 1), (10, 11), (1, 0), (0, 0), (0, 0), (5, 5), (0, 1)]
+        );
         let app = by_file(&hunks, "src/app.rs");
         assert_eq!((app[0].old_start, app[0].new_start), (1, 1));
         assert_eq!((app[1].old_start, app[1].new_start), (10, 11));
@@ -1225,7 +1289,10 @@ mod tests {
         assert!(app[0].rule_tier.is_none());
 
         let gone = by_file(&hunks, "gone.txt");
-        assert_eq!(gone[0].deletions, 2, "'--' content line is body, not a header");
+        assert_eq!(
+            gone[0].deletions, 2,
+            "'--' content line is body, not a header"
+        );
         let web = by_file(&hunks, "web/new.ts");
         assert_eq!(web[0].body.last().unwrap(), "\\ No newline at end of file");
     }
@@ -1247,15 +1314,21 @@ mod tests {
     #[test]
     fn generated_marker_must_be_a_comment() {
         assert!(!has_generated_marker(&["+let m = \"@generated\";".into()]));
-        assert!(has_generated_marker(&["+# Code generated by x. DO NOT EDIT.".into()]));
+        assert!(has_generated_marker(&[
+            "+# Code generated by x. DO NOT EDIT.".into()
+        ]));
         assert!(is_snapshot("src/__snapshots__/a.test.ts.snap"));
     }
 
     #[test]
     fn hunk_id_survives_line_shifts_and_disambiguates_repeats() {
         let a = "diff --git a/f b/f\n--- a/f\n+++ b/f\n@@ -1,2 +1,2 @@\n ctx\n-x\n+y\n";
-        let b = "diff --git a/f b/f\n--- a/f\n+++ b/f\n@@ -40,2 +42,2 @@ other\n other ctx\n-x\n+y\n";
-        assert_eq!(parse_diff_hunks(a)[0].hunk_id, parse_diff_hunks(b)[0].hunk_id);
+        let b =
+            "diff --git a/f b/f\n--- a/f\n+++ b/f\n@@ -40,2 +42,2 @@ other\n other ctx\n-x\n+y\n";
+        assert_eq!(
+            parse_diff_hunks(a)[0].hunk_id,
+            parse_diff_hunks(b)[0].hunk_id
+        );
 
         let twice = "diff --git a/f b/f\n--- a/f\n+++ b/f\n@@ -1,1 +1,1 @@\n-x\n+y\n@@ -9,1 +9,1 @@\n-x\n+y\n";
         let h = parse_diff_hunks(twice);
@@ -1270,7 +1343,10 @@ mod tests {
             split_git_paths("a/x b/y.rs b/x b/y.rs"),
             (Some("x b/y.rs".into()), Some("x b/y.rs".into()))
         );
-        assert_eq!(split_git_paths("a/o.rs b/n.rs"), (Some("o.rs".into()), Some("n.rs".into())));
+        assert_eq!(
+            split_git_paths("a/o.rs b/n.rs"),
+            (Some("o.rs".into()), Some("n.rs".into()))
+        );
     }
 
     fn seed_review(conn: &Connection, head: &str) -> i64 {
@@ -1330,11 +1406,17 @@ mod tests {
         let tier = |id: &str| view.hunks.iter().find(|h| h.hunk_id == id).unwrap();
         assert_eq!(tier(&a).tier, "critical", "never lowered");
         assert_eq!(tier(&b).tier, "critical");
-        assert!(tier(&b).reason.is_none(), "hidden → visible drops the reason");
+        assert!(
+            tier(&b).reason.is_none(),
+            "hidden → visible drops the reason"
+        );
         assert_eq!(tier(&b).override_.as_deref(), Some("hide"), "override kept");
         assert_eq!(tier(&gone).tier, "skim", "never lowered");
         assert_eq!(tier(&gone).reason.as_deref(), Some("cleanup"));
-        assert_eq!(view.focus.summary.as_deref(), Some("Does X.\n\nCoverage: 40/100"));
+        assert_eq!(
+            view.focus.summary.as_deref(),
+            Some("Does X.\n\nCoverage: 40/100")
+        );
         let notes_after = focus_comments_impl(&conn, rid).unwrap();
         assert_eq!(
             notes_before.iter().map(|c| c.id).collect::<Vec<_>>(),
@@ -1342,9 +1424,18 @@ mod tests {
             "note comments untouched"
         );
 
-        let view = raise_focus_from(&conn, rid, &hunks, raise(r#"{"summary_line":"Coverage: 85/100"}"#))
-            .unwrap();
-        assert_eq!(view.focus.summary.as_deref(), Some("Does X.\n\nCoverage: 85/100"), "line replaced");
+        let view = raise_focus_from(
+            &conn,
+            rid,
+            &hunks,
+            raise(r#"{"summary_line":"Coverage: 85/100"}"#),
+        )
+        .unwrap();
+        assert_eq!(
+            view.focus.summary.as_deref(),
+            Some("Does X.\n\nCoverage: 85/100"),
+            "line replaced"
+        );
 
         let view = raise_focus_from(
             &conn,
@@ -1359,8 +1450,20 @@ mod tests {
             "several lines, each replaced or appended"
         );
 
-        assert!(raise_focus_from(&conn, rid, &hunks, raise(r#"{"hunks":[{"id":"nope","tier":"review"}]}"#)).is_err());
-        assert!(raise_focus_from(&conn, rid, &hunks, raise(&format!(r#"{{"hunks":[{{"id":"{a}","tier":"loud"}}]}}"#))).is_err());
+        assert!(raise_focus_from(
+            &conn,
+            rid,
+            &hunks,
+            raise(r#"{"hunks":[{"id":"nope","tier":"review"}]}"#)
+        )
+        .is_err());
+        assert!(raise_focus_from(
+            &conn,
+            rid,
+            &hunks,
+            raise(&format!(r#"{{"hunks":[{{"id":"{a}","tier":"loud"}}]}}"#))
+        )
+        .is_err());
     }
 
     #[test]
@@ -1378,8 +1481,14 @@ mod tests {
         let hunks = parse_diff_hunks(DIFF);
         let app = by_file(&hunks, "src/app.rs");
 
-        let err = set_focus_plan_from(&conn, rid, &hunks, plan(r#"{"hunks":[{"id":"nope","tier":"review"}]}"#), None)
-            .unwrap_err();
+        let err = set_focus_plan_from(
+            &conn,
+            rid,
+            &hunks,
+            plan(r#"{"hunks":[{"id":"nope","tier":"review"}]}"#),
+            None,
+        )
+        .unwrap_err();
         assert!(err.to_string().contains("nope"));
         assert!(load_focus(&conn, rid).unwrap().is_none(), "nothing written");
 
@@ -1418,7 +1527,8 @@ mod tests {
 
         set_focus_plan_from(&conn, rid, &hunks, plan(r#"{"summary":"again"}"#), None).unwrap();
         // The review's pin moved (Update review): the planned focus is now stale.
-        conn.execute("UPDATE review SET head_sha = 'head2'", []).unwrap();
+        conn.execute("UPDATE review SET head_sha = 'head2'", [])
+            .unwrap();
         let mut moved = hunks.clone();
         moved.push(DiffHunk {
             hunk_id: "fresh0000000".into(),
@@ -1465,7 +1575,11 @@ mod tests {
         assert_eq!((add_note.side.as_str(), add_note.line), ("RIGHT", 2));
         assert_eq!(add_note.anchored_head_sha.as_deref(), Some("head1"));
         assert_eq!(add_note.tag.as_deref(), Some("ai:explain"));
-        assert!(add_note.diff_hunk.as_deref().unwrap().starts_with("@@ -1,3 +1,4 @@"));
+        assert!(add_note
+            .diff_hunk
+            .as_deref()
+            .unwrap()
+            .starts_with("@@ -1,3 +1,4 @@"));
         let del_note = notes.iter().find(|c| c.body == "del?").unwrap();
         assert_eq!((del_note.side.as_str(), del_note.line), ("LEFT", 1));
     }
@@ -1491,13 +1605,24 @@ mod tests {
         // writes a fresh `ai` comment for the still-planned note.
         set_focus_plan_from(&conn, rid, &hunks, plan(&p), None).unwrap();
         let after = focus_comments_impl(&conn, rid).unwrap();
-        assert_eq!(after.len(), 1, "a fresh ai comment replaces the untouched one");
+        assert_eq!(
+            after.len(),
+            1,
+            "a fresh ai comment replaces the untouched one"
+        );
         assert_ne!(after[0].id, kept_id);
 
         let edited: String = conn
-            .query_row("SELECT body FROM comment WHERE id = ?1", params![kept_id], |r| r.get(0))
+            .query_row(
+                "SELECT body FROM comment WHERE id = ?1",
+                params![kept_id],
+                |r| r.get(0),
+            )
             .unwrap();
-        assert_eq!(edited, "edited by me", "the edited comment survives, just untracked");
+        assert_eq!(
+            edited, "edited by me",
+            "the edited comment survives, just untracked"
+        );
     }
 
     #[test]
@@ -1512,8 +1637,13 @@ mod tests {
         );
         set_focus_plan_from(&conn, rid, &hunks, plan(&p), None).unwrap();
         clear_focus_impl(&conn, rid).unwrap();
-        let count: i64 = conn.query_row("SELECT COUNT(*) FROM comment", [], |r| r.get(0)).unwrap();
-        assert_eq!(count, 0, "the untouched ai comment is removed with the focus");
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM comment", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            count, 0,
+            "the untouched ai comment is removed with the focus"
+        );
         assert!(load_focus(&conn, rid).unwrap().is_none());
     }
 
@@ -1524,14 +1654,27 @@ mod tests {
         let hunks = parse_diff_hunks(DIFF);
 
         begin_generation(&conn, rid, "opus").unwrap();
-        assert!(begin_generation(&conn, rid, "opus").is_err(), "one run at a time");
+        assert!(
+            begin_generation(&conn, rid, "opus").is_err(),
+            "one run at a time"
+        );
         finish_generation(&conn, rid, None).unwrap();
         let f = load_focus(&conn, rid).unwrap().unwrap();
-        assert_eq!((f.status.as_str(), f.model.as_deref()), ("failed", Some("opus")));
+        assert_eq!(
+            (f.status.as_str(), f.model.as_deref()),
+            ("failed", Some("opus"))
+        );
         assert_eq!(f.error.as_deref(), Some(NO_PLAN_ERROR));
 
         begin_generation(&conn, rid, "").unwrap();
-        set_focus_plan_from(&conn, rid, &hunks, plan(r#"{"summary":"ok"}"#), Some("critical")).unwrap();
+        set_focus_plan_from(
+            &conn,
+            rid,
+            &hunks,
+            plan(r#"{"summary":"ok"}"#),
+            Some("critical"),
+        )
+        .unwrap();
         finish_generation(&conn, rid, Some("claude exited 1".into())).unwrap();
         let f = load_focus(&conn, rid).unwrap().unwrap();
         assert_eq!(f.status, "ready", "a submitted plan wins over a late error");
@@ -1556,8 +1699,11 @@ mod tests {
         fail_interrupted(&conn).unwrap();
         assert_eq!(load_focus(&conn, rid).unwrap().unwrap().status, "failed");
 
-        conn.execute("DELETE FROM review WHERE id = ?1", params![rid]).unwrap();
-        let n: i64 = conn.query_row("SELECT COUNT(*) FROM focus", [], |r| r.get(0)).unwrap();
+        conn.execute("DELETE FROM review WHERE id = ?1", params![rid])
+            .unwrap();
+        let n: i64 = conn
+            .query_row("SELECT COUNT(*) FROM focus", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(n, 0);
     }
 }

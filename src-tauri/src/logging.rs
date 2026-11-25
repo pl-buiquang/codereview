@@ -44,7 +44,11 @@ impl FileLogger {
             return;
         }
         let _ = std::fs::rename(&self.path, self.path.with_extension("log.old"));
-        if let Ok(fresh) = OpenOptions::new().create(true).append(true).open(&self.path) {
+        if let Ok(fresh) = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.path)
+        {
             *file = fresh;
         }
     }
@@ -59,7 +63,9 @@ impl log::Log for FileLogger {
         if !self.enabled(record.metadata()) {
             return;
         }
-        let Ok(mut file) = self.file.lock() else { return };
+        let Ok(mut file) = self.file.lock() else {
+            return;
+        };
         if self.writes.fetch_add(1, Ordering::Relaxed) % ROLL_CHECK_EVERY == ROLL_CHECK_EVERY - 1 {
             self.roll_if_needed(&mut file);
         }
@@ -148,7 +154,11 @@ pub fn init(dir: &Path) -> std::io::Result<()> {
         let _ = std::fs::rename(&path, path.with_extension("log.old"));
     }
     let file = OpenOptions::new().create(true).append(true).open(&path)?;
-    let logger = FileLogger { file: Mutex::new(file), path, writes: AtomicU32::new(0) };
+    let logger = FileLogger {
+        file: Mutex::new(file),
+        path,
+        writes: AtomicU32::new(0),
+    };
     if log::set_boxed_logger(Box::new(logger)).is_ok() {
         log::set_max_level(read_saved_level(dir));
     }

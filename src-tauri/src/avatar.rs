@@ -29,7 +29,11 @@ pub fn cached(conn: &Connection, email: &str, now: i64) -> AppResult<Option<Opti
         )
         .optional()?;
     Ok(row.and_then(|(data_url, fetched_at)| {
-        let ttl = if data_url.is_some() { HIT_TTL_SECS } else { MISS_TTL_SECS };
+        let ttl = if data_url.is_some() {
+            HIT_TTL_SECS
+        } else {
+            MISS_TTL_SECS
+        };
         (now - fetched_at < ttl).then_some(data_url)
     }))
 }
@@ -64,7 +68,9 @@ fn is_login(s: &str) -> bool {
 fn parse_noreply(email: &str) -> Option<Noreply> {
     let local = email.strip_suffix("@users.noreply.github.com")?;
     match local.split_once('+') {
-        Some((id, login)) if !id.is_empty() && id.chars().all(|c| c.is_ascii_digit()) && is_login(login) => {
+        Some((id, login))
+            if !id.is_empty() && id.chars().all(|c| c.is_ascii_digit()) && is_login(login) =>
+        {
             Some(Noreply::Id(id.to_string()))
         }
         None if is_login(local) => Some(Noreply::Login(local.to_string())),
@@ -88,16 +94,27 @@ fn with_gh_slot<T>(f: impl FnOnce() -> T) -> T {
 }
 
 fn gh_api_string(endpoint: &str, jq: &str) -> AppResult<String> {
-    let ctx = GhRepo::Remote { owner: String::new(), name: String::new() };
+    let ctx = GhRepo::Remote {
+        owner: String::new(),
+        name: String::new(),
+    };
     let out = with_gh_slot(|| gh::run_gh(&ctx, &["api", endpoint, "--jq", jq]))?;
     Ok(out.trim().to_string())
 }
 
 /// Avatar URL for `email`: `Ok(None)` means GitHub has no user linked to it;
 /// `Err` is a transient failure that must not be cached.
-fn avatar_url(email: &str, sha: &str, owner_name: Option<&(String, String)>) -> AppResult<Option<String>> {
+fn avatar_url(
+    email: &str,
+    sha: &str,
+    owner_name: Option<&(String, String)>,
+) -> AppResult<Option<String>> {
     match parse_noreply(email) {
-        Some(Noreply::Id(id)) => return Ok(Some(format!("https://avatars.githubusercontent.com/u/{id}?v=4"))),
+        Some(Noreply::Id(id)) => {
+            return Ok(Some(format!(
+                "https://avatars.githubusercontent.com/u/{id}?v=4"
+            )))
+        }
         Some(Noreply::Login(login)) => {
             let url = gh_api_string(&format!("users/{login}"), ".avatar_url // \"\"")?;
             return Ok((!url.is_empty()).then_some(url));
@@ -121,14 +138,23 @@ fn sized(url: &str) -> AppResult<String> {
         .filter(|(k, _)| k != "s")
         .map(|(k, v)| (k.into_owned(), v.into_owned()))
         .collect();
-    parsed.query_pairs_mut().clear().extend_pairs(pairs).append_pair("s", AVATAR_SIZE);
+    parsed
+        .query_pairs_mut()
+        .clear()
+        .extend_pairs(pairs)
+        .append_pair("s", AVATAR_SIZE);
     Ok(parsed.into())
 }
 
-pub async fn resolve(email: String, sha: String, owner_name: Option<(String, String)>) -> AppResult<Option<String>> {
-    let url = tauri::async_runtime::spawn_blocking(move || avatar_url(&email, &sha, owner_name.as_ref()))
-        .await
-        .map_err(|e| AppError::Other(format!("avatar task failed: {e}")))??;
+pub async fn resolve(
+    email: String,
+    sha: String,
+    owner_name: Option<(String, String)>,
+) -> AppResult<Option<String>> {
+    let url =
+        tauri::async_runtime::spawn_blocking(move || avatar_url(&email, &sha, owner_name.as_ref()))
+            .await
+            .map_err(|e| AppError::Other(format!("avatar task failed: {e}")))??;
     let Some(url) = url else {
         return Ok(None);
     };
@@ -149,7 +175,10 @@ mod tests {
     #[test]
     fn noreply_with_id_maps_to_avatar_url_without_gh() {
         let url = avatar_url("123+octo-cat@users.noreply.github.com", "abc", None).unwrap();
-        assert_eq!(url.as_deref(), Some("https://avatars.githubusercontent.com/u/123?v=4"));
+        assert_eq!(
+            url.as_deref(),
+            Some("https://avatars.githubusercontent.com/u/123?v=4")
+        );
     }
 
     #[test]
@@ -161,7 +190,9 @@ mod tests {
     fn noreply_parsing_rejects_path_tricks() {
         assert!(parse_noreply("../x@users.noreply.github.com").is_none());
         assert!(parse_noreply("1+a/b@users.noreply.github.com").is_none());
-        assert!(matches!(parse_noreply("octo@users.noreply.github.com"), Some(Noreply::Login(l)) if l == "octo"));
+        assert!(
+            matches!(parse_noreply("octo@users.noreply.github.com"), Some(Noreply::Login(l)) if l == "octo")
+        );
     }
 
     #[test]
@@ -177,7 +208,10 @@ mod tests {
         let c = conn();
         store(&c, "a@x", Some("data:x"), 1000).unwrap();
         store(&c, "b@x", None, 1000).unwrap();
-        assert_eq!(cached(&c, "a@x", 1000 + MISS_TTL_SECS).unwrap(), Some(Some("data:x".into())));
+        assert_eq!(
+            cached(&c, "a@x", 1000 + MISS_TTL_SECS).unwrap(),
+            Some(Some("data:x".into()))
+        );
         assert_eq!(cached(&c, "b@x", 1000 + 10).unwrap(), Some(None));
         assert_eq!(cached(&c, "b@x", 1000 + MISS_TTL_SECS).unwrap(), None);
         assert_eq!(cached(&c, "a@x", 1000 + HIT_TTL_SECS).unwrap(), None);

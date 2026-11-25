@@ -24,7 +24,10 @@ pub fn group(ids: &[String]) -> Vec<ModelGroup> {
         let provider = id.split_once('/').map(|(p, _)| p).unwrap_or("");
         match groups.iter_mut().find(|g| g.provider == provider) {
             Some(g) => g.models.push(id.clone()),
-            None => groups.push(ModelGroup { provider: provider.to_string(), models: vec![id.clone()] }),
+            None => groups.push(ModelGroup {
+                provider: provider.to_string(),
+                models: vec![id.clone()],
+            }),
         }
     }
     groups
@@ -35,7 +38,8 @@ static CACHE: Mutex<Option<HashMap<String, Vec<String>>>> = Mutex::new(None);
 /// The models of harness `id`, provider-grouped. `refresh` runs the CLI again; otherwise a previous
 /// non-empty answer is reused. An empty list is not cached (a provider may be added meanwhile).
 pub fn for_harness(id: &str, refresh: bool) -> AppResult<Vec<ModelGroup>> {
-    let harness = harness_by_id(id).ok_or_else(|| AppError::Other(format!("unknown harness `{id}`")))?;
+    let harness =
+        harness_by_id(id).ok_or_else(|| AppError::Other(format!("unknown harness `{id}`")))?;
     if !refresh {
         if let Some(ids) = CACHE.lock().unwrap().as_ref().and_then(|c| c.get(id)) {
             return Ok(group(ids));
@@ -62,13 +66,27 @@ mod tests {
 
     #[test]
     fn ids_are_grouped_by_provider_in_order_of_appearance() {
-        let groups = group(&ids(&["opencode/a", "openrouter/x/y", "opencode/b", "sonnet"]));
+        let groups = group(&ids(&[
+            "opencode/a",
+            "openrouter/x/y",
+            "opencode/b",
+            "sonnet",
+        ]));
         assert_eq!(
             groups,
             vec![
-                ModelGroup { provider: "opencode".into(), models: ids(&["opencode/a", "opencode/b"]) },
-                ModelGroup { provider: "openrouter".into(), models: ids(&["openrouter/x/y"]) },
-                ModelGroup { provider: "".into(), models: ids(&["sonnet"]) },
+                ModelGroup {
+                    provider: "opencode".into(),
+                    models: ids(&["opencode/a", "opencode/b"])
+                },
+                ModelGroup {
+                    provider: "openrouter".into(),
+                    models: ids(&["openrouter/x/y"])
+                },
+                ModelGroup {
+                    provider: "".into(),
+                    models: ids(&["sonnet"])
+                },
             ]
         );
         assert!(group(&[]).is_empty());

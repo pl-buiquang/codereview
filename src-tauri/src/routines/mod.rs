@@ -67,7 +67,11 @@ impl ClaudeOptions {
             claude
                 .get(key)
                 .and_then(Value::as_array)
-                .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(str::to_string))
+                        .collect()
+                })
                 .unwrap_or_default()
         };
         Self {
@@ -141,7 +145,9 @@ impl Routine {
                 system_prompt_mode: c.system_prompt_mode,
                 allowed_tools: c.allowed_tools,
                 extra_args: c.extra_args,
-                access: c.permission_mode.map_or_else(|| self.neutral_access(), Access::Native),
+                access: c
+                    .permission_mode
+                    .map_or_else(|| self.neutral_access(), Access::Native),
             }
         } else {
             RunOptions {
@@ -182,7 +188,12 @@ pub fn access_for_permission_mode(mode: &str) -> &'static str {
     }
 }
 
-fn claude_overrides(permission_mode: &str, tools: &[&str], args: &[&str], system_prompt_mode: &str) -> Value {
+fn claude_overrides(
+    permission_mode: &str,
+    tools: &[&str],
+    args: &[&str],
+    system_prompt_mode: &str,
+) -> Value {
     json!({ "claude": {
         "permission_mode": permission_mode,
         "allowed_tools": tools,
@@ -192,16 +203,23 @@ fn claude_overrides(permission_mode: &str, tools: &[&str], args: &[&str], system
 }
 
 pub fn get(conn: &Connection, id: i64) -> AppResult<Routine> {
-    conn.query_row("SELECT * FROM routine WHERE id = ?1", params![id], Routine::from_row)
-        .map_err(|e| match e {
-            rusqlite::Error::QueryReturnedNoRows => AppError::Other(format!("routine {id} not found")),
-            other => other.into(),
-        })
+    conn.query_row(
+        "SELECT * FROM routine WHERE id = ?1",
+        params![id],
+        Routine::from_row,
+    )
+    .map_err(|e| match e {
+        rusqlite::Error::QueryReturnedNoRows => AppError::Other(format!("routine {id} not found")),
+        other => other.into(),
+    })
 }
 
 pub fn list(conn: &Connection) -> AppResult<Vec<Routine>> {
-    let mut stmt = conn.prepare("SELECT * FROM routine ORDER BY builtin DESC, name COLLATE NOCASE")?;
-    let rows = stmt.query_map([], Routine::from_row)?.collect::<rusqlite::Result<_>>()?;
+    let mut stmt =
+        conn.prepare("SELECT * FROM routine ORDER BY builtin DESC, name COLLATE NOCASE")?;
+    let rows = stmt
+        .query_map([], Routine::from_row)?
+        .collect::<rusqlite::Result<_>>()?;
     Ok(rows)
 }
 
@@ -255,7 +273,11 @@ Every fix and every conflict resolution must be simple. If it is not obvious and
 Stop when the goal holds, or when you cannot make progress without a human (a failure or conflict that is not simple, a decision only the \
 author can take, repeated reruns of the same failure). In that last case finish with `NEEDS_ATTENTION: <one-sentence diagnosis>`.";
 
-const ISSUE_PLAN_SYSTEM: &str = concat!(include_str!("builtin/preamble.md"), "\n", include_str!("builtin/issue_plan.md"));
+const ISSUE_PLAN_SYSTEM: &str = concat!(
+    include_str!("builtin/preamble.md"),
+    "\n",
+    include_str!("builtin/issue_plan.md")
+);
 
 const ISSUE_PLAN_TOOLS: &[&str] = &[
     "Read",
@@ -462,7 +484,13 @@ impl Defaults {
     }
 
     fn overrides_json(&self) -> String {
-        claude_overrides(self.permission_mode, self.allowed_tools, self.extra_args, self.system_prompt_mode).to_string()
+        claude_overrides(
+            self.permission_mode,
+            self.allowed_tools,
+            self.extra_args,
+            self.system_prompt_mode,
+        )
+        .to_string()
     }
 }
 
@@ -503,7 +531,10 @@ pub fn seed(conn: &Connection) -> AppResult<()> {
 
 /// Built-in keys that were renamed: `(old, new)`. The row keeps its id, run history, profile, model,
 /// timeout and enabled flag; `refresh_ai_review_builtins` then brings its shipped fields up to date.
-const RENAMED_KEYS: &[(&str, &str)] = &[("ai_review_critique", "ai_review_normal"), ("ai_review_codex", "ai_review_advanced")];
+const RENAMED_KEYS: &[(&str, &str)] = &[
+    ("ai_review_critique", "ai_review_normal"),
+    ("ai_review_codex", "ai_review_advanced"),
+];
 
 /// Built-in keys folded into another one: `(old, into)`. Their runs move over and the row goes.
 const MERGED_KEYS: &[(&str, &str)] = &[("ai_review_coverage", "ai_review_advanced")];
@@ -511,22 +542,35 @@ const MERGED_KEYS: &[(&str, &str)] = &[("ai_review_coverage", "ai_review_advance
 /// Run before `seed`, so a renamed row is reused instead of a fresh one being seeded. Idempotent.
 pub fn migrate_builtin_keys(conn: &Connection) -> AppResult<()> {
     let id_of = |key: &str| -> AppResult<Option<i64>> {
-        Ok(conn.query_row("SELECT id FROM routine WHERE key = ?1", params![key], |r| r.get(0)).optional()?)
+        Ok(conn
+            .query_row("SELECT id FROM routine WHERE key = ?1", params![key], |r| {
+                r.get(0)
+            })
+            .optional()?)
     };
     for (old, new) in RENAMED_KEYS {
         if let (Some(id), None) = (id_of(old)?, id_of(new)?) {
-            conn.execute("UPDATE routine SET key = ?2 WHERE id = ?1", params![id, new])?;
+            conn.execute(
+                "UPDATE routine SET key = ?2 WHERE id = ?1",
+                params![id, new],
+            )?;
         }
     }
     for (old, into) in MERGED_KEYS {
         let Some(old_id) = id_of(old)? else { continue };
         match id_of(into)? {
             Some(into_id) => {
-                conn.execute("UPDATE routine_run SET routine_id = ?2 WHERE routine_id = ?1", params![old_id, into_id])?;
+                conn.execute(
+                    "UPDATE routine_run SET routine_id = ?2 WHERE routine_id = ?1",
+                    params![old_id, into_id],
+                )?;
                 conn.execute("DELETE FROM routine WHERE id = ?1", params![old_id])?;
             }
             None => {
-                conn.execute("UPDATE routine SET key = ?2 WHERE id = ?1", params![old_id, into])?;
+                conn.execute(
+                    "UPDATE routine SET key = ?2 WHERE id = ?1",
+                    params![old_id, into],
+                )?;
             }
         }
     }
@@ -571,10 +615,18 @@ const ADOPTED_KEYS: &[&str] = &[SMALL_ISSUE_KEY];
 
 pub fn adopt_builtin_keys(conn: &Connection) -> AppResult<()> {
     for d in DEFAULTS.iter().filter(|d| ADOPTED_KEYS.contains(&d.key)) {
-        let id: Option<i64> =
-            conn.query_row("SELECT id FROM routine WHERE key = ?1 AND builtin = 0", params![d.key], |r| r.get(0)).optional()?;
+        let id: Option<i64> = conn
+            .query_row(
+                "SELECT id FROM routine WHERE key = ?1 AND builtin = 0",
+                params![d.key],
+                |r| r.get(0),
+            )
+            .optional()?;
         if let Some(id) = id {
-            conn.execute("UPDATE routine SET builtin = 1, handler = ?2, kind = ?3 WHERE id = ?1", params![id, d.handler, d.kind()])?;
+            conn.execute(
+                "UPDATE routine SET builtin = 1, handler = ?2, kind = ?3 WHERE id = ?1",
+                params![id, d.handler, d.kind()],
+            )?;
             reset(conn, id)?;
         }
     }
@@ -587,17 +639,25 @@ pub fn adopt_builtin_keys(conn: &Connection) -> AppResult<()> {
 /// Idempotent: a routine that already has a system prompt is left alone.
 pub fn adopt_prompt_overrides(conn: &Connection) -> AppResult<()> {
     use crate::prompts::{BOARD_OVERVIEW, BOARD_OVERVIEW_DEFAULT, FOCUS_DEFAULT, FOCUS_SYSTEM};
-    for (routine_key, prompt_key, default) in
-        [("board_overview", BOARD_OVERVIEW, BOARD_OVERVIEW_DEFAULT), ("focus", FOCUS_SYSTEM, FOCUS_DEFAULT)]
-    {
+    for (routine_key, prompt_key, default) in [
+        ("board_overview", BOARD_OVERVIEW, BOARD_OVERVIEW_DEFAULT),
+        ("focus", FOCUS_SYSTEM, FOCUS_DEFAULT),
+    ] {
         let custom: Option<String> = conn
-            .query_row("SELECT body FROM prompt_override WHERE key = ?1", params![prompt_key], |r| r.get(0))
+            .query_row(
+                "SELECT body FROM prompt_override WHERE key = ?1",
+                params![prompt_key],
+                |r| r.get(0),
+            )
             .optional()?;
         conn.execute(
             "UPDATE routine SET system_prompt = ?2 WHERE key = ?1 AND builtin = 1 AND TRIM(system_prompt) = ''",
             params![routine_key, custom.as_deref().unwrap_or(default)],
         )?;
-        conn.execute("DELETE FROM prompt_override WHERE key = ?1", params![prompt_key])?;
+        conn.execute(
+            "DELETE FROM prompt_override WHERE key = ?1",
+            params![prompt_key],
+        )?;
     }
     Ok(())
 }
@@ -677,7 +737,14 @@ fn default_true() -> bool {
     true
 }
 
-const PERMISSION_MODES: &[&str] = &["default", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions"];
+const PERMISSION_MODES: &[&str] = &[
+    "default",
+    "acceptEdits",
+    "plan",
+    "auto",
+    "dontAsk",
+    "bypassPermissions",
+];
 
 fn slug(name: &str) -> String {
     let s: String = name
@@ -685,7 +752,11 @@ fn slug(name: &str) -> String {
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
         .collect();
-    let s = s.split('-').filter(|p| !p.is_empty()).collect::<Vec<_>>().join("-");
+    let s = s
+        .split('-')
+        .filter(|p| !p.is_empty())
+        .collect::<Vec<_>>()
+        .join("-");
     if s.is_empty() {
         "routine".into()
     } else {
@@ -697,7 +768,9 @@ fn slug(name: &str) -> String {
 /// harnesses are kept as sent.
 fn normalize_overrides(raw: &Value) -> AppResult<Value> {
     let Value::Object(map) = raw else {
-        return Err(AppError::Other("harness overrides must be a JSON object".into()));
+        return Err(AppError::Other(
+            "harness overrides must be a JSON object".into(),
+        ));
     };
     let mut out = map.clone();
     if let Some(claude) = map.get("claude") {
@@ -709,7 +782,9 @@ fn normalize_overrides(raw: &Value) -> AppResult<Value> {
         }
         if let Some(mode) = claude.get("system_prompt_mode").and_then(Value::as_str) {
             if !["append", "replace"].contains(&mode) {
-                return Err(AppError::Other("system prompt mode must be append or replace".into()));
+                return Err(AppError::Other(
+                    "system prompt mode must be append or replace".into(),
+                ));
             }
         }
         out.insert(
@@ -740,13 +815,22 @@ fn legacy_columns(access: &str, overrides: &Value) -> (String, String, String, S
         mode,
         serde_json::to_string(&c.allowed_tools).unwrap_or_else(|_| "[]".into()),
         serde_json::to_string(&c.extra_args).unwrap_or_else(|_| "[]".into()),
-        if c.system_prompt_mode == SystemPromptMode::Replace { "replace" } else { "append" }.to_string(),
+        if c.system_prompt_mode == SystemPromptMode::Replace {
+            "replace"
+        } else {
+            "append"
+        }
+        .to_string(),
     )
 }
 
 fn check_profile(conn: &Connection, profile_id: Option<i64>) -> AppResult<()> {
     if let Some(id) = profile_id {
-        let exists: bool = conn.query_row("SELECT COUNT(*) FROM ai_profile WHERE id = ?1", params![id], |r| r.get::<_, i64>(0))? > 0;
+        let exists: bool = conn.query_row(
+            "SELECT COUNT(*) FROM ai_profile WHERE id = ?1",
+            params![id],
+            |r| r.get::<_, i64>(0),
+        )? > 0;
         if !exists {
             return Err(AppError::Other(format!("profile {id} not found")));
         }
@@ -787,10 +871,16 @@ pub fn save(conn: &Connection, input: RoutineInput) -> AppResult<Routine> {
         return Err(AppError::Other("a routine needs a prompt".into()));
     }
     if !["pr", "review", "issue", "board"].contains(&input.context_type.as_str()) {
-        return Err(AppError::Other(format!("unknown context type `{}`", input.context_type)));
+        return Err(AppError::Other(format!(
+            "unknown context type `{}`",
+            input.context_type
+        )));
     }
     if !ACCESS_LEVELS.contains(&input.access.as_str()) {
-        return Err(AppError::Other(format!("unknown access level `{}`", input.access)));
+        return Err(AppError::Other(format!(
+            "unknown access level `{}`",
+            input.access
+        )));
     }
     let mut overrides = normalize_overrides(&input.harness_overrides)?;
 
@@ -801,13 +891,18 @@ pub fn save(conn: &Connection, input: RoutineInput) -> AppResult<Routine> {
             // A native permission mode wins over the access, so changing the access alone would
             // look like it did nothing: drop the mode that still stands for the old access.
             if input.access != existing.access
-                && ClaudeOptions::from_overrides(&overrides).permission_mode == existing.claude().permission_mode
+                && ClaudeOptions::from_overrides(&overrides).permission_mode
+                    == existing.claude().permission_mode
             {
                 if let Some(claude) = overrides.get_mut("claude").and_then(Value::as_object_mut) {
                     claude.insert("permission_mode".into(), json!(""));
                 }
             }
-            let context_type = if existing.builtin { existing.context_type.clone() } else { input.context_type };
+            let context_type = if existing.builtin {
+                existing.context_type.clone()
+            } else {
+                input.context_type
+            };
             let (mode, tools, args, prompt_mode) = legacy_columns(&input.access, &overrides);
             conn.execute(
                 "UPDATE routine SET name = ?2, description = ?3, context_type = ?4, prompt_template = ?5,
@@ -843,7 +938,9 @@ pub fn save(conn: &Connection, input: RoutineInput) -> AppResult<Routine> {
             let mut key = base.clone();
             let mut n = 2;
             while conn
-                .query_row("SELECT 1 FROM routine WHERE key = ?1", params![key], |_| Ok(()))
+                .query_row("SELECT 1 FROM routine WHERE key = ?1", params![key], |_| {
+                    Ok(())
+                })
                 .is_ok()
             {
                 key = format!("{base}-{n}");
@@ -895,7 +992,9 @@ pub fn babysit_active(conn: &Connection, context_key: &str) -> bool {
 
 pub fn delete(conn: &Connection, id: i64) -> AppResult<()> {
     if get(conn, id)?.builtin {
-        return Err(AppError::Other("built-in routines can't be deleted (use reset)".into()));
+        return Err(AppError::Other(
+            "built-in routines can't be deleted (use reset)".into(),
+        ));
     }
     conn.execute("DELETE FROM routine WHERE id = ?1", params![id])?;
     Ok(())
@@ -925,7 +1024,12 @@ mod tests {
     }
 
     fn system_of(conn: &Connection, key: &str) -> String {
-        conn.query_row("SELECT system_prompt FROM routine WHERE key = ?1", params![key], |r| r.get(0)).unwrap()
+        conn.query_row(
+            "SELECT system_prompt FROM routine WHERE key = ?1",
+            params![key],
+            |r| r.get(0),
+        )
+        .unwrap()
     }
 
     #[test]
@@ -938,7 +1042,13 @@ mod tests {
             params![now],
         )
         .unwrap();
-        let id: i64 = conn.query_row("SELECT id FROM routine WHERE key = 'address-small-issue'", [], |r| r.get(0)).unwrap();
+        let id: i64 = conn
+            .query_row(
+                "SELECT id FROM routine WHERE key = 'address-small-issue'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
         seed(&conn).unwrap();
         for _ in 0..2 {
             adopt_builtin_keys(&conn).unwrap();
@@ -947,7 +1057,13 @@ mod tests {
         assert!(r.builtin);
         assert!(r.needs_worktree);
         assert!(r.system_prompt.contains("Local review"));
-        let count: i64 = conn.query_row("SELECT COUNT(*) FROM routine WHERE key = 'address-small-issue'", [], |r| r.get(0)).unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM routine WHERE key = 'address-small-issue'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_eq!(count, 1);
     }
 
@@ -955,7 +1071,12 @@ mod tests {
     fn old_ai_review_routines_migrate_to_the_levels() {
         let conn = open_memory();
         // A database from before the levels: the four layer routines, one with a chosen model, all with runs.
-        for (key, model) in [("ai_review_explain", ""), ("ai_review_critique", "opus"), ("ai_review_codex", ""), ("ai_review_coverage", "")] {
+        for (key, model) in [
+            ("ai_review_explain", ""),
+            ("ai_review_critique", "opus"),
+            ("ai_review_codex", ""),
+            ("ai_review_coverage", ""),
+        ] {
             conn.execute(
                 "INSERT INTO routine (key, name, context_type, prompt_template, handler, builtin, kind, model, created_at, updated_at)
                  VALUES (?1, ?1, 'review', '/local-review old', 'ai_review', 1, 'system', ?2, 'now', 'now')",
@@ -969,8 +1090,16 @@ mod tests {
             )
             .unwrap();
         }
-        let id_of = |key: &str| conn.query_row("SELECT id FROM routine WHERE key = ?1", params![key], |r| r.get::<_, i64>(0)).ok();
-        let (critique, codex) = (id_of("ai_review_critique").unwrap(), id_of("ai_review_codex").unwrap());
+        let id_of = |key: &str| {
+            conn.query_row("SELECT id FROM routine WHERE key = ?1", params![key], |r| {
+                r.get::<_, i64>(0)
+            })
+            .ok()
+        };
+        let (critique, codex) = (
+            id_of("ai_review_critique").unwrap(),
+            id_of("ai_review_codex").unwrap(),
+        );
         for _ in 0..2 {
             migrate_builtin_keys(&conn).unwrap();
             seed(&conn).unwrap();
@@ -980,31 +1109,65 @@ mod tests {
         assert_eq!(id_of("ai_review_advanced"), Some(codex));
         assert_eq!(id_of("ai_review_coverage"), None);
         let normal = get(&conn, critique).unwrap();
-        assert_eq!(normal.prompt_template, "/local-review {{review_id}} --depth normal");
+        assert_eq!(
+            normal.prompt_template,
+            "/local-review {{review_id}} --depth normal"
+        );
         assert_eq!(normal.model, "opus", "user model kept");
         let explain = get(&conn, id_of("ai_review_explain").unwrap()).unwrap();
-        assert_eq!(explain.prompt_template, "/local-review {{review_id}} --explain");
-        let runs = |id: i64| conn.query_row("SELECT COUNT(*) FROM routine_run WHERE routine_id = ?1", params![id], |r| r.get::<_, i64>(0)).unwrap();
+        assert_eq!(
+            explain.prompt_template,
+            "/local-review {{review_id}} --explain"
+        );
+        let runs = |id: i64| {
+            conn.query_row(
+                "SELECT COUNT(*) FROM routine_run WHERE routine_id = ?1",
+                params![id],
+                |r| r.get::<_, i64>(0),
+            )
+            .unwrap()
+        };
         assert_eq!(runs(codex), 2, "coverage runs moved to advanced");
-        let ai: i64 = conn.query_row("SELECT COUNT(*) FROM routine WHERE handler = 'ai_review'", [], |r| r.get(0)).unwrap();
+        let ai: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM routine WHERE handler = 'ai_review'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_eq!(ai, 3);
     }
 
     #[test]
     fn shipped_issue_prompts_have_no_unknown_placeholders() {
-        let known = ["repo", "number", "url", "title", "plans_dir", "head_ref", "base_ref", "worktree", "review_id"];
+        let known = [
+            "repo",
+            "number",
+            "url",
+            "title",
+            "plans_dir",
+            "head_ref",
+            "base_ref",
+            "worktree",
+            "review_id",
+        ];
         for d in DEFAULTS.iter().filter(|d| d.context_type == "issue") {
             for text in [d.system_prompt, d.prompt_template] {
                 for part in text.split("{{").skip(1) {
                     let name = part.split("}}").next().unwrap();
-                    assert!(known.contains(&name), "{}: unknown placeholder {{{{{name}}}}}", d.key);
+                    assert!(
+                        known.contains(&name),
+                        "{}: unknown placeholder {{{{{name}}}}}",
+                        d.key
+                    );
                 }
             }
         }
     }
 
     fn override_count(conn: &Connection) -> i64 {
-        conn.query_row("SELECT COUNT(*) FROM prompt_override", [], |r| r.get(0)).unwrap()
+        conn.query_row("SELECT COUNT(*) FROM prompt_override", [], |r| r.get(0))
+            .unwrap()
     }
 
     #[test]
@@ -1012,7 +1175,11 @@ mod tests {
         let conn = open_memory();
         seed(&conn).unwrap();
         // A row seeded before the move has an empty system prompt.
-        conn.execute("UPDATE routine SET system_prompt = '' WHERE key IN ('focus', 'board_overview')", []).unwrap();
+        conn.execute(
+            "UPDATE routine SET system_prompt = '' WHERE key IN ('focus', 'board_overview')",
+            [],
+        )
+        .unwrap();
         conn.execute(
             "INSERT INTO prompt_override (key, body, updated_at) VALUES ('board.overview', 'mine', 'now'), ('chat.system', 'chat', 'now')",
             [],
@@ -1025,7 +1192,11 @@ mod tests {
         assert_eq!(override_count(&conn), 1, "only the chat override is left");
 
         // Idempotent, and a routine that now has a prompt is not touched again.
-        conn.execute("UPDATE routine SET system_prompt = 'edited' WHERE key = 'focus'", []).unwrap();
+        conn.execute(
+            "UPDATE routine SET system_prompt = 'edited' WHERE key = 'focus'",
+            [],
+        )
+        .unwrap();
         adopt_prompt_overrides(&conn).unwrap();
         assert_eq!(system_of(&conn, "focus"), "edited");
         assert_eq!(system_of(&conn, "board_overview"), "mine");
@@ -1035,7 +1206,10 @@ mod tests {
     fn seeded_overview_and_focus_ship_their_system_prompt() {
         let conn = open_memory();
         seed(&conn).unwrap();
-        assert_eq!(system_of(&conn, "board_overview"), crate::prompts::BOARD_OVERVIEW_DEFAULT);
+        assert_eq!(
+            system_of(&conn, "board_overview"),
+            crate::prompts::BOARD_OVERVIEW_DEFAULT
+        );
         assert_eq!(system_of(&conn, "focus"), crate::prompts::FOCUS_DEFAULT);
     }
 
@@ -1043,12 +1217,27 @@ mod tests {
     fn seed_is_idempotent_and_keeps_edits() {
         let conn = open_memory();
         seed(&conn).unwrap();
-        let babysit = list(&conn).unwrap().into_iter().find(|r| r.key == BABYSIT_KEY).unwrap();
-        assert!(babysit.builtin && babysit.needs_worktree && babysit.claude().permission_mode.as_deref() == Some("bypassPermissions"));
-        assert_eq!((babysit.kind.as_str(), babysit.access.as_str()), ("plain", "full"));
+        let babysit = list(&conn)
+            .unwrap()
+            .into_iter()
+            .find(|r| r.key == BABYSIT_KEY)
+            .unwrap();
+        assert!(
+            babysit.builtin
+                && babysit.needs_worktree
+                && babysit.claude().permission_mode.as_deref() == Some("bypassPermissions")
+        );
+        assert_eq!(
+            (babysit.kind.as_str(), babysit.access.as_str()),
+            ("plain", "full")
+        );
         assert!(babysit.prompt_template.starts_with("/goal "));
 
-        conn.execute("UPDATE routine SET timeout_min = 5 WHERE id = ?1", params![babysit.id]).unwrap();
+        conn.execute(
+            "UPDATE routine SET timeout_min = 5 WHERE id = ?1",
+            params![babysit.id],
+        )
+        .unwrap();
         seed(&conn).unwrap();
         assert_eq!(get(&conn, babysit.id).unwrap().timeout_min, 5);
         assert_eq!(reset(&conn, babysit.id).unwrap().timeout_min, 240);
@@ -1061,17 +1250,47 @@ mod tests {
         let all = list(&conn).unwrap();
         let get_key = |k: &str| all.iter().find(|r| r.key == k).unwrap();
         let overview = get_key("board_overview");
-        assert_eq!((overview.handler.as_deref(), overview.context_type.as_str()), (Some("overview"), "board"));
-        assert_eq!(overview.claude().system_prompt_mode, SystemPromptMode::Replace);
-        assert_eq!(overview.claude().extra_args, ["--tools", "", "--effort", "low"]);
-        assert_eq!((overview.kind.as_str(), overview.access.as_str()), ("system", "read_only"));
+        assert_eq!(
+            (overview.handler.as_deref(), overview.context_type.as_str()),
+            (Some("overview"), "board")
+        );
+        assert_eq!(
+            overview.claude().system_prompt_mode,
+            SystemPromptMode::Replace
+        );
+        assert_eq!(
+            overview.claude().extra_args,
+            ["--tools", "", "--effort", "low"]
+        );
+        assert_eq!(
+            (overview.kind.as_str(), overview.access.as_str()),
+            ("system", "read_only")
+        );
         let focus = get_key("focus");
-        assert_eq!((focus.claude().permission_mode.as_deref(), focus.claude().allowed_tools.len()), (Some("default"), 8));
+        assert_eq!(
+            (
+                focus.claude().permission_mode.as_deref(),
+                focus.claude().allowed_tools.len()
+            ),
+            (Some("default"), 8)
+        );
         let codex = get_key("ai_review_advanced");
-        assert_eq!(codex.prompt_template, "/local-review {{review_id}} --depth advanced");
-        assert_eq!(codex.claude().permission_mode.as_deref(), Some("acceptEdits"));
-        assert_eq!((codex.kind.as_str(), codex.access.as_str()), ("system", "edit"));
-        assert!(codex.claude().allowed_tools.contains(&"Bash(cr:*)".to_string()));
+        assert_eq!(
+            codex.prompt_template,
+            "/local-review {{review_id}} --depth advanced"
+        );
+        assert_eq!(
+            codex.claude().permission_mode.as_deref(),
+            Some("acceptEdits")
+        );
+        assert_eq!(
+            (codex.kind.as_str(), codex.access.as_str()),
+            ("system", "edit")
+        );
+        assert!(codex
+            .claude()
+            .allowed_tools
+            .contains(&"Bash(cr:*)".to_string()));
         // Reset restores the shipped tools and arguments.
         conn.execute(
             "UPDATE routine SET harness_overrides = '{}', access = 'full', profile_id = NULL WHERE id = ?1",
@@ -1091,7 +1310,11 @@ mod tests {
         let b = save(&conn, input("Fix lint")).unwrap();
         assert_eq!((a.key.as_str(), b.key.as_str()), ("fix-lint", "fix-lint-2"));
         delete(&conn, a.id).unwrap();
-        let babysit = list(&conn).unwrap().into_iter().find(|r| r.key == BABYSIT_KEY).unwrap();
+        let babysit = list(&conn)
+            .unwrap()
+            .into_iter()
+            .find(|r| r.key == BABYSIT_KEY)
+            .unwrap();
         assert!(delete(&conn, babysit.id).is_err());
     }
 
@@ -1099,7 +1322,11 @@ mod tests {
     fn builtin_context_type_cannot_change() {
         let conn = open_memory();
         seed(&conn).unwrap();
-        let babysit = list(&conn).unwrap().into_iter().find(|r| r.key == BABYSIT_KEY).unwrap();
+        let babysit = list(&conn)
+            .unwrap()
+            .into_iter()
+            .find(|r| r.key == BABYSIT_KEY)
+            .unwrap();
         let mut edit = input("Babysit");
         edit.id = Some(babysit.id);
         edit.context_type = "issue".into();
@@ -1127,7 +1354,11 @@ mod tests {
     }
 
     fn plain_by_key(conn: &Connection, key: &str) -> Routine {
-        list(conn).unwrap().into_iter().find(|r| r.key == key).unwrap()
+        list(conn)
+            .unwrap()
+            .into_iter()
+            .find(|r| r.key == key)
+            .unwrap()
     }
 
     #[test]
@@ -1148,8 +1379,18 @@ mod tests {
         seed(&conn).unwrap();
         for d in DEFAULTS {
             let r = plain_by_key(&conn, d.key);
-            assert_eq!(r.access, access_for_permission_mode(d.permission_mode), "{}", d.key);
-            assert_eq!(r.claude().permission_mode.as_deref(), Some(d.permission_mode), "{}", d.key);
+            assert_eq!(
+                r.access,
+                access_for_permission_mode(d.permission_mode),
+                "{}",
+                d.key
+            );
+            assert_eq!(
+                r.claude().permission_mode.as_deref(),
+                Some(d.permission_mode),
+                "{}",
+                d.key
+            );
         }
     }
 
@@ -1158,7 +1399,9 @@ mod tests {
         let conn = open_memory();
         seed(&conn).unwrap();
         let focus = plain_by_key(&conn, "focus");
-        let profile: i64 = conn.query_row("SELECT id FROM ai_profile", [], |r| r.get(0)).unwrap();
+        let profile: i64 = conn
+            .query_row("SELECT id FROM ai_profile", [], |r| r.get(0))
+            .unwrap();
         let mut edit = input("Hacked");
         edit.id = Some(focus.id);
         edit.prompt_template = "evil".into();
@@ -1169,7 +1412,12 @@ mod tests {
         edit.enabled = false;
         let saved = save(&conn, edit).unwrap();
         assert_eq!(
-            (saved.profile_id, saved.model.as_str(), saved.timeout_min, saved.enabled),
+            (
+                saved.profile_id,
+                saved.model.as_str(),
+                saved.timeout_min,
+                saved.enabled
+            ),
             (Some(profile), "haiku", 7, false)
         );
         assert_eq!(saved.name, focus.name);
@@ -1184,7 +1432,13 @@ mod tests {
         seed(&conn).unwrap();
         let host = crate::remote::host::save(
             &conn,
-            crate::remote::host::HostInput { id: None, name: "koza".into(), ssh_target: "koza".into(), remote_endpoint: "7777".into(), enabled: true },
+            crate::remote::host::HostInput {
+                id: None,
+                name: "koza".into(),
+                ssh_target: "koza".into(),
+                remote_endpoint: "7777".into(),
+                enabled: true,
+            },
         )
         .unwrap();
         conn.execute("INSERT INTO ai_profile (name, harness, host_id, created_at, updated_at) VALUES ('R', 'claude', ?1, 'n', 'n')", params![host.id]).unwrap();
@@ -1217,7 +1471,15 @@ mod tests {
                 Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
             })
             .unwrap();
-        assert_eq!((mode.as_str(), tools.as_str(), args.as_str(), spm.as_str()), ("acceptEdits", "[\"Read\"]", "[\"--effort\",\"low\"]", "replace"));
+        assert_eq!(
+            (mode.as_str(), tools.as_str(), args.as_str(), spm.as_str()),
+            (
+                "acceptEdits",
+                "[\"Read\"]",
+                "[\"--effort\",\"low\"]",
+                "replace"
+            )
+        );
     }
 
     #[test]
@@ -1227,7 +1489,10 @@ mod tests {
         new.access = "edit".into();
         new.harness_overrides = json!({ "claude": { "permission_mode": "acceptEdits" } });
         let r = save(&conn, new).unwrap();
-        assert_eq!(r.run_options("claude").access, Access::Native("acceptEdits".into()));
+        assert_eq!(
+            r.run_options("claude").access,
+            Access::Native("acceptEdits".into())
+        );
 
         let mut edit = input("Access");
         edit.id = Some(r.id);
@@ -1242,7 +1507,14 @@ mod tests {
         both.id = Some(r.id);
         both.access = "read_only".into();
         both.harness_overrides = json!({ "claude": { "permission_mode": "plan" } });
-        assert_eq!(save(&conn, both).unwrap().claude().permission_mode.as_deref(), Some("plan"));
+        assert_eq!(
+            save(&conn, both)
+                .unwrap()
+                .claude()
+                .permission_mode
+                .as_deref(),
+            Some("plan")
+        );
     }
 
     #[test]
@@ -1256,7 +1528,10 @@ mod tests {
         let other = focus.run_options("opencode");
         assert_eq!(other.access, Access::ReadOnly);
         assert!(other.allowed_tools.is_empty() && other.extra_args.is_empty());
-        assert_eq!(plain_by_key(&conn, BABYSIT_KEY).run_options("other").access, Access::Full);
+        assert_eq!(
+            plain_by_key(&conn, BABYSIT_KEY).run_options("other").access,
+            Access::Full
+        );
     }
 
     #[test]
@@ -1265,16 +1540,23 @@ mod tests {
         seed(&conn).unwrap();
         let babysit = plain_by_key(&conn, BABYSIT_KEY);
         let n = launch_needs(&babysit, "claude");
-        assert_eq!((n.access, n.tools, n.tool_allowlist), (Access::Full, true, false));
+        assert_eq!(
+            (n.access, n.tools, n.tool_allowlist),
+            (Access::Full, true, false)
+        );
         // Claude's allowlist is Claude's detail: another harness gets none.
         let focus = plain_by_key(&conn, "focus");
         let claude = launch_needs(&focus, "claude");
-        assert_eq!((claude.access.clone(), claude.tools, claude.tool_allowlist), (Access::ReadOnly, true, true));
+        assert_eq!(
+            (claude.access.clone(), claude.tools, claude.tool_allowlist),
+            (Access::ReadOnly, true, true)
+        );
         let other = launch_needs(&focus, "other");
         assert_eq!((other.tools, other.tool_allowlist), (false, false));
         // The caps check passes on Claude for all of them.
         for r in list(&conn).unwrap() {
-            crate::ai::check_caps(&crate::ai::ClaudeCode, &r.name, &launch_needs(&r, "claude")).unwrap();
+            crate::ai::check_caps(&crate::ai::ClaudeCode, &r.name, &launch_needs(&r, "claude"))
+                .unwrap();
         }
     }
 }

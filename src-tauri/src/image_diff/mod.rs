@@ -33,7 +33,8 @@ pub fn is_image_path(path: &str) -> bool {
 }
 
 pub fn is_svg_path(path: &str) -> bool {
-    path.rsplit_once('.').is_some_and(|(_, ext)| ext.eq_ignore_ascii_case("svg"))
+    path.rsplit_once('.')
+        .is_some_and(|(_, ext)| ext.eq_ignore_ascii_case("svg"))
 }
 
 /// One image file a review changes.
@@ -69,10 +70,16 @@ pub fn changed_image_files(diff: &str) -> Vec<ImageFile> {
     for line in diff.lines() {
         if let Some(rest) = line.strip_prefix("diff --git ") {
             let (old, new) = crate::commands::focus::split_git_paths(rest);
-            headers.push(Header { old, new, ..Default::default() });
+            headers.push(Header {
+                old,
+                new,
+                ..Default::default()
+            });
             continue;
         }
-        let Some(h) = headers.last_mut() else { continue };
+        let Some(h) = headers.last_mut() else {
+            continue;
+        };
         if line.starts_with("new file mode") {
             h.added = true;
         } else if line.starts_with("deleted file mode") {
@@ -82,7 +89,10 @@ pub fn changed_image_files(diff: &str) -> Vec<ImageFile> {
             h.old = Some(p.to_string());
         } else if let Some(p) = line.strip_prefix("rename to ") {
             h.new = Some(p.to_string());
-        } else if line.starts_with("Binary files ") || line == "GIT binary patch" || line.starts_with("@@") {
+        } else if line.starts_with("Binary files ")
+            || line == "GIT binary patch"
+            || line.starts_with("@@")
+        {
             h.content = true;
         }
     }
@@ -92,7 +102,11 @@ pub fn changed_image_files(diff: &str) -> Vec<ImageFile> {
             if !(h.added || h.deleted || h.content) {
                 return None;
             }
-            let path = if h.deleted { h.old.clone().or(h.new.clone())? } else { h.new.clone().or(h.old.clone())? };
+            let path = if h.deleted {
+                h.old.clone().or(h.new.clone())?
+            } else {
+                h.new.clone().or(h.old.clone())?
+            };
             if !is_image_path(&path) {
                 return None;
             }
@@ -105,14 +119,20 @@ pub fn changed_image_files(diff: &str) -> Vec<ImageFile> {
             } else {
                 (Change::Modified, None)
             };
-            Some(ImageFile { path, old_path, change })
+            Some(ImageFile {
+                path,
+                old_path,
+                change,
+            })
         })
         .collect()
 }
 
 fn numeric_prefix(v: &str) -> Option<f64> {
     let v = v.trim();
-    let end = v.find(|c: char| !(c.is_ascii_digit() || c == '.')).unwrap_or(v.len());
+    let end = v
+        .find(|c: char| !(c.is_ascii_digit() || c == '.'))
+        .unwrap_or(v.len());
     // Percentages say nothing about an absolute size.
     if v[end..].trim_start().starts_with('%') {
         return None;
@@ -146,11 +166,21 @@ pub fn svg_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
     let start = head.find("<svg")?;
     let tag = &head[start..start + head[start..].find('>')?];
     let view_box = attr(tag, "viewBox").and_then(|v| {
-        let n: Vec<f64> = v.split(|c: char| c == ',' || c.is_whitespace()).filter(|s| !s.is_empty()).filter_map(|s| s.parse().ok()).collect();
+        let n: Vec<f64> = v
+            .split(|c: char| c == ',' || c.is_whitespace())
+            .filter(|s| !s.is_empty())
+            .filter_map(|s| s.parse().ok())
+            .collect();
         (n.len() == 4).then(|| (n[2], n[3]))
     });
-    let width = attr(tag, "width").and_then(numeric_prefix).or(view_box.map(|v| v.0)).unwrap_or(300.0);
-    let height = attr(tag, "height").and_then(numeric_prefix).or(view_box.map(|v| v.1)).unwrap_or(150.0);
+    let width = attr(tag, "width")
+        .and_then(numeric_prefix)
+        .or(view_box.map(|v| v.0))
+        .unwrap_or(300.0);
+    let height = attr(tag, "height")
+        .and_then(numeric_prefix)
+        .or(view_box.map(|v| v.1))
+        .unwrap_or(150.0);
     Some((width.ceil().max(1.0) as u32, height.ceil().max(1.0) as u32))
 }
 
@@ -159,7 +189,11 @@ pub fn probe_dimensions(bytes: &[u8], path: &str) -> Option<(u32, u32)> {
     if is_svg_path(path) {
         return svg_dimensions(bytes);
     }
-    image::ImageReader::new(Cursor::new(bytes)).with_guessed_format().ok()?.into_dimensions().ok()
+    image::ImageReader::new(Cursor::new(bytes))
+        .with_guessed_format()
+        .ok()?
+        .into_dimensions()
+        .ok()
 }
 
 #[cfg(test)]
@@ -210,8 +244,10 @@ new mode 100755
     #[test]
     fn lists_changed_images_only() {
         let files = changed_image_files(DIFF);
-        let got: Vec<(&str, Change, Option<&str>)> =
-            files.iter().map(|f| (f.path.as_str(), f.change, f.old_path.as_deref())).collect();
+        let got: Vec<(&str, Change, Option<&str>)> = files
+            .iter()
+            .map(|f| (f.path.as_str(), f.change, f.old_path.as_deref()))
+            .collect();
         assert_eq!(
             got,
             vec![
@@ -227,8 +263,14 @@ new mode 100755
 
     #[test]
     fn svg_size_comes_from_width_height_then_viewbox_then_the_default() {
-        assert_eq!(svg_dimensions(br#"<svg xmlns="x" width="20px" height='10'>"#), Some((20, 10)));
-        assert_eq!(svg_dimensions(br#"<?xml?><svg viewBox="0 0 48 24" width="100%">"#), Some((48, 24)));
+        assert_eq!(
+            svg_dimensions(br#"<svg xmlns="x" width="20px" height='10'>"#),
+            Some((20, 10))
+        );
+        assert_eq!(
+            svg_dimensions(br#"<?xml?><svg viewBox="0 0 48 24" width="100%">"#),
+            Some((48, 24))
+        );
         assert_eq!(svg_dimensions(b"<svg>"), Some((300, 150)));
         assert_eq!(svg_dimensions(b"not svg"), None);
     }

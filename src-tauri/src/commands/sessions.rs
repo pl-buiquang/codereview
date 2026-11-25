@@ -7,7 +7,10 @@ use tauri::State;
 use std::path::Path;
 
 use crate::ai::profiles::{self, Feature};
-use crate::ai::{self, Access, Harness, OneShot, SessionMode, SystemPrompt, SystemPromptMode, ToolPolicy, TurnResult};
+use crate::ai::{
+    self, Access, Harness, OneShot, SessionMode, SystemPrompt, SystemPromptMode, ToolPolicy,
+    TurnResult,
+};
 use crate::claude_sessions::{self, AgentSession};
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
@@ -41,20 +44,38 @@ pub async fn list_claude_sessions(
     let mut summaries = summary_dir
         .map(|d| d.trim().to_string())
         .filter(|d| !d.is_empty())
-        .map(|d| session_summaries::load(std::path::Path::new(&crate::commands::repo::expand_home(&d))))
+        .map(|d| {
+            session_summaries::load(std::path::Path::new(&crate::commands::repo::expand_home(
+                &d,
+            )))
+        })
         .unwrap_or_default();
-    sessions.extend(claude_sessions::history_sessions(history_days, &exclude, &mut summaries));
+    sessions.extend(claude_sessions::history_sessions(
+        history_days,
+        &exclude,
+        &mut summaries,
+    ));
     claude_sessions::apply_generated_summaries(&mut sessions, &generated);
-    Ok(SessionsSnapshot { sessions, card_sessions })
+    Ok(SessionsSnapshot {
+        sessions,
+        card_sessions,
+    })
 }
 
 fn load_generated_summaries(conn: &Connection) -> AppResult<HashMap<String, SessionSummary>> {
-    let mut stmt = conn.prepare("SELECT session_id, title, body, generated_at FROM live_session_summary")?;
+    let mut stmt =
+        conn.prepare("SELECT session_id, title, body, generated_at FROM live_session_summary")?;
     let rows = stmt
         .query_map([], |r| {
             Ok((
                 r.get::<_, String>(0)?,
-                SessionSummary { title: r.get(1)?, body: r.get(2)?, date: Some(r.get(3)?), generated: true, cost: None },
+                SessionSummary {
+                    title: r.get(1)?,
+                    body: r.get(2)?,
+                    date: Some(r.get(3)?),
+                    generated: true,
+                    cost: None,
+                },
             ))
         })?
         .collect::<Result<_, _>>()?;
@@ -67,12 +88,23 @@ const EXTRACT_MAX_BYTES: usize = 400_000;
 const EXTRACT_MODEL: &str = "haiku";
 
 fn session_tag(variant: &str, session: &AgentSession) -> crate::run_usage::RunTag {
-    let project = session.cwd.trim_end_matches('/').rsplit('/').next().unwrap_or("");
+    let project = session
+        .cwd
+        .trim_end_matches('/')
+        .rsplit('/')
+        .next()
+        .unwrap_or("");
     let short: String = session.session_id.chars().take(8).collect();
-    crate::run_usage::RunTag::new("session_summary").variant(variant).label(format!("{project} ({short})"))
+    crate::run_usage::RunTag::new("session_summary")
+        .variant(variant)
+        .label(format!("{project} ({short})"))
 }
 
-fn fork_request<'a>(session: &'a AgentSession, prompt: &'a str, harness: &'static str) -> OneShot<'a> {
+fn fork_request<'a>(
+    session: &'a AgentSession,
+    prompt: &'a str,
+    harness: &'static str,
+) -> OneShot<'a> {
     OneShot {
         model: "",
         system_prompt: None,
@@ -92,8 +124,13 @@ fn fork_request<'a>(session: &'a AgentSession, prompt: &'a str, harness: &'stati
     }
 }
 
-fn run_fork_summary(harness: &dyn Harness, session: &AgentSession, instructions: &str) -> AppResult<TurnResult> {
-    let prompt = format!("{instructions}\n\nSummarize this conversation so far. Do not call any tools.");
+fn run_fork_summary(
+    harness: &dyn Harness,
+    session: &AgentSession,
+    instructions: &str,
+) -> AppResult<TurnResult> {
+    let prompt =
+        format!("{instructions}\n\nSummarize this conversation so far. Do not call any tools.");
     harness.one_shot(&fork_request(session, &prompt, harness.id()))
 }
 
@@ -137,9 +174,18 @@ fn run_extract_summary(
         .ok_or_else(|| AppError::Other("no conversation to summarize yet".into()))?;
     let cwd = std::env::temp_dir().join("codereview_live_summary");
     std::fs::create_dir_all(&cwd)?;
-    let prompt = format!("<transcript>\n{transcript}</transcript>\nSummarize the transcript above.");
+    let prompt =
+        format!("<transcript>\n{transcript}</transcript>\nSummarize the transcript above.");
     let file_tag = format!("live_summary_{}", session.session_id);
-    let mut req = extract_request(session, instructions, &file_tag, &cwd, &prompt, model, harness.id());
+    let mut req = extract_request(
+        session,
+        instructions,
+        &file_tag,
+        &cwd,
+        &prompt,
+        model,
+        harness.id(),
+    );
     req.extra_args.extend(harness.settings_args(settings));
     harness.one_shot(&req)
 }
@@ -180,7 +226,8 @@ pub async fn generate_live_session_summary(
                 return Ok((turn, "fork", session.session_id));
             }
         }
-        run_extract_summary(harness, &settings, &session, &instructions, &extract_model).map(|turn| (turn, "extract", session.session_id))
+        run_extract_summary(harness, &settings, &session, &instructions, &extract_model)
+            .map(|turn| (turn, "extract", session.session_id))
     })
     .await
     .map_err(|e| AppError::Other(format!("summary task failed: {e}")))??;
@@ -196,7 +243,13 @@ pub async fn generate_live_session_summary(
            input_tokens = excluded.input_tokens, output_tokens = excluded.output_tokens, cost_usd = excluded.cost_usd",
         params![session_id, title, body, generated_at, model, mode, turn.input_tokens, turn.output_tokens, turn.cost_usd],
     )?;
-    Ok(SessionSummary { date: Some(generated_at), title, body, generated: true, cost: None })
+    Ok(SessionSummary {
+        date: Some(generated_at),
+        title,
+        body,
+        generated: true,
+        cost: None,
+    })
 }
 
 #[tauri::command]
@@ -222,20 +275,40 @@ pub async fn resume_claude_session(
     db: State<'_, Db>,
 ) -> AppResult<()> {
     if live_session_ids().contains(&session_id) {
-        return Err(AppError::Other("this session is already running — focus it instead".into()));
+        return Err(AppError::Other(
+            "this session is already running — focus it instead".into(),
+        ));
     }
     if !std::path::Path::new(&cwd).is_dir() {
         return Err(AppError::Other(format!("{cwd} no longer exists")));
     }
-    let repo = repo.unwrap_or_else(|| cwd.trim_end_matches('/').rsplit('/').next().unwrap_or(&cwd).to_string());
+    let repo = repo.unwrap_or_else(|| {
+        cwd.trim_end_matches('/')
+            .rsplit('/')
+            .next()
+            .unwrap_or(&cwd)
+            .to_string()
+    });
     let window_name: String = session_id.chars().take(8).collect();
     // A session resumes on the harness that owns it (the session row's harness), else the profile default.
-    let argv = ai::interactive_argv_with(&db, harness.as_deref(), &ai::Interactive {
-        session: SessionMode::Resume(&session_id),
-        system_prompt_file: None,
-        system_prompt_mode: SystemPromptMode::Append,
-    })?;
-    terminal::open_session(host, tmux_target, &tmux_session, &repo, &window_name, &cwd, &argv)
+    let argv = ai::interactive_argv_with(
+        &db,
+        harness.as_deref(),
+        &ai::Interactive {
+            session: SessionMode::Resume(&session_id),
+            system_prompt_file: None,
+            system_prompt_mode: SystemPromptMode::Append,
+        },
+    )?;
+    terminal::open_session(
+        host,
+        tmux_target,
+        &tmux_session,
+        &repo,
+        &window_name,
+        &cwd,
+        &argv,
+    )
 }
 
 /// Stop a background session via `claude stop <job id>`; its conversation is kept.
@@ -273,10 +346,19 @@ fn load_session_cards(conn: &Connection) -> AppResult<(Vec<SessionCard>, Session
         crate::commands::board::CARD_VIEW
     ))?;
     let cards = stmt
-        .query_map([], |r| Ok(SessionCard { id: r.get(0)?, repo: r.get(1)?, number: r.get(2)?, head_ref: r.get(3)? }))?
+        .query_map([], |r| {
+            Ok(SessionCard {
+                id: r.get(0)?,
+                repo: r.get(1)?,
+                number: r.get(2)?,
+                head_ref: r.get(3)?,
+            })
+        })?
         .collect::<Result<Vec<_>, _>>()?;
     let mut meta = SessionIdsByCard::new();
-    let mut stmt = conn.prepare("SELECT card_id, value FROM board_meta WHERE kind IN ('claude_session', 'ai_session')")?;
+    let mut stmt = conn.prepare(
+        "SELECT card_id, value FROM board_meta WHERE kind IN ('claude_session', 'ai_session')",
+    )?;
     for row in stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))? {
         let (card, value) = row?;
         meta.entry(card).or_default().insert(value);
@@ -299,7 +381,9 @@ fn match_card_sessions(
             let by_meta = recorded.is_some_and(|ids| ids.contains(&s.session_id));
             let by_branch = card.head_ref.is_some()
                 && s.git_branch == card.head_ref
-                && s.repo.as_deref().is_some_and(|r| r.eq_ignore_ascii_case(&card.repo));
+                && s.repo
+                    .as_deref()
+                    .is_some_and(|r| r.eq_ignore_ascii_case(&card.repo));
             if by_meta || by_branch {
                 out.push(CardSession {
                     card_id: card.id.clone(),
@@ -315,12 +399,18 @@ fn match_card_sessions(
 
 /// The live sessions of every harness (Claude's rich source plus the other harnesses' basics).
 pub(crate) fn all_live_sessions() -> Vec<AgentSession> {
-    claude_sessions::live_sessions().into_iter().chain(ai::live_sessions_except("claude")).collect()
+    claude_sessions::live_sessions()
+        .into_iter()
+        .chain(ai::live_sessions_except("claude"))
+        .collect()
 }
 
 /// Ids of the live sessions of every harness.
 pub(crate) fn live_session_ids() -> HashSet<String> {
-    all_live_sessions().into_iter().map(|s| s.session_id).collect()
+    all_live_sessions()
+        .into_iter()
+        .map(|s| s.session_id)
+        .collect()
 }
 
 /// Most recent session of `harness` recorded on the card (`claude_session` rows are Claude's) that
@@ -345,13 +435,18 @@ pub(crate) fn resumable_card_session(
 
 fn is_focusable(s: &AgentSession) -> bool {
     s.focus == claude_sessions::FocusState::Ready
-        || s.agent_view.as_ref().is_some_and(|v| v.focus == claude_sessions::FocusState::Ready)
+        || s.agent_view
+            .as_ref()
+            .is_some_and(|v| v.focus == claude_sessions::FocusState::Ready)
 }
 
 fn in_dir(cwd: &str, dir: &str) -> bool {
     let dir = dir.trim_end_matches('/');
     let cwd = cwd.trim_end_matches('/');
-    cwd == dir || cwd.strip_prefix(dir).is_some_and(|rest| rest.starts_with('/'))
+    cwd == dir
+        || cwd
+            .strip_prefix(dir)
+            .is_some_and(|rest| rest.starts_with('/'))
 }
 
 /// Focusable live sessions for a review: those running inside its chat worktree, or belonging
@@ -384,7 +479,11 @@ struct ReviewSessionCtx {
 fn review_session_ctx(conn: &Connection, review_id: i64) -> AppResult<ReviewSessionCtx> {
     let detail = crate::commands::review::load_detail(conn, review_id)?;
     let worktree: Option<String> = conn
-        .query_row("SELECT worktree_path FROM chat WHERE review_id = ?1", params![review_id], |r| r.get(0))
+        .query_row(
+            "SELECT worktree_path FROM chat WHERE review_id = ?1",
+            params![review_id],
+            |r| r.get(0),
+        )
         .optional()?
         .flatten();
     let card = match (&detail.remote_owner, &detail.remote_name, detail.target.github_pr_number) {
@@ -400,11 +499,18 @@ fn review_session_ctx(conn: &Connection, review_id: i64) -> AppResult<ReviewSess
             .optional()?,
         _ => None,
     };
-    Ok(ReviewSessionCtx { detail, worktree, card })
+    Ok(ReviewSessionCtx {
+        detail,
+        worktree,
+        card,
+    })
 }
 
 #[tauri::command]
-pub async fn review_agent_sessions(review_id: i64, db: State<'_, Db>) -> AppResult<Vec<AgentSession>> {
+pub async fn review_agent_sessions(
+    review_id: i64,
+    db: State<'_, Db>,
+) -> AppResult<Vec<AgentSession>> {
     let (ctx, meta) = {
         let conn = db.0.lock().unwrap();
         let ctx = review_session_ctx(&conn, review_id)?;
@@ -412,7 +518,12 @@ pub async fn review_agent_sessions(review_id: i64, db: State<'_, Db>) -> AppResu
         (ctx, meta)
     };
     let sessions = claude_sessions::live_sessions();
-    Ok(match_review_sessions(ctx.worktree.as_deref(), ctx.card.as_ref(), &meta, sessions))
+    Ok(match_review_sessions(
+        ctx.worktree.as_deref(),
+        ctx.card.as_ref(),
+        &meta,
+        sessions,
+    ))
 }
 
 /// Ensure the review's chat worktree exists, then open a tmux window there running Claude —
@@ -447,12 +558,25 @@ pub async fn review_open_agent(
         Some(n) => format!("#{n}"),
         None => target.head_ref.clone(),
     };
-    let argv = ai::argv_of(harness, &ai::Interactive {
-        session: resume.as_deref().map_or(SessionMode::Ephemeral, SessionMode::Resume),
-        system_prompt_file: None,
-        system_prompt_mode: SystemPromptMode::Append,
-    })?;
-    terminal::open_session(host, tmux_target, &tmux_session, &repo, &window_name, &worktree_path, &argv)
+    let argv = ai::argv_of(
+        harness,
+        &ai::Interactive {
+            session: resume
+                .as_deref()
+                .map_or(SessionMode::Ephemeral, SessionMode::Resume),
+            system_prompt_file: None,
+            system_prompt_mode: SystemPromptMode::Append,
+        },
+    )?;
+    terminal::open_session(
+        host,
+        tmux_target,
+        &tmux_session,
+        &repo,
+        &window_name,
+        &worktree_path,
+        &argv,
+    )
 }
 
 #[cfg(test)]
@@ -486,12 +610,20 @@ mod tests {
     }
 
     fn card(id: &str, repo: &str, head_ref: Option<&str>) -> SessionCard {
-        SessionCard { id: id.into(), repo: repo.into(), number: 1, head_ref: head_ref.map(Into::into) }
+        SessionCard {
+            id: id.into(),
+            repo: repo.into(),
+            number: 1,
+            head_ref: head_ref.map(Into::into),
+        }
     }
 
     #[test]
     fn matches_by_meta_or_branch() {
-        let cards = vec![card("a", "Org/Repo", Some("feat/x")), card("b", "org/other", Some("feat/x"))];
+        let cards = vec![
+            card("a", "Org/Repo", Some("feat/x")),
+            card("b", "org/other", Some("feat/x")),
+        ];
         let meta = HashMap::from([("b".to_string(), HashSet::from(["s3".to_string()]))]);
         let sessions = vec![
             session("s1", Some("org/repo"), Some("feat/x")),
@@ -503,7 +635,10 @@ mod tests {
             .into_iter()
             .map(|c| (c.card_id, c.session_id))
             .collect();
-        assert_eq!(got, vec![("a".into(), "s1".into()), ("b".into(), "s3".into())]);
+        assert_eq!(
+            got,
+            vec![("a".into(), "s1".into()), ("b".into(), "s3".into())]
+        );
     }
 
     #[test]
@@ -518,8 +653,14 @@ mod tests {
         // Same repo and a branch named like the issue's, yet only the recorded id counts.
         let cards = vec![card("i", "org/repo", None)];
         let meta = HashMap::from([("i".to_string(), HashSet::from(["s2".to_string()]))]);
-        let sessions = vec![session("s1", Some("org/repo"), Some("pbq/issue-1")), session("s2", Some("org/repo"), Some("main"))];
-        let got: Vec<_> = match_card_sessions(&cards, &meta, &sessions).into_iter().map(|c| c.session_id).collect();
+        let sessions = vec![
+            session("s1", Some("org/repo"), Some("pbq/issue-1")),
+            session("s2", Some("org/repo"), Some("main")),
+        ];
+        let got: Vec<_> = match_card_sessions(&cards, &meta, &sessions)
+            .into_iter()
+            .map(|c| c.session_id)
+            .collect();
         assert_eq!(got, vec!["s2".to_string()]);
     }
 
@@ -535,12 +676,33 @@ mod tests {
                ('c', 'note', 'x', '2026-01-03', NULL);",
         )
         .unwrap();
-        assert_eq!(resumable_card_session(&conn, "c", &HashSet::new(), "claude").unwrap().as_deref(), Some("new"));
-        assert_eq!(resumable_card_session(&conn, "c", &HashSet::new(), "opencode").unwrap().as_deref(), Some("oc1"));
-        assert_eq!(resumable_card_session(&conn, "c", &HashSet::new(), "codex").unwrap(), None);
+        assert_eq!(
+            resumable_card_session(&conn, "c", &HashSet::new(), "claude")
+                .unwrap()
+                .as_deref(),
+            Some("new")
+        );
+        assert_eq!(
+            resumable_card_session(&conn, "c", &HashSet::new(), "opencode")
+                .unwrap()
+                .as_deref(),
+            Some("oc1")
+        );
+        assert_eq!(
+            resumable_card_session(&conn, "c", &HashSet::new(), "codex").unwrap(),
+            None
+        );
         let live = HashSet::from(["new".to_string()]);
-        assert_eq!(resumable_card_session(&conn, "c", &live, "claude").unwrap().as_deref(), Some("old"));
-        assert_eq!(resumable_card_session(&conn, "other", &live, "claude").unwrap(), None);
+        assert_eq!(
+            resumable_card_session(&conn, "c", &live, "claude")
+                .unwrap()
+                .as_deref(),
+            Some("old")
+        );
+        assert_eq!(
+            resumable_card_session(&conn, "other", &live, "claude").unwrap(),
+            None
+        );
     }
     #[test]
     fn review_sessions_match_worktree_or_card() {
@@ -567,7 +729,13 @@ mod tests {
 
     #[test]
     fn review_sessions_without_worktree_or_card_is_empty() {
-        assert!(match_review_sessions(None, None, &HashMap::new(), vec![session("s1", None, None)]).is_empty());
+        assert!(match_review_sessions(
+            None,
+            None,
+            &HashMap::new(),
+            vec![session("s1", None, None)]
+        )
+        .is_empty());
     }
 
     #[test]
@@ -575,18 +743,48 @@ mod tests {
         use crate::test_support::{argv, envs, strs};
         let sess = session("abcdef123456", None, None);
         let cwd = std::path::Path::new("/tmp/codereview_live_summary");
-        let req = extract_request(&sess, "instr", "live_summary_abcdef123456", cwd, "p", "haiku", "claude");
-        let cmd = crate::ai::claude::command(&req, false, Some(std::path::Path::new("/tmp/codereview_live_summary_abcdef123456.txt")));
+        let req = extract_request(
+            &sess,
+            "instr",
+            "live_summary_abcdef123456",
+            cwd,
+            "p",
+            "haiku",
+            "claude",
+        );
+        let cmd = crate::ai::claude::command(
+            &req,
+            false,
+            Some(std::path::Path::new(
+                "/tmp/codereview_live_summary_abcdef123456.txt",
+            )),
+        );
         assert_eq!(
             argv(&cmd),
             strs(&[
-                "-p", "--output-format", "json", "--strict-mcp-config", "--permission-mode", "default",
-                "--add-dir", "/tmp/codereview_live_summary", "--model", "haiku", "--tools", "", "--effort", "low",
-                "--no-session-persistence", "--system-prompt-file",
+                "-p",
+                "--output-format",
+                "json",
+                "--strict-mcp-config",
+                "--permission-mode",
+                "default",
+                "--add-dir",
+                "/tmp/codereview_live_summary",
+                "--model",
+                "haiku",
+                "--tools",
+                "",
+                "--effort",
+                "low",
+                "--no-session-persistence",
+                "--system-prompt-file",
                 "/tmp/codereview_live_summary_abcdef123456.txt",
             ])
         );
-        assert_eq!(envs(&cmd), vec![("CLAUDE_SUMMARY_RUNNING".to_string(), "1".to_string())]);
+        assert_eq!(
+            envs(&cmd),
+            vec![("CLAUDE_SUMMARY_RUNNING".to_string(), "1".to_string())]
+        );
     }
 
     #[test]
@@ -597,9 +795,22 @@ mod tests {
         let cmd = crate::ai::claude::command(&req, false, None);
         assert_eq!(
             argv(&cmd),
-            strs(&["-p", "--output-format", "json", "--resume", "sid-1", "--fork-session", "--no-session-persistence", "--max-turns", "1"])
+            strs(&[
+                "-p",
+                "--output-format",
+                "json",
+                "--resume",
+                "sid-1",
+                "--fork-session",
+                "--no-session-persistence",
+                "--max-turns",
+                "1"
+            ])
         );
-        assert_eq!(envs(&cmd), vec![("CLAUDE_SUMMARY_RUNNING".to_string(), "1".to_string())]);
+        assert_eq!(
+            envs(&cmd),
+            vec![("CLAUDE_SUMMARY_RUNNING".to_string(), "1".to_string())]
+        );
         assert_eq!(cmd.get_current_dir(), Some(std::path::Path::new("/x")));
     }
 }

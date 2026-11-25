@@ -33,14 +33,21 @@ pub fn global() -> Option<Arc<RemoteRuntime>> {
 
 impl RemoteRuntime {
     pub fn new(tunnels: TunnelManager, hosts: Box<HostFn>) -> Arc<Self> {
-        Arc::new(Self { tunnels, hosts, infos: Mutex::new(HashMap::new()) })
+        Arc::new(Self {
+            tunnels,
+            hosts,
+            infos: Mutex::new(HashMap::new()),
+        })
     }
 
     /// The host row, refusing a missing or disabled one.
     pub fn host(&self, host_id: i64) -> RemoteResult<Host> {
         let host = (self.hosts)(host_id).map_err(|e| RemoteError::disabled(e.to_string()))?;
         if !host.enabled {
-            return Err(RemoteError::disabled(format!("host “{}” is disabled in Settings → AI → Hosts", host.name)));
+            return Err(RemoteError::disabled(format!(
+                "host “{}” is disabled in Settings → AI → Hosts",
+                host.name
+            )));
         }
         Ok(host)
     }

@@ -8,14 +8,15 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use super::outcome::{
-    file_has_result, final_status, outcome_from, read_stderr, Outcome, PROMPT_FILE, STDERR_FILE, STDOUT_FILE,
+    file_has_result, final_status, outcome_from, read_stderr, Outcome, PROMPT_FILE, STDERR_FILE,
+    STDOUT_FILE,
 };
 use super::proc::{process_alive, signal_group, terminate, SIGKILL, SIGTERM};
 use super::tail::{event_json, tail_events, Tail};
 use super::{EventSink, Finished, Prepared, RunStore, RunningRun};
 use crate::ai::{Harness, StreamRun};
-use crate::run_usage;
 use crate::error::{AppError, AppResult};
+use crate::run_usage;
 
 pub const DEFAULT_CONCURRENCY: i64 = 4;
 /// Finished runs kept in the store.
@@ -46,8 +47,17 @@ pub struct RunEngine {
 }
 
 impl RunEngine {
-    pub fn new(store: Arc<dyn RunStore>, sink: Arc<dyn EventSink>, harness: &'static dyn Harness) -> Arc<Self> {
-        Arc::new(Self { store, sink, harness, inner: Mutex::new(Inner::default()) })
+    pub fn new(
+        store: Arc<dyn RunStore>,
+        sink: Arc<dyn EventSink>,
+        harness: &'static dyn Harness,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            store,
+            sink,
+            harness,
+            inner: Mutex::new(Inner::default()),
+        })
     }
 
     /// The harness used for what names none (the default of the host).
@@ -106,7 +116,9 @@ impl RunEngine {
                 if self.store.running_count()? >= self.store.max_concurrency() {
                     return Ok(None);
                 }
-                let Some(id) = self.store.next_queued()? else { return Ok(None) };
+                let Some(id) = self.store.next_queued()? else {
+                    return Ok(None);
+                };
                 Ok(Some((id, self.store.mark_running(id)?)))
             })();
             match next {
@@ -157,7 +169,9 @@ impl RunEngine {
 
     /// Runs a quit would interrupt: started ones plus those still queued.
     pub fn active_count(&self) -> usize {
-        self.store.active_count().unwrap_or_else(|_| self.inner.lock().unwrap().live.len())
+        self.store
+            .active_count()
+            .unwrap_or_else(|_| self.inner.lock().unwrap().live.len())
     }
 
     /// Exiting but the runs go on: workers stop tailing (leaving their rows `running` for the next
@@ -201,10 +215,18 @@ impl RunEngine {
 
     /// Startup: pick up the runs a previous session left alive and sweep the files of every other run.
     pub fn adopt_detached(self: &Arc<Self>) {
-        let Ok(running) = self.store.running_runs() else { return };
+        let Ok(running) = self.store.running_runs() else {
+            return;
+        };
         if let Ok(entries) = std::fs::read_dir(self.store.runs_root()) {
             for entry in entries.flatten() {
-                let Some(id) = entry.file_name().to_str().and_then(|n| n.parse::<i64>().ok()) else { continue };
+                let Some(id) = entry
+                    .file_name()
+                    .to_str()
+                    .and_then(|n| n.parse::<i64>().ok())
+                else {
+                    continue;
+                };
                 if !running.iter().any(|r| r.id == id) {
                     self.discard_run_files(id);
                 }
@@ -235,7 +257,13 @@ impl RunEngine {
     }
 
     /// Finalize a finished run and start the next queued one.
-    fn settle(self: &Arc<Self>, run_id: i64, outcome: &Outcome, started: Instant, started_at: &str) {
+    fn settle(
+        self: &Arc<Self>,
+        run_id: i64,
+        outcome: &Outcome,
+        started: Instant,
+        started_at: &str,
+    ) {
         self.finalize(run_id, outcome, started, started_at);
         self.pump();
     }
@@ -253,12 +281,21 @@ impl RunEngine {
         if !p.cleanup.is_empty() {
             self.store.set_cleanup(run_id, &p.cleanup);
         }
-        let cleanup = || p.cleanup.iter().for_each(|d| drop(std::fs::remove_dir_all(d)));
+        let cleanup = || {
+            p.cleanup
+                .iter()
+                .for_each(|d| drop(std::fs::remove_dir_all(d)))
+        };
         let dir = self.run_dir(run_id);
         let prompt_path = dir.join(PROMPT_FILE);
         let files = std::fs::create_dir_all(&dir)
             .and_then(|_| std::fs::write(&prompt_path, &p.system_prompt))
-            .and_then(|_| Ok((File::create(dir.join(STDOUT_FILE))?, File::create(dir.join(STDERR_FILE))?)));
+            .and_then(|_| {
+                Ok((
+                    File::create(dir.join(STDOUT_FILE))?,
+                    File::create(dir.join(STDERR_FILE))?,
+                ))
+            });
         let (stdout_file, stderr_file) = match files {
             Ok(f) => f,
             Err(e) => {
@@ -284,7 +321,13 @@ impl RunEngine {
         let pid = child.id();
         {
             let mut inner = self.inner.lock().unwrap();
-            inner.live.insert(run_id, Live { pgid: pid as i32, deadline: Instant::now() + p.timeout });
+            inner.live.insert(
+                run_id,
+                Live {
+                    pgid: pid as i32,
+                    deadline: Instant::now() + p.timeout,
+                },
+            );
             if inner.stops.contains_key(&run_id) {
                 drop(inner);
                 terminate(pid as i32);
@@ -293,25 +336,47 @@ impl RunEngine {
         self.store.set_process(run_id, pid, &p.cwd, &p.session_id);
 
         if let Some(mut stdin) = child.stdin.take() {
-            let _ = stdin.write_all(stdin_payload(harness.caps().replaces_system_prompt, &p.system_prompt, &p.prompt).as_bytes());
+            let _ = stdin.write_all(
+                stdin_payload(
+                    harness.caps().replaces_system_prompt,
+                    &p.system_prompt,
+                    &p.prompt,
+                )
+                .as_bytes(),
+            );
         }
-        let tail = self.tail(harness, run_id, &dir.join(STDOUT_FILE), 0, &mut || matches!(child.try_wait(), Ok(None)));
+        let tail = self.tail(harness, run_id, &dir.join(STDOUT_FILE), 0, &mut || {
+            matches!(child.try_wait(), Ok(None))
+        });
         let result = match tail {
             Tail::Detached => {
                 // Dropping `child` neither kills nor reaps it; the next start adopts the run.
                 self.inner.lock().unwrap().live.remove(&run_id);
-                return Outcome { detached: true, ..Outcome::default() };
+                return Outcome {
+                    detached: true,
+                    ..Outcome::default()
+                };
             }
             Tail::Done(result) => result,
         };
-        let status = child.wait().map(|s| s.to_string()).map_err(|e| e.to_string());
+        let status = child
+            .wait()
+            .map(|s| s.to_string())
+            .map_err(|e| e.to_string());
         self.inner.lock().unwrap().live.remove(&run_id);
         let _ = std::fs::remove_file(&prompt_path);
         cleanup();
         outcome_from(harness, result, read_stderr(&dir), status)
     }
 
-    fn tail(&self, harness: &dyn Harness, run_id: i64, path: &std::path::Path, skip: i64, alive: &mut dyn FnMut() -> bool) -> Tail {
+    fn tail(
+        &self,
+        harness: &dyn Harness,
+        run_id: i64,
+        path: &std::path::Path,
+        skip: i64,
+        alive: &mut dyn FnMut() -> bool,
+    ) -> Tail {
         tail_events(
             harness,
             path,
@@ -335,7 +400,9 @@ impl RunEngine {
         let started = Instant::now();
         let started_at = run_usage::now_stamp();
         let id = run.id;
-        let Some(timeout) = self.sink.adopt(id) else { return self.settle_lost_and_pump(id) };
+        let Some(timeout) = self.sink.adopt(id) else {
+            return self.settle_lost_and_pump(id);
+        };
         let dir = self.run_dir(id);
         let out = dir.join(STDOUT_FILE);
         let pid = run.pid;
@@ -351,16 +418,31 @@ impl RunEngine {
                 .started_at
                 .as_deref()
                 .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
-                .and_then(|t| (chrono::Utc::now() - t.with_timezone(&chrono::Utc)).to_std().ok())
+                .and_then(|t| {
+                    (chrono::Utc::now() - t.with_timezone(&chrono::Utc))
+                        .to_std()
+                        .ok()
+                })
                 .unwrap_or_default();
             let left = timeout.saturating_sub(spent);
-            self.inner.lock().unwrap().live.insert(id, Live { pgid: pid, deadline: Instant::now() + left });
+            self.inner.lock().unwrap().live.insert(
+                id,
+                Live {
+                    pgid: pid,
+                    deadline: Instant::now() + left,
+                },
+            );
         }
         let skip = self.store.last_seq(id);
         let tail = self.tail(harness, id, &out, skip, &mut || alive && process_alive(pid));
         self.inner.lock().unwrap().live.remove(&id);
         let Tail::Done(result) = tail else { return };
-        let outcome = outcome_from(harness, result, read_stderr(&dir), Ok("an unknown status".into()));
+        let outcome = outcome_from(
+            harness,
+            result,
+            read_stderr(&dir),
+            Ok("an unknown status".into()),
+        );
         self.settle(id, &outcome, started, &started_at);
     }
 
@@ -386,14 +468,23 @@ impl RunEngine {
     }
 
     /// Write the final state, prune old runs, tell the sink. Returns the status it settled on.
-    fn finalize(&self, run_id: i64, outcome: &Outcome, started: Instant, started_at: &str) -> &'static str {
+    fn finalize(
+        &self,
+        run_id: i64,
+        outcome: &Outcome,
+        started: Instant,
+        started_at: &str,
+    ) -> &'static str {
         let (stop, shutting_down) = {
             let mut inner = self.inner.lock().unwrap();
             (inner.stops.remove(&run_id), inner.shutting_down)
         };
         self.discard_run_files(run_id);
         let result = outcome.result.clone();
-        let text = result.as_ref().and_then(|r| r.text.clone()).unwrap_or_default();
+        let text = result
+            .as_ref()
+            .and_then(|r| r.text.clone())
+            .unwrap_or_default();
         let status = final_status(stop, result.as_ref(), &text);
         let error = match status {
             "error" => Some(outcome.failure.clone().unwrap_or_else(|| {
@@ -442,8 +533,8 @@ fn stdin_payload(replaces_system_prompt: bool, system: &str, prompt: &str) -> St
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
-    use crate::ai::{Caps, Event, Interactive, OneShot, TurnResult};
     use crate::ai::{Access, SystemPromptMode, ToolPolicy};
+    use crate::ai::{Caps, Event, Interactive, OneShot, TurnResult};
     use crate::run_usage::RunTag;
     use serde_json::Value;
     use std::path::Path;
@@ -458,7 +549,11 @@ mod tests {
 
     impl Harness for FakeHarness {
         fn id(&self) -> &'static str {
-            if self.prefix.is_empty() { "fake" } else { "alt" }
+            if self.prefix.is_empty() {
+                "fake"
+            } else {
+                "alt"
+            }
         }
         fn name(&self) -> &'static str {
             "Fake"
@@ -488,25 +583,45 @@ mod tests {
             use std::os::unix::process::CommandExt;
             let mut cmd = Command::new("sh");
             cmd.arg("-c").arg(run.req.model);
-            cmd.stdin(Stdio::piped()).stdout(Stdio::from(run.stdout)).stderr(Stdio::from(run.stderr));
+            cmd.stdin(Stdio::piped())
+                .stdout(Stdio::from(run.stdout))
+                .stderr(Stdio::from(run.stderr));
             cmd.process_group(0);
             cmd.spawn().map_err(|e| AppError::Other(e.to_string()))
         }
         fn parse_line(&self, line: &str) -> (String, Option<Value>) {
             match serde_json::from_str::<Value>(line) {
-                Ok(v) => (v.get("type").and_then(Value::as_str).unwrap_or("unknown").to_string(), Some(v)),
+                Ok(v) => (
+                    v.get("type")
+                        .and_then(Value::as_str)
+                        .unwrap_or("unknown")
+                        .to_string(),
+                    Some(v),
+                ),
                 Err(_) => ("raw".to_string(), None),
             }
         }
         fn normalize(&self, line: &str) -> Vec<Event> {
             match serde_json::from_str::<Value>(line) {
-                Ok(v) if v.get("type").and_then(Value::as_str) == Some("result") => vec![Event::Final {
-                    ok: !v.get("is_error").and_then(Value::as_bool).unwrap_or(false),
-                    text: format!("{}{}", self.prefix, v.get("result").and_then(Value::as_str).unwrap_or_default()),
-                    usage: Default::default(),
+                Ok(v) if v.get("type").and_then(Value::as_str) == Some("result") => {
+                    vec![Event::Final {
+                        ok: !v.get("is_error").and_then(Value::as_bool).unwrap_or(false),
+                        text: format!(
+                            "{}{}",
+                            self.prefix,
+                            v.get("result").and_then(Value::as_str).unwrap_or_default()
+                        ),
+                        usage: Default::default(),
+                    }]
+                }
+                Ok(v) => vec![Event::Other {
+                    kind: "x".into(),
+                    raw: v,
                 }],
-                Ok(v) => vec![Event::Other { kind: "x".into(), raw: v }],
-                Err(_) => vec![Event::Other { kind: "raw".into(), raw: Value::Null }],
+                Err(_) => vec![Event::Other {
+                    kind: "raw".into(),
+                    raw: Value::Null,
+                }],
             }
         }
         fn is_own_process(&self, _: i32, _: Option<&str>) -> bool {
@@ -540,13 +655,25 @@ mod tests {
 
     impl FakeStore {
         fn new(name: &str, cap: i64) -> Arc<Self> {
-            let root = std::env::temp_dir().join(format!("cr_engine_{name}_{}", std::process::id()));
+            let root =
+                std::env::temp_dir().join(format!("cr_engine_{name}_{}", std::process::id()));
             let _ = std::fs::remove_dir_all(&root);
             std::fs::create_dir_all(&root).unwrap();
-            Arc::new(Self { root, cap, enabled: Mutex::new(true), rows: Mutex::new(Default::default()) })
+            Arc::new(Self {
+                root,
+                cap,
+                enabled: Mutex::new(true),
+                rows: Mutex::new(Default::default()),
+            })
         }
         fn add(&self, id: i64, status: &str) {
-            self.rows.lock().unwrap().insert(id, Row { status: status.into(), ..Row::default() });
+            self.rows.lock().unwrap().insert(
+                id,
+                Row {
+                    status: status.into(),
+                    ..Row::default()
+                },
+            );
         }
         fn row(&self, id: i64) -> Row {
             self.rows.lock().unwrap()[&id].clone()
@@ -564,10 +691,22 @@ mod tests {
             self.cap
         }
         fn running_count(&self) -> AppResult<i64> {
-            Ok(self.rows.lock().unwrap().values().filter(|r| r.status == "running").count() as i64)
+            Ok(self
+                .rows
+                .lock()
+                .unwrap()
+                .values()
+                .filter(|r| r.status == "running")
+                .count() as i64)
         }
         fn next_queued(&self) -> AppResult<Option<i64>> {
-            Ok(self.rows.lock().unwrap().iter().find(|(_, r)| r.status == "queued").map(|(id, _)| *id))
+            Ok(self
+                .rows
+                .lock()
+                .unwrap()
+                .iter()
+                .find(|(_, r)| r.status == "queued")
+                .map(|(id, _)| *id))
         }
         fn mark_running(&self, id: i64) -> AppResult<bool> {
             let mut rows = self.rows.lock().unwrap();
@@ -579,7 +718,11 @@ mod tests {
             Ok(true)
         }
         fn is_running(&self, id: i64) -> bool {
-            self.rows.lock().unwrap().get(&id).is_some_and(|r| r.status == "running")
+            self.rows
+                .lock()
+                .unwrap()
+                .get(&id)
+                .is_some_and(|r| r.status == "running")
         }
         fn drop_queued(&self, id: i64) -> AppResult<bool> {
             let mut rows = self.rows.lock().unwrap();
@@ -592,16 +735,34 @@ mod tests {
             }
         }
         fn active_count(&self) -> AppResult<usize> {
-            Ok(self.rows.lock().unwrap().values().filter(|r| r.status == "queued" || r.status == "running").count())
+            Ok(self
+                .rows
+                .lock()
+                .unwrap()
+                .values()
+                .filter(|r| r.status == "queued" || r.status == "running")
+                .count())
         }
         fn kill_queued(&self) -> AppResult<()> {
-            for r in self.rows.lock().unwrap().values_mut().filter(|r| r.status == "queued") {
+            for r in self
+                .rows
+                .lock()
+                .unwrap()
+                .values_mut()
+                .filter(|r| r.status == "queued")
+            {
                 r.status = "killed".into();
             }
             Ok(())
         }
         fn kill_active(&self) -> AppResult<()> {
-            for r in self.rows.lock().unwrap().values_mut().filter(|r| r.status == "queued" || r.status == "running") {
+            for r in self
+                .rows
+                .lock()
+                .unwrap()
+                .values_mut()
+                .filter(|r| r.status == "queued" || r.status == "running")
+            {
                 r.status = "killed".into();
             }
             Ok(())
@@ -625,7 +786,12 @@ mod tests {
             row.norms.push((seq, norm.into()));
         }
         fn last_seq(&self, id: i64) -> i64 {
-            self.rows.lock().unwrap()[&id].events.iter().map(|(s, _)| *s).max().unwrap_or(0)
+            self.rows.lock().unwrap()[&id]
+                .events
+                .iter()
+                .map(|(s, _)| *s)
+                .max()
+                .unwrap_or(0)
         }
         fn running_runs(&self) -> AppResult<Vec<RunningRun>> {
             Ok(self
@@ -705,10 +871,16 @@ mod tests {
             self.log.lock().unwrap().push(format!("started {id}"));
         }
         fn status_changed(&self, id: i64, status: &str) {
-            self.log.lock().unwrap().push(format!("status {id} {status}"));
+            self.log
+                .lock()
+                .unwrap()
+                .push(format!("status {id} {status}"));
         }
         fn event(&self, id: i64, seq: i64, kind: &str, _: &str) {
-            self.log.lock().unwrap().push(format!("event {id} {seq} {kind}"));
+            self.log
+                .lock()
+                .unwrap()
+                .push(format!("event {id} {seq} {kind}"));
         }
         fn dropped(&self, id: i64) {
             self.log.lock().unwrap().push(format!("dropped {id}"));
@@ -720,7 +892,13 @@ mod tests {
             if stopped() {
                 return Ok(None);
             }
-            let harness = self.alt.lock().unwrap().get(&id).copied().unwrap_or_else(|| *self.harness.get().unwrap());
+            let harness = self
+                .alt
+                .lock()
+                .unwrap()
+                .get(&id)
+                .copied()
+                .unwrap_or_else(|| *self.harness.get().unwrap());
             Ok(Some(Prepared {
                 harness,
                 model: script,
@@ -767,7 +945,10 @@ mod tests {
     fn each_run_goes_through_the_harness_it_was_prepared_with() {
         let store = FakeStore::new("per_run", 2);
         let sink = FakeSink::new(Duration::from_secs(60));
-        let alt: &'static FakeHarness = Box::leak(Box::new(FakeHarness { own: false, prefix: "alt:" }));
+        let alt: &'static FakeHarness = Box::leak(Box::new(FakeHarness {
+            own: false,
+            prefix: "alt:",
+        }));
         for id in 1..=2 {
             store.add(id, "queued");
             sink.script(id, RESULT_OK);
@@ -775,7 +956,9 @@ mod tests {
         sink.alt.lock().unwrap().insert(2, alt);
         let e = engine(&store, &sink, false);
         e.pump();
-        wait_for("both done", || store.status(1) == "ok" && store.status(2) == "ok");
+        wait_for("both done", || {
+            store.status(1) == "ok" && store.status(2) == "ok"
+        });
         assert_eq!(store.row(1).text, "done");
         assert_eq!(store.row(2).text, "alt:done");
     }
@@ -821,7 +1004,11 @@ mod tests {
             ("running".into(), "queued".into(), "queued".into())
         );
         wait_for("all done", || (1..=3).all(|i| store.status(i) == "ok"));
-        let started: Vec<String> = sink.log().into_iter().filter(|l| l.starts_with("started")).collect();
+        let started: Vec<String> = sink
+            .log()
+            .into_iter()
+            .filter(|l| l.starts_with("started"))
+            .collect();
         assert_eq!(started, ["started 1", "started 2", "started 3"]);
         let ev: Vec<_> = store.row(1).events.iter().map(|(_, k)| k.clone()).collect();
         assert_eq!(ev, ["assistant", "result"]);
@@ -919,7 +1106,11 @@ mod tests {
         let e = engine(&store, &sink, false);
         Arc::clone(&e).execute(1);
         assert_eq!(store.status(1), "error");
-        assert!(store.row(1).error.unwrap().starts_with("fake exited with exit status: 3 without a result. oops"));
+        assert!(store
+            .row(1)
+            .error
+            .unwrap()
+            .starts_with("fake exited with exit status: 3 without a result. oops"));
     }
 
     fn leave_files(store: &FakeStore, id: i64, stdout: &str) {
@@ -934,18 +1125,28 @@ mod tests {
         let sink = FakeSink::new(Duration::from_secs(60));
         store.add(1, "running");
         store.append_event(1, 1, "assistant", "{}", "{}");
-        leave_files(&store, 1, "{\"type\":\"assistant\"}\n{\"type\":\"result\",\"result\":\"late\"}\n");
+        leave_files(
+            &store,
+            1,
+            "{\"type\":\"assistant\"}\n{\"type\":\"result\",\"result\":\"late\"}\n",
+        );
         let e = engine(&store, &sink, false);
         e.adopt_detached();
         wait_for("ok", || store.status(1) == "ok");
         // seq 1 was recorded before: only the result is new
-        assert_eq!(store.row(1).events, vec![(1, "assistant".to_string()), (2, "result".to_string())]);
+        assert_eq!(
+            store.row(1).events,
+            vec![(1, "assistant".to_string()), (2, "result".to_string())]
+        );
         assert_eq!(store.row(1).text, "late");
         // the new line was stored with its normalized form next to it; the old one is untouched
         let norms = store.row(1).norms;
         assert_eq!(norms[0], (1, "{}".to_string()));
         let last: serde_json::Value = serde_json::from_str(&norms[1].1).unwrap();
-        assert_eq!((last["v"].clone(), last["events"][0]["type"].clone()), (1.into(), "final".into()));
+        assert_eq!(
+            (last["v"].clone(), last["events"][0]["type"].clone()),
+            (1.into(), "final".into())
+        );
         assert_eq!(last["events"][0]["text"], "late");
         assert!(!store.root.join("1").exists());
     }
@@ -974,7 +1175,9 @@ mod tests {
         let e = engine(&store, &sink, false);
         // nothing pumps but the adoption itself
         e.adopt_detached();
-        wait_for("lost run settled and the queued one done", || store.status(1) == "interrupted" && store.status(2) == "ok");
+        wait_for("lost run settled and the queued one done", || {
+            store.status(1) == "interrupted" && store.status(2) == "ok"
+        });
         assert_eq!(store.row(2).text, "done");
     }
 
@@ -988,7 +1191,10 @@ mod tests {
         // stands in for a process that outlived the previous session
         let mut child = Command::new("sh")
             .arg("-c")
-            .arg(format!("sleep 0.6; printf '%s\\n' '{{\"type\":\"result\",\"result\":\"alive\"}}' > {}", out.display()))
+            .arg(format!(
+                "sleep 0.6; printf '%s\\n' '{{\"type\":\"result\",\"result\":\"alive\"}}' > {}",
+                out.display()
+            ))
             .spawn()
             .unwrap();
         store.rows.lock().unwrap().get_mut(&1).unwrap().pid = child.id() as i32;
@@ -1026,7 +1232,10 @@ mod tests {
         let pid = store.row(1).pid;
         e.detach_all();
         // the running row stays `running` for the next start; the queued one is dropped
-        assert_eq!((store.status(1), store.status(2)), ("running".into(), "killed".into()));
+        assert_eq!(
+            (store.status(1), store.status(2)),
+            ("running".into(), "killed".into())
+        );
         assert!(process_alive(pid));
         e.kill_all(); // detaching: a no-op
         assert_eq!(store.status(1), "running");
@@ -1044,7 +1253,10 @@ mod tests {
         e.pump();
         wait_for("live", || e.inner.lock().unwrap().live.contains_key(&1));
         e.kill_all();
-        assert_eq!((store.status(1), store.status(2)), ("killed".into(), "killed".into()));
+        assert_eq!(
+            (store.status(1), store.status(2)),
+            ("killed".into(), "killed".into())
+        );
         wait_for("finished", || !sink.finished.lock().unwrap().is_empty());
         assert!(sink.finished.lock().unwrap()[0].1.shutting_down);
     }

@@ -125,7 +125,12 @@ impl RemoteSession {
             summaries: Vec::new(),
             original_name: None,
         };
-        Self { session, host_id: host.id, host_name: host.name.clone(), host_ssh_target: host.ssh_target.clone() }
+        Self {
+            session,
+            host_id: host.id,
+            host_name: host.name.clone(),
+            host_ssh_target: host.ssh_target.clone(),
+        }
     }
 }
 
@@ -174,7 +179,12 @@ pub fn collect<F>(mut hosts: Vec<Host>, deadline: Duration, fetch: Arc<F>) -> Ve
 where
     F: Fn(&Host) -> RemoteResult<Vec<WireSession>> + Send + Sync + 'static,
 {
-    hosts.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()).then(a.id.cmp(&b.id)));
+    hosts.sort_by(|a, b| {
+        a.name
+            .to_lowercase()
+            .cmp(&b.name.to_lowercase())
+            .then(a.id.cmp(&b.id))
+    });
     let (tx, rx) = mpsc::channel::<(usize, RemoteResult<Vec<WireSession>>)>();
     for (i, host) in hosts.iter().cloned().enumerate() {
         let (tx, fetch) = (tx.clone(), fetch.clone());
@@ -186,10 +196,13 @@ where
     }
     drop(tx);
     let end = Instant::now() + deadline;
-    let mut results: Vec<Option<RemoteResult<Vec<WireSession>>>> = hosts.iter().map(|_| None).collect();
+    let mut results: Vec<Option<RemoteResult<Vec<WireSession>>>> =
+        hosts.iter().map(|_| None).collect();
     let mut pending = hosts.len();
     while pending > 0 {
-        let Some(left) = end.checked_duration_since(Instant::now()) else { break };
+        let Some(left) = end.checked_duration_since(Instant::now()) else {
+            break;
+        };
         match rx.recv_timeout(left) {
             Ok((i, r)) => {
                 results[i] = Some(r);
@@ -205,13 +218,28 @@ where
             let result = result.unwrap_or_else(|| Err(RemoteError::unreachable("timed out")));
             let (status, error, mut sessions) = match result {
                 Ok(list) => {
-                    let sessions = list.into_iter().filter(WireSession::usable).take(MAX_SESSIONS).map(|w| RemoteSession::from_wire(w, host)).collect();
+                    let sessions = list
+                        .into_iter()
+                        .filter(WireSession::usable)
+                        .take(MAX_SESSIONS)
+                        .map(|w| RemoteSession::from_wire(w, host))
+                        .collect();
                     (HostSessionsStatus::Ok, None, sessions)
                 }
-                Err(e) => (status_of(&e), Some(clean(&e.message, MAX_ERROR)), Vec::new()),
+                Err(e) => (
+                    status_of(&e),
+                    Some(clean(&e.message, MAX_ERROR)),
+                    Vec::new(),
+                ),
             };
             sessions.sort_by_key(|s: &RemoteSession| std::cmp::Reverse(s.session.updated_at));
-            HostSessions { host_id: host.id, host_name: host.name.clone(), status, error, sessions }
+            HostSessions {
+                host_id: host.id,
+                host_name: host.name.clone(),
+                status,
+                error,
+                sessions,
+            }
         })
         .collect()
 }
@@ -251,12 +279,18 @@ impl Drop for Flight {
 
 /// Every enabled host's sessions, via the app's runtime. Disabled hosts are left out.
 pub fn collect_all(rt: Arc<RemoteRuntime>, hosts: Vec<Host>) -> Vec<HostSessions> {
-    collect(enabled(hosts), DEADLINE, Arc::new(move |h: &Host| {
-        let Some(_flight) = Flight::enter(h.id) else {
-            return Err(RemoteError::unreachable("the previous lookup is still running"));
-        };
-        fetch(&rt, h)
-    }))
+    collect(
+        enabled(hosts),
+        DEADLINE,
+        Arc::new(move |h: &Host| {
+            let Some(_flight) = Flight::enter(h.id) else {
+                return Err(RemoteError::unreachable(
+                    "the previous lookup is still running",
+                ));
+            };
+            fetch(&rt, h)
+        }),
+    )
 }
 
 fn enabled(hosts: Vec<Host>) -> Vec<Host> {
@@ -270,8 +304,13 @@ impl RemoteClient {
         struct Sessions {
             sessions: Vec<WireSession>,
         }
-        let limits = super::http::Limits { max_body: MAX_BODY, total: Some(SESSIONS_TIMEOUT) };
-        Ok(self.get_limited::<Sessions>("/v1/sessions", READ_TIMEOUT, limits)?.sessions)
+        let limits = super::http::Limits {
+            max_body: MAX_BODY,
+            total: Some(SESSIONS_TIMEOUT),
+        };
+        Ok(self
+            .get_limited::<Sessions>("/v1/sessions", READ_TIMEOUT, limits)?
+            .sessions)
     }
 }
 
@@ -305,64 +344,140 @@ mod tests {
     #[test]
     fn one_reachable_and_one_down_host_give_rows_in_name_order_without_failing_the_list() {
         let hosts = vec![host(2, "nija"), host(1, "koza")];
-        let out = collect(hosts, DEADLINE, Arc::new(|h: &Host| {
-            if h.name == "koza" {
-                Ok(vec![wire("old", 1), wire("new", 9)])
-            } else {
-                Err(RemoteError::unreachable("ssh: connection refused"))
-            }
-        }));
-        assert_eq!(out.iter().map(|h| (h.host_name.as_str(), h.status)).collect::<Vec<_>>(), [("koza", HostSessionsStatus::Ok), ("nija", HostSessionsStatus::Unreachable)]);
-        assert_eq!(out[0].sessions.iter().map(|s| s.session.session_id.as_str()).collect::<Vec<_>>(), ["new", "old"]);
+        let out = collect(
+            hosts,
+            DEADLINE,
+            Arc::new(|h: &Host| {
+                if h.name == "koza" {
+                    Ok(vec![wire("old", 1), wire("new", 9)])
+                } else {
+                    Err(RemoteError::unreachable("ssh: connection refused"))
+                }
+            }),
+        );
+        assert_eq!(
+            out.iter()
+                .map(|h| (h.host_name.as_str(), h.status))
+                .collect::<Vec<_>>(),
+            [
+                ("koza", HostSessionsStatus::Ok),
+                ("nija", HostSessionsStatus::Unreachable)
+            ]
+        );
+        assert_eq!(
+            out[0]
+                .sessions
+                .iter()
+                .map(|s| s.session.session_id.as_str())
+                .collect::<Vec<_>>(),
+            ["new", "old"]
+        );
         assert_eq!(out[1].error.as_deref(), Some("ssh: connection refused"));
         assert!(out[1].sessions.is_empty());
         let s = &out[0].sessions[0];
-        assert_eq!((s.host_id, s.host_name.as_str(), s.host_ssh_target.as_str()), (1, "koza", "koza-alias"));
+        assert_eq!(
+            (s.host_id, s.host_name.as_str(), s.host_ssh_target.as_str()),
+            (1, "koza", "koza-alias")
+        );
         assert_eq!(s.session.tmux.as_ref().map(|t| t.pane.as_str()), Some("%3"));
     }
 
     #[test]
     fn errors_map_to_a_status_and_the_dto_carries_the_host_next_to_the_session() {
-        let out = collect(vec![host(1, "a"), host(2, "b"), host(3, "c")], DEADLINE, Arc::new(|h: &Host| match h.id {
-            1 => Err(RemoteError::new(PROTOCOL_MISMATCH, "host runs protocol 2")),
-            2 => Err(RemoteError::disabled("off")),
-            _ => Err(RemoteError::protocol("bad json")),
-        }));
-        assert_eq!(out.iter().map(|h| h.status).collect::<Vec<_>>(), [HostSessionsStatus::ProtocolMismatch, HostSessionsStatus::Disabled, HostSessionsStatus::Error]);
-        let ok = collect(vec![host(1, "a")], DEADLINE, Arc::new(|_: &Host| Ok(vec![wire("s", 1)])));
+        let out = collect(
+            vec![host(1, "a"), host(2, "b"), host(3, "c")],
+            DEADLINE,
+            Arc::new(|h: &Host| match h.id {
+                1 => Err(RemoteError::new(PROTOCOL_MISMATCH, "host runs protocol 2")),
+                2 => Err(RemoteError::disabled("off")),
+                _ => Err(RemoteError::protocol("bad json")),
+            }),
+        );
+        assert_eq!(
+            out.iter().map(|h| h.status).collect::<Vec<_>>(),
+            [
+                HostSessionsStatus::ProtocolMismatch,
+                HostSessionsStatus::Disabled,
+                HostSessionsStatus::Error
+            ]
+        );
+        let ok = collect(
+            vec![host(1, "a")],
+            DEADLINE,
+            Arc::new(|_: &Host| Ok(vec![wire("s", 1)])),
+        );
         let v = serde_json::to_value(&ok[0].sessions[0]).unwrap();
-        assert_eq!((v["session_id"].as_str(), v["host_id"].as_i64(), v["focus"].as_str(), v["summaries"].as_array().map(Vec::len)), (Some("s"), Some(1), Some("no_terminal"), Some(0)));
+        assert_eq!(
+            (
+                v["session_id"].as_str(),
+                v["host_id"].as_i64(),
+                v["focus"].as_str(),
+                v["summaries"].as_array().map(Vec::len)
+            ),
+            (Some("s"), Some(1), Some("no_terminal"), Some(0))
+        );
         assert_eq!(v["pid"], serde_json::Value::Null);
     }
 
     #[test]
     fn a_stalled_host_times_out_without_delaying_the_good_one() {
         let started = Instant::now();
-        let out = collect(vec![host(1, "good"), host(2, "stuck")], Duration::from_millis(300), Arc::new(|h: &Host| {
-            if h.name == "stuck" {
-                std::thread::sleep(Duration::from_secs(3));
-            }
-            Ok(vec![wire("s", 1)])
-        }));
-        assert!(started.elapsed() < Duration::from_secs(2), "{:?}", started.elapsed());
-        assert_eq!((out[0].status, out[0].sessions.len()), (HostSessionsStatus::Ok, 1));
-        assert_eq!((out[1].status, out[1].error.as_deref(), out[1].sessions.len()), (HostSessionsStatus::Unreachable, Some("timed out"), 0));
+        let out = collect(
+            vec![host(1, "good"), host(2, "stuck")],
+            Duration::from_millis(300),
+            Arc::new(|h: &Host| {
+                if h.name == "stuck" {
+                    std::thread::sleep(Duration::from_secs(3));
+                }
+                Ok(vec![wire("s", 1)])
+            }),
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "{:?}",
+            started.elapsed()
+        );
+        assert_eq!(
+            (out[0].status, out[0].sessions.len()),
+            (HostSessionsStatus::Ok, 1)
+        );
+        assert_eq!(
+            (
+                out[1].status,
+                out[1].error.as_deref(),
+                out[1].sessions.len()
+            ),
+            (HostSessionsStatus::Unreachable, Some("timed out"), 0)
+        );
     }
 
     #[test]
     fn remote_text_is_cleaned_and_bounded() {
         let mut hostile = wire("id\u{1b}[200~x\nrm", 1);
         hostile.cwd = format!("/a\r\n{}", "d".repeat(5000));
-        let many: Vec<WireSession> = std::iter::once(hostile).chain((0..800).map(|i| wire(&format!("s{i}"), i))).collect();
-        let out = collect(vec![host(1, "a"), host(2, "b")], DEADLINE, Arc::new(move |h: &Host| {
-            if h.id == 1 {
-                Ok(many.clone())
-            } else {
-                Err(RemoteError::unreachable(format!("bad\u{7}\n{}", "e".repeat(1000))))
-            }
-        }));
+        let many: Vec<WireSession> = std::iter::once(hostile)
+            .chain((0..800).map(|i| wire(&format!("s{i}"), i)))
+            .collect();
+        let out = collect(
+            vec![host(1, "a"), host(2, "b")],
+            DEADLINE,
+            Arc::new(move |h: &Host| {
+                if h.id == 1 {
+                    Ok(many.clone())
+                } else {
+                    Err(RemoteError::unreachable(format!(
+                        "bad\u{7}\n{}",
+                        "e".repeat(1000)
+                    )))
+                }
+            }),
+        );
         assert_eq!(out[0].sessions.len(), MAX_SESSIONS);
-        let h = out[0].sessions.iter().find(|s| s.session.session_id.starts_with("id")).unwrap();
+        let h = out[0]
+            .sessions
+            .iter()
+            .find(|s| s.session.session_id.starts_with("id"))
+            .unwrap();
         assert_eq!(h.session.session_id, "id[200~xrm");
         assert!(h.session.cwd.len() <= MAX_CWD && !h.session.cwd.contains('\n'));
         let e = out[1].error.as_deref().unwrap();
@@ -391,7 +506,14 @@ mod server_tests {
         let out = collect_all(rt.clone(), vec![h]);
         assert_eq!(out[0].status, HostSessionsStatus::Ok, "{:?}", out[0].error);
         let s = &out[0].sessions[0];
-        assert_eq!((s.session.harness.as_str(), s.session.session_id.as_str(), s.host_name.as_str()), ("fake", "fake-1", "koza"));
+        assert_eq!(
+            (
+                s.session.harness.as_str(),
+                s.session.session_id.as_str(),
+                s.host_name.as_str()
+            ),
+            ("fake", "fake-1", "koza")
+        );
         assert_eq!(s.session.repo.as_deref(), Some("acme/widgets"));
         assert_eq!(s.session.tmux.as_ref().map(|t| t.pane.as_str()), Some("%7"));
         rt.shutdown();

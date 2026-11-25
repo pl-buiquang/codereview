@@ -179,10 +179,18 @@ mod tests {
     #[test]
     fn parse_board_card() {
         let a = parse_deep_link("codereview://board/acme/widget/7").unwrap();
-        let DeepLinkAction::ShowBoardCard { owner, name, number } = a else {
+        let DeepLinkAction::ShowBoardCard {
+            owner,
+            name,
+            number,
+        } = a
+        else {
             panic!("expected ShowBoardCard, got {a:?}");
         };
-        assert_eq!((owner.as_str(), name.as_str(), number), ("acme", "widget", 7));
+        assert_eq!(
+            (owner.as_str(), name.as_str(), number),
+            ("acme", "widget", 7)
+        );
     }
 
     #[test]
@@ -243,7 +251,12 @@ mod tests {
     #[test]
     fn parse_repo_plain() {
         let a = parse_deep_link("codereview://repo/7").unwrap();
-        let DeepLinkAction::OpenRepo { repo_id, ref_name, worktree } = a else {
+        let DeepLinkAction::OpenRepo {
+            repo_id,
+            ref_name,
+            worktree,
+        } = a
+        else {
             panic!("expected OpenRepo, got {a:?}");
         };
         assert_eq!(repo_id, 7);
@@ -258,7 +271,10 @@ mod tests {
             .append_pair("ref", "feature/x")
             .append_pair("worktree", "/tmp/my wt");
         let a = parse_deep_link(url.as_str()).unwrap();
-        let DeepLinkAction::OpenRepo { ref_name, worktree, .. } = a else {
+        let DeepLinkAction::OpenRepo {
+            ref_name, worktree, ..
+        } = a
+        else {
             panic!("expected OpenRepo, got {a:?}");
         };
         assert_eq!(ref_name.as_deref(), Some("feature/x"));

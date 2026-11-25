@@ -65,7 +65,9 @@ pub fn run_git_bytes(repo: &Path, args: &[&str]) -> AppResult<Vec<u8>> {
         .output()
         .map_err(|e| AppError::Git(format!("failed to spawn git: {e}")))?;
     if !output.status.success() {
-        return Err(AppError::Git(String::from_utf8_lossy(&output.stderr).trim().to_string()));
+        return Err(AppError::Git(
+            String::from_utf8_lossy(&output.stderr).trim().to_string(),
+        ));
     }
     Ok(output.stdout)
 }
@@ -78,7 +80,11 @@ pub fn show_blob_bytes(repo: &Path, rev: &str, path: &str) -> AppResult<Vec<u8>>
 
 /// Whether a background fetch ([`fetch_commits_in_background`]) is running in `repo`.
 pub fn background_fetch_running(repo: &Path) -> bool {
-    BG_FETCHES.lock().unwrap().as_ref().is_some_and(|set| set.contains(repo))
+    BG_FETCHES
+        .lock()
+        .unwrap()
+        .as_ref()
+        .is_some_and(|set| set.contains(repo))
 }
 
 pub fn is_git_repo(path: &Path) -> bool {
@@ -197,7 +203,8 @@ pub fn validate_commit_ref(rev: &str) -> AppResult<()> {
 
 /// Whether `sha` is already a local commit object.
 pub fn has_commit(repo: &Path, sha: &str) -> bool {
-    validate_commit_ref(sha).is_ok() && run_git(repo, &["cat-file", "-e", &format!("{sha}^{{commit}}")]).is_ok()
+    validate_commit_ref(sha).is_ok()
+        && run_git(repo, &["cat-file", "-e", &format!("{sha}^{{commit}}")]).is_ok()
 }
 
 /// Fetch `shas` from `origin` in a single negotiation.
@@ -221,7 +228,11 @@ pub fn ensure_commits(repo: &Path, shas: &[&str]) -> AppResult<()> {
     for sha in shas {
         validate_commit_ref(sha)?;
     }
-    let missing: Vec<&str> = shas.iter().copied().filter(|sha| !has_commit(repo, sha)).collect();
+    let missing: Vec<&str> = shas
+        .iter()
+        .copied()
+        .filter(|sha| !has_commit(repo, sha))
+        .collect();
     if missing.is_empty() {
         return Ok(());
     }
@@ -241,15 +252,24 @@ static BG_FETCHES: std::sync::Mutex<Option<std::collections::HashSet<std::path::
 /// request while one runs is dropped, the next open finds the commits missing and asks again.
 pub fn fetch_commits_in_background(repo: &Path, shas: &[&str]) {
     let repo = repo.to_path_buf();
-    if !BG_FETCHES.lock().unwrap().get_or_insert_with(Default::default).insert(repo.clone()) {
+    if !BG_FETCHES
+        .lock()
+        .unwrap()
+        .get_or_insert_with(Default::default)
+        .insert(repo.clone())
+    {
         return;
     }
     let shas: Vec<String> = shas.iter().map(|s| s.to_string()).collect();
     std::thread::spawn(move || {
         let refs: Vec<&str> = shas.iter().map(String::as_str).collect();
         match fetch_commits(&repo, &refs) {
-            Ok(()) => log::info!(target: "git", "background fetch of {} commit(s) done in {}", refs.len(), repo.display()),
-            Err(e) => log::warn!(target: "git", "background fetch failed in {}: {e}", repo.display()),
+            Ok(()) => {
+                log::info!(target: "git", "background fetch of {} commit(s) done in {}", refs.len(), repo.display())
+            }
+            Err(e) => {
+                log::warn!(target: "git", "background fetch failed in {}: {e}", repo.display())
+            }
         }
         if let Some(set) = BG_FETCHES.lock().unwrap().as_mut() {
             set.remove(&repo);
@@ -297,9 +317,24 @@ pub fn show_file(path: &Path, sha: &str, file_path: &str) -> AppResult<String> {
 
 /// `git grep -nE <pattern>` over the tree at `sha`, limited to the `globs` pathspecs. Returns
 /// `(path, 1-based line, line text)`; no match is an empty list, not an error.
-pub fn grep_at(path: &Path, sha: &str, pattern: &str, globs: &[&str]) -> AppResult<Vec<(String, u32, String)>> {
+pub fn grep_at(
+    path: &Path,
+    sha: &str,
+    pattern: &str,
+    globs: &[&str],
+) -> AppResult<Vec<(String, u32, String)>> {
     let sha = rev_parse(path, sha)?;
-    let mut args = vec!["grep", "-n", "-I", "-E", "--no-color", "-e", pattern, &sha, "--"];
+    let mut args = vec![
+        "grep",
+        "-n",
+        "-I",
+        "-E",
+        "--no-color",
+        "-e",
+        pattern,
+        &sha,
+        "--",
+    ];
     args.extend(globs);
     let out = match run_git(path, &args) {
         Ok(out) => out,
@@ -321,7 +356,12 @@ pub fn grep_at(path: &Path, sha: &str, pattern: &str, globs: &[&str]) -> AppResu
 
 /// `git grep -lE` over the tree at `sha` (already a full commit id): the paths (within `globs`)
 /// with at least one match for any of `patterns`. No match is an empty list, not an error.
-pub fn grep_files_at(path: &Path, sha: &str, patterns: &[String], globs: &[&str]) -> AppResult<Vec<String>> {
+pub fn grep_files_at(
+    path: &Path,
+    sha: &str,
+    patterns: &[String],
+    globs: &[&str],
+) -> AppResult<Vec<String>> {
     let mut args = vec!["grep", "-l", "-I", "-E", "--no-color"];
     for p in patterns {
         args.extend(["-e", p.as_str()]);
@@ -334,14 +374,21 @@ pub fn grep_files_at(path: &Path, sha: &str, patterns: &[String], globs: &[&str]
         Err(e) => return Err(e),
     };
     let prefix = format!("{sha}:");
-    Ok(out.lines().filter_map(|l| l.strip_prefix(&prefix).map(str::to_string)).collect())
+    Ok(out
+        .lines()
+        .filter_map(|l| l.strip_prefix(&prefix).map(str::to_string))
+        .collect())
 }
-
 
 /// Contents of `paths` at `sha` (a full commit id), read through one `git cat-file --batch`
 /// process. Files that do not exist or are larger than `max_bytes` come back as `None` (still in
 /// input order).
-pub fn cat_files(path: &Path, sha: &str, paths: &[String], max_bytes: usize) -> AppResult<Vec<Option<String>>> {
+pub fn cat_files(
+    path: &Path,
+    sha: &str,
+    paths: &[String],
+    max_bytes: usize,
+) -> AppResult<Vec<Option<String>>> {
     use std::io::{BufRead, BufReader, Read, Write};
     use std::process::Stdio;
 
@@ -370,12 +417,21 @@ pub fn cat_files(path: &Path, sha: &str, paths: &[String], max_bytes: usize) -> 
     let mut header = String::new();
     for _ in paths {
         header.clear();
-        if out.read_line(&mut header).map_err(|e| AppError::Git(e.to_string()))? == 0 {
+        if out
+            .read_line(&mut header)
+            .map_err(|e| AppError::Git(e.to_string()))?
+            == 0
+        {
             files.push(None);
             continue;
         }
         // `<oid> <type> <size>` or `<spec> missing`
-        let size = match header.trim_end().rsplit(' ').next().zip(header.split(' ').nth(1)) {
+        let size = match header
+            .trim_end()
+            .rsplit(' ')
+            .next()
+            .zip(header.split(' ').nth(1))
+        {
             Some((size, "blob")) => size.parse::<usize>().ok(),
             _ => None,
         };
@@ -384,9 +440,14 @@ pub fn cat_files(path: &Path, sha: &str, paths: &[String], max_bytes: usize) -> 
             continue;
         };
         let mut buf = vec![0u8; size + 1]; // content + trailing newline
-        out.read_exact(&mut buf).map_err(|e| AppError::Git(e.to_string()))?;
+        out.read_exact(&mut buf)
+            .map_err(|e| AppError::Git(e.to_string()))?;
         buf.truncate(size);
-        files.push(if size > max_bytes { None } else { Some(String::from_utf8_lossy(&buf).into_owned()) });
+        files.push(if size > max_bytes {
+            None
+        } else {
+            Some(String::from_utf8_lossy(&buf).into_owned())
+        });
     }
     drop(out);
     let _ = writer.join();
@@ -512,7 +573,12 @@ fn replay_tree(repo: &Path, old_base: &str, old_head: &str, new_base: &str) -> O
 
 /// Resolve the since side of an interdiff between an earlier pin
 /// (`old_base`, `old_head`) and the new merge-base.
-pub fn interdiff_base(repo: &Path, old_base: &str, old_head: &str, new_base: &str) -> AppResult<InterdiffBase> {
+pub fn interdiff_base(
+    repo: &Path,
+    old_base: &str,
+    old_head: &str,
+    new_base: &str,
+) -> AppResult<InterdiffBase> {
     ensure_commits(repo, &[old_base, old_head, new_base])?;
     let old_base = rev_parse(repo, old_base)?;
     let old_head = rev_parse(repo, old_head)?;
@@ -527,8 +593,15 @@ pub fn interdiff_base(repo: &Path, old_base: &str, old_head: &str, new_base: &st
 }
 
 fn changed_paths(repo: &Path, a: &str, b: &str) -> AppResult<Vec<String>> {
-    let out = run_git(repo, &["diff", "--name-only", "-z", "--no-color", a, b, "--"])?;
-    Ok(out.split('\0').filter(|p| !p.is_empty()).map(str::to_string).collect())
+    let out = run_git(
+        repo,
+        &["diff", "--name-only", "-z", "--no-color", a, b, "--"],
+    )?;
+    Ok(out
+        .split('\0')
+        .filter(|p| !p.is_empty())
+        .map(str::to_string)
+        .collect())
 }
 
 /// What changed between an earlier PR pin and `new_head`, rebase-aware: the
@@ -570,7 +643,13 @@ pub fn show_blob(repo: &Path, treeish: &str, file_path: &str) -> AppResult<Strin
     validate_commit_ref(treeish)?;
     run_git(
         repo,
-        &["show", "--no-ext-diff", "--no-textconv", &format!("{treeish}:{file_path}"), "--"],
+        &[
+            "show",
+            "--no-ext-diff",
+            "--no-textconv",
+            &format!("{treeish}:{file_path}"),
+            "--",
+        ],
     )
 }
 
@@ -664,8 +743,11 @@ mod tests {
     fn linguist_generated_reads_gitattributes() {
         let dir = fixture_repo();
         let p = dir.path();
-        fs::write(p.join(".gitattributes"), "gen/** linguist-generated\nx.pb.go linguist-generated=true\n")
-            .unwrap();
+        fs::write(
+            p.join(".gitattributes"),
+            "gen/** linguist-generated\nx.pb.go linguist-generated=true\n",
+        )
+        .unwrap();
         let got = linguist_generated(p, &["gen/a.ts", "x.pb.go", "file.txt"]).unwrap();
         assert_eq!(got, ["gen/a.ts", "x.pb.go"]);
         assert!(linguist_generated(p, &[]).unwrap().is_empty());
@@ -984,7 +1066,11 @@ mod tests {
         assert!(out.contains("+fix"), "{out}");
         let changed: Vec<&str> = out
             .lines()
-            .filter(|l| (l.starts_with('+') || l.starts_with('-')) && !l.starts_with("+++") && !l.starts_with("---"))
+            .filter(|l| {
+                (l.starts_with('+') || l.starts_with('-'))
+                    && !l.starts_with("+++")
+                    && !l.starts_with("---")
+            })
             .collect();
         assert_eq!(changed, ["-line9", "+fix"], "{out}");
         assert!(!out.contains("b.txt"), "{out}");
@@ -1025,6 +1111,9 @@ mod tests {
         ));
         let out = interdiff(p, &old_base, &old_head, &new_base, &new_head).unwrap();
         assert!(out.contains("-pr1") && out.contains("+resolved"), "{out}");
-        assert!(!out.contains("b.txt"), "limited to files the PR touches: {out}");
+        assert!(
+            !out.contains("b.txt"),
+            "limited to files the PR touches: {out}"
+        );
     }
 }

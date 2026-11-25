@@ -134,7 +134,15 @@ mod tests {
             .unwrap()
             .collect::<rusqlite::Result<_>>()
             .unwrap();
-        for expected in ["comment", "repository", "review", "target", "board_card", "board_link", "board_meta"] {
+        for expected in [
+            "comment",
+            "repository",
+            "review",
+            "target",
+            "board_card",
+            "board_link",
+            "board_meta",
+        ] {
             assert!(tables.contains(&expected.to_string()), "missing {expected}");
         }
     }
@@ -154,7 +162,9 @@ mod tests {
         .unwrap();
         migrate(&conn).unwrap();
         let row: (String, String, Option<String>) = conn
-            .query_row("SELECT kind, value, harness FROM board_meta", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .query_row("SELECT kind, value, harness FROM board_meta", [], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+            })
             .unwrap();
         assert_eq!(row, ("claude_session".into(), "s1".into(), None));
         conn.execute(
@@ -206,7 +216,9 @@ mod tests {
         migrate(&conn).unwrap();
 
         let resolved: Option<String> = conn
-            .query_row("SELECT resolved_at FROM comment WHERE id = 1", [], |r| r.get(0))
+            .query_row("SELECT resolved_at FROM comment WHERE id = 1", [], |r| {
+                r.get(0)
+            })
             .unwrap();
         assert!(resolved.is_none(), "old comment defaults to unresolved");
     }
@@ -250,7 +262,11 @@ mod tests {
         migrate(&conn).unwrap();
 
         let base_sha: Option<String> = conn
-            .query_row("SELECT anchored_base_sha FROM comment WHERE id = 1", [], |r| r.get(0))
+            .query_row(
+                "SELECT anchored_base_sha FROM comment WHERE id = 1",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert!(base_sha.is_none(), "old comment defaults to NULL base pin");
     }
@@ -325,18 +341,28 @@ mod tests {
         migrate(&conn).unwrap();
 
         let q = |id: &str| -> (String, Option<String>) {
-            conn.query_row("SELECT state, archive_cause FROM inbox_entry WHERE id = ?1", [id], |r| {
-                Ok((r.get(0)?, r.get(1)?))
-            })
+            conn.query_row(
+                "SELECT state, archive_cause FROM inbox_entry WHERE id = ?1",
+                [id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
             .unwrap()
         };
         assert_eq!(q("open"), ("new".into(), None));
         assert_eq!(q("done"), ("archived".into(), Some("dismissed".into())));
         assert_eq!(q("arch"), ("archived".into(), Some("dismissed".into())));
         assert_eq!(q("closed"), ("archived".into(), Some("closed".into())));
-        assert_eq!(q("mine"), ("archived".into(), Some("dismissed".into())), "own PRs leave the queue");
+        assert_eq!(
+            q("mine"),
+            ("archived".into(), Some("dismissed".into())),
+            "own PRs leave the queue"
+        );
         assert_eq!(q("mine_issue"), ("new".into(), None), "own issues stay");
-        assert_eq!(q("onboard"), ("tracked".into(), None), "on the board beats done");
+        assert_eq!(
+            q("onboard"),
+            ("tracked".into(), None),
+            "on the board beats done"
+        );
         assert_eq!(q("discarded"), ("new".into(), None));
     }
 
@@ -359,12 +385,25 @@ mod tests {
         migrate(&conn).unwrap();
 
         let viewed = |id: &str| -> Option<String> {
-            conn.query_row("SELECT viewed_at FROM inbox_entry WHERE id = ?1", [id], |r| r.get(0)).unwrap()
+            conn.query_row(
+                "SELECT viewed_at FROM inbox_entry WHERE id = ?1",
+                [id],
+                |r| r.get(0),
+            )
+            .unwrap()
         };
         assert_eq!(viewed("old").as_deref(), Some("2026-01-02T00:00:00+00:00"));
-        assert_eq!(viewed("fresh"), None, "arrived after the marker: still counts");
+        assert_eq!(
+            viewed("fresh"),
+            None,
+            "arrived after the marker: still counts"
+        );
         let marker: i64 = conn
-            .query_row("SELECT COUNT(*) FROM meta WHERE key = 'inbox_new_seen_at'", [], |r| r.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM meta WHERE key = 'inbox_new_seen_at'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(marker, 0);
     }
@@ -405,39 +444,95 @@ mod tests {
         migrate(&conn).unwrap();
 
         let q = |sql: &str| -> String {
-            conn.query_row(&format!("SELECT CAST(({sql}) AS TEXT)"), [], |r| r.get::<_, Option<String>>(0))
-                .unwrap()
-                .unwrap_or_default()
+            conn.query_row(&format!("SELECT CAST(({sql}) AS TEXT)"), [], |r| {
+                r.get::<_, Option<String>>(0)
+            })
+            .unwrap()
+            .unwrap_or_default()
         };
-        assert_eq!(q("SELECT title FROM gh_pr WHERE node_id = 'PR_7'"), "board title", "newer updated_at wins");
-        assert_eq!(q("SELECT body_snippet FROM gh_pr WHERE node_id = 'PR_7'"), "snippet");
-        assert_eq!(q("SELECT head_ref || ' ' || base_ref FROM gh_pr WHERE node_id = 'PR_7'"), "feat main");
+        assert_eq!(
+            q("SELECT title FROM gh_pr WHERE node_id = 'PR_7'"),
+            "board title",
+            "newer updated_at wins"
+        );
+        assert_eq!(
+            q("SELECT body_snippet FROM gh_pr WHERE node_id = 'PR_7'"),
+            "snippet"
+        );
+        assert_eq!(
+            q("SELECT head_ref || ' ' || base_ref FROM gh_pr WHERE node_id = 'PR_7'"),
+            "feat main"
+        );
         assert_eq!(q("SELECT ci_state || ' ' || auto_merge_method FROM gh_pr_status WHERE pr_id = 'PR_7'"), "SUCCESS SQUASH");
-        assert_eq!(q("SELECT pending_count FROM gh_pr_threads WHERE pr_id = 'PR_7'"), "2");
-        assert_eq!(q("SELECT filename FROM gh_pr_file WHERE pr_id = 'PR_7'"), "a.rs");
-        assert_eq!(q("SELECT avatar_url FROM gh_user WHERE login = 'octo'"), "https://a/o.png");
-        assert_eq!(q("SELECT engaged_at FROM inbox_entry WHERE id = 'PR_7'"), "engaged");
-        assert_eq!(q("SELECT untracked_at FROM inbox_entry WHERE id = 'I_9'"), "archived");
-        assert_eq!(q("SELECT reason FROM item_reasons WHERE item_id = 'PR_7'"), "direct_review");
-        assert_eq!(q("SELECT tracked_at FROM board_card WHERE id = 'PR_7'"), "tracked");
-        assert_eq!(q("SELECT value FROM board_meta WHERE card_id = 'PR_7'"), "n");
+        assert_eq!(
+            q("SELECT pending_count FROM gh_pr_threads WHERE pr_id = 'PR_7'"),
+            "2"
+        );
+        assert_eq!(
+            q("SELECT filename FROM gh_pr_file WHERE pr_id = 'PR_7'"),
+            "a.rs"
+        );
+        assert_eq!(
+            q("SELECT avatar_url FROM gh_user WHERE login = 'octo'"),
+            "https://a/o.png"
+        );
+        assert_eq!(
+            q("SELECT engaged_at FROM inbox_entry WHERE id = 'PR_7'"),
+            "engaged"
+        );
+        assert_eq!(
+            q("SELECT untracked_at FROM inbox_entry WHERE id = 'I_9'"),
+            "archived"
+        );
+        assert_eq!(
+            q("SELECT reason FROM item_reasons WHERE item_id = 'PR_7'"),
+            "direct_review"
+        );
+        assert_eq!(
+            q("SELECT tracked_at FROM board_card WHERE id = 'PR_7'"),
+            "tracked"
+        );
+        assert_eq!(
+            q("SELECT value FROM board_meta WHERE card_id = 'PR_7'"),
+            "n"
+        );
         assert_eq!(q("SELECT gh_pr_id FROM target WHERE id = 1"), "PR_7");
-        assert_eq!(q("SELECT head_sha FROM review WHERE id = 1"), "h", "pins untouched");
-        assert_eq!(q("SELECT registered_at FROM repository WHERE id = 1"), "added");
+        assert_eq!(
+            q("SELECT head_sha FROM review WHERE id = 1"),
+            "h",
+            "pins untouched"
+        );
+        assert_eq!(
+            q("SELECT registered_at FROM repository WHERE id = 1"),
+            "added"
+        );
         assert_eq!(
             q("SELECT COALESCE(registered_at, 'auto') FROM repository WHERE remote_owner = 'other'"),
             "auto",
             "a repo only the inbox knew is auto-added"
         );
-        assert_eq!(q("SELECT title FROM gh_issue WHERE node_id = 'I_9'"), "foreign issue");
-        assert_eq!(q("SELECT COUNT(*) FROM sqlite_master WHERE name = 'items'"), "0");
+        assert_eq!(
+            q("SELECT title FROM gh_issue WHERE node_id = 'I_9'"),
+            "foreign issue"
+        );
+        assert_eq!(
+            q("SELECT COUNT(*) FROM sqlite_master WHERE name = 'items'"),
+            "0"
+        );
         let violations: i64 = conn
-            .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| r.get(0))
+            .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| {
+                r.get(0)
+            })
             .unwrap();
         assert_eq!(violations, 0);
         conn.execute("DELETE FROM review", []).unwrap();
-        conn.execute("DELETE FROM board_card WHERE id = 'PR_7'", []).unwrap();
-        assert_eq!(q("SELECT COUNT(*) FROM board_meta"), "0", "board_meta still cascades from the rebuilt card");
+        conn.execute("DELETE FROM board_card WHERE id = 'PR_7'", [])
+            .unwrap();
+        assert_eq!(
+            q("SELECT COUNT(*) FROM board_meta"),
+            "0",
+            "board_meta still cascades from the rebuilt card"
+        );
     }
 
     /// A database at 0042 with one routine per permission mode, plus a handler routine.
@@ -475,7 +570,10 @@ mod tests {
         let conn = db_at_0042();
         migrate(&conn).unwrap();
         let access = |key: &str| -> String {
-            conn.query_row("SELECT access FROM routine WHERE key = ?1", [key], |r| r.get(0)).unwrap()
+            conn.query_row("SELECT access FROM routine WHERE key = ?1", [key], |r| {
+                r.get(0)
+            })
+            .unwrap()
         };
         assert_eq!(access("bypass"), "full");
         assert_eq!(access("edits"), "edit");
@@ -490,7 +588,10 @@ mod tests {
         let conn = db_at_0042();
         migrate(&conn).unwrap();
         let kind = |key: &str| -> String {
-            conn.query_row("SELECT kind FROM routine WHERE key = ?1", [key], |r| r.get(0)).unwrap()
+            conn.query_row("SELECT kind FROM routine WHERE key = ?1", [key], |r| {
+                r.get(0)
+            })
+            .unwrap()
         };
         assert_eq!(kind("focus"), "system");
         assert_eq!(kind("review"), "system");
@@ -502,8 +603,13 @@ mod tests {
     fn migration_0043_moves_claude_fields_into_harness_overrides() {
         let conn = db_at_0042();
         migrate(&conn).unwrap();
-        let raw: String =
-            conn.query_row("SELECT harness_overrides FROM routine WHERE key = 'plan'", [], |r| r.get(0)).unwrap();
+        let raw: String = conn
+            .query_row(
+                "SELECT harness_overrides FROM routine WHERE key = 'plan'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
         let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
         assert_eq!(
             v,
@@ -516,9 +622,11 @@ mod tests {
         );
         // The old columns are left as they were.
         let (mode, tools): (String, String) = conn
-            .query_row("SELECT permission_mode, allowed_tools FROM routine WHERE key = 'plan'", [], |r| {
-                Ok((r.get(0)?, r.get(1)?))
-            })
+            .query_row(
+                "SELECT permission_mode, allowed_tools FROM routine WHERE key = 'plan'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
             .unwrap();
         assert_eq!(mode, "plan");
         assert_eq!(tools, "[\"Read\",\"Bash(git:*)\"]");
@@ -536,14 +644,31 @@ mod tests {
         migrate(&conn).unwrap();
 
         let (name, harness, default): (String, String, i64) = conn
-            .query_row("SELECT name, harness, is_default FROM ai_profile", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .query_row(
+                "SELECT name, harness, is_default FROM ai_profile",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
             .unwrap();
-        assert_eq!((name.as_str(), harness.as_str(), default), ("Claude Code", "claude", 1));
-        let pinned: Option<i64> = conn.query_row("SELECT profile_id FROM chat", [], |r| r.get(0)).unwrap();
+        assert_eq!(
+            (name.as_str(), harness.as_str(), default),
+            ("Claude Code", "claude", 1)
+        );
+        let pinned: Option<i64> = conn
+            .query_row("SELECT profile_id FROM chat", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(pinned, None);
-        let run_harness: String = conn.query_row("SELECT harness FROM ai_run", [], |r| r.get(0)).unwrap();
+        let run_harness: String = conn
+            .query_row("SELECT harness FROM ai_run", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(run_harness, "claude");
-        let routine_profile: Option<i64> = conn.query_row("SELECT profile_id FROM routine WHERE key = 'plan'", [], |r| r.get(0)).unwrap();
+        let routine_profile: Option<i64> = conn
+            .query_row(
+                "SELECT profile_id FROM routine WHERE key = 'plan'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_eq!(routine_profile, None);
     }
 
@@ -555,7 +680,11 @@ mod tests {
             [],
         );
         assert!(second.is_err(), "a second default profile is rejected");
-        conn.execute("INSERT INTO ai_profile (name, created_at, updated_at) VALUES ('b', 'n', 'n')", []).unwrap();
+        conn.execute(
+            "INSERT INTO ai_profile (name, created_at, updated_at) VALUES ('b', 'n', 'n')",
+            [],
+        )
+        .unwrap();
         let id = conn.last_insert_rowid();
         conn.execute(
             "INSERT INTO routine (key, name, context_type, prompt_template, profile_id, created_at, updated_at)
@@ -563,8 +692,13 @@ mod tests {
             [id],
         )
         .unwrap();
-        conn.execute("DELETE FROM ai_profile WHERE id = ?1", [id]).unwrap();
-        let pinned: Option<i64> = conn.query_row("SELECT profile_id FROM routine WHERE key = 'k'", [], |r| r.get(0)).unwrap();
+        conn.execute("DELETE FROM ai_profile WHERE id = ?1", [id])
+            .unwrap();
+        let pinned: Option<i64> = conn
+            .query_row("SELECT profile_id FROM routine WHERE key = 'k'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
         assert_eq!(pinned, None);
     }
 

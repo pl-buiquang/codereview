@@ -175,7 +175,11 @@ pub fn relocate(old: &[&str], new: &[&str], start: i64, end: i64, predicted: Opt
     let mut best: Vec<(usize, usize)> = Vec::new(); // (score, 0-based index in new)
     let mut best_score = 0;
     for i in 0..=(new.len() - block.len()) {
-        if !block.iter().enumerate().all(|(k, l)| new[i + k].trim() == *l) {
+        if !block
+            .iter()
+            .enumerate()
+            .all(|(k, l)| new[i + k].trim() == *l)
+        {
             continue;
         }
         let mut score = 0;
@@ -199,7 +203,9 @@ pub fn relocate(old: &[&str], new: &[&str], start: i64, end: i64, predicted: Opt
         return Remap::Lost;
     }
     if best.len() > 1 {
-        let Some(p) = predicted else { return Remap::Lost };
+        let Some(p) = predicted else {
+            return Remap::Lost;
+        };
         let dist = |&(_, i): &(usize, usize)| (i as i64 + 1 - p).abs();
         best.sort_by_key(dist);
         if dist(&best[0]) == dist(&best[1]) {
@@ -379,7 +385,8 @@ index abc123..def456 100644\n\
 
     #[test]
     fn predict_line_counts_hunks_above_only() {
-        let hunks = parse_file_patch("@@ -10,1 +10,3 @@\n ctx\n+a\n+b\n@@ -100,2 +102,0 @@\n-x\n-y\n");
+        let hunks =
+            parse_file_patch("@@ -10,1 +10,3 @@\n ctx\n+a\n+b\n@@ -100,2 +102,0 @@\n-x\n-y\n");
         assert_eq!(predict_line(50, &hunks), 52);
         assert_eq!(predict_line(100, &hunks), 102);
         assert_eq!(predict_line(200, &hunks), 200);

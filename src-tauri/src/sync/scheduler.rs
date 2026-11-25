@@ -11,8 +11,8 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
 
 use super::{
-    pipeline, MirrorUpdated, Mode, Scope, SyncReport, SyncRequest, BOARD_MONITOR_EVENT, MIRROR_UPDATED_EVENT,
-    SYNC_STATUS_EVENT,
+    pipeline, MirrorUpdated, Mode, Scope, SyncReport, SyncRequest, BOARD_MONITOR_EVENT,
+    MIRROR_UPDATED_EVENT, SYNC_STATUS_EVENT,
 };
 use crate::db::Db;
 use crate::error::AppResult;
@@ -135,7 +135,9 @@ struct State {
 
 impl State {
     fn due(&self, scope: Scope, after: Duration) -> bool {
-        self.last_sync.get(&scope).is_none_or(|t| t.elapsed() >= after)
+        self.last_sync
+            .get(&scope)
+            .is_none_or(|t| t.elapsed() >= after)
     }
 
     fn periodic_interval(&self, scope: Scope) -> Duration {
@@ -150,7 +152,11 @@ impl State {
 
     fn discovery_due(&self) -> bool {
         self.discovery_interval().is_some_and(|i| {
-            let i = if self.notif_healthy { i.max(DISCOVERY_FALLBACK) } else { i };
+            let i = if self.notif_healthy {
+                i.max(DISCOVERY_FALLBACK)
+            } else {
+                i
+            };
             self.last_discovery.is_none_or(|t| t.elapsed() >= i)
         })
     }
@@ -161,19 +167,26 @@ impl State {
             && self.visible
             && self.config.auto_sync != AutoSync::Off
             && self.discovery_interval().is_some()
-            && self.last_notif_poll.is_none_or(|t| t.elapsed() >= self.notif_interval)
+            && self
+                .last_notif_poll
+                .is_none_or(|t| t.elapsed() >= self.notif_interval)
     }
 
     fn monitor_due(&self) -> bool {
         self.config.board_monitor
             && !self.monitoring
             && self.last_monitor.is_none_or(|t| {
-                t.elapsed() >= Duration::from_secs(u64::from(self.config.board_monitor_interval_min.max(1)) * 60)
+                t.elapsed()
+                    >= Duration::from_secs(
+                        u64::from(self.config.board_monitor_interval_min.max(1)) * 60,
+                    )
             })
     }
 
     fn overlaps(&self, scope: Scope) -> bool {
-        self.running.iter().any(|r| r.scope.covers(scope) || scope.covers(r.scope))
+        self.running
+            .iter()
+            .any(|r| r.scope.covers(scope) || scope.covers(r.scope))
     }
 }
 
@@ -190,7 +203,9 @@ pub struct SyncEngine {
 /// How long ago an RFC 3339 timestamp was, as an `Instant`.
 fn instant_of(ts: Option<String>) -> Option<Instant> {
     let at = chrono::DateTime::parse_from_rfc3339(&ts?).ok()?;
-    let ago = (chrono::Utc::now() - at.with_timezone(&chrono::Utc)).to_std().ok()?;
+    let ago = (chrono::Utc::now() - at.with_timezone(&chrono::Utc))
+        .to_std()
+        .ok()?;
     Instant::now().checked_sub(ago)
 }
 
@@ -229,10 +244,12 @@ impl SyncEngine {
             }),
         };
         let ticker = engine.clone();
-        let spawned = std::thread::Builder::new().name("sync-scheduler".into()).spawn(move || loop {
-            std::thread::sleep(TICK);
-            ticker.tick();
-        });
+        let spawned = std::thread::Builder::new()
+            .name("sync-scheduler".into())
+            .spawn(move || loop {
+                std::thread::sleep(TICK);
+                ticker.tick();
+            });
         if let Err(e) = spawned {
             crate::logging::warn(&format!("[sync] could not start the scheduler: {e}"));
         }
@@ -306,8 +323,14 @@ impl SyncEngine {
                 return;
             }
             let discover = !s.notif_healthy
-                && s.discovery_interval().is_some_and(|i| away.is_some_and(|a| a >= i));
-            let scopes: Vec<Scope> = s.active.keys().copied().filter(|sc| s.due(*sc, LIGHT_TTL)).collect();
+                && s.discovery_interval()
+                    .is_some_and(|i| away.is_some_and(|a| a >= i));
+            let scopes: Vec<Scope> = s
+                .active
+                .keys()
+                .copied()
+                .filter(|sc| s.due(*sc, LIGHT_TTL))
+                .collect();
             (discover, scopes)
         };
         self.spawn_round(discover, scopes);
@@ -322,8 +345,12 @@ impl SyncEngine {
             if !s.visible || s.config.auto_sync != AutoSync::Periodic {
                 return;
             }
-            let scopes: Vec<Scope> =
-                s.active.keys().copied().filter(|sc| s.due(*sc, s.periodic_interval(*sc))).collect();
+            let scopes: Vec<Scope> = s
+                .active
+                .keys()
+                .copied()
+                .filter(|sc| s.due(*sc, s.periodic_interval(*sc)))
+                .collect();
             (s.discovery_due(), scopes)
         };
         if discover || !scopes.is_empty() {
@@ -345,13 +372,17 @@ impl SyncEngine {
             s.last_notif_poll = Some(Instant::now());
         }
         let engine = self.clone();
-        let spawned = std::thread::Builder::new().name("notifications-poll".into()).spawn(move || {
-            engine.poll_notifications_round();
-            engine.state().notif_polling = false;
-        });
+        let spawned = std::thread::Builder::new()
+            .name("notifications-poll".into())
+            .spawn(move || {
+                engine.poll_notifications_round();
+                engine.state().notif_polling = false;
+            });
         if let Err(e) = spawned {
             self.state().notif_polling = false;
-            crate::logging::warn(&format!("[sync] could not start the notifications poll: {e}"));
+            crate::logging::warn(&format!(
+                "[sync] could not start the notifications poll: {e}"
+            ));
         }
     }
 
@@ -362,16 +393,23 @@ impl SyncEngine {
             Ok(crate::gh::NotificationsPoll::NotModified) => {
                 log::debug!(target: "sync", "notifications: 304");
             }
-            Ok(crate::gh::NotificationsPoll::Changed { last_modified, poll_interval }) => {
+            Ok(crate::gh::NotificationsPoll::Changed {
+                last_modified,
+                poll_interval,
+            }) => {
                 log::debug!(target: "sync", "notifications: changed (baseline={})", since.is_none());
                 if let Some(lm) = &last_modified {
-                    let _ = crate::commands::inbox::set_meta(&db.0.lock().unwrap(), NOTIF_META_KEY, lm);
+                    let _ =
+                        crate::commands::inbox::set_meta(&db.0.lock().unwrap(), NOTIF_META_KEY, lm);
                 }
                 if let Some(secs) = poll_interval {
                     self.state().notif_interval = Duration::from_secs(secs).max(NOTIF_POLL_DEFAULT);
                 }
                 if since.is_some() {
-                    self.spawn(SyncRequest { discover: true, ..SyncRequest::new(Scope::All, Mode::Light) });
+                    self.spawn(SyncRequest {
+                        discover: true,
+                        ..SyncRequest::new(Scope::All, Mode::Light)
+                    });
                 }
             }
             Err(e) => {
@@ -396,10 +434,12 @@ impl SyncEngine {
             s.last_monitor = Some(Instant::now());
         }
         let engine = self.clone();
-        let spawned = std::thread::Builder::new().name("board-monitor".into()).spawn(move || {
-            engine.monitor_round();
-            engine.state().monitoring = false;
-        });
+        let spawned = std::thread::Builder::new()
+            .name("board-monitor".into())
+            .spawn(move || {
+                engine.monitor_round();
+                engine.state().monitoring = false;
+            });
         if let Err(e) = spawned {
             self.state().monitoring = false;
             crate::logging::warn(&format!("[sync] could not start the board monitor: {e}"));
@@ -419,7 +459,10 @@ impl SyncEngine {
             let db = self.inner.app.state::<Db>();
             let (reset, mut floors) = {
                 let mut s = self.state();
-                (std::mem::take(&mut s.retry_gave_up), std::mem::take(&mut s.cap_floors))
+                (
+                    std::mem::take(&mut s.retry_gave_up),
+                    std::mem::take(&mut s.cap_floors),
+                )
             };
             let result = crate::board_monitor::run(&db, &mut floors, reset);
             let idle = {
@@ -446,37 +489,56 @@ impl SyncEngine {
                         log::info!("[sync] monitor: no PR left to watch, turning off");
                     }
                     if !actions.is_empty() {
-                        let mut ids: Vec<String> = actions.iter().map(|a| a.card_id.clone()).collect();
+                        let mut ids: Vec<String> =
+                            actions.iter().map(|a| a.card_id.clone()).collect();
                         ids.dedup();
-                        let _ = self
-                            .inner
-                            .app
-                            .emit(MIRROR_UPDATED_EVENT, &MirrorUpdated { scopes: vec![Scope::Board], ids });
+                        let _ = self.inner.app.emit(
+                            MIRROR_UPDATED_EVENT,
+                            &MirrorUpdated {
+                                scopes: vec![Scope::Board],
+                                ids,
+                            },
+                        );
                     }
                     if !actions.is_empty() || idle {
-                        let _ = self.inner.app.emit(BOARD_MONITOR_EVENT, BoardMonitorPayload { actions, error: None, idle });
+                        let _ = self.inner.app.emit(
+                            BOARD_MONITOR_EVENT,
+                            BoardMonitorPayload {
+                                actions,
+                                error: None,
+                                idle,
+                            },
+                        );
                     }
                     return;
                 }
                 Err(e) => {
                     crate::logging::warn(&format!("[sync] monitor failed: {e}"));
-                    self.state().last_error = Some((e.to_string(), chrono::Utc::now().to_rfc3339()));
+                    self.state().last_error =
+                        Some((e.to_string(), chrono::Utc::now().to_rfc3339()));
                     self.emit_status();
                     error = Some(e.to_string());
                 }
             }
         }
-        let _ = self
-            .inner
-            .app
-            .emit(BOARD_MONITOR_EVENT, BoardMonitorPayload { actions: Vec::new(), error, idle: false });
+        let _ = self.inner.app.emit(
+            BOARD_MONITOR_EVENT,
+            BoardMonitorPayload {
+                actions: Vec::new(),
+                error,
+                idle: false,
+            },
+        );
     }
 
     /// Discovery covers every scope (it syncs Inbox + Board), so it replaces
     /// the per-scope light syncs of this round.
     fn spawn_round(&self, discover: bool, scopes: Vec<Scope>) {
         if discover {
-            self.spawn(SyncRequest { discover: true, ..SyncRequest::new(Scope::All, Mode::Light) });
+            self.spawn(SyncRequest {
+                discover: true,
+                ..SyncRequest::new(Scope::All, Mode::Light)
+            });
         } else {
             for scope in scopes {
                 self.spawn(SyncRequest::new(scope, Mode::Light));
@@ -496,9 +558,11 @@ impl SyncEngine {
             req.scope, req.mode, req.discover, req.visible_ids.len()
         );
         let engine = self.clone();
-        let spawned = std::thread::Builder::new().name("sync".into()).spawn(move || {
-            let _ = engine.execute(req);
-        });
+        let spawned = std::thread::Builder::new()
+            .name("sync".into())
+            .spawn(move || {
+                let _ = engine.execute(req);
+            });
         if let Err(e) = spawned {
             crate::logging::warn(&format!("[sync] could not start a sync: {e}"));
         }
@@ -527,7 +591,11 @@ impl SyncEngine {
             if exclusive && s.overlaps(req.scope) {
                 return false;
             }
-            s.running.push(Running { scope: req.scope, mode: req.mode, discover: req.discover });
+            s.running.push(Running {
+                scope: req.scope,
+                mode: req.mode,
+                discover: req.discover,
+            });
         }
         self.emit_status();
         true
@@ -546,7 +614,11 @@ impl SyncEngine {
         log::debug!(target: "sync", "execute {:?} {:?} done in {}ms (ok={})", req.scope, req.mode, started.elapsed().as_millis(), result.is_ok());
         {
             let mut s = self.state();
-            let me = Running { scope: req.scope, mode: req.mode, discover: req.discover };
+            let me = Running {
+                scope: req.scope,
+                mode: req.mode,
+                discover: req.discover,
+            };
             if let Some(i) = s.running.iter().position(|r| *r == me) {
                 s.running.remove(i);
             }
@@ -557,7 +629,11 @@ impl SyncEngine {
                         "[sync] {:?} {:?}{}: {} probed, {} refetched, {} threads in {}ms",
                         req.scope,
                         req.mode,
-                        if report.discovered { " + discovery" } else { "" },
+                        if report.discovered {
+                            " + discovery"
+                        } else {
+                            ""
+                        },
                         report.probed,
                         report.changed,
                         report.threads,
@@ -570,14 +646,21 @@ impl SyncEngine {
                         }
                         s.last_sync.insert(scope, now);
                         let b = s.backoff.entry(scope).or_insert(1);
-                        *b = if req.mode == Mode::Light && report.changed == 0 { (*b * 2).min(periodic_base(scope).1) } else { 1 };
+                        *b = if req.mode == Mode::Light && report.changed == 0 {
+                            (*b * 2).min(periodic_base(scope).1)
+                        } else {
+                            1
+                        };
                     }
                     if report.discovered && req.scope.inbox() {
                         s.last_discovery = Some(now);
                     }
                 }
                 Err(e) => {
-                    crate::logging::warn(&format!("[sync] {:?} {:?} sync failed: {e}", req.scope, req.mode));
+                    crate::logging::warn(&format!(
+                        "[sync] {:?} {:?} sync failed: {e}",
+                        req.scope, req.mode
+                    ));
                     s.last_error = Some((e.to_string(), chrono::Utc::now().to_rfc3339()));
                 }
             }
@@ -597,7 +680,9 @@ impl SyncEngine {
             }
             (
                 scopes,
-                s.running.iter().any(|r| r.discover || r.mode != Mode::Light),
+                s.running
+                    .iter()
+                    .any(|r| r.discover || r.mode != Mode::Light),
                 s.running.iter().any(|r| r.mode == Mode::Full),
                 s.last_error.clone(),
             )

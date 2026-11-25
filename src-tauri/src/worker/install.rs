@@ -25,7 +25,9 @@ pub struct UnitSpec {
 }
 
 fn quote(s: &str) -> String {
-    if s.chars().all(|c| c.is_ascii_alphanumeric() || "/._-:=@%+,".contains(c)) {
+    if s.chars()
+        .all(|c| c.is_ascii_alphanumeric() || "/._-:=@%+,".contains(c))
+    {
         s.to_string()
     } else {
         format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
@@ -55,7 +57,10 @@ pub fn unit_text(spec: &UnitSpec) -> String {
         args.push("--log-level".into());
         args.push(l.clone());
     }
-    let exec: Vec<String> = std::iter::once(spec.exe.display().to_string()).chain(args).map(|a| quote(&a)).collect();
+    let exec: Vec<String> = std::iter::once(spec.exe.display().to_string())
+        .chain(args)
+        .map(|a| quote(&a))
+        .collect();
     format!(
         "[Unit]\nDescription=CodeReview agent daemon (cr worker)\nAfter=network.target\n\n\
          [Service]\nType=simple\nExecStart={}\nRestart=on-failure\nRestartSec=3\n\
@@ -69,7 +74,9 @@ pub fn unit_text(spec: &UnitSpec) -> String {
 pub fn unit_path() -> AppResult<PathBuf> {
     let base = match std::env::var_os("XDG_CONFIG_HOME") {
         Some(p) if !p.is_empty() => PathBuf::from(p),
-        _ => dirs::home_dir().ok_or_else(|| AppError::Other("no home directory".into()))?.join(".config"),
+        _ => dirs::home_dir()
+            .ok_or_else(|| AppError::Other("no home directory".into()))?
+            .join(".config"),
     };
     Ok(base.join("systemd").join("user").join(UNIT_NAME))
 }
@@ -87,7 +94,11 @@ fn systemctl_ok(args: &[&str]) -> AppResult<()> {
     if out.status.success() {
         return Ok(());
     }
-    Err(AppError::Other(format!("systemctl --user {} failed: {}", args.join(" "), String::from_utf8_lossy(&out.stderr).trim())))
+    Err(AppError::Other(format!(
+        "systemctl --user {} failed: {}",
+        args.join(" "),
+        String::from_utf8_lossy(&out.stderr).trim()
+    )))
 }
 
 /// Write the unit, reload systemd and enable + start the service.
@@ -118,15 +129,31 @@ pub fn uninstall() -> AppResult<()> {
 pub fn status(listen: &Listen) -> AppResult<String> {
     let mut out = String::new();
     let path = unit_path()?;
-    out.push_str(&format!("unit:     {} ({})\n", path.display(), if path.exists() { "installed" } else { "not installed" }));
+    out.push_str(&format!(
+        "unit:     {} ({})\n",
+        path.display(),
+        if path.exists() {
+            "installed"
+        } else {
+            "not installed"
+        }
+    ));
     let state = |verb: &str| {
-        systemctl(&[verb, UNIT_NAME]).map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_else(|_| "unknown".into())
+        systemctl(&[verb, UNIT_NAME])
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .unwrap_or_else(|_| "unknown".into())
     };
-    out.push_str(&format!("enabled:  {}\nactive:   {}\n", state("is-enabled"), state("is-active")));
+    out.push_str(&format!(
+        "enabled:  {}\nactive:   {}\n",
+        state("is-enabled"),
+        state("is-active")
+    ));
     out.push_str(&match probe_info(listen) {
         Ok(v) => format!(
             "daemon:   answering on {listen}: protocol {}, cr {}, host {}\n",
-            v["protocol"], v["version"].as_str().unwrap_or("?"), v["host"].as_str().unwrap_or("?")
+            v["protocol"],
+            v["version"].as_str().unwrap_or("?"),
+            v["host"].as_str().unwrap_or("?")
         ),
         Err(e) => format!("daemon:   not answering on {listen} ({e})\n"),
     });
@@ -139,10 +166,21 @@ pub fn probe_info(listen: &Listen) -> Result<serde_json::Value, String> {
     let mut raw = Vec::new();
     match listen {
         #[cfg(unix)]
-        Listen::Unix(p) => exchange(std::os::unix::net::UnixStream::connect(p).map_err(|e| e.to_string())?, request, &mut raw)?,
+        Listen::Unix(p) => exchange(
+            std::os::unix::net::UnixStream::connect(p).map_err(|e| e.to_string())?,
+            request,
+            &mut raw,
+        )?,
         #[cfg(not(unix))]
-        Listen::Unix(_) => return Err("unix sockets are not supported on this platform".to_string()),
-        Listen::Tcp(a) => exchange(std::net::TcpStream::connect_timeout(a, std::time::Duration::from_secs(2)).map_err(|e| e.to_string())?, request, &mut raw)?,
+        Listen::Unix(_) => {
+            return Err("unix sockets are not supported on this platform".to_string())
+        }
+        Listen::Tcp(a) => exchange(
+            std::net::TcpStream::connect_timeout(a, std::time::Duration::from_secs(2))
+                .map_err(|e| e.to_string())?,
+            request,
+            &mut raw,
+        )?,
     }
     let text = String::from_utf8_lossy(&raw);
     let (head, body) = text.split_once("\r\n\r\n").ok_or("malformed response")?;

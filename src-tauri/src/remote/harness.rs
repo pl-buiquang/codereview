@@ -15,8 +15,8 @@ use serde_json::Value;
 
 use super::runtime::{self, RemoteRuntime};
 use crate::ai::{
-    harness_by_id, Access, Caps, Event, Harness, Interactive, OneShot, SessionMode, StreamRun, SystemPrompt, SystemPromptMode,
-    ToolPolicy, TurnResult,
+    harness_by_id, Access, Caps, Event, Harness, Interactive, OneShot, SessionMode, StreamRun,
+    SystemPrompt, SystemPromptMode, ToolPolicy, TurnResult,
 };
 use crate::error::{AppError, AppResult};
 use crate::run_usage::{now_stamp, RunUsage};
@@ -32,11 +32,23 @@ pub struct RemoteHarness {
 
 impl RemoteHarness {
     pub fn new(host_id: i64, inner: &'static dyn Harness) -> Self {
-        Self { host_id, inner, runtime: None }
+        Self {
+            host_id,
+            inner,
+            runtime: None,
+        }
     }
 
-    pub fn with_runtime(host_id: i64, inner: &'static dyn Harness, runtime: Arc<RemoteRuntime>) -> Self {
-        Self { host_id, inner, runtime: Some(runtime) }
+    pub fn with_runtime(
+        host_id: i64,
+        inner: &'static dyn Harness,
+        runtime: Arc<RemoteRuntime>,
+    ) -> Self {
+        Self {
+            host_id,
+            inner,
+            runtime: Some(runtime),
+        }
     }
 
     pub fn host_id(&self) -> i64 {
@@ -44,22 +56,31 @@ impl RemoteHarness {
     }
 
     fn rt(&self) -> AppResult<Arc<RemoteRuntime>> {
-        self.runtime.clone().or_else(runtime::global).ok_or_else(|| AppError::Other("remote hosts are not available here".into()))
+        self.runtime
+            .clone()
+            .or_else(runtime::global)
+            .ok_or_else(|| AppError::Other("remote hosts are not available here".into()))
     }
 
     fn host_label(&self) -> String {
-        self.rt().ok().and_then(|rt| rt.host(self.host_id).ok()).map_or_else(|| format!("host #{}", self.host_id), |h| h.name)
+        self.rt()
+            .ok()
+            .and_then(|rt| rt.host(self.host_id).ok())
+            .map_or_else(|| format!("host #{}", self.host_id), |h| h.name)
     }
 }
 
 /// The remote harness `harness_id` of `host_id`, one instance per pair for the life of the process
 /// (profiles resolve to `&'static dyn Harness`).
 pub fn for_host(host_id: i64, harness_id: &str) -> Option<&'static dyn Harness> {
-    static CACHE: Mutex<Option<HashMap<(i64, &'static str), &'static RemoteHarness>>> = Mutex::new(None);
+    static CACHE: Mutex<Option<HashMap<(i64, &'static str), &'static RemoteHarness>>> =
+        Mutex::new(None);
     let inner = harness_by_id(harness_id)?;
     let mut cache = CACHE.lock().unwrap();
     let cache = cache.get_or_insert_with(HashMap::new);
-    let h: &'static RemoteHarness = cache.entry((host_id, inner.id())).or_insert_with(|| Box::leak(Box::new(RemoteHarness::new(host_id, inner))));
+    let h: &'static RemoteHarness = cache
+        .entry((host_id, inner.id()))
+        .or_insert_with(|| Box::leak(Box::new(RemoteHarness::new(host_id, inner))));
     Some(h)
 }
 
@@ -81,7 +102,9 @@ fn access_wire(access: &Access) -> AppResult<AccessWire> {
         Access::Edit => AccessWire::Edit,
         Access::Full => AccessWire::Full,
         Access::Native(mode) => {
-            return Err(AppError::Other(format!("a remote host takes a neutral access level, not the native mode `{mode}`")))
+            return Err(AppError::Other(format!(
+                "a remote host takes a neutral access level, not the native mode `{mode}`"
+            )))
         }
     })
 }
@@ -94,7 +117,9 @@ pub fn oneshot_request(harness_id: &str, req: &OneShot<'_>) -> AppResult<OneShot
         ));
     }
     if !req.extra_args.is_empty() {
-        return Err(AppError::Other("harness-native extra arguments cannot be sent to a remote host".into()));
+        return Err(AppError::Other(
+            "harness-native extra arguments cannot be sent to a remote host".into(),
+        ));
     }
     let system_prompt = match req.system_prompt {
         None => String::new(),
@@ -157,14 +182,28 @@ impl Harness for RemoteHarness {
             Err(e) => Some(e.to_string()),
             Ok(info) => match info.harnesses.iter().find(|h| h.id == self.inner.id()) {
                 Some(h) if h.available => None,
-                Some(_) => Some(format!("`{}` is not installed on {}", self.inner.id(), self.host_label())),
-                None => Some(format!("{} does not offer the `{}` harness", self.host_label(), self.inner.id())),
+                Some(_) => Some(format!(
+                    "`{}` is not installed on {}",
+                    self.inner.id(),
+                    self.host_label()
+                )),
+                None => Some(format!(
+                    "{} does not offer the `{}` harness",
+                    self.host_label(),
+                    self.inner.id()
+                )),
             },
         }
     }
 
     fn version(&self) -> Option<String> {
-        self.rt().ok()?.cached_info(self.host_id)?.harnesses.into_iter().find(|h| h.id == self.inner.id())?.version
+        self.rt()
+            .ok()?
+            .cached_info(self.host_id)?
+            .harnesses
+            .into_iter()
+            .find(|h| h.id == self.inner.id())?
+            .version
     }
 
     fn one_shot(&self, req: &OneShot<'_>) -> AppResult<TurnResult> {
@@ -172,9 +211,17 @@ impl Harness for RemoteHarness {
         let started = now_stamp();
         let t0 = Instant::now();
         let tag = req.usage_tag.clone().host(Some(self.host_id));
-        let outcome = self.rt().and_then(|rt| Ok(rt.client(self.host_id)?.oneshot(&wire)?));
+        let outcome = self
+            .rt()
+            .and_then(|rt| Ok(rt.client(self.host_id)?.oneshot(&wire)?));
         let record = |usage: &RunUsage, error: Option<&str>| {
-            crate::ai_usage::record(&tag, &started, t0.elapsed().as_millis() as i64, usage, error);
+            crate::ai_usage::record(
+                &tag,
+                &started,
+                t0.elapsed().as_millis() as i64,
+                usage,
+                error,
+            );
         };
         match outcome {
             Err(e) => {
@@ -182,13 +229,16 @@ impl Harness for RemoteHarness {
                 Err(e)
             }
             Ok(resp) => {
-                let usage = resp.usage.as_ref().map_or_else(RunUsage::default, |u| RunUsage {
-                    num_turns: 1,
-                    input_tokens: u.input_tokens,
-                    output_tokens: u.output_tokens,
-                    cost_usd: u.cost_usd,
-                    ..RunUsage::default()
-                });
+                let usage = resp
+                    .usage
+                    .as_ref()
+                    .map_or_else(RunUsage::default, |u| RunUsage {
+                        num_turns: 1,
+                        input_tokens: u.input_tokens,
+                        output_tokens: u.output_tokens,
+                        cost_usd: u.cost_usd,
+                        ..RunUsage::default()
+                    });
                 if let Some(error) = resp.error {
                     record(&usage, Some(&error));
                     return Err(AppError::Other(error));
@@ -206,7 +256,10 @@ impl Harness for RemoteHarness {
     }
 
     fn spawn(&self, _: StreamRun<'_>) -> AppResult<Child> {
-        Err(AppError::Other("a remote run is posted to the host and mirrored, it does not start a local process".into()))
+        Err(AppError::Other(
+            "a remote run is posted to the host and mirrored, it does not start a local process"
+                .into(),
+        ))
     }
 
     fn parse_line(&self, line: &str) -> (String, Option<Value>) {
@@ -260,10 +313,27 @@ mod tests {
     #[test]
     fn a_one_shot_becomes_the_neutral_wire_request() {
         let w = oneshot_request("claude", &req("hello", Path::new("/local/only"))).unwrap();
-        assert_eq!((w.harness.as_str(), w.model.as_str(), w.prompt.as_str()), ("claude", "haiku", "hello"));
-        assert_eq!((w.system_prompt.as_str(), w.system_prompt_replace), ("be brief", true));
-        assert_eq!((w.access, w.tools, w.allowed_tools.clone(), w.max_turns), (AccessWire::ReadOnly, ToolsWire::Allowlist, vec!["Read".to_string()], Some(2)));
-        assert!(w.workspace.is_none(), "a local path never goes over the wire");
+        assert_eq!(
+            (w.harness.as_str(), w.model.as_str(), w.prompt.as_str()),
+            ("claude", "haiku", "hello")
+        );
+        assert_eq!(
+            (w.system_prompt.as_str(), w.system_prompt_replace),
+            ("be brief", true)
+        );
+        assert_eq!(
+            (w.access, w.tools, w.allowed_tools.clone(), w.max_turns),
+            (
+                AccessWire::ReadOnly,
+                ToolsWire::Allowlist,
+                vec!["Read".to_string()],
+                Some(2)
+            )
+        );
+        assert!(
+            w.workspace.is_none(),
+            "a local path never goes over the wire"
+        );
         let json = serde_json::to_string(&w).unwrap();
         assert!(!json.contains("/local/only"));
     }
@@ -273,13 +343,22 @@ mod tests {
         let cwd = Path::new("/x");
         let mut r = req("p", cwd);
         r.session = SessionMode::Resume("s");
-        assert!(oneshot_request("claude", &r).unwrap_err().to_string().contains("without a session"));
+        assert!(oneshot_request("claude", &r)
+            .unwrap_err()
+            .to_string()
+            .contains("without a session"));
         let mut r = req("p", cwd);
         r.extra_args = vec!["--effort".into()];
-        assert!(oneshot_request("claude", &r).unwrap_err().to_string().contains("extra arguments"));
+        assert!(oneshot_request("claude", &r)
+            .unwrap_err()
+            .to_string()
+            .contains("extra arguments"));
         let mut r = req("p", cwd);
         r.access = Access::Native("plan".into());
-        assert!(oneshot_request("claude", &r).unwrap_err().to_string().contains("neutral access"));
+        assert!(oneshot_request("claude", &r)
+            .unwrap_err()
+            .to_string()
+            .contains("neutral access"));
     }
 
     #[test]
@@ -289,25 +368,46 @@ mod tests {
         std::fs::write(&file, "from a file").unwrap();
         let mut r = req("p", dir.path());
         r.system_prompt = Some(SystemPrompt::File(&file));
-        assert_eq!(oneshot_request("claude", &r).unwrap().system_prompt, "from a file");
+        assert_eq!(
+            oneshot_request("claude", &r).unwrap().system_prompt,
+            "from a file"
+        );
     }
 
     #[test]
     fn caps_drop_sessions_and_the_instances_are_shared() {
         let h = for_host(7, "claude").unwrap();
         let caps = h.caps();
-        assert!(!caps.sessions && !caps.resume && !caps.fork && !caps.interactive_tui && !caps.pins_session_id);
+        assert!(
+            !caps.sessions
+                && !caps.resume
+                && !caps.fork
+                && !caps.interactive_tui
+                && !caps.pins_session_id
+        );
         assert_eq!(caps.access_levels, ClaudeCode.caps().access_levels);
         assert_eq!((h.id(), h.name()), ("claude", "Claude Code"));
-        assert!(std::ptr::eq(h as *const _ as *const u8, for_host(7, "claude").unwrap() as *const _ as *const u8));
+        assert!(std::ptr::eq(
+            h as *const _ as *const u8,
+            for_host(7, "claude").unwrap() as *const _ as *const u8
+        ));
         assert!(for_host(7, "zed").is_none());
-        assert!(h.interactive_argv(&Interactive { session: SessionMode::Ephemeral, system_prompt_file: None, system_prompt_mode: SystemPromptMode::Append }).is_none());
+        assert!(h
+            .interactive_argv(&Interactive {
+                session: SessionMode::Ephemeral,
+                system_prompt_file: None,
+                system_prompt_mode: SystemPromptMode::Append
+            })
+            .is_none());
     }
 
     #[test]
     fn without_a_runtime_the_harness_says_so() {
         let h = RemoteHarness::new(1, &ClaudeCode);
-        assert!(h.unavailable_reason().unwrap().contains("not available here"));
+        assert!(h
+            .unavailable_reason()
+            .unwrap()
+            .contains("not available here"));
         assert!(!h.available());
     }
 }
@@ -315,7 +415,7 @@ mod tests {
 #[cfg(all(test, feature = "worker", unix))]
 mod server_tests {
     use super::*;
-    use crate::remote::test_server::{TestServer, Fake};
+    use crate::remote::test_server::{Fake, TestServer};
     use crate::run_usage::RunTag;
 
     fn fake_harness(rt: Arc<RemoteRuntime>) -> RemoteHarness {
@@ -349,9 +449,21 @@ mod server_tests {
         let h = fake_harness(rt.clone());
         let turn = h.one_shot(&request("hi")).unwrap();
         assert!(turn.text.starts_with("echo:hi@"), "{}", turn.text);
-        assert_eq!((turn.input_tokens, turn.output_tokens, turn.cost_usd, turn.session_id), (3, 4, 0.5, None));
+        assert_eq!(
+            (
+                turn.input_tokens,
+                turn.output_tokens,
+                turn.cost_usd,
+                turn.session_id
+            ),
+            (3, 4, 0.5, None)
+        );
         // the host's failure comes back as an error, not as empty text
-        assert!(h.one_shot(&request("fail")).unwrap_err().to_string().contains("the harness failed"));
+        assert!(h
+            .one_shot(&request("fail"))
+            .unwrap_err()
+            .to_string()
+            .contains("the harness failed"));
         // capabilities and availability come from the host
         assert!(h.available());
         assert!(h.caps().streaming && !h.caps().sessions);
@@ -366,7 +478,10 @@ mod server_tests {
         let rt = srv.runtime();
         let h = RemoteHarness::with_runtime(1, &crate::ai::ClaudeCode, rt.clone());
         assert!(!h.available());
-        assert!(h.unavailable_reason().unwrap().contains("does not offer the `claude` harness"));
+        assert!(h
+            .unavailable_reason()
+            .unwrap()
+            .contains("does not offer the `claude` harness"));
         let err = h.one_shot(&request("hi")).unwrap_err().to_string();
         assert!(err.contains("harness_unavailable"), "{err}");
         rt.shutdown();

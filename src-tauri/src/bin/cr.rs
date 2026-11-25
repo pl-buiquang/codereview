@@ -12,9 +12,9 @@ use codereview_lib::db_path::resolve_db_path;
 use codereview_lib::error::{AppError, AppResult};
 use codereview_lib::gh::{self, GhRepo};
 use codereview_lib::provider::provider_for;
-use codereview_lib::worker::remote::{self, RemoteRun};
 use codereview_lib::sync::{self, Mode, Scope, SyncReport, SyncRequest};
 use codereview_lib::tools;
+use codereview_lib::worker::remote::{self, RemoteRun};
 
 #[derive(Parser)]
 #[command(
@@ -54,17 +54,11 @@ enum Cmd {
         title: Option<String>,
     },
     /// Show a review's detail
-    Show {
-        review_id: i64,
-    },
+    Show { review_id: i64 },
     /// Print the diff for a review
-    Diff {
-        review_id: i64,
-    },
+    Diff { review_id: i64 },
     /// Print the path of a checkout of the review's head branch, creating a worktree if none holds it
-    Worktree {
-        review_id: i64,
-    },
+    Worktree { review_id: i64 },
     /// Create a new review
     Create {
         #[command(subcommand)]
@@ -73,9 +67,7 @@ enum Cmd {
     /// Start another draft review on the same PR / local diff as <review-id>,
     /// even if it already has an unpublished one (e.g. a second pass with a
     /// different kind of comment)
-    New {
-        review_id: i64,
-    },
+    New { review_id: i64 },
     /// Update a review's body or verdict
     Update {
         review_id: i64,
@@ -87,9 +79,7 @@ enum Cmd {
         verdict: Option<String>,
     },
     /// Delete a draft review
-    Delete {
-        review_id: i64,
-    },
+    Delete { review_id: i64 },
     /// Comment operations
     Comment {
         #[command(subcommand)]
@@ -373,9 +363,7 @@ enum CommentAction {
         tag: String,
     },
     /// Delete a comment
-    Delete {
-        comment_id: i64,
-    },
+    Delete { comment_id: i64 },
     /// Delete the AI comments a rerun replaces: root, unpublished, unresolved, unedited and
     /// reply-less comments still carrying one of the given tags. Focus notes are kept.
     Prune {
@@ -385,13 +373,9 @@ enum CommentAction {
         tags: Vec<String>,
     },
     /// Mark a comment thread as resolved
-    Resolve {
-        comment_id: i64,
-    },
+    Resolve { comment_id: i64 },
     /// Mark a comment thread as unresolved
-    Unresolve {
-        comment_id: i64,
-    },
+    Unresolve { comment_id: i64 },
     /// Reply to a local comment thread (existing review comments, not GitHub threads)
     Reply {
         review_id: i64,
@@ -426,13 +410,9 @@ enum CommentAction {
         body: String,
     },
     /// Publish all draft replies for a review to their GitHub threads
-    PublishReplies {
-        review_id: i64,
-    },
+    PublishReplies { review_id: i64 },
     /// Publish a single draft reply to its GitHub thread
-    PublishReply {
-        comment_id: i64,
-    },
+    PublishReply { comment_id: i64 },
 }
 
 #[derive(Subcommand)]
@@ -465,7 +445,11 @@ enum OpenTarget {
     /// Open an existing review by ID
     Review { review_id: i64 },
     /// Open/create a review for a GitHub PR
-    Pr { owner: String, name: String, number: i64 },
+    Pr {
+        owner: String,
+        name: String,
+        number: i64,
+    },
     /// Open/create a review for a local diff
     Diff {
         repo_id: i64,
@@ -519,11 +503,16 @@ fn parse_github_pr_url(url: &str) -> Option<(String, String, i64)> {
 /// Resolve the current repo + branch to a `owner/name#number` reference: the
 /// branch's open PR if it has one, else an `issue-<n>`-named branch's issue.
 fn resolve_here() -> AppResult<String> {
-    let cwd = std::env::current_dir().map_err(|e| AppError::Other(format!("cannot read cwd: {e}")))?;
+    let cwd =
+        std::env::current_dir().map_err(|e| AppError::Other(format!("cannot read cwd: {e}")))?;
     let remote = codereview_lib::git::remote_info(&cwd);
     let (owner, name) = match (remote.owner, remote.name) {
         (Some(o), Some(n)) => (o, n),
-        _ => return Err(AppError::Other("not inside a repo clone with a GitHub origin remote".into())),
+        _ => {
+            return Err(AppError::Other(
+                "not inside a repo clone with a GitHub origin remote".into(),
+            ))
+        }
     };
 
     let ctx = GhRepo::Local(cwd.clone());
@@ -565,19 +554,24 @@ fn resolve_graph_target(
 ) -> AppResult<GraphTarget> {
     let dir = match path {
         Some(p) => std::path::PathBuf::from(p),
-        None => std::env::current_dir().map_err(|e| AppError::Other(format!("cannot read cwd: {e}")))?,
+        None => {
+            std::env::current_dir().map_err(|e| AppError::Other(format!("cannot read cwd: {e}")))?
+        }
     };
     let not_repo = || AppError::NotARepo(dir.display().to_string());
-    let git = |args: &[&str]| codereview_lib::git::run_git(&dir, args).map(|s| s.trim().to_string());
+    let git =
+        |args: &[&str]| codereview_lib::git::run_git(&dir, args).map(|s| s.trim().to_string());
 
-    let toplevel = std::path::PathBuf::from(git(&["rev-parse", "--show-toplevel"]).map_err(|_| not_repo())?);
+    let toplevel =
+        std::path::PathBuf::from(git(&["rev-parse", "--show-toplevel"]).map_err(|_| not_repo())?);
     let worktrees = codereview_lib::worktree::list_worktrees(&toplevel)?;
     let main_path = worktrees
         .iter()
         .find(|w| w.is_main)
         .map(|w| w.path.clone())
         .ok_or_else(not_repo)?;
-    let worktree = (toplevel != std::path::Path::new(&main_path)).then(|| toplevel.display().to_string());
+    let worktree =
+        (toplevel != std::path::Path::new(&main_path)).then(|| toplevel.display().to_string());
 
     let repo_id = match repo_id {
         Some(id) => id,
@@ -605,19 +599,29 @@ fn resolve_graph_target(
         ref_name
     } else {
         codereview_lib::worktree::current_branch(&toplevel).or_else(|| {
-            git(&["describe", "--tags", "--exact-match"]).ok().filter(|t| !t.is_empty())
+            git(&["describe", "--tags", "--exact-match"])
+                .ok()
+                .filter(|t| !t.is_empty())
         })
     };
 
-    Ok(GraphTarget { repo_id, ref_name, worktree })
+    Ok(GraphTarget {
+        repo_id,
+        ref_name,
+        worktree,
+    })
 }
 
 fn resolve_reference(reference: Option<String>, here: bool) -> AppResult<String> {
     match (reference, here) {
         (Some(r), false) => Ok(r),
         (None, true) => resolve_here(),
-        (Some(_), true) => Err(AppError::Other("pass either a reference or --here, not both".into())),
-        (None, false) => Err(AppError::Other("pass a reference (URL or owner/repo#n) or --here".into())),
+        (Some(_), true) => Err(AppError::Other(
+            "pass either a reference or --here, not both".into(),
+        )),
+        (None, false) => Err(AppError::Other(
+            "pass a reference (URL or owner/repo#n) or --here".into(),
+        )),
     }
 }
 
@@ -632,7 +636,11 @@ fn main() {
     // Inside a remote run `cr` never touches a database: writes go to the run's outbox and reads
     // come from its context snapshot (ADR 0007).
     if let Some(remote) = RemoteRun::from_env() {
-        let name = <Cli as clap::CommandFactory>::command().get_matches().subcommand_name().unwrap_or("").to_string();
+        let name = <Cli as clap::CommandFactory>::command()
+            .get_matches()
+            .subcommand_name()
+            .unwrap_or("")
+            .to_string();
         if let Err(e) = run_remote(&remote, &name, cli.cmd, cli.json) {
             eprintln!("error: {e}");
             process::exit(1);
@@ -655,7 +663,10 @@ fn main() {
     let conn = match db::open(&db_path) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("error: failed to open database at {}: {e}", db_path.display());
+            eprintln!(
+                "error: failed to open database at {}: {e}",
+                db_path.display()
+            );
             process::exit(1);
         }
     };
@@ -692,20 +703,33 @@ fn run_worker(args: WorkerArgs, app_db: Option<&str>) -> AppResult<()> {
         let spec = install::UnitSpec {
             exe,
             listen,
-            app_db: app_db.map(PathBuf::from).or_else(|| std::env::var_os("CODEREVIEW_DB").map(PathBuf::from)).map(abs),
-            worker_db: args.worker_db.as_deref().map(PathBuf::from).or_else(|| std::env::var_os(worker::WORKER_DB_ENV).map(PathBuf::from)).map(abs),
+            app_db: app_db
+                .map(PathBuf::from)
+                .or_else(|| std::env::var_os("CODEREVIEW_DB").map(PathBuf::from))
+                .map(abs),
+            worker_db: args
+                .worker_db
+                .as_deref()
+                .map(PathBuf::from)
+                .or_else(|| std::env::var_os(worker::WORKER_DB_ENV).map(PathBuf::from))
+                .map(abs),
             max_concurrency: args.max_concurrency,
             log_level: args.log_level.clone(),
         };
         let path = install::install(&spec)?;
-        println!("Installed and started {} (check with `cr worker --status`)", path.display());
+        println!(
+            "Installed and started {} (check with `cr worker --status`)",
+            path.display()
+        );
         return Ok(());
     }
     daemon::run(daemon::Config {
         listen,
         app_db: app_db_path,
         worker_db,
-        max_concurrency: args.max_concurrency.unwrap_or(codereview_lib::run_engine::engine::DEFAULT_CONCURRENCY),
+        max_concurrency: args
+            .max_concurrency
+            .unwrap_or(codereview_lib::run_engine::engine::DEFAULT_CONCURRENCY),
         log_level: args.log_level,
     })
 }
@@ -718,7 +742,10 @@ fn run_remote(remote: &RemoteRun, name: &str, cmd: Cmd, json: bool) -> AppResult
         if json {
             println!("{}", serde_json::json!({ "opId": id }));
         } else {
-            println!("Recorded {op} for the app (op {id}, remote run {})", remote.run_id);
+            println!(
+                "Recorded {op} for the app (op {id}, remote run {})",
+                remote.run_id
+            );
         }
         Ok(())
     };
@@ -727,7 +754,10 @@ fn run_remote(remote: &RemoteRun, name: &str, cmd: Cmd, json: bool) -> AppResult
         Ok(())
     };
     match cmd {
-        Cmd::Notify { message, title } => queued("notify", serde_json::json!({ "message": message, "title": title })),
+        Cmd::Notify { message, title } => queued(
+            "notify",
+            serde_json::json!({ "message": message, "title": title }),
+        ),
         Cmd::Board { action } => match action {
             BoardAction::List { lane } => {
                 let mut cards = remote.cards()?;
@@ -740,12 +770,27 @@ fn run_remote(remote: &RemoteRun, name: &str, cmd: Cmd, json: bool) -> AppResult
                 let (owner, name, number) = board::parse_ref(&resolve_reference(reference, here)?)?;
                 show(&remote.card(&owner, &name, number)?)
             }
-            BoardAction::Track { reference } => queued("board_track", serde_json::json!({ "reference": reference })),
-            BoardAction::Link { issue_id, pr_reference } => {
-                queued("board_link", serde_json::json!({ "issue_id": issue_id, "pr_reference": pr_reference }))
+            BoardAction::Track { reference } => {
+                queued("board_track", serde_json::json!({ "reference": reference }))
             }
+            BoardAction::Link {
+                issue_id,
+                pr_reference,
+            } => queued(
+                "board_link",
+                serde_json::json!({ "issue_id": issue_id, "pr_reference": pr_reference }),
+            ),
             BoardAction::Meta { action } => match action {
-                BoardMetaAction::Add { reference, here, kind, value, tag, label, cwd, track } => {
+                BoardMetaAction::Add {
+                    reference,
+                    here,
+                    kind,
+                    value,
+                    tag,
+                    label,
+                    cwd,
+                    track,
+                } => {
                     let reference = resolve_reference(reference, here)?;
                     queued(
                         "board_meta_add",
@@ -754,21 +799,37 @@ fn run_remote(remote: &RemoteRun, name: &str, cmd: Cmd, json: bool) -> AppResult
                         }),
                     )
                 }
-                BoardMetaAction::Rm { id } => queued("board_meta_rm", serde_json::json!({ "id": id })),
+                BoardMetaAction::Rm { id } => {
+                    queued("board_meta_rm", serde_json::json!({ "id": id }))
+                }
                 BoardMetaAction::List { reference, here } => {
-                    let (owner, name, number) = board::parse_ref(&resolve_reference(reference, here)?)?;
+                    let (owner, name, number) =
+                        board::parse_ref(&resolve_reference(reference, here)?)?;
                     show(&remote.card(&owner, &name, number)?["meta"])
                 }
             },
             BoardAction::Sync => Err(remote::unsupported("board sync")),
         },
         Cmd::Focus { action } => match action {
-            FocusAction::Set { review_id, file, level } => {
-                let raw = if file == "-" { std::io::read_to_string(std::io::stdin())? } else { std::fs::read_to_string(&file)? };
+            FocusAction::Set {
+                review_id,
+                file,
+                level,
+            } => {
+                let raw = if file == "-" {
+                    std::io::read_to_string(std::io::stdin())?
+                } else {
+                    std::fs::read_to_string(&file)?
+                };
                 let plan: serde_json::Value = serde_json::from_str(&raw)?;
-                queued("focus_set", serde_json::json!({ "review_id": review_id, "plan": plan, "level": level }))
+                queued(
+                    "focus_set",
+                    serde_json::json!({ "review_id": review_id, "plan": plan, "level": level }),
+                )
             }
-            FocusAction::Clear { review_id } => queued("focus_clear", serde_json::json!({ "review_id": review_id })),
+            FocusAction::Clear { review_id } => {
+                queued("focus_clear", serde_json::json!({ "review_id": review_id }))
+            }
             FocusAction::Show { review_id } => show(&remote.focus(review_id)?),
             FocusAction::Hunks { .. } => Err(remote::unsupported("focus hunks")),
             FocusAction::Hunk { .. } => Err(remote::unsupported("focus hunk")),
@@ -783,7 +844,9 @@ fn run(cmd: Cmd, json: bool, db: &Db) -> AppResult<()> {
         #[cfg(all(feature = "worker", unix))]
         Cmd::Worker(_) => unreachable!("handled before the database is opened"),
         Cmd::Notify { .. } => {
-            return Err(AppError::Other("`cr notify` is only available in a remote run (see `cr worker`)".into()));
+            return Err(AppError::Other(
+                "`cr notify` is only available in a remote run (see `cr worker`)".into(),
+            ));
         }
         Cmd::List { repo: repo_id } => {
             let conn = db.0.lock().unwrap();
@@ -857,7 +920,11 @@ fn run(cmd: Cmd, json: bool, db: &Db) -> AppResult<()> {
                         } else {
                             format!("{}:{} ({})", c.file_path, c.line, c.side)
                         };
-                        let tag = c.tag.as_deref().map(|t| format!(" [{t}]")).unwrap_or_default();
+                        let tag = c
+                            .tag
+                            .as_deref()
+                            .map(|t| format!(" [{t}]"))
+                            .unwrap_or_default();
                         println!("  [#{}]{tag} {}", c.id, loc);
                         for line in c.body.lines() {
                             println!("        {line}");
@@ -920,7 +987,10 @@ fn run(cmd: Cmd, json: bool, db: &Db) -> AppResult<()> {
                 detail.review.head_sha.as_deref(),
             )?;
             if json {
-                println!("{}", serde_json::json!({ "path": path.display().to_string() }));
+                println!(
+                    "{}",
+                    serde_json::json!({ "path": path.display().to_string() })
+                );
             } else {
                 println!("{}", path.display());
             }
@@ -947,13 +1017,7 @@ fn run(cmd: Cmd, json: bool, db: &Db) -> AppResult<()> {
                     )
                 })?;
                 let r = review::create_review_impl(
-                    &conn,
-                    repo_id,
-                    repo_path,
-                    &base_ref,
-                    &head_ref,
-                    three_dot,
-                    false,
+                    &conn, repo_id, repo_path, &base_ref, &head_ref, three_dot, false,
                 )?;
                 if json {
                     println!("{}", serde_json::to_string_pretty(&r)?);
@@ -967,33 +1031,39 @@ fn run(cmd: Cmd, json: bool, db: &Db) -> AppResult<()> {
                 number,
                 reuse_draft: _,
             } => {
-                let (owner, repo_name, pr_number) =
-                    if owner_or_url.contains("github.com/") {
-                        parse_github_pr_url(&owner_or_url).ok_or_else(|| {
-                            codereview_lib::error::AppError::Other(
-                                format!("could not parse GitHub PR URL: {owner_or_url}"),
-                            )
-                        })?
-                    } else {
-                        let n = name.ok_or_else(|| {
-                            codereview_lib::error::AppError::Other(
-                                "name and number are required when not providing a URL".into(),
-                            )
-                        })?;
-                        let num = number.ok_or_else(|| {
-                            codereview_lib::error::AppError::Other(
-                                "number is required when not providing a URL".into(),
-                            )
-                        })?;
-                        (owner_or_url, n, num)
-                    };
+                let (owner, repo_name, pr_number) = if owner_or_url.contains("github.com/") {
+                    parse_github_pr_url(&owner_or_url).ok_or_else(|| {
+                        codereview_lib::error::AppError::Other(format!(
+                            "could not parse GitHub PR URL: {owner_or_url}"
+                        ))
+                    })?
+                } else {
+                    let n = name.ok_or_else(|| {
+                        codereview_lib::error::AppError::Other(
+                            "name and number are required when not providing a URL".into(),
+                        )
+                    })?;
+                    let num = number.ok_or_else(|| {
+                        codereview_lib::error::AppError::Other(
+                            "number is required when not providing a URL".into(),
+                        )
+                    })?;
+                    (owner_or_url, n, num)
+                };
                 let base_paths: Vec<String> = std::env::var("CODEREVIEW_BASE_PATHS")
                     .unwrap_or_default()
                     .split(',')
                     .map(|s| s.trim().to_string())
                     .filter(|s| !s.is_empty())
                     .collect();
-                let r = review::create_review_for_pr_impl(db, &owner, &repo_name, pr_number, &base_paths, false)?;
+                let r = review::create_review_for_pr_impl(
+                    db,
+                    &owner,
+                    &repo_name,
+                    pr_number,
+                    &base_paths,
+                    false,
+                )?;
                 if json {
                     println!("{}", serde_json::to_string_pretty(&r)?);
                 } else {
@@ -1071,7 +1141,8 @@ fn run(cmd: Cmd, json: bool, db: &Db) -> AppResult<()> {
                 tag,
             } => {
                 let conn = db.0.lock().unwrap();
-                let c = review::add_file_comment_impl(&conn, review_id, file, body, parse_tag(&tag))?;
+                let c =
+                    review::add_file_comment_impl(&conn, review_id, file, body, parse_tag(&tag))?;
                 if json {
                     println!("{}", serde_json::to_string_pretty(&c)?);
                 } else {
@@ -1170,7 +1241,10 @@ fn run(cmd: Cmd, json: bool, db: &Db) -> AppResult<()> {
                 if json {
                     println!("{}", serde_json::to_string_pretty(&c)?);
                 } else {
-                    println!("Drafted reply #{} to GitHub thread comment {thread_comment_id}", c.id);
+                    println!(
+                        "Drafted reply #{} to GitHub thread comment {thread_comment_id}",
+                        c.id
+                    );
                 }
             }
             CommentAction::PublishReplies { review_id } => {
@@ -1245,7 +1319,11 @@ fn run(cmd: Cmd, json: bool, db: &Db) -> AppResult<()> {
                 if json {
                     println!("{}", serde_json::to_string_pretty(&r)?);
                 } else {
-                    println!("Added repository #{} ({})", r.id, r.local_path.as_deref().unwrap_or("remote-only"));
+                    println!(
+                        "Added repository #{} ({})",
+                        r.id,
+                        r.local_path.as_deref().unwrap_or("remote-only")
+                    );
                 }
             }
             RepoAction::Remove { id } => {
@@ -1326,12 +1404,13 @@ fn run(cmd: Cmd, json: bool, db: &Db) -> AppResult<()> {
                     );
                     for item in &items {
                         let title = truncate(&item.item.title, 28);
-                        let author = item
-                            .item
-                            .author_login
-                            .as_deref()
-                            .unwrap_or("-");
-                        let reasons = item.reasons.iter().map(|r| r.reason.as_str()).collect::<Vec<_>>().join(",");
+                        let author = item.item.author_login.as_deref().unwrap_or("-");
+                        let reasons = item
+                            .reasons
+                            .iter()
+                            .map(|r| r.reason.as_str())
+                            .collect::<Vec<_>>()
+                            .join(",");
                         println!(
                             "{:<40} {:<8} {:<30} {:<15} {}{}",
                             truncate(&item.item.repo, 38),
@@ -1374,9 +1453,19 @@ fn run(cmd: Cmd, json: bool, db: &Db) -> AppResult<()> {
                     let status = if t.is_resolved { "resolved" } else { "open" };
                     println!("Thread {} — {loc} [{status}]", t.id);
                     for c in &t.comments {
-                        let login = c.author.as_ref().and_then(|a| a.login.as_deref()).unwrap_or("unknown");
-                        let db_id = c.database_id.map(|n| n.to_string()).unwrap_or_else(|| "-".to_string());
-                        println!("  [{db_id}] {login}: {}", c.body.lines().next().unwrap_or(""));
+                        let login = c
+                            .author
+                            .as_ref()
+                            .and_then(|a| a.login.as_deref())
+                            .unwrap_or("unknown");
+                        let db_id = c
+                            .database_id
+                            .map(|n| n.to_string())
+                            .unwrap_or_else(|| "-".to_string());
+                        println!(
+                            "  [{db_id}] {login}: {}",
+                            c.body.lines().next().unwrap_or("")
+                        );
                     }
                     println!();
                 }
@@ -1414,7 +1503,14 @@ fn set_inbox_archived(db: &Db, reference: &str, archive: bool) -> AppResult<()> 
     } else {
         inbox::restore_item_impl(&conn, &id)?;
     }
-    println!("{owner}/{name}#{number} {}.", if archive { "archived" } else { "restored to New" });
+    println!(
+        "{owner}/{name}#{number} {}.",
+        if archive {
+            "archived"
+        } else {
+            "restored to New"
+        }
+    );
     Ok(())
 }
 
@@ -1464,7 +1560,10 @@ fn run_board(action: BoardAction, json: bool, db: &Db) -> AppResult<()> {
                     println!("No cards on the board.");
                     return Ok(());
                 }
-                println!("{:<10} {:<30} {:<8} {:<40}", "LANE", "REPO", "NUMBER", "TITLE");
+                println!(
+                    "{:<10} {:<30} {:<8} {:<40}",
+                    "LANE", "REPO", "NUMBER", "TITLE"
+                );
                 for c in &cards {
                     println!(
                         "{:<10} {:<30} {:<8} {:<40}",
@@ -1481,28 +1580,45 @@ fn run_board(action: BoardAction, json: bool, db: &Db) -> AppResult<()> {
             let reference = resolve_reference(reference, here)?;
             let (owner, name, number) = board::parse_ref(&reference)?;
             let conn = db.0.lock().unwrap();
-            let card_id = board_cmd::find_card_id(&conn, &owner, &name, number)?
-                .ok_or_else(|| AppError::Other(format!("{owner}/{name}#{number} isn't tracked on the board")))?;
+            let card_id =
+                board_cmd::find_card_id(&conn, &owner, &name, number)?.ok_or_else(|| {
+                    AppError::Other(format!(
+                        "{owner}/{name}#{number} isn't tracked on the board"
+                    ))
+                })?;
             let card = board_cmd::board_show_impl(&conn, &card_id)?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&card)?);
             } else {
-                println!("{} {}#{} — {}", card.card.typ, card.card.repo, card.card.number, card.card.title);
+                println!(
+                    "{} {}#{} — {}",
+                    card.card.typ, card.card.repo, card.card.number, card.card.title
+                );
                 println!("Lane:  {}", card.lane.as_deref().unwrap_or("(hidden)"));
                 println!("State: {}", card.card.state.as_deref().unwrap_or("-"));
                 if card.card.typ == "pr" {
                     println!("CI:    {}", card.card.ci_status.as_deref().unwrap_or("-"));
                     println!("Merge: {}", card.card.mergeable.as_deref().unwrap_or("-"));
-                    println!("Head:  {}", card.card.merge_state_status.as_deref().unwrap_or("-"));
+                    println!(
+                        "Head:  {}",
+                        card.card.merge_state_status.as_deref().unwrap_or("-")
+                    );
                     if let Some(stack) = card.card.stack_number {
-                        println!("Stack: #{stack} (position {})", card.card.stack_position.unwrap_or(0));
+                        println!(
+                            "Stack: #{stack} (position {})",
+                            card.card.stack_position.unwrap_or(0)
+                        );
                     }
                 }
                 println!("URL:   {}", card.card.url);
                 if !card.meta.is_empty() {
                     println!("\nMetadata:");
                     for m in &card.meta {
-                        let tag = m.tag.as_deref().map(|t| format!(" [{t}]")).unwrap_or_default();
+                        let tag = m
+                            .tag
+                            .as_deref()
+                            .map(|t| format!(" [{t}]"))
+                            .unwrap_or_default();
                         println!("  [#{}] {}{tag}: {}", m.id, m.kind, m.value);
                     }
                 }
@@ -1520,7 +1636,10 @@ fn run_board(action: BoardAction, json: bool, db: &Db) -> AppResult<()> {
 
         BoardAction::Sync => print_sync(&sync_once(db, Scope::Board, Mode::Forced)?, json)?,
 
-        BoardAction::Link { issue_id, pr_reference } => {
+        BoardAction::Link {
+            issue_id,
+            pr_reference,
+        } => {
             board_cmd::board_link_pr_impl(db, &issue_id, &pr_reference)?;
             if !json {
                 println!("Linked {pr_reference} to card {issue_id}");
@@ -1567,8 +1686,12 @@ fn run_board_meta(action: BoardMetaAction, json: bool, db: &Db) -> AppResult<()>
             let reference = resolve_reference(reference, here)?;
             let (owner, name, number) = board::parse_ref(&reference)?;
             let conn = db.0.lock().unwrap();
-            let card_id = board_cmd::find_card_id(&conn, &owner, &name, number)?
-                .ok_or_else(|| AppError::Other(format!("{owner}/{name}#{number} isn't tracked on the board")))?;
+            let card_id =
+                board_cmd::find_card_id(&conn, &owner, &name, number)?.ok_or_else(|| {
+                    AppError::Other(format!(
+                        "{owner}/{name}#{number} isn't tracked on the board"
+                    ))
+                })?;
             let items = board_cmd::board_meta_list_impl(&conn, &card_id)?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&items)?);
@@ -1578,7 +1701,11 @@ fn run_board_meta(action: BoardMetaAction, json: bool, db: &Db) -> AppResult<()>
                     return Ok(());
                 }
                 for m in &items {
-                    let tag = m.tag.as_deref().map(|t| format!(" [{t}]")).unwrap_or_default();
+                    let tag = m
+                        .tag
+                        .as_deref()
+                        .map(|t| format!(" [{t}]"))
+                        .unwrap_or_default();
                     println!("[#{}] {}{tag}: {}", m.id, m.kind, m.value);
                 }
             }
@@ -1615,7 +1742,11 @@ fn run_focus(action: FocusAction, json: bool, db: &Db) -> AppResult<()> {
                     (Some(t), Some(r)) => format!("  [{t}: {r}]"),
                     _ => String::new(),
                 };
-                let header = if h.header.is_empty() { "(no hunks)" } else { &h.header };
+                let header = if h.header.is_empty() {
+                    "(no hunks)"
+                } else {
+                    &h.header
+                };
                 println!(
                     "{}  {}  {}  +{} -{}{rule}",
                     h.hunk_id, h.file_path, header, h.additions, h.deletions
@@ -1626,7 +1757,10 @@ fn run_focus(action: FocusAction, json: bool, db: &Db) -> AppResult<()> {
             }
         }
         FocusAction::Hunk { review_id, hunk_id } => {
-            println!("{}", focus::focus_hunk_text_impl(&conn, review_id, &hunk_id)?);
+            println!(
+                "{}",
+                focus::focus_hunk_text_impl(&conn, review_id, &hunk_id)?
+            );
         }
         FocusAction::Set {
             review_id,
@@ -1662,7 +1796,10 @@ fn run_focus(action: FocusAction, json: bool, db: &Db) -> AppResult<()> {
             if json {
                 println!("{}", serde_json::to_string_pretty(&view)?);
             } else {
-                println!("Focus raised on review #{review_id}: {} hunks", view.hunks.len());
+                println!(
+                    "Focus raised on review #{review_id}: {} hunks",
+                    view.hunks.len()
+                );
                 print_tier_counts(&view.hunks);
             }
         }
@@ -1689,7 +1826,11 @@ fn run_focus(action: FocusAction, json: bool, db: &Db) -> AppResult<()> {
             println!(
                 "Head:   {}{}",
                 f.head_sha.as_deref().unwrap_or("-"),
-                if view.stale { " (stale: head or base moved)" } else { "" }
+                if view.stale {
+                    " (stale: head or base moved)"
+                } else {
+                    ""
+                }
             );
             if let Some(s) = &f.summary {
                 println!("\n## Summary\n{s}");
@@ -1698,7 +1839,10 @@ fn run_focus(action: FocusAction, json: bool, db: &Db) -> AppResult<()> {
             print_tier_counts(&view.hunks);
             let notes = focus::focus_comments_impl(&conn, review_id)?;
             for c in &notes {
-                println!("\n  [#{}] {}:{} ({})\n        {}", c.id, c.file_path, c.line, c.side, c.body);
+                println!(
+                    "\n  [#{}] {}:{} ({})\n        {}",
+                    c.id, c.file_path, c.line, c.side, c.body
+                );
             }
         }
         FocusAction::Clear { review_id } => {

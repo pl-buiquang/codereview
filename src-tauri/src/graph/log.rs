@@ -59,7 +59,15 @@ pub fn range_log(checkout: &Path, base: &str, head: &str) -> AppResult<Vec<Graph
     let range = format!("{base}..{head}");
     let out = run_git(
         checkout,
-        &["log", "--topo-order", "--no-color", LOG_FORMAT, "--end-of-options", &range, "--"],
+        &[
+            "log",
+            "--topo-order",
+            "--no-color",
+            LOG_FORMAT,
+            "--end-of-options",
+            &range,
+            "--",
+        ],
     )?;
     out.split('\x1e')
         .map(|rec| rec.trim_start_matches(['\n', '\r']))
@@ -75,7 +83,11 @@ pub fn range_log(checkout: &Path, base: &str, head: &str) -> AppResult<Vec<Graph
 fn tracked_remote_refs(checkout: &Path) -> AppResult<Vec<String>> {
     let remotes = run_git(
         checkout,
-        &["for-each-ref", "--format=%(refname)%09%(symref)", "refs/remotes"],
+        &[
+            "for-each-ref",
+            "--format=%(refname)%09%(symref)",
+            "refs/remotes",
+        ],
     )?;
     let existing: Vec<&str> = remotes
         .lines()
@@ -88,7 +100,11 @@ fn tracked_remote_refs(checkout: &Path) -> AppResult<Vec<String>> {
 
     let heads = run_git(
         checkout,
-        &["for-each-ref", "--format=%(refname:short)%09%(upstream)", "refs/heads"],
+        &[
+            "for-each-ref",
+            "--format=%(refname:short)%09%(upstream)",
+            "refs/heads",
+        ],
     )?;
     let mut names = std::collections::HashSet::new();
     let mut refs = std::collections::BTreeSet::new();
@@ -101,7 +117,10 @@ fn tracked_remote_refs(checkout: &Path) -> AppResult<Vec<String>> {
     }
     for refname in existing {
         let short = refname.strip_prefix("refs/remotes/").unwrap_or(refname);
-        if short.split_once('/').is_some_and(|(_, branch)| names.contains(branch)) {
+        if short
+            .split_once('/')
+            .is_some_and(|(_, branch)| names.contains(branch))
+        {
             refs.insert(refname.to_string());
         }
     }
@@ -156,7 +175,10 @@ fn parse_ref(line: &str) -> Option<RefInfo> {
     let peeled = parts.next().unwrap_or("");
     let head = parts.next().unwrap_or("");
     let symref = parts.next().unwrap_or("");
-    let updated_at = parts.next().and_then(|t| t.trim().parse().ok()).unwrap_or(0);
+    let updated_at = parts
+        .next()
+        .and_then(|t| t.trim().parse().ok())
+        .unwrap_or(0);
     if !symref.is_empty() {
         return None;
     }
@@ -270,7 +292,10 @@ mod tests {
         let c2 = f.commit("a.txt", "second");
         let c3 = f.commit("a.txt", "third");
 
-        assert_eq!(shas(&range_log(f.path(), &c1, &c3).unwrap()), vec![c3.clone(), c2.clone()]);
+        assert_eq!(
+            shas(&range_log(f.path(), &c1, &c3).unwrap()),
+            vec![c3.clone(), c2.clone()]
+        );
         assert!(range_log(f.path(), &c3, &c3).unwrap().is_empty());
         assert!(range_log(f.path(), "--output=x", &c3).is_err());
     }

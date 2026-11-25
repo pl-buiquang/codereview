@@ -37,13 +37,21 @@ pub struct Light {
 }
 
 pub fn pr_key(owner: &str, name: &str, number: i64) -> String {
-    format!("pr:{}/{}#{number}", owner.to_lowercase(), name.to_lowercase())
+    format!(
+        "pr:{}/{}#{number}",
+        owner.to_lowercase(),
+        name.to_lowercase()
+    )
 }
 
 pub fn light(db: &Db, r: &ContextRef) -> AppResult<Light> {
     let conn = db.0.lock().unwrap();
     match r.kind.as_str() {
-        "board" => Ok(Light { key: "board".into(), label: "Board".into(), kinds: vec!["board"] }),
+        "board" => Ok(Light {
+            key: "board".into(),
+            label: "Board".into(),
+            kinds: vec!["board"],
+        }),
         "pr" | "issue" => {
             let card = board::card_row(&conn, &r.id)?;
             if card.typ != r.kind {
@@ -54,12 +62,22 @@ pub fn light(db: &Db, r: &ContextRef) -> AppResult<Light> {
                 Some((o, n)) if kind == "pr" => pr_key(o, n, card.number),
                 _ => format!("{kind}:{}#{}", card.repo.to_lowercase(), card.number),
             };
-            Ok(Light { key, label: format!("{}#{}", card.repo, card.number), kinds: vec![kind] })
+            Ok(Light {
+                key,
+                label: format!("{}#{}", card.repo, card.number),
+                kinds: vec![kind],
+            })
         }
         "review" => {
-            let review_id: i64 = r.id.parse().map_err(|_| AppError::Other("bad review id".into()))?;
+            let review_id: i64 =
+                r.id.parse()
+                    .map_err(|_| AppError::Other("bad review id".into()))?;
             let detail = review::load_detail(&conn, review_id)?;
-            match (&detail.remote_owner, &detail.remote_name, detail.target.github_pr_number) {
+            match (
+                &detail.remote_owner,
+                &detail.remote_name,
+                detail.target.github_pr_number,
+            ) {
                 (Some(o), Some(n), Some(num)) if detail.target.kind == "github_pr" => Ok(Light {
                     key: pr_key(o, n, num),
                     label: format!("{o}/{n}#{num}"),
@@ -114,9 +132,16 @@ fn scratch_dir(tag: &str) -> PathBuf {
 }
 
 fn pr_refs(conn: &Connection, node_id: &str) -> (String, String) {
-    conn.query_row("SELECT head_ref, base_ref FROM gh_pr WHERE node_id = ?1", params![node_id], |r| {
-        Ok((r.get::<_, Option<String>>(0)?.unwrap_or_default(), r.get::<_, Option<String>>(1)?.unwrap_or_default()))
-    })
+    conn.query_row(
+        "SELECT head_ref, base_ref FROM gh_pr WHERE node_id = ?1",
+        params![node_id],
+        |r| {
+            Ok((
+                r.get::<_, Option<String>>(0)?.unwrap_or_default(),
+                r.get::<_, Option<String>>(1)?.unwrap_or_default(),
+            ))
+        },
+    )
     .unwrap_or_default()
 }
 
@@ -135,7 +160,10 @@ pub(crate) fn repo_local_path(conn: &Connection, repo: &str) -> Option<String> {
 /// review of the PR to hang a worktree on); a remote run does not want that.
 fn gather(app: &AppHandle, routine: &Routine, r: &ContextRef, local: bool) -> AppResult<Facts> {
     let db = app.state::<Db>();
-    let mut facts = Facts { kind: "board", ..Facts::default() };
+    let mut facts = Facts {
+        kind: "board",
+        ..Facts::default()
+    };
     match r.kind.as_str() {
         "board" => {}
         "pr" => {
@@ -146,7 +174,11 @@ fn gather(app: &AppHandle, routine: &Routine, r: &ContextRef, local: bool) -> Ap
                 number: card.number.to_string(),
                 url: card.url.clone(),
                 title: card.title.clone(),
-                head_ref: card.head_ref.clone().filter(|h| !h.is_empty()).unwrap_or(head_ref),
+                head_ref: card
+                    .head_ref
+                    .clone()
+                    .filter(|h| !h.is_empty())
+                    .unwrap_or(head_ref),
                 base_ref,
                 kind: "pr",
                 github_repo: Some(card.repo.clone()),
@@ -155,7 +187,14 @@ fn gather(app: &AppHandle, routine: &Routine, r: &ContextRef, local: bool) -> Ap
             };
             if routine.needs_worktree && local {
                 let (owner, name, number) = board::pr_card_coords(&db, &r.id)?;
-                let rev = review::create_review_for_pr_impl(&db, &owner, &name, number, &r.base_paths, true)?;
+                let rev = review::create_review_for_pr_impl(
+                    &db,
+                    &owner,
+                    &name,
+                    number,
+                    &r.base_paths,
+                    true,
+                )?;
                 facts.review_id = Some(rev.id);
             }
         }
@@ -174,16 +213,30 @@ fn gather(app: &AppHandle, routine: &Routine, r: &ContextRef, local: bool) -> Ap
             };
         }
         "review" => {
-            let review_id: i64 = r.id.parse().map_err(|_| AppError::Other("bad review id".into()))?;
+            let review_id: i64 =
+                r.id.parse()
+                    .map_err(|_| AppError::Other("bad review id".into()))?;
             let detail = review::load_detail(&db.0.lock().unwrap(), review_id)?;
-            let (repo, url) = match (&detail.remote_owner, &detail.remote_name, detail.target.github_pr_number) {
-                (Some(o), Some(n), Some(num)) => (format!("{o}/{n}"), format!("https://github.com/{o}/{n}/pull/{num}")),
+            let (repo, url) = match (
+                &detail.remote_owner,
+                &detail.remote_name,
+                detail.target.github_pr_number,
+            ) {
+                (Some(o), Some(n), Some(num)) => (
+                    format!("{o}/{n}"),
+                    format!("https://github.com/{o}/{n}/pull/{num}"),
+                ),
                 _ => (detail.local_path.clone().unwrap_or_default(), String::new()),
             };
-            let github_repo = (detail.target.kind == "github_pr" && !url.is_empty()).then(|| repo.clone());
+            let github_repo =
+                (detail.target.kind == "github_pr" && !url.is_empty()).then(|| repo.clone());
             facts = Facts {
                 repo,
-                number: detail.target.github_pr_number.map(|n| n.to_string()).unwrap_or_default(),
+                number: detail
+                    .target
+                    .github_pr_number
+                    .map(|n| n.to_string())
+                    .unwrap_or_default(),
                 url,
                 title: detail.target.title.clone(),
                 head_ref: detail.target.head_ref.clone(),
@@ -223,8 +276,14 @@ pub fn resolve(app: &AppHandle, routine: &Routine, r: &ContextRef) -> AppResult<
         scratch_dir(&format!("{}_{}", routine.key, facts.kind))
     };
 
-    let worktree = if routine.needs_worktree { cwd.to_string_lossy().into_owned() } else { String::new() };
-    let plans_dir = crate::commands::repo::expand_home(&manager::routine_settings(&db.0.lock().unwrap()).plans_dir);
+    let worktree = if routine.needs_worktree {
+        cwd.to_string_lossy().into_owned()
+    } else {
+        String::new()
+    };
+    let plans_dir = crate::commands::repo::expand_home(
+        &manager::routine_settings(&db.0.lock().unwrap()).plans_dir,
+    );
     let vars = vec![
         ("plans_dir".to_string(), plans_dir),
         ("repo".to_string(), facts.repo.clone()),
@@ -234,7 +293,10 @@ pub fn resolve(app: &AppHandle, routine: &Routine, r: &ContextRef) -> AppResult<
         ("head_ref".to_string(), facts.head_ref.clone()),
         ("base_ref".to_string(), facts.base_ref.clone()),
         ("worktree".to_string(), worktree),
-        ("review_id".to_string(), facts.review_id.map(|i| i.to_string()).unwrap_or_default()),
+        (
+            "review_id".to_string(),
+            facts.review_id.map(|i| i.to_string()).unwrap_or_default(),
+        ),
     ];
     let block = context_block(routine, &facts, &cwd.to_string_lossy());
     Ok(Resolved { vars, cwd, block })
@@ -251,7 +313,10 @@ pub struct RemoteResolved {
 
 /// The workspace a remote host should prepare for a run, or why it can't be named.
 fn workspace_for(routine: &Routine, f: &Facts) -> AppResult<WorkspaceSpec> {
-    let repo = f.github_repo.clone().filter(|r| r.split_once('/').is_some_and(|(o, n)| !o.is_empty() && !n.is_empty() && !n.contains('/')));
+    let repo = f.github_repo.clone().filter(|r| {
+        r.split_once('/')
+            .is_some_and(|(o, n)| !o.is_empty() && !n.is_empty() && !n.contains('/'))
+    });
     let Some(repo) = repo else {
         return Err(AppError::Other(format!(
             "“{}” can't run on a remote host from this context: the host needs a GitHub repository (owner/name), and this context has none",
@@ -266,17 +331,28 @@ fn workspace_for(routine: &Routine, f: &Facts) -> AppResult<WorkspaceSpec> {
             branch: Some(f.head_ref.clone()).filter(|b| !b.is_empty()),
             kind: WorkspaceKind::PrWorktree,
         },
-        _ => WorkspaceSpec { repo, pr: None, branch: None, kind: WorkspaceKind::MainClone },
+        _ => WorkspaceSpec {
+            repo,
+            pr: None,
+            branch: None,
+            kind: WorkspaceKind::MainClone,
+        },
     })
 }
 
 /// Everything a remote run needs from its context. Nothing here touches the disk: the host owns its
 /// clones, and the request names `owner/name` + PR, never a local path.
-pub fn resolve_remote(app: &AppHandle, routine: &Routine, r: &ContextRef) -> AppResult<RemoteResolved> {
+pub fn resolve_remote(
+    app: &AppHandle,
+    routine: &Routine,
+    r: &ContextRef,
+) -> AppResult<RemoteResolved> {
     let db = app.state::<Db>();
     let facts = gather(app, routine, r, false)?;
     let workspace = workspace_for(routine, &facts)?;
-    let plans_dir = crate::commands::repo::expand_home(&manager::routine_settings(&db.0.lock().unwrap()).plans_dir);
+    let plans_dir = crate::commands::repo::expand_home(
+        &manager::routine_settings(&db.0.lock().unwrap()).plans_dir,
+    );
     let here = "the current directory (a checkout on the remote host)";
     let vars = vec![
         ("plans_dir".to_string(), plans_dir),
@@ -286,12 +362,27 @@ pub fn resolve_remote(app: &AppHandle, routine: &Routine, r: &ContextRef) -> App
         ("title".to_string(), facts.title.clone()),
         ("head_ref".to_string(), facts.head_ref.clone()),
         ("base_ref".to_string(), facts.base_ref.clone()),
-        ("worktree".to_string(), if routine.needs_worktree { here.to_string() } else { String::new() }),
-        ("review_id".to_string(), facts.review_id.map(|i| i.to_string()).unwrap_or_default()),
+        (
+            "worktree".to_string(),
+            if routine.needs_worktree {
+                here.to_string()
+            } else {
+                String::new()
+            },
+        ),
+        (
+            "review_id".to_string(),
+            facts.review_id.map(|i| i.to_string()).unwrap_or_default(),
+        ),
     ];
     let block = context_block(routine, &facts, here);
     let snapshot = snapshot(&db.0.lock().unwrap(), &facts, &workspace);
-    Ok(RemoteResolved { vars, block, workspace, snapshot })
+    Ok(RemoteResolved {
+        vars,
+        block,
+        workspace,
+        snapshot,
+    })
 }
 
 /// The context snapshot a remote run reads with `cr board ...` / `cr focus show`: the context's card
@@ -302,13 +393,21 @@ fn snapshot(conn: &Connection, f: &Facts, ws: &WorkspaceSpec) -> serde_json::Val
         let own = f.card_id.clone().or_else(|| {
             let number = ws.pr.or_else(|| f.number.parse().ok())?;
             let (owner, name) = ws.repo.split_once('/')?;
-            board::find_card_id(conn, owner, name, number).ok().flatten()
+            board::find_card_id(conn, owner, name, number)
+                .ok()
+                .flatten()
         });
         if let Some(own) = own {
             let linked: Vec<String> = all
                 .iter()
                 .find(|c| c.card.id == own)
-                .map(|c| c.linked_issue_ids.iter().chain(&c.linked_pr_ids).cloned().collect())
+                .map(|c| {
+                    c.linked_issue_ids
+                        .iter()
+                        .chain(&c.linked_pr_ids)
+                        .cloned()
+                        .collect()
+                })
                 .unwrap_or_default();
             cards = all
                 .iter()
@@ -320,7 +419,10 @@ fn snapshot(conn: &Connection, f: &Facts, ws: &WorkspaceSpec) -> serde_json::Val
     let mut focus = serde_json::Map::new();
     if let Some(id) = f.review_id {
         if let Ok(view) = crate::commands::focus::get_focus_impl(conn, id) {
-            focus.insert(id.to_string(), serde_json::to_value(view).unwrap_or(serde_json::Value::Null));
+            focus.insert(
+                id.to_string(),
+                serde_json::to_value(view).unwrap_or(serde_json::Value::Null),
+            );
         }
     }
     serde_json::json!({ "cards": cards, "focus": focus })
@@ -345,7 +447,10 @@ fn context_block(routine: &Routine, f: &Facts, cwd: &str) -> String {
     fact("Title", &f.title);
     fact("Head branch", &f.head_ref);
     fact("Base branch", &f.base_ref);
-    fact("Review id", &f.review_id.map(|i| i.to_string()).unwrap_or_default());
+    fact(
+        "Review id",
+        &f.review_id.map(|i| i.to_string()).unwrap_or_default(),
+    );
     fact("Working directory", cwd);
     lines.push(
         "If you cannot finish without a human, end your final message with a line `NEEDS_ATTENTION: <one-sentence \
@@ -383,8 +488,16 @@ mod tests {
 
     #[test]
     fn review_of_a_pr_satisfies_pr_routines_but_not_the_other_way() {
-        let review_on_pr = Light { key: "pr:o/n#1".into(), label: String::new(), kinds: vec!["review", "pr"] };
-        let pr_card = Light { key: "pr:o/n#1".into(), label: String::new(), kinds: vec!["pr"] };
+        let review_on_pr = Light {
+            key: "pr:o/n#1".into(),
+            label: String::new(),
+            kinds: vec!["review", "pr"],
+        };
+        let pr_card = Light {
+            key: "pr:o/n#1".into(),
+            label: String::new(),
+            kinds: vec!["pr"],
+        };
         assert!(eligible(&routine("pr", true), &review_on_pr));
         assert!(eligible(&routine("review", true), &review_on_pr));
         assert!(!eligible(&routine("review", true), &pr_card));
@@ -405,19 +518,40 @@ mod tests {
     fn a_remote_workspace_names_the_repo_and_pr_never_a_path() {
         let mut r = routine("pr", true);
         let ws = workspace_for(&r, &facts("pr", Some("acme/widgets"), "7", "feat/x")).unwrap();
-        assert_eq!((ws.repo.as_str(), ws.pr, ws.kind), ("acme/widgets", None, WorkspaceKind::MainClone));
+        assert_eq!(
+            (ws.repo.as_str(), ws.pr, ws.kind),
+            ("acme/widgets", None, WorkspaceKind::MainClone)
+        );
         r.needs_worktree = true;
         let ws = workspace_for(&r, &facts("pr", Some("acme/widgets"), "7", "feat/x")).unwrap();
-        assert_eq!((ws.pr, ws.branch.as_deref(), ws.kind), (Some(7), Some("feat/x"), WorkspaceKind::PrWorktree));
+        assert_eq!(
+            (ws.pr, ws.branch.as_deref(), ws.kind),
+            (Some(7), Some("feat/x"), WorkspaceKind::PrWorktree)
+        );
         // a review of a PR is the same; an issue has no PR to check out
-        assert_eq!(workspace_for(&r, &facts("review", Some("acme/widgets"), "7", "")).unwrap().branch, None);
-        assert_eq!(workspace_for(&r, &facts("issue", Some("acme/widgets"), "3", "")).unwrap().kind, WorkspaceKind::MainClone);
+        assert_eq!(
+            workspace_for(&r, &facts("review", Some("acme/widgets"), "7", ""))
+                .unwrap()
+                .branch,
+            None
+        );
+        assert_eq!(
+            workspace_for(&r, &facts("issue", Some("acme/widgets"), "3", ""))
+                .unwrap()
+                .kind,
+            WorkspaceKind::MainClone
+        );
     }
 
     #[test]
     fn a_context_without_a_github_repo_is_refused_for_a_remote_run() {
         let r = routine("board", true);
-        for f in [facts("board", None, "", ""), facts("review", None, "", ""), facts("pr", Some("/home/me/code/widgets"), "1", ""), facts("pr", Some("a/b/c"), "1", "")] {
+        for f in [
+            facts("board", None, "", ""),
+            facts("review", None, "", ""),
+            facts("pr", Some("/home/me/code/widgets"), "1", ""),
+            facts("pr", Some("a/b/c"), "1", ""),
+        ] {
             let err = workspace_for(&r, &f).unwrap_err().to_string();
             assert!(err.contains("can't run on a remote host"), "{err}");
         }
@@ -425,6 +559,9 @@ mod tests {
 
     #[test]
     fn pr_key_is_case_insensitive() {
-        assert_eq!(pr_key("Cardiologs", "Back", 12), pr_key("cardiologs", "back", 12));
+        assert_eq!(
+            pr_key("Cardiologs", "Back", 12),
+            pr_key("cardiologs", "back", 12)
+        );
     }
 }

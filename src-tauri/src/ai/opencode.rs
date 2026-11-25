@@ -24,12 +24,12 @@ use std::time::{Duration, Instant};
 use serde_json::Value;
 
 use super::{
-    Access, AgentSession, Caps, Event, FinalResult, Harness, Interactive, OneShot, RunAcc, SessionMode, StreamRun, SystemPrompt,
-    ToolPolicy, TurnResult,
+    Access, AgentSession, Caps, Event, FinalResult, Harness, Interactive, OneShot, RunAcc,
+    SessionMode, StreamRun, SystemPrompt, ToolPolicy, TurnResult,
 };
 use crate::ai_usage;
-use crate::run_usage::{self, RunUsage};
 use crate::error::{AppError, AppResult};
+use crate::run_usage::{self, RunUsage};
 
 pub struct OpenCode;
 
@@ -66,7 +66,10 @@ impl Harness for OpenCode {
     }
 
     fn version(&self) -> Option<String> {
-        let out = Command::new(crate::tools::opencode_bin()).arg("--version").output().ok()?;
+        let out = Command::new(crate::tools::opencode_bin())
+            .arg("--version")
+            .output()
+            .ok()?;
         let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
         (out.status.success() && !text.is_empty()).then_some(text)
     }
@@ -80,7 +83,13 @@ impl Harness for OpenCode {
         let mut tag = req.usage_tag.clone();
         tag.model = req.model.to_string();
         let error = result.as_ref().err().map(|e| e.to_string());
-        ai_usage::record(&tag, &started_at, started.elapsed().as_millis() as i64, &usage, error.as_deref());
+        ai_usage::record(
+            &tag,
+            &started_at,
+            started.elapsed().as_millis() as i64,
+            &usage,
+            error.as_deref(),
+        );
         result
     }
 
@@ -88,41 +97,64 @@ impl Harness for OpenCode {
         // A private server per run (`--standalone`): stopping the run's process group then stops the
         // work too, which the shared background service would carry on with.
         let mut cmd = command(&run.req, true)?;
-        cmd.stdin(Stdio::piped()).stdout(Stdio::from(run.stdout)).stderr(Stdio::from(run.stderr));
+        cmd.stdin(Stdio::piped())
+            .stdout(Stdio::from(run.stdout))
+            .stderr(Stdio::from(run.stderr));
         #[cfg(unix)]
         {
             use std::os::unix::process::CommandExt;
             cmd.process_group(0);
         }
-        cmd.spawn().map_err(|e| AppError::Other(format!("failed to spawn opencode: {e}")))
+        cmd.spawn()
+            .map_err(|e| AppError::Other(format!("failed to spawn opencode: {e}")))
     }
 
     fn parse_line(&self, line: &str) -> (String, Option<Value>) {
         match serde_json::from_str::<Value>(line) {
-            Ok(v) => (v.get("type").and_then(Value::as_str).unwrap_or("unknown").to_string(), Some(v)),
+            Ok(v) => (
+                v.get("type")
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown")
+                    .to_string(),
+                Some(v),
+            ),
             Err(_) => ("raw".to_string(), None),
         }
     }
 
     fn normalize(&self, line: &str) -> Vec<Event> {
         let Ok(v) = serde_json::from_str::<Value>(line) else {
-            return vec![Event::Other { kind: "raw".into(), raw: Value::String(line.trim_end().to_string()) }];
+            return vec![Event::Other {
+                kind: "raw".into(),
+                raw: Value::String(line.trim_end().to_string()),
+            }];
         };
         let kind = v.get("type").and_then(Value::as_str).unwrap_or("unknown");
         let mut events = Vec::new();
         match kind {
             "text" => {
-                let text = v.pointer("/part/text").and_then(Value::as_str).unwrap_or_default();
+                let text = v
+                    .pointer("/part/text")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
                 if !text.trim().is_empty() {
                     events.push(Event::Text(text.to_string()));
                 }
             }
             "tool_use" => {
-                let id = v.pointer("/part/id").and_then(Value::as_str).unwrap_or_default().to_string();
+                let id = v
+                    .pointer("/part/id")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string();
                 let state = v.pointer("/part/state");
                 events.push(Event::ToolCall {
                     id: id.clone(),
-                    name: v.pointer("/part/tool").and_then(Value::as_str).unwrap_or_default().to_string(),
+                    name: v
+                        .pointer("/part/tool")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string(),
                     input: state
                         .and_then(|s| s.get("input"))
                         .cloned()
@@ -133,7 +165,10 @@ impl Harness for OpenCode {
                     Some("completed") => events.push(Event::ToolResult {
                         id,
                         ok: true,
-                        text: state.and_then(|s| s.get("output")).map(value_text).unwrap_or_default(),
+                        text: state
+                            .and_then(|s| s.get("output"))
+                            .map(value_text)
+                            .unwrap_or_default(),
                     }),
                     Some("error") => events.push(Event::ToolResult {
                         id,
@@ -147,22 +182,36 @@ impl Harness for OpenCode {
                 }
             }
             "step_finish" => {
-                let reason = v.pointer("/part/reason").and_then(Value::as_str).unwrap_or_default();
+                let reason = v
+                    .pointer("/part/reason")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
                 // A step that ends in tool calls is followed by another one; any other reason ends the run.
                 if reason != "tool-calls" {
                     events.push(Event::Final {
                         ok: reason == "stop",
-                        text: if reason == "stop" { String::new() } else { format!("opencode stopped: {reason}") },
+                        text: if reason == "stop" {
+                            String::new()
+                        } else {
+                            format!("opencode stopped: {reason}")
+                        },
                         usage: step_usage(&v).unwrap_or_default(),
                     });
                 }
             }
-            "error" => events.push(Event::Final { ok: false, text: error_text(&v), usage: RunUsage::default() }),
+            "error" => events.push(Event::Final {
+                ok: false,
+                text: error_text(&v),
+                usage: RunUsage::default(),
+            }),
             _ => {}
         }
         // Everything else (step starts, reasoning, unknown types) stays as `other`.
         if events.is_empty() {
-            events.push(Event::Other { kind: kind.to_string(), raw: v });
+            events.push(Event::Other {
+                kind: kind.to_string(),
+                raw: v,
+            });
         }
         events
     }
@@ -178,11 +227,16 @@ impl Harness for OpenCode {
 
     #[cfg(unix)]
     fn is_own_process(&self, pid: i32, session_id: Option<&str>) -> bool {
-        let Ok(out) = Command::new("ps").args(["-o", "command=", "-p", &pid.to_string()]).output() else {
+        let Ok(out) = Command::new("ps")
+            .args(["-o", "command=", "-p", &pid.to_string()])
+            .output()
+        else {
             return false;
         };
         let cmd = String::from_utf8_lossy(&out.stdout);
-        cmd.contains("opencode") && cmd.contains(" run") && session_id.is_none_or(|s| cmd.contains(&session_id_for(s)))
+        cmd.contains("opencode")
+            && cmd.contains(" run")
+            && session_id.is_none_or(|s| cmd.contains(&session_id_for(s)))
     }
 
     #[cfg(not(unix))]
@@ -194,7 +248,9 @@ impl Harness for OpenCode {
         let mut argv = vec!["opencode".to_string()];
         match opts.session {
             SessionMode::Ephemeral => {}
-            SessionMode::New(id) | SessionMode::Resume(id) => argv.extend(["--session".to_string(), session_id_for(id)]),
+            SessionMode::New(id) | SessionMode::Resume(id) => {
+                argv.extend(["--session".to_string(), session_id_for(id)])
+            }
             SessionMode::Fork(_) => return None,
         }
         // No system prompt flag: the instructions go in as the opening prompt of a new session.
@@ -207,11 +263,13 @@ impl Harness for OpenCode {
     fn context_file_note(&self, opts: &Interactive<'_>) -> Option<String> {
         opts.system_prompt_file?;
         Some(if opening_prompt(opts).is_some() {
-            "opencode has no system prompt flag: the context was passed as the opening prompt".to_string()
+            "opencode has no system prompt flag: the context was passed as the opening prompt"
+                .to_string()
         } else if matches!(opts.session, SessionMode::New(_) | SessionMode::Ephemeral) {
             "context file skipped: it is empty or could not be read".to_string()
         } else {
-            "context file skipped: opencode can only take it as the opening prompt of a new session".to_string()
+            "context file skipped: opencode can only take it as the opening prompt of a new session"
+                .to_string()
         })
     }
 
@@ -235,10 +293,20 @@ impl Harness for OpenCode {
 
     fn settings_args(&self, settings: &Value) -> Vec<String> {
         let mut args = Vec::new();
-        if let Some(agent) = settings.get("agent").and_then(Value::as_str).map(str::trim).filter(|a| !a.is_empty()) {
+        if let Some(agent) = settings
+            .get("agent")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|a| !a.is_empty())
+        {
             args.extend(["--agent".to_string(), agent.to_string()]);
         }
-        for a in settings.get("extra_args").and_then(Value::as_array).into_iter().flatten() {
+        for a in settings
+            .get("extra_args")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
             if let Some(a) = a.as_str() {
                 args.push(a.to_string());
             }
@@ -251,13 +319,24 @@ impl Harness for OpenCode {
 /// file is readable and not blank. `interactive_argv` and `context_file_note` both go through it, so
 /// the note always matches the argv.
 fn opening_prompt(opts: &Interactive<'_>) -> Option<String> {
-    let (file, SessionMode::New(_) | SessionMode::Ephemeral) = (opts.system_prompt_file?, opts.session) else { return None };
-    std::fs::read_to_string(file).ok().filter(|t| !t.trim().is_empty())
+    let (file, SessionMode::New(_) | SessionMode::Ephemeral) =
+        (opts.system_prompt_file?, opts.session)
+    else {
+        return None;
+    };
+    std::fs::read_to_string(file)
+        .ok()
+        .filter(|t| !t.trim().is_empty())
 }
 
 /// The ids `opencode models` prints, one `provider/model` per line.
 pub(crate) fn parse_models(stdout: &str) -> Vec<String> {
-    stdout.lines().map(str::trim).filter(|l| l.contains('/') && !l.contains(char::is_whitespace)).map(String::from).collect()
+    stdout
+        .lines()
+        .map(str::trim)
+        .filter(|l| l.contains('/') && !l.contains(char::is_whitespace))
+        .map(String::from)
+        .collect()
 }
 
 /// opencode wants session ids starting with `ses`; the app's own ids (UUIDs) become `ses_<hex>`.
@@ -290,14 +369,20 @@ fn step_usage(v: &Value) -> Option<RunUsage> {
         output_tokens: n("/part/tokens/output") + n("/part/tokens/reasoning"),
         cache_read_tokens: n("/part/tokens/cache/read"),
         cache_creation_tokens: n("/part/tokens/cache/write"),
-        cost_usd: v.pointer("/part/cost").and_then(Value::as_f64).unwrap_or(0.0),
+        cost_usd: v
+            .pointer("/part/cost")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.0),
         ..RunUsage::default()
     })
 }
 
 /// The message of an `error` line.
 fn error_text(v: &Value) -> String {
-    let message = v.pointer("/error/message").and_then(Value::as_str).filter(|m| !m.is_empty());
+    let message = v
+        .pointer("/error/message")
+        .and_then(Value::as_str)
+        .filter(|m| !m.is_empty());
     match (message, v.pointer("/error/type").and_then(Value::as_str)) {
         (Some(m), _) => m.to_string(),
         (None, Some(t)) => t.to_string(),
@@ -313,7 +398,11 @@ pub(crate) fn message(req: &OneShot<'_>) -> AppResult<String> {
             .map_err(|e| AppError::Other(format!("failed to read the system prompt: {e}")))?,
         None => String::new(),
     };
-    Ok(if system.trim().is_empty() { req.prompt.to_string() } else { format!("{}\n\n---\n\n{}", system.trim_end(), req.prompt) })
+    Ok(if system.trim().is_empty() {
+        req.prompt.to_string()
+    } else {
+        format!("{}\n\n---\n\n{}", system.trim_end(), req.prompt)
+    })
 }
 
 /// The `--agent` / `--auto` flags of `access`. An explicit `--agent` in the extra args (a profile's
@@ -322,7 +411,9 @@ pub(crate) fn message(req: &OneShot<'_>) -> AppResult<String> {
 /// access. It is still used for runs that ask for no tools (summaries, theme), where it is strictly
 /// less capable than the default agent.
 fn access_flags(access: &Access, tools: &ToolPolicy, extra_args: &[String]) -> Vec<&'static str> {
-    let named = extra_args.iter().any(|a| a == "--agent" || a.starts_with("--agent="));
+    let named = extra_args
+        .iter()
+        .any(|a| a == "--agent" || a.starts_with("--agent="));
     let mut flags = Vec::new();
     match access {
         Access::ReadOnly if !named => flags.extend(["--agent", "plan"]),
@@ -333,7 +424,9 @@ fn access_flags(access: &Access, tools: &ToolPolicy, extra_args: &[String]) -> V
             }
             flags.push("--auto");
         }
-        Access::Default if !named && *tools == ToolPolicy::None => flags.extend(["--agent", "plan"]),
+        Access::Default if !named && *tools == ToolPolicy::None => {
+            flags.extend(["--agent", "plan"])
+        }
         _ => {}
     }
     flags
@@ -356,7 +449,9 @@ pub(crate) fn command(req: &OneShot<'_>, stream: bool) -> AppResult<Command> {
             cmd.arg("--session").arg(session_id_for(id));
         }
         SessionMode::Ephemeral => {}
-        SessionMode::Fork(_) => return Err(AppError::Other("opencode can't fork a session".into())),
+        SessionMode::Fork(_) => {
+            return Err(AppError::Other("opencode can't fork a session".into()))
+        }
     }
     // The tool policy has no opencode equivalent: the agent decides which tools exist.
     cmd.args(&req.extra_args);
@@ -367,9 +462,19 @@ pub(crate) fn command(req: &OneShot<'_>, stream: bool) -> AppResult<Command> {
 }
 
 fn execute(cmd: &mut Command, message: &str) -> (AppResult<TurnResult>, RunUsage) {
-    let mut child = match cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn() {
+    let mut child = match cmd
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+    {
         Ok(c) => c,
-        Err(e) => return (Err(AppError::Chat(format!("failed to spawn opencode: {e}"))), RunUsage::default()),
+        Err(e) => {
+            return (
+                Err(AppError::Chat(format!("failed to spawn opencode: {e}"))),
+                RunUsage::default(),
+            )
+        }
     };
     if let Some(mut stdin) = child.stdin.take() {
         // A process that exited early closes the pipe: its output and stderr say why, so go on and
@@ -378,19 +483,35 @@ fn execute(cmd: &mut Command, message: &str) -> (AppResult<TurnResult>, RunUsage
             if e.kind() != std::io::ErrorKind::BrokenPipe {
                 let _ = child.kill();
                 let _ = child.wait();
-                return (Err(AppError::Chat(format!("failed to write prompt: {e}"))), RunUsage::default());
+                return (
+                    Err(AppError::Chat(format!("failed to write prompt: {e}"))),
+                    RunUsage::default(),
+                );
             }
         }
     }
     let output = match child.wait_with_output() {
         Ok(o) => o,
-        Err(e) => return (Err(AppError::Chat(format!("opencode process error: {e}"))), RunUsage::default()),
+        Err(e) => {
+            return (
+                Err(AppError::Chat(format!("opencode process error: {e}"))),
+                RunUsage::default(),
+            )
+        }
     };
-    interpret(&String::from_utf8_lossy(&output.stdout), &String::from_utf8_lossy(&output.stderr), output.status.code().unwrap_or(-1))
+    interpret(
+        &String::from_utf8_lossy(&output.stdout),
+        &String::from_utf8_lossy(&output.stderr),
+        output.status.code().unwrap_or(-1),
+    )
 }
 
 /// Turn the finished output of `opencode run --format json` into the run result and its usage.
-pub(crate) fn interpret(stdout: &str, stderr: &str, exit_code: i32) -> (AppResult<TurnResult>, RunUsage) {
+pub(crate) fn interpret(
+    stdout: &str,
+    stderr: &str,
+    exit_code: i32,
+) -> (AppResult<TurnResult>, RunUsage) {
     let h = OpenCode;
     let mut acc = RunAcc::default();
     let mut fin: Option<FinalResult> = None;
@@ -403,7 +524,11 @@ pub(crate) fn interpret(stdout: &str, stderr: &str, exit_code: i32) -> (AppResul
     }
     let Some(fin) = fin else {
         let stderr = stderr.trim();
-        let message = if stderr.is_empty() { format!("opencode exited {exit_code} without a result") } else { stderr.to_string() };
+        let message = if stderr.is_empty() {
+            format!("opencode exited {exit_code} without a result")
+        } else {
+            stderr.to_string()
+        };
         return (Err(AppError::Chat(message)), RunUsage::default());
     };
     let text = fin.text.clone().unwrap_or_default();
@@ -433,15 +558,26 @@ struct ListedSession {
 }
 
 fn parse_session_list(json: &str) -> Vec<ListedSession> {
-    let Ok(Value::Array(items)) = serde_json::from_str::<Value>(json) else { return Vec::new() };
+    let Ok(Value::Array(items)) = serde_json::from_str::<Value>(json) else {
+        return Vec::new();
+    };
     items
         .iter()
         .filter_map(|v| {
             Some(ListedSession {
                 id: v.get("id")?.as_str()?.to_string(),
-                title: v.get("title").and_then(Value::as_str).map(str::trim).filter(|t| !t.is_empty()).map(String::from),
+                title: v
+                    .get("title")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|t| !t.is_empty())
+                    .map(String::from),
                 updated: v.get("updated").and_then(Value::as_i64).unwrap_or(0),
-                directory: v.get("directory").and_then(Value::as_str).unwrap_or("").to_string(),
+                directory: v
+                    .get("directory")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string(),
             })
         })
         .collect()
@@ -463,14 +599,46 @@ struct Tui {
 /// Every subcommand of the opencode CLI across versions (`opencode --help` of 2.2.5 plus the ones
 /// older releases had), so `opencode <sub>` is never taken for a TUI started in directory `<sub>`.
 const SUBCOMMANDS: &[&str] = &[
-    "upgrade", "update", "uninstall", "acp", "api", "debug", "auth", "mcp", "plugin", "models", "stats", "mini", "run",
-    "session", "service", "reload", "pair", "serve", "attach", "web", "github", "export", "import", "agent", "completion",
+    "upgrade",
+    "update",
+    "uninstall",
+    "acp",
+    "api",
+    "debug",
+    "auth",
+    "mcp",
+    "plugin",
+    "models",
+    "stats",
+    "mini",
+    "run",
+    "session",
+    "service",
+    "reload",
+    "pair",
+    "serve",
+    "attach",
+    "web",
+    "github",
+    "export",
+    "import",
+    "agent",
+    "completion",
     "generate",
 ];
 
 /// Flags that take their value as the next argument. Anything else starting with `-` is a switch.
 const VALUE_FLAGS: &[&str] = &[
-    "--session", "-s", "--server", "--model", "-m", "--agent", "--port", "--hostname", "--log-level", "--completions",
+    "--session",
+    "-s",
+    "--server",
+    "--model",
+    "-m",
+    "--agent",
+    "--port",
+    "--hostname",
+    "--log-level",
+    "--completions",
 ];
 
 /// `(session id, directory argument)` of an opencode command line when it is an interactive TUI (no
@@ -493,7 +661,9 @@ fn parse_tui_args(argv: &[String]) -> Option<(Option<String>, Option<String>)> {
                 it.next();
             }
             _ if a.starts_with("--prompt=") => break,
-            _ if a.starts_with("--session=") => session = a.strip_prefix("--session=").map(String::from),
+            _ if a.starts_with("--session=") => {
+                session = a.strip_prefix("--session=").map(String::from)
+            }
             _ if a.starts_with('-') => {}
             _ if dir.is_none() && SUBCOMMANDS.contains(&a) => return None,
             _ => {
@@ -572,11 +742,23 @@ fn parse_tuis(
             let (session, dir) = parse_tui_args(&argv)?;
             let base = normalize_path(&cwd_of(pid)?);
             let cwd = dir
-                .map(|d| if d.starts_with('/') { normalize_path(&d) } else { normalize_path(&format!("{base}/{d}")) })
+                .map(|d| {
+                    if d.starts_with('/') {
+                        normalize_path(&d)
+                    } else {
+                        normalize_path(&format!("{base}/{d}"))
+                    }
+                })
                 .filter(|d| is_dir(d))
                 .unwrap_or(base);
             // `?` on Linux, `??` on macOS: no controlling terminal.
-            Some(Tui { pid, tty: (tty != "?" && tty != "??").then(|| tty.to_string()), cwd, session, started_ms })
+            Some(Tui {
+                pid,
+                tty: (tty != "?" && tty != "??").then(|| tty.to_string()),
+                cwd,
+                session,
+                started_ms,
+            })
         })
         .collect()
 }
@@ -584,7 +766,12 @@ fn parse_tuis(
 /// The exact argv of a process from `/proc/<pid>/cmdline` (NUL-separated); `None` without /proc.
 pub(crate) fn proc_argv(pid: i64) -> Option<Vec<String>> {
     let raw = std::fs::read(format!("/proc/{pid}/cmdline")).ok()?;
-    Some(raw.split(|b| *b == 0).filter(|a| !a.is_empty()).map(|a| String::from_utf8_lossy(a).into_owned()).collect())
+    Some(
+        raw.split(|b| *b == 0)
+            .filter(|a| !a.is_empty())
+            .map(|a| String::from_utf8_lossy(a).into_owned())
+            .collect(),
+    )
 }
 
 /// How much older than the TUI's start a session may be and still count as created by it.
@@ -601,29 +788,30 @@ pub(crate) const START_SLACK_MS: i64 = 2_000;
 ///   before the TUI started is not its). The newest such session wins. Otherwise it is left out.
 fn match_tuis(tuis: &[Tui], listed: impl Fn(&str) -> Vec<ListedSession>) -> Vec<AgentSession> {
     let mut out: Vec<AgentSession> = Vec::new();
-    let session_of = |t: &Tui, id: &str, s: Option<&ListedSession>| {
-        AgentSession {
-            harness: "opencode".into(),
-            session_id: id.to_string(),
-            pid: Some(t.pid),
-            live: true,
-            status: None,
-            kind: Some("interactive".into()),
-            attached: false,
-            job_id: None,
-            waiting_for: None,
-            agent_view: None,
-            name: s.and_then(|s| s.title.clone()),
-            cwd: s.map(|s| s.directory.clone()).filter(|d| !d.is_empty()).unwrap_or_else(|| t.cwd.clone()),
-            git_branch: None,
-            repo: None,
-            tmux: None,
-            tty: t.tty.clone(),
-            updated_at: s.map_or(t.started_ms, |s| s.updated),
-            focus: crate::claude_sessions::FocusState::NoTerminal,
-            summaries: Vec::new(),
-            original_name: None,
-        }
+    let session_of = |t: &Tui, id: &str, s: Option<&ListedSession>| AgentSession {
+        harness: "opencode".into(),
+        session_id: id.to_string(),
+        pid: Some(t.pid),
+        live: true,
+        status: None,
+        kind: Some("interactive".into()),
+        attached: false,
+        job_id: None,
+        waiting_for: None,
+        agent_view: None,
+        name: s.and_then(|s| s.title.clone()),
+        cwd: s
+            .map(|s| s.directory.clone())
+            .filter(|d| !d.is_empty())
+            .unwrap_or_else(|| t.cwd.clone()),
+        git_branch: None,
+        repo: None,
+        tmux: None,
+        tty: t.tty.clone(),
+        updated_at: s.map_or(t.started_ms, |s| s.updated),
+        focus: crate::claude_sessions::FocusState::NoTerminal,
+        summaries: Vec::new(),
+        original_name: None,
     };
     // Pinned TUIs first, so an unpinned one can't take their sessions.
     for t in tuis.iter().filter(|t| t.session.is_some()) {
@@ -632,12 +820,19 @@ fn match_tuis(tuis: &[Tui], listed: impl Fn(&str) -> Vec<ListedSession>) -> Vec<
         out.push(session_of(t, id, sessions.iter().find(|s| s.id == id)));
     }
     for t in tuis.iter().filter(|t| t.session.is_none()) {
-        if tuis.iter().filter(|o| o.session.is_none() && o.cwd == t.cwd).count() > 1 {
+        if tuis
+            .iter()
+            .filter(|o| o.session.is_none() && o.cwd == t.cwd)
+            .count()
+            > 1
+        {
             continue;
         }
         let found = listed(&t.cwd)
             .into_iter()
-            .filter(|s| normalize_path(&s.directory) == t.cwd && s.updated >= t.started_ms - START_SLACK_MS)
+            .filter(|s| {
+                normalize_path(&s.directory) == t.cwd && s.updated >= t.started_ms - START_SLACK_MS
+            })
             .filter(|s| !out.iter().any(|o| o.session_id == s.id))
             .max_by_key(|s| s.updated);
         if let Some(s) = found {
@@ -649,7 +844,9 @@ fn match_tuis(tuis: &[Tui], listed: impl Fn(&str) -> Vec<ListedSession>) -> Vec<
 }
 
 pub(crate) fn now_ms() -> i64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64)
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as i64)
 }
 
 /// Longest a discovery subprocess (`ps`, `lsof`, `opencode session list`) may run.
@@ -661,7 +858,12 @@ const LIST_TTL: Duration = Duration::from_secs(8);
 /// non-zero exit or a timeout.
 pub(crate) fn run_with_timeout(cmd: &mut Command, timeout: Duration) -> Option<String> {
     use std::io::Read as _;
-    let mut child = cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().ok()?;
+    let mut child = cmd
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
     let mut stdout = child.stdout.take()?;
     // Read on a thread so a chatty child can't fill the pipe while we wait for it.
     let reader = std::thread::spawn(move || {
@@ -682,7 +884,9 @@ pub(crate) fn run_with_timeout(cmd: &mut Command, timeout: Duration) -> Option<S
         }
     };
     let buf = reader.join().ok()?;
-    status.filter(|st| st.success()).map(|_| String::from_utf8_lossy(&buf).into_owned())
+    status
+        .filter(|st| st.success())
+        .map(|_| String::from_utf8_lossy(&buf).into_owned())
 }
 
 pub(crate) fn proc_cwd(pid: i64) -> Option<String> {
@@ -690,15 +894,23 @@ pub(crate) fn proc_cwd(pid: i64) -> Option<String> {
         return Some(p.to_string_lossy().into_owned());
     }
     // macOS: no /proc.
-    let out = run_with_timeout(Command::new("lsof").args(["-a", "-d", "cwd", "-Fn", "-p", &pid.to_string()]), PROBE_TIMEOUT)?;
-    out.lines().find_map(|l| l.strip_prefix('n')).map(String::from)
+    let out = run_with_timeout(
+        Command::new("lsof").args(["-a", "-d", "cwd", "-Fn", "-p", &pid.to_string()]),
+        PROBE_TIMEOUT,
+    )?;
+    out.lines()
+        .find_map(|l| l.strip_prefix('n'))
+        .map(String::from)
 }
 
 /// Sessions of the project at `dir`, via `opencode session list` (read-only, no model call).
 fn list_in(dir: &str) -> Vec<ListedSession> {
     let mut cmd = Command::new(crate::tools::opencode_bin());
-    cmd.args(["session", "list", "--format", "json"]).current_dir(dir);
-    run_with_timeout(&mut cmd, PROBE_TIMEOUT).map(|o| parse_session_list(&o)).unwrap_or_default()
+    cmd.args(["session", "list", "--format", "json"])
+        .current_dir(dir);
+    run_with_timeout(&mut cmd, PROBE_TIMEOUT)
+        .map(|o| parse_session_list(&o))
+        .unwrap_or_default()
 }
 
 type ListCache = Mutex<HashMap<String, (Instant, Vec<ListedSession>)>>;
@@ -724,8 +936,16 @@ fn list_cached(dir: &str) -> Vec<ListedSession> {
 fn live_tuis() -> Vec<Tui> {
     let mut ps = Command::new("ps");
     ps.args(["-eo", "pid=,tty=,etime=,args="]);
-    let Some(out) = run_with_timeout(&mut ps, PROBE_TIMEOUT) else { return Vec::new() };
-    parse_tuis(&out, proc_argv, proc_cwd, |d| std::path::Path::new(d).is_dir(), now_ms())
+    let Some(out) = run_with_timeout(&mut ps, PROBE_TIMEOUT) else {
+        return Vec::new();
+    };
+    parse_tuis(
+        &out,
+        proc_argv,
+        proc_cwd,
+        |d| std::path::Path::new(d).is_dir(),
+        now_ms(),
+    )
 }
 
 /// The working directories of the running opencode TUIs, with no session lookup: what the worktree
@@ -783,7 +1003,9 @@ mod tests {
     }
 
     fn argv(cmd: &Command) -> Vec<String> {
-        cmd.get_args().map(|a| a.to_string_lossy().into_owned()).collect()
+        cmd.get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect()
     }
 
     fn strs(a: &[&str]) -> Vec<String> {
@@ -797,31 +1019,50 @@ mod tests {
         // step_start, text, tool_use (call + result), step_finish (tool-calls), step_start, text, step_finish (stop)
         assert_eq!(events[0]["events"][0]["type"], "other");
         assert_eq!(events[0]["events"][0]["kind"], "step_start");
-        assert_eq!(events[1]["events"][0]["text"], "I'll read the file note.txt for you.");
+        assert_eq!(
+            events[1]["events"][0]["text"],
+            "I'll read the file note.txt for you."
+        );
         let call = &events[2]["events"][0];
-        assert_eq!((call["type"].as_str(), call["name"].as_str()), (Some("tool_call"), Some("read")));
+        assert_eq!(
+            (call["type"].as_str(), call["name"].as_str()),
+            (Some("tool_call"), Some("read"))
+        );
         assert_eq!(call["input"]["path"], "note.txt");
         let result = &events[2]["events"][1];
-        assert_eq!((result["type"].as_str(), result["ok"].as_bool()), (Some("tool_result"), Some(true)));
+        assert_eq!(
+            (result["type"].as_str(), result["ok"].as_bool()),
+            (Some("tool_result"), Some(true))
+        );
         assert_eq!(result["id"], call["id"]);
         assert!(result["text"].as_str().unwrap().contains("hello-from-file"));
         // a step that ends in tool calls is not the end of the run
         assert_eq!(events[3]["events"][0]["type"], "other");
         let fin = &events[6]["events"][0];
-        assert_eq!((fin["type"].as_str(), fin["ok"].as_bool()), (Some("final"), Some(true)));
+        assert_eq!(
+            (fin["type"].as_str(), fin["ok"].as_bool()),
+            (Some("final"), Some(true))
+        );
     }
 
     #[test]
     fn the_final_text_and_usage_are_folded_over_all_steps() {
         let (turn, usage) = interpret(STREAM, "", 0);
         let turn = turn.unwrap();
-        assert_eq!(turn.text, "The file note.txt contains a single line: \"hello-from-file\".");
+        assert_eq!(
+            turn.text,
+            "The file note.txt contains a single line: \"hello-from-file\"."
+        );
         assert_eq!(usage.num_turns, 2);
         assert_eq!(usage.input_tokens, 3 + 6);
         assert_eq!(usage.output_tokens, 65 + 20);
         assert_eq!(usage.cache_read_tokens, 11874);
         assert_eq!(usage.cache_creation_tokens, 11874 + 93);
-        assert!((usage.cost_usd - (0.0151705 + 0.00140965)).abs() < 1e-9, "{}", usage.cost_usd);
+        assert!(
+            (usage.cost_usd - (0.0151705 + 0.00140965)).abs() < 1e-9,
+            "{}",
+            usage.cost_usd
+        );
         assert!((turn.cost_usd - usage.cost_usd).abs() < 1e-12);
     }
 
@@ -834,8 +1075,15 @@ mod tests {
 
     #[test]
     fn an_error_line_is_a_failed_final() {
-        for (raw, needle) in [(ERROR_AUTH, "Reconnect OpenCode Console"), (ERROR_ROUTE, "Model unavailable: nope/none")] {
-            let fin = OpenCode.normalize(raw.lines().next().unwrap()).iter().find_map(Event::as_final).unwrap();
+        for (raw, needle) in [
+            (ERROR_AUTH, "Reconnect OpenCode Console"),
+            (ERROR_ROUTE, "Model unavailable: nope/none"),
+        ] {
+            let fin = OpenCode
+                .normalize(raw.lines().next().unwrap())
+                .iter()
+                .find_map(Event::as_final)
+                .unwrap();
             assert!(fin.is_error);
             assert!(fin.text.unwrap().contains(needle));
         }
@@ -848,7 +1096,12 @@ mod tests {
 
     #[test]
     fn unknown_and_malformed_lines_degrade_to_other() {
-        for line in [r#"{"type":"brand_new","x":1}"#, r#"{"no_type":true}"#, "not json at all", r#"{"type":"text","part":{}}"#] {
+        for line in [
+            r#"{"type":"brand_new","x":1}"#,
+            r#"{"no_type":true}"#,
+            "not json at all",
+            r#"{"type":"text","part":{}}"#,
+        ] {
             let events = OpenCode.normalize(line);
             assert_eq!(events.len(), 1, "{line}");
             assert!(matches!(events[0], Event::Other { .. }), "{line}");
@@ -868,7 +1121,11 @@ mod tests {
     #[test]
     fn a_step_cut_short_is_a_failed_final() {
         let line = r#"{"type":"step_finish","part":{"reason":"length","cost":0,"tokens":{"input":1,"output":2}}}"#;
-        let fin = OpenCode.normalize(line).iter().find_map(Event::as_final).unwrap();
+        let fin = OpenCode
+            .normalize(line)
+            .iter()
+            .find_map(Event::as_final)
+            .unwrap();
         assert!(fin.is_error);
         assert!(fin.text.unwrap().contains("length"));
     }
@@ -888,12 +1145,18 @@ mod tests {
         assert!(models.contains(&"opencode/beam-free".to_string()));
         assert!(models.iter().any(|m| m.starts_with("openrouter/")));
         assert_eq!(models.len(), MODELS.lines().count());
-        assert_eq!(parse_models("\nnote: something\nopenai/gpt-5\n  \n"), ["openai/gpt-5"]);
+        assert_eq!(
+            parse_models("\nnote: something\nopenai/gpt-5\n  \n"),
+            ["openai/gpt-5"]
+        );
     }
 
     #[test]
     fn session_ids_are_mapped_into_opencodes_namespace() {
-        assert_eq!(session_id_for("3f2a1b0c-aaaa-4bbb-8ccc-0123456789ab"), "ses_3f2a1b0caaaa4bbb8ccc0123456789ab");
+        assert_eq!(
+            session_id_for("3f2a1b0c-aaaa-4bbb-8ccc-0123456789ab"),
+            "ses_3f2a1b0caaaa4bbb8ccc0123456789ab"
+        );
         assert_eq!(session_id_for("ses_abc"), "ses_abc");
         assert_eq!(session_id_for("x"), session_id_for("x"));
     }
@@ -901,24 +1164,45 @@ mod tests {
     #[test]
     fn argv_snapshot_per_access_level() {
         let cwd = Path::new("/w");
-        let base = ["run", "--format", "json", "--model", "openrouter/anthropic/claude-haiku-4.5"];
+        let base = [
+            "run",
+            "--format",
+            "json",
+            "--model",
+            "openrouter/anthropic/claude-haiku-4.5",
+        ];
         let mut req = request(cwd);
         assert_eq!(argv(&command(&req, false).unwrap()), strs(&base));
         req.access = Access::ReadOnly;
-        assert_eq!(&argv(&command(&req, false).unwrap())[5..], &strs(&["--agent", "plan"])[..]);
+        assert_eq!(
+            &argv(&command(&req, false).unwrap())[5..],
+            &strs(&["--agent", "plan"])[..]
+        );
         req.access = Access::Edit;
-        assert_eq!(&argv(&command(&req, false).unwrap())[5..], &strs(&["--agent", "build"])[..]);
+        assert_eq!(
+            &argv(&command(&req, false).unwrap())[5..],
+            &strs(&["--agent", "build"])[..]
+        );
         req.access = Access::Full;
-        assert_eq!(&argv(&command(&req, false).unwrap())[5..], &strs(&["--agent", "build", "--auto"])[..]);
+        assert_eq!(
+            &argv(&command(&req, false).unwrap())[5..],
+            &strs(&["--agent", "build", "--auto"])[..]
+        );
         // no tools at all: the plan agent
         req.access = Access::Default;
         req.tools = ToolPolicy::None;
-        assert_eq!(&argv(&command(&req, false).unwrap())[5..], &strs(&["--agent", "plan"])[..]);
+        assert_eq!(
+            &argv(&command(&req, false).unwrap())[5..],
+            &strs(&["--agent", "plan"])[..]
+        );
         req.tools = ToolPolicy::Full;
         req.access = Access::Full;
         // a profile's agent wins over the access level, which still auto-approves
         req.extra_args = strs(&["--agent", "review"]);
-        assert_eq!(&argv(&command(&req, false).unwrap())[5..], &strs(&["--auto", "--agent", "review"])[..]);
+        assert_eq!(
+            &argv(&command(&req, false).unwrap())[5..],
+            &strs(&["--auto", "--agent", "review"])[..]
+        );
     }
 
     #[test]
@@ -928,10 +1212,23 @@ mod tests {
         req.model = "";
         req.session = SessionMode::New("3f2a1b0c-aaaa-4bbb-8ccc-0123456789ab");
         let cmd = command(&req, true).unwrap();
-        assert_eq!(argv(&cmd), strs(&["run", "--format", "json", "--standalone", "--session", "ses_3f2a1b0caaaa4bbb8ccc0123456789ab"]));
+        assert_eq!(
+            argv(&cmd),
+            strs(&[
+                "run",
+                "--format",
+                "json",
+                "--standalone",
+                "--session",
+                "ses_3f2a1b0caaaa4bbb8ccc0123456789ab"
+            ])
+        );
         assert_eq!(cmd.get_current_dir(), Some(cwd));
         req.session = SessionMode::Resume("ses_x");
-        assert_eq!(&argv(&command(&req, false).unwrap())[3..], &strs(&["--session", "ses_x"])[..]);
+        assert_eq!(
+            &argv(&command(&req, false).unwrap())[3..],
+            &strs(&["--session", "ses_x"])[..]
+        );
         req.session = SessionMode::Fork("ses_x");
         assert!(command(&req, false).is_err());
     }
@@ -955,29 +1252,58 @@ mod tests {
         let h = OpenCode;
         assert!(h.settings_args(&serde_json::json!({})).is_empty());
         assert_eq!(
-            h.settings_args(&serde_json::json!({ "agent": " review ", "extra_args": ["--thinking", 3] })),
+            h.settings_args(
+                &serde_json::json!({ "agent": " review ", "extra_args": ["--thinking", 3] })
+            ),
             strs(&["--agent", "review", "--thinking"])
         );
     }
 
     #[test]
     fn interactive_argv_opens_the_tui_on_a_session() {
-        let opts = |session| Interactive { session, system_prompt_file: None, system_prompt_mode: super::super::SystemPromptMode::Append };
-        assert_eq!(OpenCode.interactive_argv(&opts(SessionMode::Ephemeral)), Some(strs(&["opencode"])));
+        let opts = |session| Interactive {
+            session,
+            system_prompt_file: None,
+            system_prompt_mode: super::super::SystemPromptMode::Append,
+        };
+        assert_eq!(
+            OpenCode.interactive_argv(&opts(SessionMode::Ephemeral)),
+            Some(strs(&["opencode"]))
+        );
         assert_eq!(
             OpenCode.interactive_argv(&opts(SessionMode::Resume("a-b"))),
             Some(strs(&["opencode", "--session", "ses_ab"]))
         );
-        assert_eq!(OpenCode.interactive_argv(&opts(SessionMode::Fork("x"))), None);
+        assert_eq!(
+            OpenCode.interactive_argv(&opts(SessionMode::Fork("x"))),
+            None
+        );
         let path = std::env::temp_dir().join(format!("cr_oc_int_{}.txt", std::process::id()));
         std::fs::write(&path, "instructions").unwrap();
-        let with_file = Interactive { session: SessionMode::New("a"), system_prompt_file: Some(&path), ..opts(SessionMode::New("a")) };
-        assert_eq!(OpenCode.interactive_argv(&with_file), Some(strs(&["opencode", "--session", "ses_a", "--prompt", "instructions"])));
+        let with_file = Interactive {
+            session: SessionMode::New("a"),
+            system_prompt_file: Some(&path),
+            ..opts(SessionMode::New("a"))
+        };
+        assert_eq!(
+            OpenCode.interactive_argv(&with_file),
+            Some(strs(&[
+                "opencode",
+                "--session",
+                "ses_a",
+                "--prompt",
+                "instructions"
+            ]))
+        );
         let _ = std::fs::remove_file(path);
     }
 
     fn opts_for<'a>(session: SessionMode<'a>, file: Option<&'a Path>) -> Interactive<'a> {
-        Interactive { session, system_prompt_file: file, system_prompt_mode: super::super::SystemPromptMode::Append }
+        Interactive {
+            session,
+            system_prompt_file: file,
+            system_prompt_mode: super::super::SystemPromptMode::Append,
+        }
     }
 
     #[test]
@@ -985,45 +1311,104 @@ mod tests {
         let file = std::env::temp_dir().join(format!("cr_oc_ctx_{}.md", std::process::id()));
         std::fs::write(&file, "ctx").unwrap();
         let path = file.as_path();
-        let opts = |session, file| Interactive { session, system_prompt_file: file, system_prompt_mode: super::super::SystemPromptMode::Append };
-        assert_eq!(OpenCode.context_file_note(&opts(SessionMode::New("a"), None)), None);
-        let new = OpenCode.context_file_note(&opts(SessionMode::New("a"), Some(path))).unwrap();
-        assert!(new.contains("opening prompt") && !new.contains("skipped"), "{new}");
-        let resumed = OpenCode.context_file_note(&opts(SessionMode::Resume("a"), Some(path))).unwrap();
+        let opts = |session, file| Interactive {
+            session,
+            system_prompt_file: file,
+            system_prompt_mode: super::super::SystemPromptMode::Append,
+        };
+        assert_eq!(
+            OpenCode.context_file_note(&opts(SessionMode::New("a"), None)),
+            None
+        );
+        let new = OpenCode
+            .context_file_note(&opts(SessionMode::New("a"), Some(path)))
+            .unwrap();
+        assert!(
+            new.contains("opening prompt") && !new.contains("skipped"),
+            "{new}"
+        );
+        let resumed = OpenCode
+            .context_file_note(&opts(SessionMode::Resume("a"), Some(path)))
+            .unwrap();
         assert!(resumed.contains("skipped"), "{resumed}");
-        assert_eq!(crate::ai::ClaudeCode.context_file_note(&opts(SessionMode::New("a"), Some(path))), None);
+        assert_eq!(
+            crate::ai::ClaudeCode.context_file_note(&opts(SessionMode::New("a"), Some(path))),
+            None
+        );
         // A readable file really is passed; an empty or missing one is not, and the note says so.
         let real = std::env::temp_dir().join(format!("cr_oc_note_{}.txt", std::process::id()));
         std::fs::write(&real, "ctx").unwrap();
-        let ok = OpenCode.context_file_note(&opts(SessionMode::New("a"), Some(&real))).unwrap();
-        assert!(ok.contains("opening prompt") && !ok.contains("skipped"), "{ok}");
+        let ok = OpenCode
+            .context_file_note(&opts(SessionMode::New("a"), Some(&real)))
+            .unwrap();
+        assert!(
+            ok.contains("opening prompt") && !ok.contains("skipped"),
+            "{ok}"
+        );
         std::fs::write(&real, "  \n").unwrap();
-        let empty = OpenCode.context_file_note(&opts(SessionMode::New("a"), Some(&real))).unwrap();
-        assert!(empty.contains("skipped") && empty.contains("empty"), "{empty}");
-        assert_eq!(OpenCode.interactive_argv(&opts_for(SessionMode::New("a"), Some(&real))), Some(strs(&["opencode", "--session", "ses_a"])));
+        let empty = OpenCode
+            .context_file_note(&opts(SessionMode::New("a"), Some(&real)))
+            .unwrap();
+        assert!(
+            empty.contains("skipped") && empty.contains("empty"),
+            "{empty}"
+        );
+        assert_eq!(
+            OpenCode.interactive_argv(&opts_for(SessionMode::New("a"), Some(&real))),
+            Some(strs(&["opencode", "--session", "ses_a"]))
+        );
         let _ = std::fs::remove_file(real);
     }
 
     #[test]
     fn capabilities_are_refused_when_a_routine_needs_more() {
         use crate::ai::{check_caps, Needs};
-        let needs = |tool_allowlist| Needs { access: Access::Edit, tools: true, tool_allowlist };
+        let needs = |tool_allowlist| Needs {
+            access: Access::Edit,
+            tools: true,
+            tool_allowlist,
+        };
         check_caps(&OpenCode, "r", &needs(false)).unwrap();
-        let err = check_caps(&OpenCode, "“Babysit”", &needs(true)).unwrap_err().to_string();
-        assert!(err.contains("a tool allowlist") && err.contains("opencode"), "{err}");
+        let err = check_caps(&OpenCode, "“Babysit”", &needs(true))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("a tool allowlist") && err.contains("opencode"),
+            "{err}"
+        );
         assert!(!OpenCode.caps().fork);
     }
 
     #[test]
     fn read_only_routines_are_refused_because_bash_cannot_be_denied() {
         use crate::ai::{check_caps, Needs};
-        let err = check_caps(&OpenCode, "“Babysit”", &Needs { access: Access::ReadOnly, tools: false, tool_allowlist: false })
-            .unwrap_err()
-            .to_string();
-        assert!(err.contains("“Babysit”") && err.contains("read-only") && err.contains("opencode"), "{err}");
+        let err = check_caps(
+            &OpenCode,
+            "“Babysit”",
+            &Needs {
+                access: Access::ReadOnly,
+                tools: false,
+                tool_allowlist: false,
+            },
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            err.contains("“Babysit”") && err.contains("read-only") && err.contains("opencode"),
+            "{err}"
+        );
         assert!(err.contains("Edit or Full"), "{err}");
         assert!(!OpenCode.caps().access_levels.contains(&Access::ReadOnly));
-        check_caps(&OpenCode, "r", &Needs { access: Access::Edit, tools: true, tool_allowlist: false }).unwrap();
+        check_caps(
+            &OpenCode,
+            "r",
+            &Needs {
+                access: Access::Edit,
+                tools: true,
+                tool_allowlist: false,
+            },
+        )
+        .unwrap();
     }
 
     const LIST: &str = include_str!("fixtures/opencode_session_list.json");
@@ -1034,7 +1419,10 @@ mod tests {
         assert_eq!(l.len(), 2);
         assert_eq!(l[0].id, "ses_0b6f11dfdffeyohpKrjiC33cq6");
         assert_eq!(l[0].title.as_deref(), Some("Fix the login redirect"));
-        assert_eq!((l[0].updated, l[0].directory.as_str()), (1784615998673, "/home/me/app"));
+        assert_eq!(
+            (l[0].updated, l[0].directory.as_str()),
+            (1784615998673, "/home/me/app")
+        );
         assert!(parse_session_list("[]").is_empty());
         assert!(parse_session_list("not json").is_empty());
     }
@@ -1046,41 +1434,89 @@ mod tests {
     #[test]
     fn tui_args_tell_the_tui_from_other_invocations() {
         assert_eq!(parse_tui_args(&av("opencode")), Some((None, None)));
-        assert_eq!(parse_tui_args(&av("/home/me/.opencode/bin/opencode -s ses_a --prompt hi")), Some((Some("ses_a".into()), None)));
-        assert_eq!(parse_tui_args(&av("opencode --session ses_a /work")), Some((Some("ses_a".into()), Some("/work".into()))));
+        assert_eq!(
+            parse_tui_args(&av("/home/me/.opencode/bin/opencode -s ses_a --prompt hi")),
+            Some((Some("ses_a".into()), None))
+        );
+        assert_eq!(
+            parse_tui_args(&av("opencode --session ses_a /work")),
+            Some((Some("ses_a".into()), Some("/work".into())))
+        );
         assert_eq!(parse_tui_args(&av("opencode run --format json")), None);
         assert_eq!(parse_tui_args(&av("/x/opencode serve --service")), None);
         assert_eq!(parse_tui_args(&av("vim opencode")), None);
-        for sub in ["attach", "web", "github", "export", "import", "agent", "completion", "generate"] {
-            assert_eq!(parse_tui_args(&av(&format!("opencode {sub}"))), None, "{sub}");
+        for sub in [
+            "attach",
+            "web",
+            "github",
+            "export",
+            "import",
+            "agent",
+            "completion",
+            "generate",
+        ] {
+            assert_eq!(
+                parse_tui_args(&av(&format!("opencode {sub}"))),
+                None,
+                "{sub}"
+            );
         }
     }
 
     #[test]
     fn a_multi_word_prompt_is_not_parsed_for_flags_or_paths() {
         // The words of the prompt look like a path, a flag, a short flag and a subcommand.
-        let argv = vec!["opencode", "--session", "ses_a", "--prompt", "look at /x and --session ses_b, -s ses_c then run it"]
-            .into_iter()
-            .map(String::from)
-            .collect::<Vec<_>>();
+        let argv = vec![
+            "opencode",
+            "--session",
+            "ses_a",
+            "--prompt",
+            "look at /x and --session ses_b, -s ses_c then run it",
+        ]
+        .into_iter()
+        .map(String::from)
+        .collect::<Vec<_>>();
         assert_eq!(parse_tui_args(&argv), Some((Some("ses_a".into()), None)));
         // The same line as `ps` prints it (split on blanks), and with the prompt first.
         assert_eq!(
-            parse_tui_args(&av("opencode --prompt look at /x --session ses_b -s ses_c run")),
+            parse_tui_args(&av(
+                "opencode --prompt look at /x --session ses_b -s ses_c run"
+            )),
             Some((None, None))
         );
-        assert_eq!(parse_tui_args(&av("opencode --prompt=do /x -s ses_b")), Some((None, None)));
+        assert_eq!(
+            parse_tui_args(&av("opencode --prompt=do /x -s ses_b")),
+            Some((None, None))
+        );
     }
 
     #[test]
     fn value_flags_do_not_leak_into_session_or_directory() {
-        assert_eq!(parse_tui_args(&av("opencode -m anthropic/foo")), Some((None, None)));
-        assert_eq!(parse_tui_args(&av("opencode --model anthropic/foo /work")), Some((None, Some("/work".into()))));
-        assert_eq!(parse_tui_args(&av("opencode --agent build -s ses_a")), Some((Some("ses_a".into()), None)));
-        assert_eq!(parse_tui_args(&av("opencode --port 4096 --hostname 0.0.0.0")), Some((None, None)));
+        assert_eq!(
+            parse_tui_args(&av("opencode -m anthropic/foo")),
+            Some((None, None))
+        );
+        assert_eq!(
+            parse_tui_args(&av("opencode --model anthropic/foo /work")),
+            Some((None, Some("/work".into())))
+        );
+        assert_eq!(
+            parse_tui_args(&av("opencode --agent build -s ses_a")),
+            Some((Some("ses_a".into()), None))
+        );
+        assert_eq!(
+            parse_tui_args(&av("opencode --port 4096 --hostname 0.0.0.0")),
+            Some((None, None))
+        );
         // A value that spells a subcommand is a value, not the subcommand.
-        assert_eq!(parse_tui_args(&av("opencode --agent run")), Some((None, None)));
-        assert_eq!(parse_tui_args(&av("opencode --session=ses_z --continue")), Some((Some("ses_z".into()), None)));
+        assert_eq!(
+            parse_tui_args(&av("opencode --agent run")),
+            Some((None, None))
+        );
+        assert_eq!(
+            parse_tui_args(&av("opencode --session=ses_z --continue")),
+            Some((Some("ses_z".into()), None))
+        );
     }
 
     #[test]
@@ -1093,25 +1529,67 @@ mod tests {
     #[test]
     fn running_tuis_are_read_from_ps() {
         let ps = "  11 pts/3 01:00 opencode --session ses_a\n  12 ?     00:05 /x/opencode serve --service\n  13 pts/4 00:05 opencode sub\n  14 pts/5 00:05 bash\n  15 pts/6 2-01:00:00 opencode ../up\n";
-        let tuis = parse_tuis(ps, |_| None, |pid| Some(format!("/cwd/{pid}")), |d| d == "/cwd/13/sub" || d == "/cwd/up", 10_000_000);
+        let tuis = parse_tuis(
+            ps,
+            |_| None,
+            |pid| Some(format!("/cwd/{pid}")),
+            |d| d == "/cwd/13/sub" || d == "/cwd/up",
+            10_000_000,
+        );
         assert_eq!(
             tuis,
             vec![
-                Tui { pid: 11, tty: Some("pts/3".into()), cwd: "/cwd/11".into(), session: Some("ses_a".into()), started_ms: 9_940_000 },
-                Tui { pid: 13, tty: Some("pts/4".into()), cwd: "/cwd/13/sub".into(), session: None, started_ms: 9_995_000 },
-                Tui { pid: 15, tty: Some("pts/6".into()), cwd: "/cwd/up".into(), session: None, started_ms: 10_000_000 - 176_400_000 },
+                Tui {
+                    pid: 11,
+                    tty: Some("pts/3".into()),
+                    cwd: "/cwd/11".into(),
+                    session: Some("ses_a".into()),
+                    started_ms: 9_940_000
+                },
+                Tui {
+                    pid: 13,
+                    tty: Some("pts/4".into()),
+                    cwd: "/cwd/13/sub".into(),
+                    session: None,
+                    started_ms: 9_995_000
+                },
+                Tui {
+                    pid: 15,
+                    tty: Some("pts/6".into()),
+                    cwd: "/cwd/up".into(),
+                    session: None,
+                    started_ms: 10_000_000 - 176_400_000
+                },
             ]
         );
         // A positional that is not an existing directory is ignored: the TUI runs in its cwd.
-        let tuis = parse_tuis("5 pts/1 00:01 opencode nonsense\n", |_| None, |_| Some("/w".into()), |_| false, 0);
+        let tuis = parse_tuis(
+            "5 pts/1 00:01 opencode nonsense\n",
+            |_| None,
+            |_| Some("/w".into()),
+            |_| false,
+            0,
+        );
         assert_eq!(tuis[0].cwd, "/w");
     }
 
     #[test]
     fn the_exact_argv_wins_over_the_split_ps_args() {
         let ps = "21 pts/1 00:01 opencode --prompt fix the thing in /x --session ses_nope\n";
-        let exact = vec!["opencode", "-s", "ses_real", "--prompt", "fix the thing in /x --session ses_nope"];
-        let tuis = parse_tuis(ps, |_| Some(exact.iter().map(|s| s.to_string()).collect()), |_| Some("/w".into()), |_| true, 0);
+        let exact = vec![
+            "opencode",
+            "-s",
+            "ses_real",
+            "--prompt",
+            "fix the thing in /x --session ses_nope",
+        ];
+        let tuis = parse_tuis(
+            ps,
+            |_| Some(exact.iter().map(|s| s.to_string()).collect()),
+            |_| Some("/w".into()),
+            |_| true,
+            0,
+        );
         assert_eq!(tuis[0].session.as_deref(), Some("ses_real"));
         assert_eq!(tuis[0].cwd, "/w");
     }
@@ -1120,24 +1598,57 @@ mod tests {
     fn macos_ps_output_has_padded_columns_and_double_question_mark_ttys() {
         let ps = "  501 ttys003    05:12 opencode --session ses_m\n  502 ??       1-02:03:04 /opt/homebrew/bin/opencode\n99999 ttys010    59:59 /Users/me/.opencode/bin/opencode -m a/b\n";
         let tuis = parse_tuis(ps, |_| None, |_| Some("/Users/me/app".into()), |_| false, 0);
-        assert_eq!(tuis.iter().map(|t| (t.pid, t.tty.as_deref())).collect::<Vec<_>>(), [
-            (501, Some("ttys003")),
-            (502, None),
-            (99999, Some("ttys010")),
-        ]);
+        assert_eq!(
+            tuis.iter()
+                .map(|t| (t.pid, t.tty.as_deref()))
+                .collect::<Vec<_>>(),
+            [
+                (501, Some("ttys003")),
+                (502, None),
+                (99999, Some("ttys010")),
+            ]
+        );
         assert_eq!(tuis[0].session.as_deref(), Some("ses_m"));
         // A Linux `?` is no terminal either.
-        assert_eq!(parse_tuis("7 ? 00:01 opencode\n", |_| None, |_| Some("/w".into()), |_| false, 0)[0].tty, None);
+        assert_eq!(
+            parse_tuis(
+                "7 ? 00:01 opencode\n",
+                |_| None,
+                |_| Some("/w".into()),
+                |_| false,
+                0
+            )[0]
+            .tty,
+            None
+        );
     }
 
     #[test]
     fn a_probe_that_hangs_is_killed_at_the_timeout() {
         let t = Instant::now();
-        assert_eq!(run_with_timeout(&mut Command::new("sleep").arg("30"), Duration::from_millis(200)), None);
+        assert_eq!(
+            run_with_timeout(
+                &mut Command::new("sleep").arg("30"),
+                Duration::from_millis(200)
+            ),
+            None
+        );
         assert!(t.elapsed() < Duration::from_secs(5));
-        assert_eq!(run_with_timeout(Command::new("echo").arg("hi"), Duration::from_secs(5)).as_deref(), Some("hi\n"));
-        assert_eq!(run_with_timeout(&mut Command::new("false"), Duration::from_secs(5)), None);
-        assert_eq!(run_with_timeout(&mut Command::new("/nonexistent/probe"), Duration::from_secs(5)), None);
+        assert_eq!(
+            run_with_timeout(Command::new("echo").arg("hi"), Duration::from_secs(5)).as_deref(),
+            Some("hi\n")
+        );
+        assert_eq!(
+            run_with_timeout(&mut Command::new("false"), Duration::from_secs(5)),
+            None
+        );
+        assert_eq!(
+            run_with_timeout(
+                &mut Command::new("/nonexistent/probe"),
+                Duration::from_secs(5)
+            ),
+            None
+        );
     }
 
     #[test]
@@ -1164,16 +1675,34 @@ mod tests {
         // An unpinned TUI started before the newest session was updated takes it.
         let long_ago = newest.updated - 60_000;
         let out = match_tuis(&[tui(1, None, long_ago)], by_dir);
-        assert_eq!(out.iter().map(|s| (s.pid, s.session_id.as_str())).collect::<Vec<_>>(), [(Some(1), newest.id.as_str())]);
+        assert_eq!(
+            out.iter()
+                .map(|s| (s.pid, s.session_id.as_str()))
+                .collect::<Vec<_>>(),
+            [(Some(1), newest.id.as_str())]
+        );
         let s = &out[0];
-        assert!(s.live && s.harness == "opencode" && s.name.as_deref() == Some("Fix the login redirect"));
-        assert_eq!((s.updated_at, s.cwd.as_str()), (newest.updated, "/home/me/app"));
+        assert!(
+            s.live
+                && s.harness == "opencode"
+                && s.name.as_deref() == Some("Fix the login redirect")
+        );
+        assert_eq!(
+            (s.updated_at, s.cwd.as_str()),
+            (newest.updated, "/home/me/app")
+        );
         // A TUI started after every session was last updated has no session yet (created lazily).
         assert!(match_tuis(&[tui(2, None, newest.updated + 60_000)], by_dir).is_empty());
         // Two unpinned TUIs in one directory are ambiguous: neither is guessed.
         assert!(match_tuis(&[tui(3, None, long_ago), tui(4, None, long_ago)], by_dir).is_empty());
         // A pinned TUI keeps its session, even an old one, and an unpinned neighbour doesn't steal it.
-        let out = match_tuis(&[tui(5, None, older.updated - 1_000), tui(6, Some(&newest.id), newest.updated + 60_000)], by_dir);
+        let out = match_tuis(
+            &[
+                tui(5, None, older.updated - 1_000),
+                tui(6, Some(&newest.id), newest.updated + 60_000),
+            ],
+            by_dir,
+        );
         let pid_of = |id: &str| out.iter().find(|s| s.session_id == id).and_then(|s| s.pid);
         assert_eq!(pid_of(&newest.id), Some(6));
         assert_eq!(pid_of(&older.id), Some(5));
@@ -1186,18 +1715,38 @@ mod tests {
         // `..` in the listed directory is normalized before comparing.
         let mut dotted = newest.clone();
         dotted.directory = "/home/me/x/../app/./".into();
-        assert_eq!(match_tuis(&[tui(9, None, 0)], |_| vec![dotted.clone()]).len(), 1);
+        assert_eq!(
+            match_tuis(&[tui(9, None, 0)], |_| vec![dotted.clone()]).len(),
+            1
+        );
     }
 
     #[test]
     fn a_pinned_session_is_found_whatever_its_directory_and_kept_when_the_lookup_fails() {
         let l = parse_session_list(LIST);
-        let t = Tui { pid: 1, tty: None, cwd: "/home/me/app/sub".into(), session: Some(l[0].id.clone()), started_ms: 42 };
+        let t = Tui {
+            pid: 1,
+            tty: None,
+            cwd: "/home/me/app/sub".into(),
+            session: Some(l[0].id.clone()),
+            started_ms: 42,
+        };
         // The listing of the cwd's project holds a session whose directory is the project root.
         let out = match_tuis(&[t.clone()], |_| l.clone());
-        assert_eq!((out[0].session_id.as_str(), out[0].cwd.as_str()), (l[0].id.as_str(), "/home/me/app"));
+        assert_eq!(
+            (out[0].session_id.as_str(), out[0].cwd.as_str()),
+            (l[0].id.as_str(), "/home/me/app")
+        );
         // Not listed (lazy creation) or the listing failed: still the pinned id, no title.
         let out = match_tuis(&[t], |_| Vec::new());
-        assert_eq!((out[0].session_id.as_str(), out[0].name.clone(), out[0].cwd.as_str(), out[0].updated_at), (l[0].id.as_str(), None, "/home/me/app/sub", 42));
+        assert_eq!(
+            (
+                out[0].session_id.as_str(),
+                out[0].name.clone(),
+                out[0].cwd.as_str(),
+                out[0].updated_at
+            ),
+            (l[0].id.as_str(), None, "/home/me/app/sub", 42)
+        );
     }
 }

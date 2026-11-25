@@ -26,7 +26,10 @@ fn key(facet: &str, id: &str) -> String {
 
 impl InFlight {
     pub const fn new() -> Self {
-        Self { keys: Mutex::new(BTreeSet::new()), cv: Condvar::new() }
+        Self {
+            keys: Mutex::new(BTreeSet::new()),
+            cv: Condvar::new(),
+        }
     }
 
     /// Claim `ids` for `facet`: returns the claim, the ids this caller must
@@ -44,7 +47,14 @@ impl InFlight {
                 others.push(id.clone());
             }
         }
-        (Claim { owner: self, keys: claimed }, mine, others)
+        (
+            Claim {
+                owner: self,
+                keys: claimed,
+            },
+            mine,
+            others,
+        )
     }
 
     /// Block until no other caller holds any of `ids` for `facet`.

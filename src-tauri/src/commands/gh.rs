@@ -25,7 +25,10 @@ fn now() -> String {
 
 /// The Review's live fetches land in the mirror too, so Inbox and Board follow.
 pub(crate) fn notify_mirror(app: &AppHandle, id: &str) {
-    let update = MirrorUpdated { scopes: vec![Scope::Inbox, Scope::Board], ids: vec![id.to_string()] };
+    let update = MirrorUpdated {
+        scopes: vec![Scope::Inbox, Scope::Board],
+        ids: vec![id.to_string()],
+    };
     log::debug!(target: "mirror", "emit {MIRROR_UPDATED_EVENT} from a review fetch: {update:?}");
     let _ = app.emit(MIRROR_UPDATED_EVENT, update);
 }
@@ -51,7 +54,12 @@ pub async fn pr_meta(
 
 /// The PR header metadata as last mirrored, shown while `pr_meta` syncs.
 #[tauri::command]
-pub fn mirror_pr_meta(owner: String, name: String, number: i64, db: State<Db>) -> AppResult<Option<gh::PrMeta>> {
+pub fn mirror_pr_meta(
+    owner: String,
+    name: String,
+    number: i64,
+    db: State<Db>,
+) -> AppResult<Option<gh::PrMeta>> {
     mirror::store::read_pr_meta(&db.0.lock().unwrap(), &owner, &name, number)
 }
 
@@ -77,9 +85,16 @@ pub async fn pr_checks(owner: String, name: String, number: i64) -> AppResult<gh
 
 /// Rerun workflow runs (all their jobs, or only the failed ones) from the checks popover.
 #[tauri::command]
-pub async fn rerun_ci_runs(owner: String, name: String, run_ids: Vec<i64>, failed_only: bool) -> AppResult<()> {
+pub async fn rerun_ci_runs(
+    owner: String,
+    name: String,
+    run_ids: Vec<i64>,
+    failed_only: bool,
+) -> AppResult<()> {
     let repo = format!("{owner}/{name}");
-    run_ids.into_iter().try_for_each(|id| gh::rerun_run(&repo, id, failed_only))
+    run_ids
+        .into_iter()
+        .try_for_each(|id| gh::rerun_run(&repo, id, failed_only))
 }
 
 /// Rerun one Actions job from the checks popover.
@@ -89,7 +104,12 @@ pub async fn rerun_ci_job(owner: String, name: String, job_id: i64) -> AppResult
 }
 
 #[tauri::command]
-pub async fn set_pr_auto_merge(owner: String, name: String, number: i64, enable: bool) -> AppResult<()> {
+pub async fn set_pr_auto_merge(
+    owner: String,
+    name: String,
+    number: i64,
+    enable: bool,
+) -> AppResult<()> {
     provider_for().set_pr_auto_merge(&owner, &name, number, enable)
 }
 
@@ -105,7 +125,13 @@ pub async fn approve_pr(owner: String, name: String, number: i64) -> AppResult<(
 }
 
 #[tauri::command]
-pub async fn set_pr_label(owner: String, name: String, number: i64, label: String, on: bool) -> AppResult<()> {
+pub async fn set_pr_label(
+    owner: String,
+    name: String,
+    number: i64,
+    label: String,
+    on: bool,
+) -> AppResult<()> {
     provider_for().set_pr_label(&owner, &name, number, &label, on)
 }
 
@@ -127,12 +153,21 @@ pub async fn repo_labels(owner: String, name: String) -> AppResult<Vec<gh::PrLab
 }
 
 #[tauri::command]
-pub async fn repo_assignable_users(owner: String, name: String, query: String) -> AppResult<Vec<gh::PrActor>> {
+pub async fn repo_assignable_users(
+    owner: String,
+    name: String,
+    query: String,
+) -> AppResult<Vec<gh::PrActor>> {
     provider_for().repo_assignable_users(&owner, &name, &query)
 }
 
 #[tauri::command]
-pub async fn update_pr_branch(owner: String, name: String, number: i64, rebase: bool) -> AppResult<()> {
+pub async fn update_pr_branch(
+    owner: String,
+    name: String,
+    number: i64,
+    rebase: bool,
+) -> AppResult<()> {
     provider_for().update_pr_branch(&owner, &name, number, rebase)
 }
 

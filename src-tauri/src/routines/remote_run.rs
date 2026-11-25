@@ -16,7 +16,9 @@ use rusqlite::{params, Connection};
 use tauri::{AppHandle, Emitter, Manager};
 
 use super::context::{self, ContextRef, Light};
-use super::manager::{emit_updated, get_run, now, run_finished, RoutineManager, RoutineRun, RunEventPayload};
+use super::manager::{
+    emit_updated, get_run, now, run_finished, RoutineManager, RoutineRun, RunEventPayload,
+};
 use super::{get as get_routine, launch_needs, Routine};
 use crate::ai::profiles;
 use crate::commands::{board, focus};
@@ -56,11 +58,21 @@ impl MirrorHooks for AppHooks {
     }
 
     fn client(&self, host_id: i64) -> Result<RemoteClient, RemoteError> {
-        runtime::global().ok_or_else(|| RemoteError::disabled("remote hosts are not ready"))?.client(host_id)
+        runtime::global()
+            .ok_or_else(|| RemoteError::disabled("remote hosts are not ready"))?
+            .client(host_id)
     }
 
     fn event(&self, run_id: i64, seq: i64, kind: &str, json: &str) {
-        let _ = self.app.emit("routine-run-event", RunEventPayload { run_id, seq, kind, json });
+        let _ = self.app.emit(
+            "routine-run-event",
+            RunEventPayload {
+                run_id,
+                seq,
+                kind,
+                json,
+            },
+        );
     }
 
     fn status_changed(&self, run_id: i64, status: &str) {
@@ -71,12 +83,20 @@ impl MirrorHooks for AppHooks {
         let loaded = {
             let db = self.app.state::<Db>();
             let conn = db.0.lock().unwrap();
-            get_run(&conn, run_id).and_then(|run| get_routine(&conn, run.routine_id).map(|r| (run, r))).ok()
+            get_run(&conn, run_id)
+                .and_then(|run| get_routine(&conn, run.routine_id).map(|r| (run, r)))
+                .ok()
         };
         run_finished(&self.app, run_id, loaded, fin);
     }
 
-    fn sync_outbox(&self, run_id: i64, remote_run_id: i64, client: &RemoteClient, terminal: bool) -> Vec<String> {
+    fn sync_outbox(
+        &self,
+        run_id: i64,
+        remote_run_id: i64,
+        client: &RemoteClient,
+        terminal: bool,
+    ) -> Vec<String> {
         outbox::sync(self, run_id, remote_run_id, client, terminal)
     }
 }
@@ -97,9 +117,18 @@ fn apply_op(app: &AppHandle, run_id: i64, op: &OutboxOp) -> AppResult<()> {
     let a = Args(&op.args);
     match op.op_type.as_str() {
         "board_meta_add" => {
-            let card_id = board::resolve_or_track_card_id(&db, a.str("reference")?, a.flag("track"))?;
+            let card_id =
+                board::resolve_or_track_card_id(&db, a.str("reference")?, a.flag("track"))?;
             let conn = db.0.lock().unwrap();
-            board::board_meta_add_impl(&conn, &card_id, a.str("kind")?, a.str("value")?, a.opt_str("tag"), a.opt_str("label"), a.opt_str("cwd"))?;
+            board::board_meta_add_impl(
+                &conn,
+                &card_id,
+                a.str("kind")?,
+                a.str("value")?,
+                a.opt_str("tag"),
+                a.opt_str("label"),
+                a.opt_str("cwd"),
+            )?;
         }
         "board_meta_rm" => board::board_meta_delete_impl(&db.0.lock().unwrap(), a.int("id")?)?,
         "board_link" => board::board_link_pr_impl(&db, a.str("issue_id")?, a.str("pr_reference")?)?,
@@ -108,21 +137,37 @@ fn apply_op(app: &AppHandle, run_id: i64, op: &OutboxOp) -> AppResult<()> {
         }
         "focus_set" => {
             let review_id = a.int("review_id")?;
-            let plan: focus::Plan = serde_json::from_value(op.args.get("plan").cloned().unwrap_or_default())?;
+            let plan: focus::Plan =
+                serde_json::from_value(op.args.get("plan").cloned().unwrap_or_default())?;
             focus::set_focus_plan_impl(&db.0.lock().unwrap(), review_id, plan, a.opt_str("level"))?;
-            let _ = app.emit("focus-updated", serde_json::json!({ "review_id": review_id }));
+            let _ = app.emit(
+                "focus-updated",
+                serde_json::json!({ "review_id": review_id }),
+            );
         }
         "focus_clear" => {
             let review_id = a.int("review_id")?;
             focus::clear_focus_impl(&db.0.lock().unwrap(), review_id)?;
-            let _ = app.emit("focus-updated", serde_json::json!({ "review_id": review_id }));
+            let _ = app.emit(
+                "focus-updated",
+                serde_json::json!({ "review_id": review_id }),
+            );
         }
         "notify" => {
             use tauri_plugin_notification::NotificationExt;
             let title = a.opt_str("title").unwrap_or("CodeReview agent").to_string();
-            app.notification().builder().title(title).body(a.str("message")?.to_string()).show().map_err(|e| AppError::Other(e.to_string()))?;
+            app.notification()
+                .builder()
+                .title(title)
+                .body(a.str("message")?.to_string())
+                .show()
+                .map_err(|e| AppError::Other(e.to_string()))?;
         }
-        other => return Err(AppError::Other(format!("unknown outbox op `{other}` (run {run_id}); update the app?"))),
+        other => {
+            return Err(AppError::Other(format!(
+                "unknown outbox op `{other}` (run {run_id}); update the app?"
+            )))
+        }
     }
     Ok(())
 }
@@ -164,8 +209,13 @@ impl RoutineManager {
             );
             match inserted {
                 Ok(_) => conn.last_insert_rowid(),
-                Err(rusqlite::Error::SqliteFailure(e, _)) if e.code == rusqlite::ErrorCode::ConstraintViolation => {
-                    return Err(AppError::Other(format!("“{}” is already running on {}", routine.name, light.label)))
+                Err(rusqlite::Error::SqliteFailure(e, _))
+                    if e.code == rusqlite::ErrorCode::ConstraintViolation =>
+                {
+                    return Err(AppError::Other(format!(
+                        "“{}” is already running on {}",
+                        routine.name, light.label
+                    )))
                 }
                 Err(e) => return Err(e.into()),
             }
@@ -187,7 +237,12 @@ impl RoutineManager {
         let app = app.clone();
         std::thread::spawn(move || {
             drive(&app, run_id, &flags);
-            app.state::<RoutineManager>().remote.workers.lock().unwrap().remove(&run_id);
+            app.state::<RoutineManager>()
+                .remote
+                .workers
+                .lock()
+                .unwrap()
+                .remove(&run_id);
         });
     }
 
@@ -201,7 +256,10 @@ impl RoutineManager {
                 Ok(s) => s,
                 Err(_) => return,
             };
-            let rows = stmt.query_map([], |r| r.get(0)).map(|rows| rows.flatten().collect()).unwrap_or_default();
+            let rows = stmt
+                .query_map([], |r| r.get(0))
+                .map(|rows| rows.flatten().collect())
+                .unwrap_or_default();
             rows
         };
         let manager = app.state::<RoutineManager>();
@@ -217,9 +275,11 @@ impl RoutineManager {
             let db = app.state::<Db>();
             let conn = db.0.lock().unwrap();
             let row: Option<(Option<i64>, Option<i64>, String)> = conn
-                .query_row("SELECT host_id, remote_run_id, status FROM routine_run WHERE id = ?1", params![run_id], |r| {
-                    Ok((r.get(0)?, r.get(1)?, r.get(2)?))
-                })
+                .query_row(
+                    "SELECT host_id, remote_run_id, status FROM routine_run WHERE id = ?1",
+                    params![run_id],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                )
                 .ok();
             match row {
                 Some((Some(host), remote, status)) => (host, remote, status),
@@ -246,11 +306,28 @@ impl RoutineManager {
                 // Already over on the host: the mirror settles the row.
                 Err(e) if e.code == "bad_request" => {}
                 Err(e) => {
-                    let why = format!("stopped locally; {} The run may still be going on the host.", readable(&e.to_string()));
-                    if let Some(f) = app.state::<RoutineManager>().remote.workers.lock().unwrap().get(&run_id) {
+                    let why = format!(
+                        "stopped locally; {} The run may still be going on the host.",
+                        readable(&e.to_string())
+                    );
+                    if let Some(f) = app
+                        .state::<RoutineManager>()
+                        .remote
+                        .workers
+                        .lock()
+                        .unwrap()
+                        .get(&run_id)
+                    {
                         f.abandon.store(true, Ordering::Relaxed);
                     }
-                    if finish_local(&hooks, run_id, "killed", "", Some(&why), RunUsage::default()) {
+                    if finish_local(
+                        &hooks,
+                        run_id,
+                        "killed",
+                        "",
+                        Some(&why),
+                        RunUsage::default(),
+                    ) {
                         emit_updated(&app, run_id, "killed");
                     }
                 }
@@ -268,7 +345,14 @@ fn drive(app: &AppHandle, run_id: i64, flags: &Flags) {
         match create(app, &hooks, run_id, flags) {
             Ok(Some(())) => {}
             Ok(None) => {
-                if finish_local(&hooks, run_id, "killed", "", Some("stopped before it started"), RunUsage::default()) {
+                if finish_local(
+                    &hooks,
+                    run_id,
+                    "killed",
+                    "",
+                    Some("stopped before it started"),
+                    RunUsage::default(),
+                ) {
                     emit_updated(app, run_id, "killed");
                 }
                 return;
@@ -296,9 +380,13 @@ fn create(app: &AppHandle, hooks: &AppHooks, run_id: i64, flags: &Flags) -> AppR
         let resolved = profiles::resolve_routine(&conn, routine.profile_id);
         (run, routine, resolved)
     };
-    let host_id = run.host_id.ok_or_else(|| AppError::Other("not a remote run".into()))?;
+    let host_id = run
+        .host_id
+        .ok_or_else(|| AppError::Other("not a remote run".into()))?;
     if resolved.host_id != Some(host_id) {
-        return Err(AppError::Other("the routine's profile no longer runs on this host".into()));
+        return Err(AppError::Other(
+            "the routine's profile no longer runs on this host".into(),
+        ));
     }
     if routine.is_system() {
         resolved.ensure_local(&format!("“{}” (a system routine)", routine.name))?;
@@ -307,12 +395,20 @@ fn create(app: &AppHandle, hooks: &AppHooks, run_id: i64, flags: &Flags) -> AppR
     if let Some(reason) = harness.unavailable_reason() {
         return Err(AppError::Other(reason));
     }
-    crate::ai::check_caps(harness, &format!("“{}”", routine.name), &launch_needs(&routine, harness.id()))?;
+    crate::ai::check_caps(
+        harness,
+        &format!("“{}”", routine.name),
+        &launch_needs(&routine, harness.id()),
+    )?;
     if flags.cancel.load(Ordering::Relaxed) {
         return Ok(None);
     }
     let ctx = context::resolve_remote(app, &routine, &run.context)?;
-    let vars: Vec<(&str, &str)> = ctx.vars.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+    let vars: Vec<(&str, &str)> = ctx
+        .vars
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.as_str()))
+        .collect();
     let prompt = prompts::render(&routine.prompt_template, &vars);
     let mut system = prompts::render(&routine.system_prompt, &vars);
     if !system.is_empty() {
@@ -320,7 +416,10 @@ fn create(app: &AppHandle, hooks: &AppHooks, run_id: i64, flags: &Flags) -> AppR
     }
     system.push_str(&ctx.block);
     if !run.note.trim().is_empty() {
-        system.push_str(&format!("\n\n## Extra instructions for this run\n{}", run.note.trim()));
+        system.push_str(&format!(
+            "\n\n## Extra instructions for this run\n{}",
+            run.note.trim()
+        ));
     }
     let model = {
         let conn = app.state::<Db>().inner().0.lock().unwrap();

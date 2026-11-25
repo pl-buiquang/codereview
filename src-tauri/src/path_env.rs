@@ -45,11 +45,17 @@ pub fn ensure_login_env() {
     let Some(home) = std::env::var_os("HOME").map(std::path::PathBuf::from) else {
         return;
     };
-    let dirs: Vec<std::path::PathBuf> = [".local/bin", "bin", ".cargo/bin", ".claude/local", ".opencode/bin"]
-        .iter()
-        .map(|d| home.join(d))
-        .filter(|p| p.is_dir())
-        .collect();
+    let dirs: Vec<std::path::PathBuf> = [
+        ".local/bin",
+        "bin",
+        ".cargo/bin",
+        ".claude/local",
+        ".opencode/bin",
+    ]
+    .iter()
+    .map(|d| home.join(d))
+    .filter(|p| p.is_dir())
+    .collect();
     let current = std::env::var("PATH").unwrap_or_default();
     std::env::set_var("PATH", prepend_missing(&current, &dirs));
 }

@@ -51,11 +51,20 @@ pub enum ConnState {
     /// Not used (yet) in this session.
     Disconnected,
     Connecting,
-    Connected { protocol: i64, version: String },
+    Connected {
+        protocol: i64,
+        version: String,
+    },
     /// The last attempt or health check failed; the monitor retries while the host is in use.
-    Unreachable { error: String },
+    Unreachable {
+        error: String,
+    },
     /// The host speaks another protocol. Sticky until the host is tested again.
-    ProtocolMismatch { remote_protocol: i64, remote_version: String, local_protocol: u32 },
+    ProtocolMismatch {
+        remote_protocol: i64,
+        remote_version: String,
+        local_protocol: u32,
+    },
 }
 
 impl ConnState {
@@ -74,7 +83,11 @@ pub struct HostSpec {
 
 impl HostSpec {
     pub fn from_host(host: &Host) -> AppResult<Self> {
-        Ok(Self { id: host.id, ssh_target: host.ssh_target.clone(), remote: super::host::parse_endpoint(&host.remote_endpoint)? })
+        Ok(Self {
+            id: host.id,
+            ssh_target: host.ssh_target.clone(),
+            remote: super::host::parse_endpoint(&host.remote_endpoint)?,
+        })
     }
 }
 
@@ -177,7 +190,10 @@ pub fn private_dir() -> AppResult<PathBuf> {
     }
     let meta = std::fs::symlink_metadata(&dir)?;
     if !meta.is_dir() || meta.uid() != uid {
-        return Err(crate::error::AppError::Other(format!("{} is not a directory of yours; refusing to put sockets there", dir.display())));
+        return Err(crate::error::AppError::Other(format!(
+            "{} is not a directory of yours; refusing to put sockets there",
+            dir.display()
+        )));
     }
     std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))?;
     Ok(dir)
@@ -196,7 +212,12 @@ struct View {
 
 impl View {
     fn new() -> Arc<Self> {
-        Arc::new(Self { state: Mutex::new(ConnState::Disconnected), addr: Mutex::new(None), pid: AtomicU32::new(0), cancel: AtomicBool::new(false) })
+        Arc::new(Self {
+            state: Mutex::new(ConnState::Disconnected),
+            addr: Mutex::new(None),
+            pid: AtomicU32::new(0),
+            cancel: AtomicBool::new(false),
+        })
     }
 
     fn kill_ssh(&self) {
@@ -207,7 +228,9 @@ impl View {
                 libc::kill(pid as i32, libc::SIGKILL)
             };
             #[cfg(not(unix))]
-            let _ = std::process::Command::new("taskkill").args(["/F", "/PID", &pid.to_string()]).output();
+            let _ = std::process::Command::new("taskkill")
+                .args(["/F", "/PID", &pid.to_string()])
+                .output();
         }
     }
 }
@@ -243,7 +266,16 @@ pub struct TunnelManager {
 
 impl TunnelManager {
     pub fn new(cfg: SshConfig, health: Arc<dyn Health>, on_state: Box<StateFn>) -> Self {
-        Self { inner: Arc::new(Inner { cfg, health, hosts: Mutex::new(HashMap::new()), views: Mutex::new(HashMap::new()), on_state, stop: AtomicBool::new(false) }) }
+        Self {
+            inner: Arc::new(Inner {
+                cfg,
+                health,
+                hosts: Mutex::new(HashMap::new()),
+                views: Mutex::new(HashMap::new()),
+                on_state,
+                stop: AtomicBool::new(false),
+            }),
+        }
     }
 
     fn entry(&self, spec: &HostSpec) -> Arc<Mutex<Entry>> {
@@ -262,7 +294,12 @@ impl TunnelManager {
         });
         let entry = entry.clone();
         let view = entry.lock().unwrap().view.clone();
-        self.inner.views.lock().unwrap().entry(spec.id).or_insert(view);
+        self.inner
+            .views
+            .lock()
+            .unwrap()
+            .entry(spec.id)
+            .or_insert(view);
         entry
     }
 
@@ -282,7 +319,8 @@ impl TunnelManager {
 
     /// The connection state of a host (`Disconnected` when it was never used).
     pub fn state(&self, host_id: i64) -> ConnState {
-        self.view(host_id).map_or(ConnState::Disconnected, |v| v.state.lock().unwrap().clone())
+        self.view(host_id)
+            .map_or(ConnState::Disconnected, |v| v.state.lock().unwrap().clone())
     }
 
     /// The local address of a connected host, if any (no connection attempt).
@@ -290,7 +328,11 @@ impl TunnelManager {
         let v = self.view(host_id)?;
         let connected = v.state.lock().unwrap().is_connected();
         let addr = v.addr.lock().unwrap().clone();
-        if connected { addr } else { None }
+        if connected {
+            addr
+        } else {
+            None
+        }
     }
 
     /// The local address to talk to `spec`, connecting first when needed. Fails fast with
@@ -308,8 +350,17 @@ impl TunnelManager {
             e.retry_at = None;
             self.set_state(spec.id, &mut e, ConnState::Disconnected);
         }
-        if let ConnState::ProtocolMismatch { remote_protocol, remote_version, local_protocol } = &e.state {
-            return Err(mismatch_error(*remote_protocol, remote_version, *local_protocol));
+        if let ConnState::ProtocolMismatch {
+            remote_protocol,
+            remote_version,
+            local_protocol,
+        } = &e.state
+        {
+            return Err(mismatch_error(
+                *remote_protocol,
+                remote_version,
+                *local_protocol,
+            ));
         }
         if e.state.is_connected() && self.alive(&mut e) {
             return Ok(e.addr.clone().expect("a connected tunnel has an address"));
@@ -350,7 +401,14 @@ impl TunnelManager {
                 *e.view.addr.lock().unwrap() = Some(addr.clone());
                 e.failures = 0;
                 e.retry_at = None;
-                self.set_state(id, e, ConnState::Connected { protocol: info.protocol, version: info.version });
+                self.set_state(
+                    id,
+                    e,
+                    ConnState::Connected {
+                        protocol: info.protocol,
+                        version: info.version,
+                    },
+                );
                 Ok(addr)
             }
             Err(Failed::Mismatch(info)) => {
@@ -358,7 +416,11 @@ impl TunnelManager {
                 self.set_state(
                     id,
                     e,
-                    ConnState::ProtocolMismatch { remote_protocol: info.protocol, remote_version: info.version.clone(), local_protocol: PROTOCOL },
+                    ConnState::ProtocolMismatch {
+                        remote_protocol: info.protocol,
+                        remote_version: info.version.clone(),
+                        local_protocol: PROTOCOL,
+                    },
                 );
                 Err(mismatch_error(info.protocol, &info.version, PROTOCOL))
             }
@@ -372,7 +434,13 @@ impl TunnelManager {
 
     fn fail(&self, id: i64, e: &mut Entry, error: String, now: Instant) {
         e.failures = e.failures.saturating_add(1);
-        e.retry_at = Some(now + backoff(e.failures, self.inner.cfg.backoff_base, self.inner.cfg.backoff_max));
+        e.retry_at = Some(
+            now + backoff(
+                e.failures,
+                self.inner.cfg.backoff_base,
+                self.inner.cfg.backoff_max,
+            ),
+        );
         self.set_state(id, e, ConnState::Unreachable { error });
     }
 
@@ -381,7 +449,8 @@ impl TunnelManager {
         let cfg = &self.inner.cfg;
         let addr = local_addr(&cfg.dir, &e.spec).map_err(|m| Failed::Unreachable(m.to_string()))?;
         let stderr_path = cfg.dir.join(format!("ssh-{}.log", e.spec.id));
-        let stderr = std::fs::File::create(&stderr_path).map_err(|m| Failed::Unreachable(m.to_string()))?;
+        let stderr =
+            std::fs::File::create(&stderr_path).map_err(|m| Failed::Unreachable(m.to_string()))?;
         let mut spawned = None;
         for attempt in 0..5 {
             // ETXTBSY (26): a just-written executable (a script) is briefly busy while another thread forks.
@@ -389,10 +458,16 @@ impl TunnelManager {
                 .args(ssh_args(&e.spec, &addr))
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
-                .stderr(stderr.try_clone().map_err(|m| Failed::Unreachable(m.to_string()))?)
+                .stderr(
+                    stderr
+                        .try_clone()
+                        .map_err(|m| Failed::Unreachable(m.to_string()))?,
+                )
                 .spawn()
             {
-                Err(err) if err.raw_os_error() == Some(26) && attempt < 4 => std::thread::sleep(Duration::from_millis(20)),
+                Err(err) if err.raw_os_error() == Some(26) && attempt < 4 => {
+                    std::thread::sleep(Duration::from_millis(20))
+                }
                 other => {
                     spawned = Some(other);
                     break;
@@ -401,7 +476,12 @@ impl TunnelManager {
         }
         let mut child = spawned
             .expect("the loop always ends with a result")
-            .map_err(|err| Failed::Unreachable(format!("cannot run `{}`: {err}", cfg.program.to_string_lossy())))?;
+            .map_err(|err| {
+                Failed::Unreachable(format!(
+                    "cannot run `{}`: {err}",
+                    cfg.program.to_string_lossy()
+                ))
+            })?;
         e.view.pid.store(child.id(), Ordering::SeqCst);
         let deadline = Instant::now() + cfg.ready_timeout;
         let mut last;
@@ -414,7 +494,11 @@ impl TunnelManager {
             }
             if let Ok(Some(status)) = child.try_wait() {
                 let tail = last_lines(&stderr_path, 3);
-                return Err(Failed::Unreachable(if tail.is_empty() { format!("ssh exited with {status}") } else { tail }));
+                return Err(Failed::Unreachable(if tail.is_empty() {
+                    format!("ssh exited with {status}")
+                } else {
+                    tail
+                }));
             }
             match self.inner.health.check(&addr) {
                 Ok(info) if info.protocol == i64::from(PROTOCOL) => return Ok((child, addr, info)),
@@ -429,7 +513,11 @@ impl TunnelManager {
                 let _ = child.kill();
                 let _ = child.wait();
                 let tail = last_lines(&stderr_path, 3);
-                return Err(Failed::Unreachable(if tail.is_empty() { format!("timed out waiting for the daemon through ssh ({last})") } else { tail }));
+                return Err(Failed::Unreachable(if tail.is_empty() {
+                    format!("timed out waiting for the daemon through ssh ({last})")
+                } else {
+                    tail
+                }));
             }
             std::thread::sleep(Duration::from_millis(50));
         }
@@ -469,8 +557,14 @@ impl TunnelManager {
     /// One monitor pass at `now`: a connected host whose tunnel died or stopped answering becomes
     /// unreachable; an unreachable one whose backoff elapsed is reconnected.
     pub fn tick_at(&self, now: Instant) {
-        let entries: Vec<(i64, Arc<Mutex<Entry>>)> =
-            self.inner.hosts.lock().unwrap().iter().map(|(id, e)| (*id, e.clone())).collect();
+        let entries: Vec<(i64, Arc<Mutex<Entry>>)> = self
+            .inner
+            .hosts
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(id, e)| (*id, e.clone()))
+            .collect();
         for (id, entry) in entries {
             let mut e = entry.lock().unwrap();
             if !e.in_use {
@@ -479,10 +573,23 @@ impl TunnelManager {
             match e.state.clone() {
                 ConnState::Connected { .. } => {
                     let died = !self.alive(&mut e);
-                    let unhealthy = !died && e.addr.as_ref().is_none_or(|a| self.inner.health.check(a).is_err());
+                    let unhealthy = !died
+                        && e.addr
+                            .as_ref()
+                            .is_none_or(|a| self.inner.health.check(a).is_err());
                     if died || unhealthy {
-                        let why = if died { last_lines(&self.inner.cfg.dir.join(format!("ssh-{id}.log")), 3) } else { String::new() };
-                        let error = if !why.is_empty() { why } else if died { "the ssh tunnel exited".into() } else { "the daemon stopped answering".into() };
+                        let why = if died {
+                            last_lines(&self.inner.cfg.dir.join(format!("ssh-{id}.log")), 3)
+                        } else {
+                            String::new()
+                        };
+                        let error = if !why.is_empty() {
+                            why
+                        } else if died {
+                            "the ssh tunnel exited".into()
+                        } else {
+                            "the daemon stopped answering".into()
+                        };
                         self.close(&mut e);
                         self.fail(id, &mut e, error, now);
                     }
@@ -567,18 +674,36 @@ mod tests {
     use std::sync::atomic::AtomicUsize;
 
     fn spec(remote: RemoteEndpoint) -> HostSpec {
-        HostSpec { id: 1, ssh_target: "koza".into(), remote }
+        HostSpec {
+            id: 1,
+            ssh_target: "koza".into(),
+            remote,
+        }
     }
 
     #[test]
     fn a_remote_socket_is_forwarded_to_a_local_socket() {
-        let args = ssh_args(&spec(RemoteEndpoint::Socket("/run/user/1000/codereview/worker.sock".into())), &Addr::Unix("/tmp/t/h1.sock".into()));
+        let args = ssh_args(
+            &spec(RemoteEndpoint::Socket(
+                "/run/user/1000/codereview/worker.sock".into(),
+            )),
+            &Addr::Unix("/tmp/t/h1.sock".into()),
+        );
         let l = args.iter().position(|a| a == "-L").unwrap();
-        assert_eq!(args[l + 1], "/tmp/t/h1.sock:/run/user/1000/codereview/worker.sock");
+        assert_eq!(
+            args[l + 1],
+            "/tmp/t/h1.sock:/run/user/1000/codereview/worker.sock"
+        );
         // the target is last, after `--`, so it can never be read as an option
         assert_eq!(&args[args.len() - 2..], ["--", "koza"]);
         assert_eq!(&args[..2], ["-N", "-T"]);
-        for opt in ["BatchMode=yes", "ExitOnForwardFailure=yes", "ControlPath=none", "ControlMaster=no", "StreamLocalBindUnlink=yes"] {
+        for opt in [
+            "BatchMode=yes",
+            "ExitOnForwardFailure=yes",
+            "ControlPath=none",
+            "ControlMaster=no",
+            "StreamLocalBindUnlink=yes",
+        ] {
             assert!(args.contains(&opt.to_string()), "{opt}");
         }
     }
@@ -589,9 +714,18 @@ mod tests {
             let args = ssh_args(&spec(remote), &local);
             args[args.iter().position(|a| a == "-L").unwrap() + 1].clone()
         };
-        assert_eq!(at(RemoteEndpoint::Port(7777), Addr::Unix("/t/s.sock".into())), "/t/s.sock:127.0.0.1:7777");
-        assert_eq!(at(RemoteEndpoint::Port(7777), Addr::Tcp(5000)), "127.0.0.1:5000:127.0.0.1:7777");
-        assert_eq!(at(RemoteEndpoint::Socket("/r/s.sock".into()), Addr::Tcp(5000)), "127.0.0.1:5000:/r/s.sock");
+        assert_eq!(
+            at(RemoteEndpoint::Port(7777), Addr::Unix("/t/s.sock".into())),
+            "/t/s.sock:127.0.0.1:7777"
+        );
+        assert_eq!(
+            at(RemoteEndpoint::Port(7777), Addr::Tcp(5000)),
+            "127.0.0.1:5000:127.0.0.1:7777"
+        );
+        assert_eq!(
+            at(RemoteEndpoint::Socket("/r/s.sock".into()), Addr::Tcp(5000)),
+            "127.0.0.1:5000:/r/s.sock"
+        );
     }
 
     #[test]
@@ -612,7 +746,11 @@ mod tests {
 
     impl FakeHealth {
         fn new() -> Arc<Self> {
-            Arc::new(Self { up: AtomicBool::new(true), protocol: Mutex::new(PROTOCOL as i64), checks: AtomicUsize::new(0) })
+            Arc::new(Self {
+                up: AtomicBool::new(true),
+                protocol: Mutex::new(PROTOCOL as i64),
+                checks: AtomicUsize::new(0),
+            })
         }
     }
 
@@ -620,7 +758,10 @@ mod tests {
         fn check(&self, _: &Addr) -> RemoteResult<HealthInfo> {
             self.checks.fetch_add(1, Ordering::Relaxed);
             if self.up.load(Ordering::Relaxed) {
-                Ok(HealthInfo { protocol: *self.protocol.lock().unwrap(), version: "9.9.9".into() })
+                Ok(HealthInfo {
+                    protocol: *self.protocol.lock().unwrap(),
+                    version: "9.9.9".into(),
+                })
             } else {
                 Err(RemoteError::unreachable("connection refused"))
             }
@@ -671,12 +812,24 @@ mod tests {
         let health = FakeHealth::new();
         let states = Arc::new(Mutex::new(Vec::new()));
         let sink = states.clone();
-        let mgr = TunnelManager::new(cfg, health.clone(), Box::new(move |_, s| sink.lock().unwrap().push(s.clone())));
-        Rig { dir, mgr, health, states }
+        let mgr = TunnelManager::new(
+            cfg,
+            health.clone(),
+            Box::new(move |_, s| sink.lock().unwrap().push(s.clone())),
+        );
+        Rig {
+            dir,
+            mgr,
+            health,
+            states,
+        }
     }
 
     fn connected() -> ConnState {
-        ConnState::Connected { protocol: PROTOCOL as i64, version: "9.9.9".into() }
+        ConnState::Connected {
+            protocol: PROTOCOL as i64,
+            version: "9.9.9".into(),
+        }
     }
 
     #[test]
@@ -690,7 +843,10 @@ mod tests {
         assert!(matches!(a, Addr::Unix(_)));
         assert_eq!(r.log().lines().count(), 1, "ssh is started once");
         assert!(r.log().contains("-L") && r.log().contains(":/r/worker.sock"));
-        assert_eq!(*r.states.lock().unwrap(), vec![ConnState::Connecting, connected()]);
+        assert_eq!(
+            *r.states.lock().unwrap(),
+            vec![ConnState::Connecting, connected()]
+        );
         assert_eq!(r.mgr.state(1), connected());
         r.mgr.shutdown();
         assert_eq!(r.mgr.state(1), ConnState::Disconnected);
@@ -704,7 +860,10 @@ mod tests {
         s.ssh_target = "bad".into();
         let err = r.mgr.ensure(&s).unwrap_err();
         assert_eq!(err.code, "host_unreachable");
-        assert!(err.message.contains("Could not resolve hostname bad"), "{err}");
+        assert!(
+            err.message.contains("Could not resolve hostname bad"),
+            "{err}"
+        );
         assert!(matches!(r.mgr.state(1), ConnState::Unreachable { .. }));
     }
 
@@ -713,7 +872,10 @@ mod tests {
         let r = rig();
         r.health.up.store(false, Ordering::Relaxed);
         let err = r.mgr.ensure(&spec(RemoteEndpoint::Port(1))).unwrap_err();
-        assert!(err.is_connection() && err.message.contains("timed out"), "{err}");
+        assert!(
+            err.is_connection() && err.message.contains("timed out"),
+            "{err}"
+        );
     }
 
     #[test]
@@ -723,10 +885,19 @@ mod tests {
         *r.health.protocol.lock().unwrap() = 2;
         let err = r.mgr.ensure(&s).unwrap_err();
         assert_eq!(err.code, "protocol_mismatch");
-        assert!(err.message.contains("protocol 2") && err.message.contains("9.9.9") && err.message.contains("update"), "{err}");
+        assert!(
+            err.message.contains("protocol 2")
+                && err.message.contains("9.9.9")
+                && err.message.contains("update"),
+            "{err}"
+        );
         assert_eq!(
             r.mgr.state(1),
-            ConnState::ProtocolMismatch { remote_protocol: 2, remote_version: "9.9.9".into(), local_protocol: PROTOCOL }
+            ConnState::ProtocolMismatch {
+                remote_protocol: 2,
+                remote_version: "9.9.9".into(),
+                local_protocol: PROTOCOL
+            }
         );
         // sticky: no new ssh while it is known to be wrong
         let started = r.log().lines().count();
@@ -748,7 +919,12 @@ mod tests {
         r.health.up.store(false, Ordering::Relaxed);
         let t0 = Instant::now();
         r.mgr.tick_at(t0);
-        assert_eq!(r.mgr.state(1), ConnState::Unreachable { error: "the daemon stopped answering".into() });
+        assert_eq!(
+            r.mgr.state(1),
+            ConnState::Unreachable {
+                error: "the daemon stopped answering".into()
+            }
+        );
         // still inside the backoff: nothing happens, no new ssh
         let started = r.log().lines().count();
         r.mgr.tick_at(t0 + Duration::from_millis(500));
@@ -778,7 +954,12 @@ mod tests {
             child.wait().unwrap();
         }
         r.mgr.tick_at(Instant::now());
-        assert_eq!(r.mgr.state(1), ConnState::Unreachable { error: "the ssh tunnel exited".into() });
+        assert_eq!(
+            r.mgr.state(1),
+            ConnState::Unreachable {
+                error: "the ssh tunnel exited".into()
+            }
+        );
         r.mgr.tick_at(Instant::now() + Duration::from_secs(5));
         assert_eq!(r.mgr.state(1), connected());
         r.mgr.shutdown();
@@ -815,18 +996,29 @@ mod tests {
         let t = Instant::now();
         r.mgr.forget(1);
         r.mgr.shutdown();
-        assert!(t.elapsed() < Duration::from_millis(300), "forget/shutdown waited {:?}", t.elapsed());
+        assert!(
+            t.elapsed() < Duration::from_millis(300),
+            "forget/shutdown waited {:?}",
+            t.elapsed()
+        );
         assert_eq!(r.mgr.state(1), ConnState::Disconnected);
         // the connect notices and gives up well before its own timeout
         let err = connecting.join().unwrap().unwrap_err();
         assert!(err.is_connection(), "{err}");
-        assert!(t0.elapsed() < Duration::from_millis(450), "the connect was not cancelled: {:?}", t0.elapsed());
+        assert!(
+            t0.elapsed() < Duration::from_millis(450),
+            "the connect was not cancelled: {:?}",
+            t0.elapsed()
+        );
     }
 
     #[test]
     fn private_dir_is_owner_only() {
         use std::os::unix::fs::PermissionsExt;
         let dir = private_dir().unwrap();
-        assert_eq!(std::fs::metadata(dir).unwrap().permissions().mode() & 0o777, 0o700);
+        assert_eq!(
+            std::fs::metadata(dir).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
     }
 }

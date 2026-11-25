@@ -228,7 +228,10 @@ fn build_search_tasks(viewer: &ViewerInfo, scope: Option<&str>) -> Vec<SearchTas
 
     for team in viewer.team_slugs.iter().take(TEAM_LIMIT) {
         tasks.push(SearchTask {
-            query: scoped(scope, &format!("is:pr is:open team-review-requested:{team}")),
+            query: scoped(
+                scope,
+                &format!("is:pr is:open team-review-requested:{team}"),
+            ),
             reason: "team_review",
             detail: team.clone(),
         });
@@ -265,7 +268,10 @@ pub fn run_all_searches(viewer: &ViewerInfo, scope: Option<&str>) -> (Vec<Reason
     let tasks = build_search_tasks(viewer, scope);
     let results = concurrent_map(tasks, SEARCH_CONCURRENCY, run_search);
     let complete = results.iter().all(Option::is_some);
-    (merge_reasons(results.into_iter().flatten().collect()), complete)
+    (
+        merge_reasons(results.into_iter().flatten().collect()),
+        complete,
+    )
 }
 
 /// Fetch the viewer's login + team slugs (`org/team`) via GraphQL, paginating the
@@ -273,7 +279,13 @@ pub fn run_all_searches(viewer: &ViewerInfo, scope: Option<&str>) -> (Vec<Reason
 pub fn fetch_viewer() -> AppResult<ViewerInfo> {
     let data: ViewerData = gh::graphql(VIEWER_QUERY, json!({}))?;
     let login = data.viewer.login;
-    let orgs: Vec<String> = data.viewer.organizations.nodes.into_iter().map(|n| n.login).collect();
+    let orgs: Vec<String> = data
+        .viewer
+        .organizations
+        .nodes
+        .into_iter()
+        .map(|n| n.login)
+        .collect();
 
     let mut team_slugs = Vec::new();
     for org in orgs {
@@ -334,13 +346,23 @@ mod tests {
     #[test]
     fn merge_reasons_unions_and_keeps_latest_node() {
         let buckets = vec![
-            vec![reasoned("X", "PullRequest", "2024-01-01T00:00:00Z", "author")],
+            vec![reasoned(
+                "X",
+                "PullRequest",
+                "2024-01-01T00:00:00Z",
+                "author",
+            )],
             vec![
                 reasoned("X", "PullRequest", "2024-02-01T00:00:00Z", "mention"),
                 reasoned("Y", "Issue", "2024-01-15T00:00:00Z", "assigned"),
             ],
             // Duplicate reason on X must not be added twice.
-            vec![reasoned("X", "PullRequest", "2024-01-10T00:00:00Z", "author")],
+            vec![reasoned(
+                "X",
+                "PullRequest",
+                "2024-01-10T00:00:00Z",
+                "author",
+            )],
         ];
         let merged = merge_reasons(buckets);
         assert_eq!(merged.len(), 2);

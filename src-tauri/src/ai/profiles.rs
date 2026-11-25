@@ -71,7 +71,12 @@ pub enum Feature {
 }
 
 impl Feature {
-    pub const ALL: [Feature; 4] = [Feature::Chat, Feature::Summaries, Feature::Theme, Feature::Sessions];
+    pub const ALL: [Feature; 4] = [
+        Feature::Chat,
+        Feature::Summaries,
+        Feature::Theme,
+        Feature::Sessions,
+    ];
 
     pub fn key(self) -> &'static str {
         match self {
@@ -117,21 +122,44 @@ impl FeatureProfiles {
 }
 
 pub fn list(conn: &Connection) -> AppResult<Vec<AiProfile>> {
-    let mut stmt = conn.prepare("SELECT * FROM ai_profile ORDER BY is_default DESC, name COLLATE NOCASE, id")?;
-    let rows = stmt.query_map([], AiProfile::from_row)?.collect::<rusqlite::Result<_>>()?;
+    let mut stmt =
+        conn.prepare("SELECT * FROM ai_profile ORDER BY is_default DESC, name COLLATE NOCASE, id")?;
+    let rows = stmt
+        .query_map([], AiProfile::from_row)?
+        .collect::<rusqlite::Result<_>>()?;
     Ok(rows)
 }
 
 pub fn get(conn: &Connection, id: i64) -> AppResult<Option<AiProfile>> {
-    Ok(conn.query_row("SELECT * FROM ai_profile WHERE id = ?1", params![id], AiProfile::from_row).optional()?)
+    Ok(conn
+        .query_row(
+            "SELECT * FROM ai_profile WHERE id = ?1",
+            params![id],
+            AiProfile::from_row,
+        )
+        .optional()?)
 }
 
 pub fn default_profile(conn: &Connection) -> AppResult<Option<AiProfile>> {
-    Ok(conn.query_row("SELECT * FROM ai_profile WHERE is_default = 1", [], AiProfile::from_row).optional()?)
+    Ok(conn
+        .query_row(
+            "SELECT * FROM ai_profile WHERE is_default = 1",
+            [],
+            AiProfile::from_row,
+        )
+        .optional()?)
 }
 
 /// Keys whose name suggests a credential: profile settings are plain options.
-const SECRET_HINTS: &[&str] = &["token", "secret", "password", "passwd", "api_key", "apikey", "credential"];
+const SECRET_HINTS: &[&str] = &[
+    "token",
+    "secret",
+    "password",
+    "passwd",
+    "api_key",
+    "apikey",
+    "credential",
+];
 
 fn reject_secrets(settings: &Value) -> AppResult<()> {
     if let Value::Object(map) = settings {
@@ -154,10 +182,15 @@ pub fn save(conn: &mut Connection, input: AiProfileInput) -> AppResult<AiProfile
         return Err(AppError::Other("a profile needs a name".into()));
     }
     if harness_by_id(&input.harness).is_none() {
-        return Err(AppError::Other(format!("unknown harness `{}`", input.harness)));
+        return Err(AppError::Other(format!(
+            "unknown harness `{}`",
+            input.harness
+        )));
     }
     if !input.settings.is_object() {
-        return Err(AppError::Other("profile settings must be a JSON object".into()));
+        return Err(AppError::Other(
+            "profile settings must be a JSON object".into(),
+        ));
     }
     reject_secrets(&input.settings)?;
     if let Some(h) = harness_by_id(&input.harness) {
@@ -168,7 +201,11 @@ pub fn save(conn: &mut Connection, input: AiProfileInput) -> AppResult<AiProfile
     }
     if input.host_id.is_some() {
         // The default profile serves chat, sessions and system routines, which only run on this machine.
-        let default_id: Option<i64> = conn.query_row("SELECT id FROM ai_profile WHERE is_default = 1", [], |r| r.get(0)).optional()?;
+        let default_id: Option<i64> = conn
+            .query_row("SELECT id FROM ai_profile WHERE is_default = 1", [], |r| {
+                r.get(0)
+            })
+            .optional()?;
         if input.is_default || default_id.is_none() || default_id == input.id {
             return Err(AppError::Other(
                 "the default profile must run on this machine (chat, interactive sessions and system routines can't use a remote host): create a local default first, or save this profile without making it the default".into(),
@@ -202,10 +239,20 @@ pub fn save(conn: &mut Connection, input: AiProfileInput) -> AppResult<AiProfile
         }
     };
     // The default can be moved to another profile but never unset: only the one flag holder is "the" default.
-    let has_default: bool = tx.query_row("SELECT COUNT(*) FROM ai_profile WHERE is_default = 1", [], |r| r.get::<_, i64>(0))? > 0;
+    let has_default: bool = tx.query_row(
+        "SELECT COUNT(*) FROM ai_profile WHERE is_default = 1",
+        [],
+        |r| r.get::<_, i64>(0),
+    )? > 0;
     if input.is_default || !has_default {
-        tx.execute("UPDATE ai_profile SET is_default = 0 WHERE is_default = 1", [])?;
-        tx.execute("UPDATE ai_profile SET is_default = 1 WHERE id = ?1", params![id])?;
+        tx.execute(
+            "UPDATE ai_profile SET is_default = 0 WHERE is_default = 1",
+            [],
+        )?;
+        tx.execute(
+            "UPDATE ai_profile SET is_default = 1 WHERE id = ?1",
+            params![id],
+        )?;
     }
     tx.commit()?;
     get(conn, id)?.ok_or_else(|| AppError::Other("profile vanished".into()))
@@ -214,14 +261,20 @@ pub fn save(conn: &mut Connection, input: AiProfileInput) -> AppResult<AiProfile
 /// Delete a profile. Routines and chats pinned to it fall back (`ON DELETE SET NULL`); a feature
 /// mapped to it is unmapped. The default profile can't be deleted: make another one the default first.
 pub fn delete(conn: &mut Connection, id: i64) -> AppResult<()> {
-    let profile = get(conn, id)?.ok_or_else(|| AppError::Other(format!("profile {id} not found")))?;
+    let profile =
+        get(conn, id)?.ok_or_else(|| AppError::Other(format!("profile {id} not found")))?;
     if profile.is_default {
-        return Err(AppError::Other("the default profile can't be deleted: make another profile the default first".into()));
+        return Err(AppError::Other(
+            "the default profile can't be deleted: make another profile the default first".into(),
+        ));
     }
     let tx = conn.transaction()?;
     tx.execute("DELETE FROM ai_profile WHERE id = ?1", params![id])?;
     for feature in Feature::ALL {
-        tx.execute("DELETE FROM meta WHERE key = ?1 AND value = ?2", params![feature.meta_key(), id.to_string()])?;
+        tx.execute(
+            "DELETE FROM meta WHERE key = ?1 AND value = ?2",
+            params![feature.meta_key(), id.to_string()],
+        )?;
     }
     tx.commit()?;
     Ok(())
@@ -231,7 +284,11 @@ pub fn feature_profiles(conn: &Connection) -> FeatureProfiles {
     let mut out = FeatureProfiles::default();
     for feature in Feature::ALL {
         let id = conn
-            .query_row("SELECT value FROM meta WHERE key = ?1", params![feature.meta_key()], |r| r.get::<_, String>(0))
+            .query_row(
+                "SELECT value FROM meta WHERE key = ?1",
+                params![feature.meta_key()],
+                |r| r.get::<_, String>(0),
+            )
             .ok()
             .and_then(|v| v.parse::<i64>().ok());
         *out.slot(feature) = id;
@@ -246,13 +303,24 @@ pub fn set_feature_profiles(conn: &mut Connection, map: &FeatureProfiles) -> App
             Some(id) => {
                 // Chats keep a session and edit a local worktree; interactive sessions open a local terminal.
                 let remote: bool = tx
-                    .query_row("SELECT host_id IS NOT NULL FROM ai_profile WHERE id = ?1", params![id], |r| r.get(0))
+                    .query_row(
+                        "SELECT host_id IS NOT NULL FROM ai_profile WHERE id = ?1",
+                        params![id],
+                        |r| r.get(0),
+                    )
                     .optional()?
                     .unwrap_or(false);
                 if remote && matches!(feature, Feature::Chat | Feature::Sessions) {
-                    return Err(AppError::Other(format!("the {} feature runs on this machine only: pick a profile without a host", feature.key())));
+                    return Err(AppError::Other(format!(
+                        "the {} feature runs on this machine only: pick a profile without a host",
+                        feature.key()
+                    )));
                 }
-                let exists: bool = tx.query_row("SELECT COUNT(*) FROM ai_profile WHERE id = ?1", params![id], |r| r.get::<_, i64>(0))? > 0;
+                let exists: bool = tx.query_row(
+                    "SELECT COUNT(*) FROM ai_profile WHERE id = ?1",
+                    params![id],
+                    |r| r.get::<_, i64>(0),
+                )? > 0;
                 if !exists {
                     return Err(AppError::Other(format!("profile {id} not found")));
                 }
@@ -262,7 +330,10 @@ pub fn set_feature_profiles(conn: &mut Connection, map: &FeatureProfiles) -> App
                 )?;
             }
             None => {
-                tx.execute("DELETE FROM meta WHERE key = ?1", params![feature.meta_key()])?;
+                tx.execute(
+                    "DELETE FROM meta WHERE key = ?1",
+                    params![feature.meta_key()],
+                )?;
             }
         }
     }
@@ -286,7 +357,14 @@ pub struct Resolved {
 impl Resolved {
     /// No profile at all: Claude Code, empty model.
     fn legacy() -> Self {
-        Self { profile_id: None, harness: harness_for(), model: String::new(), settings: json!({}), host_id: None, explicit: false }
+        Self {
+            profile_id: None,
+            harness: harness_for(),
+            model: String::new(),
+            settings: json!({}),
+            host_id: None,
+            explicit: false,
+        }
     }
 
     fn from_profile(p: AiProfile, harness: &'static dyn Harness, explicit: bool) -> Self {
@@ -295,7 +373,14 @@ impl Resolved {
             Some(host) => crate::remote::harness::for_host(host, harness.id()).unwrap_or(harness),
             None => harness,
         };
-        Self { profile_id: Some(p.id), harness, model: p.model, settings: p.settings, host_id: p.host_id, explicit }
+        Self {
+            profile_id: Some(p.id),
+            harness,
+            model: p.model,
+            settings: p.settings,
+            host_id: p.host_id,
+            explicit,
+        }
     }
 
     /// Refuse a profile that runs on a remote host for work that can only happen on this machine
@@ -313,7 +398,11 @@ impl Resolved {
     /// Code keeps its env-based fallback so Bedrock setups that rely on it still work.
     pub fn model_for(&self, requested: &str) -> String {
         let requested = requested.trim();
-        let model = if requested.is_empty() { self.model.as_str() } else { requested };
+        let model = if requested.is_empty() {
+            self.model.as_str()
+        } else {
+            requested
+        };
         // The env fallback is this machine's; a remote Claude has its own.
         if self.harness.id() == "claude" && self.host_id.is_none() {
             resolve_model(Some(model.to_string()))
@@ -382,8 +471,13 @@ const LEGACY_IMPORTED: &str = "ai_legacy_models_imported";
 /// profile on the `board_overview` routine, so every run keeps the model it had. Returns whether
 /// anything was imported (false when it already ran).
 pub fn import_legacy_models(conn: &mut Connection, chat: &str, overview: &str) -> AppResult<bool> {
-    let done: Option<String> =
-        conn.query_row("SELECT value FROM meta WHERE key = ?1", params![LEGACY_IMPORTED], |r| r.get(0)).optional()?;
+    let done: Option<String> = conn
+        .query_row(
+            "SELECT value FROM meta WHERE key = ?1",
+            params![LEGACY_IMPORTED],
+            |r| r.get(0),
+        )
+        .optional()?;
     if done.is_some() {
         return Ok(false);
     }
@@ -391,7 +485,10 @@ pub fn import_legacy_models(conn: &mut Connection, chat: &str, overview: &str) -
     let now = chrono::Utc::now().to_rfc3339();
     let tx = conn.transaction()?;
     if !chat.is_empty() {
-        tx.execute("UPDATE ai_profile SET model = ?1, updated_at = ?2 WHERE is_default = 1 AND model = ''", params![chat, now])?;
+        tx.execute(
+            "UPDATE ai_profile SET model = ?1, updated_at = ?2 WHERE is_default = 1 AND model = ''",
+            params![chat, now],
+        )?;
     }
     if !overview.is_empty() && overview != chat {
         let routine: Option<i64> = tx
@@ -404,10 +501,16 @@ pub fn import_legacy_models(conn: &mut Connection, chat: &str, overview: &str) -
                 params![format!("Claude Code ({overview})"), overview, now],
             )?;
             let profile = tx.last_insert_rowid();
-            tx.execute("UPDATE routine SET profile_id = ?1 WHERE id = ?2", params![profile, routine])?;
+            tx.execute(
+                "UPDATE routine SET profile_id = ?1 WHERE id = ?2",
+                params![profile, routine],
+            )?;
         }
     }
-    tx.execute("INSERT INTO meta (key, value) VALUES (?1, '1')", params![LEGACY_IMPORTED])?;
+    tx.execute(
+        "INSERT INTO meta (key, value) VALUES (?1, '1')",
+        params![LEGACY_IMPORTED],
+    )?;
     tx.commit()?;
     Ok(true)
 }
@@ -435,7 +538,10 @@ mod tests {
         let all = list(&conn).unwrap();
         assert_eq!(all.len(), 1);
         assert!(all[0].is_default);
-        assert_eq!((all[0].harness.as_str(), all[0].model.as_str()), ("claude", ""));
+        assert_eq!(
+            (all[0].harness.as_str(), all[0].model.as_str()),
+            ("claude", "")
+        );
     }
 
     #[test]
@@ -450,8 +556,15 @@ mod tests {
         edit.model = "haiku".into();
         edit.is_default = true;
         let a = save(&mut conn, edit).unwrap();
-        assert_eq!((a.name.as_str(), a.model.as_str(), a.is_default), ("Fast!", "haiku", true));
-        let defaults: Vec<_> = list(&conn).unwrap().into_iter().filter(|p| p.is_default).collect();
+        assert_eq!(
+            (a.name.as_str(), a.model.as_str(), a.is_default),
+            ("Fast!", "haiku", true)
+        );
+        let defaults: Vec<_> = list(&conn)
+            .unwrap()
+            .into_iter()
+            .filter(|p| p.is_default)
+            .collect();
         assert_eq!(defaults.len(), 1, "exactly one default");
 
         // Saving the default with is_default = false doesn't unset it.
@@ -466,17 +579,27 @@ mod tests {
         assert!(save(&mut conn, input("  ")).is_err());
         let mut bad = input("x");
         bad.harness = "nope".into();
-        assert!(save(&mut conn, bad).unwrap_err().to_string().contains("unknown harness"));
+        assert!(save(&mut conn, bad)
+            .unwrap_err()
+            .to_string()
+            .contains("unknown harness"));
         let mut arr = input("x");
         arr.settings = json!([1]);
         assert!(save(&mut conn, arr).is_err());
         let mut secret = input("x");
         secret.settings = json!({ "env": { "OPENAI_API_KEY": "sk-1" } });
-        assert!(save(&mut conn, secret).unwrap_err().to_string().contains("secret"));
+        assert!(save(&mut conn, secret)
+            .unwrap_err()
+            .to_string()
+            .contains("secret"));
         let mut unsafe_args = input("x");
         unsafe_args.harness = "codex".into();
-        unsafe_args.settings = json!({ "extra_args": ["-c", "\"sandbox_mode\"=\"danger-full-access\""] });
-        assert!(save(&mut conn, unsafe_args).unwrap_err().to_string().contains("extra_args may not contain"));
+        unsafe_args.settings =
+            json!({ "extra_args": ["-c", "\"sandbox_mode\"=\"danger-full-access\""] });
+        assert!(save(&mut conn, unsafe_args)
+            .unwrap_err()
+            .to_string()
+            .contains("extra_args may not contain"));
         let mut missing = input("x");
         missing.id = Some(999);
         assert!(save(&mut conn, missing).is_err());
@@ -487,10 +610,19 @@ mod tests {
         let mut conn = open_memory();
         let mut remote = input("Remote");
         remote.host_id = Some(42);
-        assert!(save(&mut conn, remote).unwrap_err().to_string().contains("host 42 not found"));
+        assert!(save(&mut conn, remote)
+            .unwrap_err()
+            .to_string()
+            .contains("host 42 not found"));
         let host = crate::remote::host::save(
             &conn,
-            crate::remote::host::HostInput { id: None, name: "koza".into(), ssh_target: "koza".into(), remote_endpoint: "7777".into(), enabled: true },
+            crate::remote::host::HostInput {
+                id: None,
+                name: "koza".into(),
+                ssh_target: "koza".into(),
+                remote_endpoint: "7777".into(),
+                enabled: true,
+            },
         )
         .unwrap();
         let mut remote = input("Remote");
@@ -501,7 +633,13 @@ mod tests {
     fn koza(conn: &Connection) -> i64 {
         crate::remote::host::save(
             conn,
-            crate::remote::host::HostInput { id: None, name: "koza".into(), ssh_target: "koza".into(), remote_endpoint: "7777".into(), enabled: true },
+            crate::remote::host::HostInput {
+                id: None,
+                name: "koza".into(),
+                ssh_target: "koza".into(),
+                remote_endpoint: "7777".into(),
+                enabled: true,
+            },
         )
         .unwrap()
         .id
@@ -514,7 +652,10 @@ mod tests {
         let mut remote = input("Remote");
         remote.host_id = Some(host);
         remote.is_default = true;
-        assert!(save(&mut conn, remote).unwrap_err().to_string().contains("default profile must run on this machine"));
+        assert!(save(&mut conn, remote)
+            .unwrap_err()
+            .to_string()
+            .contains("default profile must run on this machine"));
         // nor can the current default be moved to a host by editing it
         let default = default_profile(&conn).unwrap().unwrap();
         let mut edit = input("Claude Code");
@@ -546,15 +687,27 @@ mod tests {
         remote.host_id = Some(host);
         let id = save(&mut conn, remote).unwrap().id;
         for map in [
-            FeatureProfiles { chat: Some(id), ..Default::default() },
-            FeatureProfiles { sessions: Some(id), ..Default::default() },
+            FeatureProfiles {
+                chat: Some(id),
+                ..Default::default()
+            },
+            FeatureProfiles {
+                sessions: Some(id),
+                ..Default::default()
+            },
         ] {
-            let err = set_feature_profiles(&mut conn, &map).unwrap_err().to_string();
+            let err = set_feature_profiles(&mut conn, &map)
+                .unwrap_err()
+                .to_string();
             assert!(err.contains("runs on this machine only"), "{err}");
         }
         assert_eq!(feature_profiles(&conn), FeatureProfiles::default());
         // one-shot features may use it
-        let ok = FeatureProfiles { summaries: Some(id), theme: Some(id), ..Default::default() };
+        let ok = FeatureProfiles {
+            summaries: Some(id),
+            theme: Some(id),
+            ..Default::default()
+        };
         set_feature_profiles(&mut conn, &ok).unwrap();
         assert_eq!(feature_profiles(&conn), ok);
     }
@@ -569,12 +722,24 @@ mod tests {
             params![p.id],
         )
         .unwrap();
-        set_feature_profiles(&mut conn, &FeatureProfiles { chat: Some(p.id), theme: Some(p.id), ..Default::default() }).unwrap();
+        set_feature_profiles(
+            &mut conn,
+            &FeatureProfiles {
+                chat: Some(p.id),
+                theme: Some(p.id),
+                ..Default::default()
+            },
+        )
+        .unwrap();
 
         delete(&mut conn, p.id).unwrap();
 
         assert!(get(&conn, p.id).unwrap().is_none());
-        let pinned: Option<i64> = conn.query_row("SELECT profile_id FROM routine WHERE key = 'k'", [], |r| r.get(0)).unwrap();
+        let pinned: Option<i64> = conn
+            .query_row("SELECT profile_id FROM routine WHERE key = 'k'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
         assert_eq!(pinned, None);
         assert_eq!(feature_profiles(&conn), FeatureProfiles::default());
     }
@@ -591,14 +756,22 @@ mod tests {
     fn feature_profiles_round_trip_and_reject_unknown_profiles() {
         let mut conn = open_memory();
         let p = save(&mut conn, input("A")).unwrap();
-        let map = FeatureProfiles { chat: Some(p.id), summaries: None, theme: None, sessions: Some(p.id) };
+        let map = FeatureProfiles {
+            chat: Some(p.id),
+            summaries: None,
+            theme: None,
+            sessions: Some(p.id),
+        };
         set_feature_profiles(&mut conn, &map).unwrap();
         assert_eq!(feature_profiles(&conn), map);
 
         set_feature_profiles(&mut conn, &FeatureProfiles::default()).unwrap();
         assert_eq!(feature_profiles(&conn), FeatureProfiles::default());
 
-        let bad = FeatureProfiles { chat: Some(999), ..Default::default() };
+        let bad = FeatureProfiles {
+            chat: Some(999),
+            ..Default::default()
+        };
         assert!(set_feature_profiles(&mut conn, &bad).is_err());
     }
 
@@ -609,10 +782,22 @@ mod tests {
         assert!(import_legacy_models(&mut conn, "opus", "sonnet").unwrap());
         let default = default_profile(&conn).unwrap().unwrap();
         assert_eq!(default.model, "opus");
-        let overview_profile: Option<i64> =
-            conn.query_row("SELECT profile_id FROM routine WHERE key = 'board_overview'", [], |r| r.get(0)).unwrap();
+        let overview_profile: Option<i64> = conn
+            .query_row(
+                "SELECT profile_id FROM routine WHERE key = 'board_overview'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
         let overview = get(&conn, overview_profile.unwrap()).unwrap().unwrap();
-        assert_eq!((overview.harness.as_str(), overview.model.as_str(), overview.is_default), ("claude", "sonnet", false));
+        assert_eq!(
+            (
+                overview.harness.as_str(),
+                overview.model.as_str(),
+                overview.is_default
+            ),
+            ("claude", "sonnet", false)
+        );
 
         // A second call (another webview start) changes nothing.
         assert!(!import_legacy_models(&mut conn, "haiku", "haiku").unwrap());
@@ -646,11 +831,21 @@ mod tests {
         let default = default_profile(&conn).unwrap().unwrap().id;
         let routine = named(&mut conn, "R", "haiku");
         let chat = named(&mut conn, "C", "opus");
-        set_feature_profiles(&mut conn, &FeatureProfiles { chat: Some(chat), ..Default::default() }).unwrap();
+        set_feature_profiles(
+            &mut conn,
+            &FeatureProfiles {
+                chat: Some(chat),
+                ..Default::default()
+            },
+        )
+        .unwrap();
 
         // The routine's own profile beats the feature's, which beats the default.
         let r = resolve(&conn, &[Some(routine), Some(chat)]);
-        assert_eq!((r.profile_id, r.model.as_str(), r.explicit), (Some(routine), "haiku", true));
+        assert_eq!(
+            (r.profile_id, r.model.as_str(), r.explicit),
+            (Some(routine), "haiku", true)
+        );
         assert_eq!(resolve_feature(&conn, Feature::Chat).profile_id, Some(chat));
         // A feature with no mapping, and a routine with no profile, get the default.
         let t = resolve_feature(&conn, Feature::Theme);
@@ -663,7 +858,13 @@ mod tests {
         let mut conn = open_memory();
         let host = crate::remote::host::save(
             &conn,
-            crate::remote::host::HostInput { id: None, name: "koza".into(), ssh_target: "koza".into(), remote_endpoint: "7777".into(), enabled: true },
+            crate::remote::host::HostInput {
+                id: None,
+                name: "koza".into(),
+                ssh_target: "koza".into(),
+                remote_endpoint: "7777".into(),
+                enabled: true,
+            },
         )
         .unwrap();
         let mut remote = input("Remote");
@@ -671,8 +872,14 @@ mod tests {
         remote.model = "opus".into();
         let id = save(&mut conn, remote).unwrap().id;
         let r = resolve_routine(&conn, Some(id));
-        assert_eq!((r.host_id, r.harness.id(), r.model_for("").as_str()), (Some(host.id), "claude", "opus"));
-        assert!(!r.harness.caps().sessions, "remote harnesses have no sessions");
+        assert_eq!(
+            (r.host_id, r.harness.id(), r.model_for("").as_str()),
+            (Some(host.id), "claude", "opus")
+        );
+        assert!(
+            !r.harness.caps().sessions,
+            "remote harnesses have no sessions"
+        );
         let err = r.ensure_local("“Focus”").unwrap_err().to_string();
         assert!(err.contains("“Focus” runs on this machine only"), "{err}");
         let local = resolve_routine(&conn, None);
@@ -685,8 +892,12 @@ mod tests {
         let default = default_profile(&conn).unwrap().unwrap().id;
         assert_eq!(resolve_routine(&conn, Some(999)).profile_id, Some(default));
         let gone = named(&mut conn, "Gone", "haiku");
-        conn.execute("DELETE FROM ai_profile WHERE id = ?1", [gone]).unwrap();
-        assert_eq!(resolve(&conn, &[Some(gone), None]).profile_id, Some(default));
+        conn.execute("DELETE FROM ai_profile WHERE id = ?1", [gone])
+            .unwrap();
+        assert_eq!(
+            resolve(&conn, &[Some(gone), None]).profile_id,
+            Some(default)
+        );
     }
 
     #[test]
@@ -695,7 +906,10 @@ mod tests {
         let default = default_profile(&conn).unwrap().unwrap().id;
         conn.execute("INSERT INTO ai_profile (name, harness, created_at, updated_at) VALUES ('Future', 'zed', 'n', 'n')", []).unwrap();
         let future = conn.last_insert_rowid();
-        assert_eq!(resolve_routine(&conn, Some(future)).profile_id, Some(default));
+        assert_eq!(
+            resolve_routine(&conn, Some(future)).profile_id,
+            Some(default)
+        );
     }
 
     #[test]
@@ -703,7 +917,10 @@ mod tests {
         let conn = open_memory();
         conn.execute("DELETE FROM ai_profile", []).unwrap();
         let r = resolve_routine(&conn, None);
-        assert_eq!((r.profile_id, r.harness.id(), r.model.as_str(), r.explicit), (None, "claude", "", false));
+        assert_eq!(
+            (r.profile_id, r.harness.id(), r.model.as_str(), r.explicit),
+            (None, "claude", "", false)
+        );
     }
 
     #[test]
@@ -723,13 +940,34 @@ mod tests {
     fn builtin_models_apply_unless_the_feature_profile_sets_one() {
         let mut conn = open_memory();
         // The default profile's model never leaks into a feature with a cheap built-in model.
-        conn.execute("UPDATE ai_profile SET model = 'opus' WHERE is_default = 1", []).unwrap();
-        assert_eq!(resolve_feature(&conn, Feature::Summaries).model_or_builtin("haiku"), "haiku");
+        conn.execute(
+            "UPDATE ai_profile SET model = 'opus' WHERE is_default = 1",
+            [],
+        )
+        .unwrap();
+        assert_eq!(
+            resolve_feature(&conn, Feature::Summaries).model_or_builtin("haiku"),
+            "haiku"
+        );
         // A feature mapped to a profile with a model uses it; without a model, the built-in.
         let with = named(&mut conn, "With", "sonnet");
         let without = named(&mut conn, "Without", "");
-        set_feature_profiles(&mut conn, &FeatureProfiles { summaries: Some(with), theme: Some(without), ..Default::default() }).unwrap();
-        assert_eq!(resolve_feature(&conn, Feature::Summaries).model_or_builtin("haiku"), "sonnet");
-        assert_eq!(resolve_feature(&conn, Feature::Theme).model_or_builtin("sonnet"), "sonnet");
+        set_feature_profiles(
+            &mut conn,
+            &FeatureProfiles {
+                summaries: Some(with),
+                theme: Some(without),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            resolve_feature(&conn, Feature::Summaries).model_or_builtin("haiku"),
+            "sonnet"
+        );
+        assert_eq!(
+            resolve_feature(&conn, Feature::Theme).model_or_builtin("sonnet"),
+            "sonnet"
+        );
     }
 }

@@ -68,7 +68,10 @@ impl ErrorCode {
         match self {
             ErrorCode::BadRequest => 400,
             ErrorCode::NotFound => 404,
-            ErrorCode::UnknownRepo | ErrorCode::NoWorktree | ErrorCode::HarnessUnavailable | ErrorCode::CapabilityMissing => 422,
+            ErrorCode::UnknownRepo
+            | ErrorCode::NoWorktree
+            | ErrorCode::HarnessUnavailable
+            | ErrorCode::CapabilityMissing => 422,
             ErrorCode::QueueFull => 429,
             ErrorCode::Conflict => 409,
             ErrorCode::Timeout => 504,
@@ -87,7 +90,10 @@ pub struct ApiError {
 
 impl ApiError {
     pub fn new(code: ErrorCode, message: impl Into<String>) -> Self {
-        Self { code, message: message.into() }
+        Self {
+            code,
+            message: message.into(),
+        }
     }
 
     pub fn bad_request(message: impl Into<String>) -> Self {
@@ -142,9 +148,19 @@ pub fn parse_listen(s: &str) -> AppResult<Listen> {
     if s.starts_with('/') {
         return Ok(Listen::Unix(PathBuf::from(s)));
     }
-    let refuse = || AppError::Other(format!("`{s}`: cr worker listens on a unix socket or a loopback port only (use an SSH tunnel to reach it)"));
-    let addr_text = if let Some(port) = s.strip_prefix(':') { format!("127.0.0.1:{port}") } else { s.replacen("localhost", "127.0.0.1", 1) };
-    let addr: SocketAddr = addr_text.parse().map_err(|_| AppError::Other(format!("`{s}` is not a socket path or a loopback host:port")))?;
+    let refuse = || {
+        AppError::Other(format!("`{s}`: cr worker listens on a unix socket or a loopback port only (use an SSH tunnel to reach it)"))
+    };
+    let addr_text = if let Some(port) = s.strip_prefix(':') {
+        format!("127.0.0.1:{port}")
+    } else {
+        s.replacen("localhost", "127.0.0.1", 1)
+    };
+    let addr: SocketAddr = addr_text.parse().map_err(|_| {
+        AppError::Other(format!(
+            "`{s}` is not a socket path or a loopback host:port"
+        ))
+    })?;
     match addr.ip() {
         IpAddr::V4(ip) if ip.is_loopback() => Ok(Listen::Tcp(addr)),
         IpAddr::V6(ip) if ip.is_loopback() => Ok(Listen::Tcp(addr)),
@@ -168,7 +184,11 @@ pub fn resolve_worker_db(cli_override: Option<&str>) -> PathBuf {
     if let Some(p) = std::env::var_os(WORKER_DB_ENV) {
         return PathBuf::from(p);
     }
-    crate::db_path::app_data_dir().join(if cfg!(debug_assertions) { "codereview-worker-dev.db" } else { "codereview-worker.db" })
+    crate::db_path::app_data_dir().join(if cfg!(debug_assertions) {
+        "codereview-worker-dev.db"
+    } else {
+        "codereview-worker.db"
+    })
 }
 
 #[cfg(test)]
@@ -177,13 +197,34 @@ mod tests {
 
     #[test]
     fn listen_accepts_sockets_and_loopback_only() {
-        assert_eq!(parse_listen("/run/user/1/cr.sock").unwrap(), Listen::Unix("/run/user/1/cr.sock".into()));
-        assert_eq!(parse_listen("unix:rel.sock").unwrap(), Listen::Unix("rel.sock".into()));
-        assert_eq!(parse_listen("127.0.0.1:7777").unwrap(), Listen::Tcp("127.0.0.1:7777".parse().unwrap()));
-        assert_eq!(parse_listen("localhost:7777").unwrap(), Listen::Tcp("127.0.0.1:7777".parse().unwrap()));
-        assert_eq!(parse_listen(":7777").unwrap(), Listen::Tcp("127.0.0.1:7777".parse().unwrap()));
-        assert_eq!(parse_listen("[::1]:7777").unwrap(), Listen::Tcp("[::1]:7777".parse().unwrap()));
-        assert!(parse_listen("0.0.0.0:7777").unwrap_err().to_string().contains("loopback"));
+        assert_eq!(
+            parse_listen("/run/user/1/cr.sock").unwrap(),
+            Listen::Unix("/run/user/1/cr.sock".into())
+        );
+        assert_eq!(
+            parse_listen("unix:rel.sock").unwrap(),
+            Listen::Unix("rel.sock".into())
+        );
+        assert_eq!(
+            parse_listen("127.0.0.1:7777").unwrap(),
+            Listen::Tcp("127.0.0.1:7777".parse().unwrap())
+        );
+        assert_eq!(
+            parse_listen("localhost:7777").unwrap(),
+            Listen::Tcp("127.0.0.1:7777".parse().unwrap())
+        );
+        assert_eq!(
+            parse_listen(":7777").unwrap(),
+            Listen::Tcp("127.0.0.1:7777".parse().unwrap())
+        );
+        assert_eq!(
+            parse_listen("[::1]:7777").unwrap(),
+            Listen::Tcp("[::1]:7777".parse().unwrap())
+        );
+        assert!(parse_listen("0.0.0.0:7777")
+            .unwrap_err()
+            .to_string()
+            .contains("loopback"));
         assert!(parse_listen("192.168.1.2:80").is_err());
         assert!(parse_listen("nonsense").is_err());
     }

@@ -71,7 +71,11 @@ pub fn run_request(i: LaunchInput<'_>) -> RunRequest {
 /// for harness-native flags.
 pub fn dropped_settings(routine: &Routine, harness_id: &str) -> Vec<String> {
     let opts = routine.run_options(harness_id);
-    if opts.extra_args.is_empty() { Vec::new() } else { vec![format!("extra_args {:?}", opts.extra_args)] }
+    if opts.extra_args.is_empty() {
+        Vec::new()
+    } else {
+        vec![format!("extra_args {:?}", opts.extra_args)]
+    }
 }
 
 #[cfg(test)]
@@ -109,7 +113,12 @@ mod tests {
             model: "opus".into(),
             prompt: "do it".into(),
             system_prompt: "sys".into(),
-            workspace: WorkspaceSpec { repo: "acme/widgets".into(), pr: Some(4), branch: Some("feat".into()), kind: WorkspaceKind::PrWorktree },
+            workspace: WorkspaceSpec {
+                repo: "acme/widgets".into(),
+                pr: Some(4),
+                branch: Some("feat".into()),
+                kind: WorkspaceKind::PrWorktree,
+            },
             snapshot: json!({"cards": []}),
             idempotency_key: "key-1".into(),
         }
@@ -117,12 +126,26 @@ mod tests {
 
     #[test]
     fn a_native_claude_mode_becomes_the_neutral_level_and_the_allowlist_travels() {
-        let r = routine(json!({"claude": {"permission_mode": "acceptEdits", "allowed_tools": ["Bash(git:*)", "Read"], "system_prompt_mode": "replace"}}), "read_only");
+        let r = routine(
+            json!({"claude": {"permission_mode": "acceptEdits", "allowed_tools": ["Bash(git:*)", "Read"], "system_prompt_mode": "replace"}}),
+            "read_only",
+        );
         let req = run_request(input(&r, "claude"));
-        assert_eq!((req.access, req.tools), (AccessWire::Edit, ToolsWire::Allowlist));
+        assert_eq!(
+            (req.access, req.tools),
+            (AccessWire::Edit, ToolsWire::Allowlist)
+        );
         assert_eq!(req.allowed_tools, ["Bash(git:*)", "Read"]);
         assert!(req.system_prompt_replace);
-        assert_eq!((req.timeout_secs, req.idempotency_key.as_str(), req.harness.as_str(), req.model.as_str()), (2700, "key-1", "claude", "opus"));
+        assert_eq!(
+            (
+                req.timeout_secs,
+                req.idempotency_key.as_str(),
+                req.harness.as_str(),
+                req.model.as_str()
+            ),
+            (2700, "key-1", "claude", "opus")
+        );
         assert_eq!(req.workspace.pr, Some(4));
         assert_eq!(req.context, json!({"cards": []}));
         let wire = serde_json::to_value(&req).unwrap();
@@ -132,21 +155,34 @@ mod tests {
 
     #[test]
     fn without_a_native_mode_or_allowlist_the_neutral_access_drives_the_tools() {
-        for (access, tools, wire) in [("read_only", ToolsWire::ReadOnly, AccessWire::ReadOnly), ("edit", ToolsWire::Edit, AccessWire::Edit), ("full", ToolsWire::Full, AccessWire::Full)] {
+        for (access, tools, wire) in [
+            ("read_only", ToolsWire::ReadOnly, AccessWire::ReadOnly),
+            ("edit", ToolsWire::Edit, AccessWire::Edit),
+            ("full", ToolsWire::Full, AccessWire::Full),
+        ] {
             let r = routine(json!({}), access);
             let req = run_request(input(&r, "codex"));
             assert_eq!((req.access, req.tools), (wire, tools), "{access}");
             assert!(req.allowed_tools.is_empty() && !req.system_prompt_replace);
         }
         // a harness other than Claude never reads Claude's overrides
-        let r = routine(json!({"claude": {"permission_mode": "bypassPermissions", "allowed_tools": ["Read"]}}), "read_only");
+        let r = routine(
+            json!({"claude": {"permission_mode": "bypassPermissions", "allowed_tools": ["Read"]}}),
+            "read_only",
+        );
         let req = run_request(input(&r, "opencode"));
-        assert_eq!((req.access, req.tools), (AccessWire::ReadOnly, ToolsWire::ReadOnly));
+        assert_eq!(
+            (req.access, req.tools),
+            (AccessWire::ReadOnly, ToolsWire::ReadOnly)
+        );
     }
 
     #[test]
     fn extra_args_are_reported_as_dropped() {
-        let r = routine(json!({"claude": {"extra_args": ["--effort", "high"]}}), "edit");
+        let r = routine(
+            json!({"claude": {"extra_args": ["--effort", "high"]}}),
+            "edit",
+        );
         assert_eq!(dropped_settings(&r, "claude").len(), 1);
         assert!(dropped_settings(&r, "codex").is_empty());
     }

@@ -31,12 +31,17 @@ impl BlobSource for GitBlobs {
         }
         .as_deref()
         .ok_or_else(|| AppError::Other("this side has no source".into()))?;
-        let local = self.local.as_deref().map(|repo| git::show_blob_bytes(repo, rev, path));
+        let local = self
+            .local
+            .as_deref()
+            .map(|repo| git::show_blob_bytes(repo, rev, path));
         match (local, &self.owner_name) {
             (Some(Ok(bytes)), _) => Ok(bytes),
             (_, Some((owner, name))) => gh::file_bytes_at_ref(owner, name, path, rev),
             (Some(Err(e)), None) => Err(e),
-            (None, None) => Err(AppError::Other("no local clone and no GitHub remote".into())),
+            (None, None) => Err(AppError::Other(
+                "no local clone and no GitHub remote".into(),
+            )),
         }
     }
 }
@@ -47,7 +52,14 @@ mod tests {
 
     fn git(dir: &std::path::Path, args: &[&str]) {
         let ok = std::process::Command::new("git")
-            .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"])
+            .args([
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "-c",
+                "commit.gpgsign=false",
+            ])
             .args(args)
             .current_dir(dir)
             .status()
@@ -68,10 +80,18 @@ mod tests {
         git(&dir, &["add", "."]);
         git(&dir, &["commit", "-q", "-m", "x"]);
 
-        let blobs = GitBlobs { local: Some(dir.clone()), owner_name: None, left: Some("HEAD".into()), right: None };
+        let blobs = GitBlobs {
+            local: Some(dir.clone()),
+            owner_name: None,
+            left: Some("HEAD".into()),
+            right: None,
+        };
         assert_eq!(blobs.read(Side::Left, "a.png").unwrap(), bytes);
         assert!(blobs.read(Side::Left, "missing.png").is_err());
-        assert!(blobs.read(Side::Right, "a.png").is_err(), "a side without a source");
+        assert!(
+            blobs.read(Side::Right, "a.png").is_err(),
+            "a side without a source"
+        );
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

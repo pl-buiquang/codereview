@@ -64,7 +64,9 @@ pub(crate) const COVERAGE_TOOLS: &[&str] = &[
 fn routine_key(layer: &str) -> AppResult<String> {
     match layer {
         "explain" | "normal" | "advanced" => Ok(format!("ai_review_{layer}")),
-        other => Err(AppError::Other(format!("unknown AI review layer `{other}`"))),
+        other => Err(AppError::Other(format!(
+            "unknown AI review layer `{other}`"
+        ))),
     }
 }
 
@@ -78,7 +80,11 @@ pub fn run_ai_review(
     db: State<Db>,
 ) -> AppResult<()> {
     let routine = builtin(&db, &routine_key(&layer)?)?;
-    let ctx = ContextRef { kind: "review".into(), id: review_id.to_string(), base_paths: vec![] };
+    let ctx = ContextRef {
+        kind: "review".into(),
+        id: review_id.to_string(),
+        base_paths: vec![],
+    };
     launch(&app, &routine, &ctx, "", model.as_deref().unwrap_or(""))?;
     Ok(())
 }

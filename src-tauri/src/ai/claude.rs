@@ -10,12 +10,12 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use super::{
-    Access, AgentSession, Caps, Event, Harness, Interactive, OneShot, SessionMode, StreamRun, SystemPrompt,
-    SystemPromptMode, ToolPolicy, TurnResult,
+    Access, AgentSession, Caps, Event, Harness, Interactive, OneShot, SessionMode, StreamRun,
+    SystemPrompt, SystemPromptMode, ToolPolicy, TurnResult,
 };
 use crate::ai_usage;
-use crate::run_usage::{self, ModelTokens, RunTag, RunUsage};
 use crate::error::{AppError, AppResult};
+use crate::run_usage::{self, ModelTokens, RunTag, RunUsage};
 
 pub struct ClaudeCode;
 
@@ -39,7 +39,12 @@ impl Harness for ClaudeCode {
             interactive_tui: true,
             reports_cost: true,
             replaces_system_prompt: true,
-            access_levels: vec![Access::Default, Access::ReadOnly, Access::Edit, Access::Full],
+            access_levels: vec![
+                Access::Default,
+                Access::ReadOnly,
+                Access::Edit,
+                Access::Full,
+            ],
             pins_session_id: true,
         }
     }
@@ -49,7 +54,10 @@ impl Harness for ClaudeCode {
     }
 
     fn version(&self) -> Option<String> {
-        let out = Command::new(crate::tools::claude_bin()).arg("--version").output().ok()?;
+        let out = Command::new(crate::tools::claude_bin())
+            .arg("--version")
+            .output()
+            .ok()?;
         let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
         (out.status.success() && !text.is_empty()).then_some(text)
     }
@@ -62,40 +70,62 @@ impl Harness for ClaudeCode {
         let prompt_path = match run.req.system_prompt {
             Some(SystemPrompt::File(path)) => Some(path),
             Some(SystemPrompt::Text(_)) => {
-                return Err(AppError::Other("a streaming run needs its system prompt as a file".into()))
+                return Err(AppError::Other(
+                    "a streaming run needs its system prompt as a file".into(),
+                ))
             }
             None => None,
         };
         let mut cmd = command(&run.req, true, prompt_path);
         // Files, not pipes: the process must outlive us when the app quits with runs left alive.
-        cmd.stdin(Stdio::piped()).stdout(Stdio::from(run.stdout)).stderr(Stdio::from(run.stderr));
+        cmd.stdin(Stdio::piped())
+            .stdout(Stdio::from(run.stdout))
+            .stderr(Stdio::from(run.stderr));
         #[cfg(unix)]
         {
             use std::os::unix::process::CommandExt;
             cmd.process_group(0);
         }
-        cmd.spawn().map_err(|e| AppError::Other(format!("failed to spawn claude: {e}")))
+        cmd.spawn()
+            .map_err(|e| AppError::Other(format!("failed to spawn claude: {e}")))
     }
 
     fn parse_line(&self, line: &str) -> (String, Option<Value>) {
         match serde_json::from_str::<Value>(line) {
-            Ok(v) => (v.get("type").and_then(Value::as_str).unwrap_or("unknown").to_string(), Some(v)),
+            Ok(v) => (
+                v.get("type")
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown")
+                    .to_string(),
+                Some(v),
+            ),
             Err(_) => ("raw".to_string(), None),
         }
     }
 
     fn normalize(&self, line: &str) -> Vec<Event> {
         let Ok(v) = serde_json::from_str::<Value>(line) else {
-            return vec![Event::Other { kind: "raw".into(), raw: Value::String(line.trim_end().to_string()) }];
+            return vec![Event::Other {
+                kind: "raw".into(),
+                raw: Value::String(line.trim_end().to_string()),
+            }];
         };
         let kind = v.get("type").and_then(Value::as_str).unwrap_or("unknown");
         let mut events = Vec::new();
         match kind {
             "assistant" => {
-                for block in v.pointer("/message/content").and_then(Value::as_array).into_iter().flatten() {
+                for block in v
+                    .pointer("/message/content")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                {
                     match block.get("type").and_then(Value::as_str) {
                         Some("text") => {
-                            let text = block.get("text").and_then(Value::as_str).unwrap_or_default();
+                            let text = block
+                                .get("text")
+                                .and_then(Value::as_str)
+                                .unwrap_or_default();
                             if !text.trim().is_empty() {
                                 events.push(Event::Text(text.to_string()));
                             }
@@ -103,25 +133,38 @@ impl Harness for ClaudeCode {
                         Some("tool_use") => events.push(Event::ToolCall {
                             id: str_field(block, "id"),
                             name: str_field(block, "name"),
-                            input: block.get("input").cloned().unwrap_or_else(|| Value::Object(Default::default())),
+                            input: block
+                                .get("input")
+                                .cloned()
+                                .unwrap_or_else(|| Value::Object(Default::default())),
                         }),
                         _ => {}
                     }
                 }
             }
             "user" => {
-                for block in v.pointer("/message/content").and_then(Value::as_array).into_iter().flatten() {
+                for block in v
+                    .pointer("/message/content")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                {
                     if block.get("type").and_then(Value::as_str) == Some("tool_result") {
                         events.push(Event::ToolResult {
                             id: str_field(block, "tool_use_id"),
-                            ok: !block.get("is_error").and_then(Value::as_bool).unwrap_or(false),
+                            ok: !block
+                                .get("is_error")
+                                .and_then(Value::as_bool)
+                                .unwrap_or(false),
                             text: tool_result_text(block.get("content")),
                         });
                     }
                 }
             }
             "result" => {
-                let usage = serde_json::from_value::<ClaudeEnvelope>(v.clone()).map(|e| e.run_usage()).unwrap_or_default();
+                let usage = serde_json::from_value::<ClaudeEnvelope>(v.clone())
+                    .map(|e| e.run_usage())
+                    .unwrap_or_default();
                 events.push(Event::Final {
                     ok: !v.get("is_error").and_then(Value::as_bool).unwrap_or(false),
                     text: match v.get("result") {
@@ -136,19 +179,27 @@ impl Harness for ClaudeCode {
         }
         // Lines with nothing to show (system, thinking-only messages, unknown types) stay as `other`.
         if events.is_empty() {
-            events.push(Event::Other { kind: kind.to_string(), raw: v });
+            events.push(Event::Other {
+                kind: kind.to_string(),
+                raw: v,
+            });
         }
         events
     }
 
     fn models(&self) -> AppResult<Vec<String>> {
         // The CLI has no model listing: aliases it understands.
-        Ok(["sonnet", "opus", "fable", "haiku"].map(String::from).to_vec())
+        Ok(["sonnet", "opus", "fable", "haiku"]
+            .map(String::from)
+            .to_vec())
     }
 
     #[cfg(unix)]
     fn is_own_process(&self, pid: i32, session_id: Option<&str>) -> bool {
-        let Ok(out) = Command::new("ps").args(["-o", "command=", "-p", &pid.to_string()]).output() else {
+        let Ok(out) = Command::new("ps")
+            .args(["-o", "command=", "-p", &pid.to_string()])
+            .output()
+        else {
             return false;
         };
         let cmd = String::from_utf8_lossy(&out.stdout);
@@ -174,14 +225,21 @@ impl Harness for ClaudeCode {
             SessionMode::Fork(_) => return None,
         }
         if let Some(file) = opts.system_prompt_file {
-            argv.extend([system_prompt_flag(opts.system_prompt_mode).to_string(), file.to_string_lossy().into_owned()]);
+            argv.extend([
+                system_prompt_flag(opts.system_prompt_mode).to_string(),
+                file.to_string_lossy().into_owned(),
+            ]);
         }
         Some(argv)
     }
 }
 
 fn str_field(block: &Value, key: &str) -> String {
-    block.get(key).and_then(Value::as_str).unwrap_or_default().to_string()
+    block
+        .get(key)
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string()
 }
 
 /// A `tool_result` block's content: a string, or the `text` of each part.
@@ -190,7 +248,11 @@ fn tool_result_text(content: Option<&Value>) -> String {
         Some(Value::String(s)) => s.clone(),
         Some(Value::Array(parts)) => parts
             .iter()
-            .map(|p| p.get("text").map(|t| t.as_str().map_or_else(|| t.to_string(), str::to_string)).unwrap_or_default())
+            .map(|p| {
+                p.get("text")
+                    .map(|t| t.as_str().map_or_else(|| t.to_string(), str::to_string))
+                    .unwrap_or_default()
+            })
             .collect::<Vec<_>>()
             .join("\n"),
         Some(Value::Null) | None => String::new(),
@@ -225,7 +287,15 @@ pub(crate) fn command(req: &OneShot<'_>, stream: bool, prompt_path: Option<&Path
     // app's directory.
     cmd.current_dir(req.cwd);
     if let SessionMode::Fork(id) = req.session {
-        cmd.args(["-p", "--output-format", "json", "--resume", id, "--fork-session", "--no-session-persistence"]);
+        cmd.args([
+            "-p",
+            "--output-format",
+            "json",
+            "--resume",
+            id,
+            "--fork-session",
+            "--no-session-persistence",
+        ]);
         if let Some(n) = req.max_turns {
             cmd.arg("--max-turns").arg(n.to_string());
         }
@@ -234,7 +304,9 @@ pub(crate) fn command(req: &OneShot<'_>, stream: bool, prompt_path: Option<&Path
         }
         return cmd;
     }
-    cmd.arg("-p").arg("--output-format").arg(if stream { "stream-json" } else { "json" });
+    cmd.arg("-p")
+        .arg("--output-format")
+        .arg(if stream { "stream-json" } else { "json" });
     if stream {
         cmd.arg("--verbose");
     }
@@ -259,7 +331,8 @@ pub(crate) fn command(req: &OneShot<'_>, stream: bool, prompt_path: Option<&Path
             cmd.arg("--allowedTools").args(["Read", "Glob", "Grep"]);
         }
         ToolPolicy::Edit => {
-            cmd.arg("--allowedTools").args(["Read", "Glob", "Grep", "Edit", "Write"]);
+            cmd.arg("--allowedTools")
+                .args(["Read", "Glob", "Grep", "Edit", "Write"]);
         }
         ToolPolicy::None | ToolPolicy::Full | ToolPolicy::Allowlist(_) => {}
     }
@@ -295,7 +368,8 @@ pub(crate) fn command(req: &OneShot<'_>, stream: bool, prompt_path: Option<&Path
         }
     }
     if let Some(path) = prompt_path {
-        cmd.arg(system_prompt_flag(req.system_prompt_mode)).arg(path);
+        cmd.arg(system_prompt_flag(req.system_prompt_mode))
+            .arg(path);
     }
     cmd
 }
@@ -307,7 +381,8 @@ fn run_one_shot(req: &OneShot<'_>) -> AppResult<TurnResult> {
         Some(SystemPrompt::File(path)) => Some(path.to_path_buf()),
         Some(SystemPrompt::Text(text)) if !matches!(req.session, SessionMode::Fork(_)) => {
             let path = std::env::temp_dir().join(format!("codereview_{}.txt", req.file_tag));
-            std::fs::write(&path, text).map_err(|e| AppError::Chat(format!("failed to write system prompt: {e}")))?;
+            std::fs::write(&path, text)
+                .map_err(|e| AppError::Chat(format!("failed to write system prompt: {e}")))?;
             temp_prompt = Some(path.clone());
             Some(path)
         }
@@ -352,25 +427,49 @@ fn run_command(cmd: Command, text: &str, tag: &RunTag) -> AppResult<TurnResult> 
     let started = std::time::Instant::now();
     let (result, usage) = execute(cmd, text);
     let error = result.as_ref().err().map(|e| e.to_string());
-    ai_usage::record(tag, &started_at, started.elapsed().as_millis() as i64, &usage, error.as_deref());
+    ai_usage::record(
+        tag,
+        &started_at,
+        started.elapsed().as_millis() as i64,
+        &usage,
+        error.as_deref(),
+    );
     result
 }
 
 fn execute(mut cmd: Command, text: &str) -> (AppResult<TurnResult>, RunUsage) {
-    let mut child = match cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn() {
+    let mut child = match cmd
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+    {
         Ok(child) => child,
-        Err(e) => return (Err(AppError::Chat(format!("failed to spawn claude: {e}"))), RunUsage::default()),
+        Err(e) => {
+            return (
+                Err(AppError::Chat(format!("failed to spawn claude: {e}"))),
+                RunUsage::default(),
+            )
+        }
     };
 
     if let Some(mut stdin) = child.stdin.take() {
         if let Err(e) = stdin.write_all(text.as_bytes()) {
-            return (Err(AppError::Chat(format!("failed to write prompt: {e}"))), RunUsage::default());
+            return (
+                Err(AppError::Chat(format!("failed to write prompt: {e}"))),
+                RunUsage::default(),
+            );
         }
     }
 
     let output = match child.wait_with_output() {
         Ok(output) => output,
-        Err(e) => return (Err(AppError::Chat(format!("claude process error: {e}"))), RunUsage::default()),
+        Err(e) => {
+            return (
+                Err(AppError::Chat(format!("claude process error: {e}"))),
+                RunUsage::default(),
+            )
+        }
     };
     interpret(
         &output.stdout,
@@ -381,12 +480,20 @@ fn execute(mut cmd: Command, text: &str) -> (AppResult<TurnResult>, RunUsage) {
 }
 
 /// Turn a finished process' output into the run result plus whatever usage it reported.
-fn interpret(stdout: &[u8], stderr: &str, success: bool, exit_code: i32) -> (AppResult<TurnResult>, RunUsage) {
+fn interpret(
+    stdout: &[u8],
+    stderr: &str,
+    success: bool,
+    exit_code: i32,
+) -> (AppResult<TurnResult>, RunUsage) {
     // Even on non-zero exit, claude may have written a JSON envelope with a
     // human-readable `result` — parse it first for a clean error message.
     let raw = String::from_utf8_lossy(stdout);
     let parsed = serde_json::from_str::<ClaudeEnvelope>(&raw);
-    let usage = parsed.as_ref().map(ClaudeEnvelope::run_usage).unwrap_or_default();
+    let usage = parsed
+        .as_ref()
+        .map(ClaudeEnvelope::run_usage)
+        .unwrap_or_default();
 
     if let Ok(envelope) = &parsed {
         if envelope.is_error {
@@ -404,13 +511,24 @@ fn interpret(stdout: &[u8], stderr: &str, success: bool, exit_code: i32) -> (App
 
     if !success || stdout.is_empty() {
         let stderr = stderr.trim();
-        let message = if stderr.is_empty() { format!("claude exited {exit_code}") } else { stderr.to_string() };
+        let message = if stderr.is_empty() {
+            format!("claude exited {exit_code}")
+        } else {
+            stderr.to_string()
+        };
         return (Err(AppError::Chat(message)), usage);
     }
 
     let envelope = match parsed {
         Ok(envelope) => envelope,
-        Err(e) => return (Err(AppError::Chat(format!("failed to parse claude response: {e}"))), usage),
+        Err(e) => {
+            return (
+                Err(AppError::Chat(format!(
+                    "failed to parse claude response: {e}"
+                ))),
+                usage,
+            )
+        }
     };
 
     let text_out = envelope
@@ -514,10 +632,29 @@ mod tests {
     fn success_reports_text_and_per_model_usage() {
         let (result, usage) = interpret(OK.as_bytes(), "", true, 0);
         let turn = result.unwrap();
-        assert_eq!((turn.text.as_str(), turn.input_tokens, turn.output_tokens, turn.cost_usd), ("hi", 3, 4, 1.5));
-        assert_eq!((usage.num_turns, usage.cache_read_tokens, usage.cache_creation_tokens), (2, 5, 6));
+        assert_eq!(
+            (
+                turn.text.as_str(),
+                turn.input_tokens,
+                turn.output_tokens,
+                turn.cost_usd
+            ),
+            ("hi", 3, 4, 1.5)
+        );
+        assert_eq!(
+            (
+                usage.num_turns,
+                usage.cache_read_tokens,
+                usage.cache_creation_tokens
+            ),
+            (2, 5, 6)
+        );
         assert_eq!(usage.session_id.as_deref(), Some("s1"));
-        let models: Vec<_> = usage.models.iter().map(|m| (m.model.as_str(), m.cost_usd)).collect();
+        let models: Vec<_> = usage
+            .models
+            .iter()
+            .map(|m| (m.model.as_str(), m.cost_usd))
+            .collect();
         assert_eq!(models, vec![("haiku", 0.1), ("opus", 1.4)]);
     }
 
@@ -525,14 +662,20 @@ mod tests {
     fn error_envelope_still_reports_usage() {
         let raw = r#"{"is_error":true,"result":"rate limited","total_cost_usd":0.25,"usage":{"input_tokens":9}}"#;
         let (result, usage) = interpret(raw.as_bytes(), "", false, 1);
-        assert_eq!(result.unwrap_err().to_string(), AppError::Chat("rate limited".into()).to_string());
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            AppError::Chat("rate limited".into()).to_string()
+        );
         assert_eq!((usage.cost_usd, usage.input_tokens), (0.25, 9));
     }
 
     #[test]
     fn crash_and_garbage_have_no_usage() {
         let (result, usage) = interpret(b"", "boom\n", false, 2);
-        assert_eq!(result.unwrap_err().to_string(), AppError::Chat("boom".into()).to_string());
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            AppError::Chat("boom".into()).to_string()
+        );
         assert_eq!(usage.cost_usd, 0.0);
 
         let (result, usage) = interpret(b"not json", "", true, 0);
@@ -543,10 +686,17 @@ mod tests {
     #[test]
     fn interactive_argv_per_session_mode() {
         let argv = |session, file: Option<&Path>, mode| {
-            ClaudeCode.interactive_argv(&Interactive { session, system_prompt_file: file, system_prompt_mode: mode })
+            ClaudeCode.interactive_argv(&Interactive {
+                session,
+                system_prompt_file: file,
+                system_prompt_mode: mode,
+            })
         };
         let append = SystemPromptMode::Append;
-        assert_eq!(argv(SessionMode::Ephemeral, None, append), Some(vec!["claude".to_string()]));
+        assert_eq!(
+            argv(SessionMode::Ephemeral, None, append),
+            Some(vec!["claude".to_string()])
+        );
         assert_eq!(
             argv(SessionMode::Resume("s1"), None, append),
             Some(vec!["claude".into(), "--resume".into(), "s1".into()])
@@ -562,8 +712,18 @@ mod tests {
             ])
         );
         assert_eq!(
-            argv(SessionMode::Resume("s1"), Some(Path::new("/c")), SystemPromptMode::Replace),
-            Some(vec!["claude".into(), "--resume".into(), "s1".into(), "--system-prompt-file".into(), "/c".into()])
+            argv(
+                SessionMode::Resume("s1"),
+                Some(Path::new("/c")),
+                SystemPromptMode::Replace
+            ),
+            Some(vec![
+                "claude".into(),
+                "--resume".into(),
+                "s1".into(),
+                "--system-prompt-file".into(),
+                "/c".into()
+            ])
         );
         assert_eq!(argv(SessionMode::Fork("s1"), None, append), None);
     }
@@ -575,7 +735,10 @@ mod tests {
     fn norms(fixture: &str) -> Vec<Value> {
         fixture
             .lines()
-            .map(|l| serde_json::from_str(&crate::ai::norm_json(&ClaudeCode.normalize(l), 100_000)).unwrap())
+            .map(|l| {
+                serde_json::from_str(&crate::ai::norm_json(&ClaudeCode.normalize(l), 100_000))
+                    .unwrap()
+            })
             .collect()
     }
 
@@ -598,14 +761,23 @@ mod tests {
             ])
         );
         // tool_result, string content
-        assert_eq!(ev(2), json!([{ "type": "tool_result", "id": "toolu_1", "ok": true, "text": "all green" }]));
+        assert_eq!(
+            ev(2),
+            json!([{ "type": "tool_result", "id": "toolu_1", "ok": true, "text": "all green" }])
+        );
         // tool_result, block content, is_error
-        assert_eq!(ev(4), json!([{ "type": "tool_result", "id": "toolu_2", "ok": false, "text": "File does not exist.\nTry again." }]));
+        assert_eq!(
+            ev(4),
+            json!([{ "type": "tool_result", "id": "toolu_2", "ok": false, "text": "File does not exist.\nTry again." }])
+        );
         // thinking-only message: nothing to show, kept as other
         assert_eq!(ev(5)[0]["type"], "other");
         assert_eq!(ev(5)[0]["kind"], "assistant");
         // malformed line
-        assert_eq!(ev(6), json!([{ "type": "other", "kind": "raw", "raw": "not json at all" }]));
+        assert_eq!(
+            ev(6),
+            json!([{ "type": "other", "kind": "raw", "raw": "not json at all" }])
+        );
         // result ok, with usage
         assert_eq!(
             ev(7),
@@ -629,21 +801,33 @@ mod tests {
     #[test]
     fn final_event_keeps_the_full_text_in_memory_and_truncates_when_stored() {
         let big = "é".repeat(60);
-        let line = serde_json::json!({ "type": "result", "is_error": false, "result": big }).to_string();
+        let line =
+            serde_json::json!({ "type": "result", "is_error": false, "result": big }).to_string();
         let events = ClaudeCode.normalize(&line);
         assert_eq!(events[0].as_final().unwrap().text.unwrap().len(), 120);
         let stored = events[0].to_json(11);
         assert_eq!(stored["text"].as_str().unwrap().len(), 10); // cut on a char boundary
         assert_eq!(stored["truncated"], true);
         // an oversized tool input is stored as a clipped string
-        let call = Event::ToolCall { id: "i".into(), name: "Bash".into(), input: serde_json::json!({ "c": "x".repeat(50) }) };
+        let call = Event::ToolCall {
+            id: "i".into(),
+            name: "Bash".into(),
+            input: serde_json::json!({ "c": "x".repeat(50) }),
+        };
         let j = call.to_json(20);
         assert!(j["input"].is_string() && j["truncated"] == true);
     }
 
     #[test]
     fn unknown_and_untyped_lines_never_fail() {
-        for line in [r#"{"x":1}"#, r#"{"type":"stream_event"}"#, "", "{", r#"{"type":"assistant"}"#, r#"{"type":"user","message":{"content":"hi"}}"#] {
+        for line in [
+            r#"{"x":1}"#,
+            r#"{"type":"stream_event"}"#,
+            "",
+            "{",
+            r#"{"type":"assistant"}"#,
+            r#"{"type":"user","message":{"content":"hi"}}"#,
+        ] {
             let events = ClaudeCode.normalize(line);
             assert_eq!(events.len(), 1, "{line}");
             assert!(matches!(events[0], Event::Other { .. }), "{line}");
@@ -671,7 +855,12 @@ mod tests {
             usage_tag: RunTag::new("t"),
         };
         let file = || std::fs::File::create(dir.join("codereview_spawn_test.out")).unwrap();
-        let run = StreamRun { req, stdout: file(), stderr: file(), timeout: std::time::Duration::from_secs(1) };
+        let run = StreamRun {
+            req,
+            stdout: file(),
+            stderr: file(),
+            timeout: std::time::Duration::from_secs(1),
+        };
         assert!(ClaudeCode.spawn(run).is_err());
         let _ = std::fs::remove_file(dir.join("codereview_spawn_test.out"));
     }

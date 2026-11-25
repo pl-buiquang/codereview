@@ -3,9 +3,9 @@
 
 use tauri::{AppHandle, State};
 
+use crate::commands::routines::{builtin, launch};
 use crate::db::{Db, DbPath};
 use crate::error::{AppError, AppResult};
-use crate::commands::routines::{builtin, launch};
 use crate::image_diff::html;
 use crate::image_diff::report::{self, Report};
 use crate::image_diff::runner::{self, Status};
@@ -17,7 +17,11 @@ use crate::routines::{handlers, IMAGE_DIFF_REPORT_KEY};
 pub fn image_diff_status(review_id: i64, db: State<Db>, path: State<DbPath>) -> AppResult<Status> {
     let conn = db.0.lock().unwrap();
     let pin = runner::current_pin(&conn, review_id)?;
-    let mut status = runner::status_of(&store::cache_dir(&path.0, review_id), &pin, runner::is_active(review_id));
+    let mut status = runner::status_of(
+        &store::cache_dir(&path.0, review_id),
+        &pin,
+        runner::is_active(review_id),
+    );
     status.report_running = handlers::active_image_diff_report(&conn, review_id);
     Ok(status)
 }
@@ -48,9 +52,18 @@ pub fn image_diff_report(review_id: i64, path: State<DbPath>) -> AppResult<Optio
 
 /// Start the AI report run (the `image_diff_report` routine) on the review's generated image diffs.
 #[tauri::command]
-pub fn image_diff_run_report(review_id: i64, model: Option<String>, app: AppHandle, db: State<Db>) -> AppResult<()> {
+pub fn image_diff_run_report(
+    review_id: i64,
+    model: Option<String>,
+    app: AppHandle,
+    db: State<Db>,
+) -> AppResult<()> {
     let routine = builtin(&db, IMAGE_DIFF_REPORT_KEY)?;
-    let ctx = ContextRef { kind: "review".into(), id: review_id.to_string(), base_paths: vec![] };
+    let ctx = ContextRef {
+        kind: "review".into(),
+        id: review_id.to_string(),
+        base_paths: vec![],
+    };
     launch(&app, &routine, &ctx, "", model.as_deref().unwrap_or(""))?;
     Ok(())
 }
@@ -58,9 +71,14 @@ pub fn image_diff_run_report(review_id: i64, model: Option<String>, app: AppHand
 /// Write the review's image diffs, and the AI report when there is one, to `dest_path` as one
 /// self-contained HTML page.
 #[tauri::command(async)]
-pub fn image_diff_export_html(review_id: i64, dest_path: String, path: State<DbPath>) -> AppResult<()> {
+pub fn image_diff_export_html(
+    review_id: i64,
+    dest_path: String,
+    path: State<DbPath>,
+) -> AppResult<()> {
     let dir = store::cache_dir(&path.0, review_id);
-    let manifest = store::read_manifest(&dir).ok_or_else(|| AppError::Other("no image diffs to export".into()))?;
+    let manifest = store::read_manifest(&dir)
+        .ok_or_else(|| AppError::Other("no image diffs to export".into()))?;
     let report = report::read_final(&dir);
     std::fs::write(&dest_path, html::render(&dir, &manifest, report.as_ref()))?;
     Ok(())

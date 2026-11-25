@@ -40,4 +40,3 @@ pub struct AgentSession {
     /// The transcript-derived name when a summary title replaced it.
     pub original_name: Option<String>,
 }
-

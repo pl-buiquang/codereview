@@ -61,12 +61,28 @@ pub(crate) const CARD_VIEW: &str = "(
 /// resurrect a discarded card.
 fn track_node(conn: &Connection, node: &Node, ts: &str, clear_discard: bool) -> AppResult<()> {
     mirror::store::upsert_node(conn, node, ts)?;
-    track_card(conn, &node.id, if node.is_pr() { "pr" } else { "issue" }, ts, clear_discard)
+    track_card(
+        conn,
+        &node.id,
+        if node.is_pr() { "pr" } else { "issue" },
+        ts,
+        clear_discard,
+    )
 }
 
 /// The card half of [`track_node`], for an item the mirror already holds.
-fn track_card(conn: &Connection, id: &str, typ: &str, ts: &str, clear_discard: bool) -> AppResult<()> {
-    let on_conflict = if clear_discard { "DO UPDATE SET discarded_at = NULL" } else { "DO NOTHING" };
+fn track_card(
+    conn: &Connection,
+    id: &str,
+    typ: &str,
+    ts: &str,
+    clear_discard: bool,
+) -> AppResult<()> {
+    let on_conflict = if clear_discard {
+        "DO UPDATE SET discarded_at = NULL"
+    } else {
+        "DO NOTHING"
+    };
     conn.execute(
         &format!("INSERT INTO board_card (id, type, tracked_at) VALUES (?1, ?2, ?3) ON CONFLICT(id) {on_conflict}"),
         params![id, typ, ts],
@@ -90,8 +106,12 @@ fn registered_repo(conn: &Connection, owner: &str, name: &str) -> AppResult<bool
 }
 
 pub(crate) fn card_row(conn: &Connection, card_id: &str) -> AppResult<BoardCardRow> {
-    conn.query_row(&format!("SELECT * FROM {CARD_VIEW} WHERE id = ?1"), params![card_id], BoardCardRow::from_row)
-        .map_err(AppError::from)
+    conn.query_row(
+        &format!("SELECT * FROM {CARD_VIEW} WHERE id = ?1"),
+        params![card_id],
+        BoardCardRow::from_row,
+    )
+    .map_err(AppError::from)
 }
 
 /// `(owner, name, number)` for a tracked PR card, erroring on an issue card.
@@ -114,8 +134,11 @@ pub(crate) fn pr_card_coords(db: &Db, card_id: &str) -> AppResult<(String, Strin
 /// Ids tracked on the board (not discarded/archived): the entities a board
 /// sync probes.
 pub(crate) fn tracked_ids(conn: &Connection) -> AppResult<Vec<String>> {
-    let mut stmt = conn.prepare("SELECT id FROM board_card WHERE archived_at IS NULL AND discarded_at IS NULL")?;
-    let rows = stmt.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
+    let mut stmt = conn
+        .prepare("SELECT id FROM board_card WHERE archived_at IS NULL AND discarded_at IS NULL")?;
+    let rows = stmt
+        .query_map([], |r| r.get(0))?
+        .collect::<rusqlite::Result<_>>()?;
     Ok(rows)
 }
 
@@ -129,7 +152,9 @@ pub(crate) fn auto_track_authored<'a>(
     let tracked: std::collections::HashSet<String> = tracked_ids(conn)?.into_iter().collect();
     let mut n = 0;
     for node in authored.filter(|n| n.is_pr() && !n.is_closed() && !tracked.contains(&n.id)) {
-        let Some((owner, name)) = node.owner_name() else { continue };
+        let Some((owner, name)) = node.owner_name() else {
+            continue;
+        };
         if registered_repo(conn, owner, name)? {
             let inserted = conn.execute(
                 "INSERT INTO board_card (id, type, tracked_at) VALUES (?1, 'pr', ?2) ON CONFLICT(id) DO NOTHING",
@@ -183,11 +208,16 @@ pub(crate) fn reconcile_links(conn: &Connection) -> AppResult<()> {
         )
     };
     for (pr_id, head_ref, pr_repo, closing) in &prs {
-        let closing: Vec<String> = closing.as_deref().and_then(|s| serde_json::from_str(s).ok()).unwrap_or_default();
+        let closing: Vec<String> = closing
+            .as_deref()
+            .and_then(|s| serde_json::from_str(s).ok())
+            .unwrap_or_default();
         for (issue_id, issue_repo, issue_number) in &issues {
             let closes = closing.contains(issue_id);
             let by_branch = issue_repo.eq_ignore_ascii_case(pr_repo)
-                && head_ref.as_deref().is_some_and(|h| board::branch_matches_issue(h, *issue_number));
+                && head_ref
+                    .as_deref()
+                    .is_some_and(|h| board::branch_matches_issue(h, *issue_number));
             if closes || by_branch {
                 link(issue_id, pr_id)?;
             }
@@ -199,7 +229,10 @@ pub(crate) fn reconcile_links(conn: &Connection) -> AppResult<()> {
 #[tauri::command]
 pub fn board_last_refresh_at(db: State<Db>) -> AppResult<Option<String>> {
     let conn = db.0.lock().unwrap();
-    Ok(crate::commands::inbox::get_meta(&conn, "board_last_refresh_at"))
+    Ok(crate::commands::inbox::get_meta(
+        &conn,
+        "board_last_refresh_at",
+    ))
 }
 
 // ---------------------------------------------------------------------------
@@ -208,9 +241,12 @@ pub fn board_last_refresh_at(db: State<Db>) -> AppResult<Option<String>> {
 
 pub fn board_list_impl(conn: &Connection) -> AppResult<Vec<BoardCardWithExtras>> {
     let cards: Vec<BoardCardRow> = {
-        let mut stmt =
-            conn.prepare(&format!("SELECT * FROM {CARD_VIEW} WHERE archived_at IS NULL ORDER BY updated_at DESC"))?;
-        let rows = stmt.query_map([], BoardCardRow::from_row)?.collect::<rusqlite::Result<_>>()?;
+        let mut stmt = conn.prepare(&format!(
+            "SELECT * FROM {CARD_VIEW} WHERE archived_at IS NULL ORDER BY updated_at DESC"
+        ))?;
+        let rows = stmt
+            .query_map([], BoardCardRow::from_row)?
+            .collect::<rusqlite::Result<_>>()?;
         rows
     };
     let mut links_by_issue: HashMap<String, Vec<String>> = HashMap::new();
@@ -220,18 +256,26 @@ pub fn board_list_impl(conn: &Connection) -> AppResult<Vec<BoardCardWithExtras>>
         let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
         for row in rows {
             let (issue_id, pr_id) = row?;
-            links_by_issue.entry(issue_id.clone()).or_default().push(pr_id.clone());
+            links_by_issue
+                .entry(issue_id.clone())
+                .or_default()
+                .push(pr_id.clone());
             links_by_pr.entry(pr_id).or_default().push(issue_id);
         }
     }
 
-    let card_state: HashMap<&str, Option<&str>> =
-        cards.iter().map(|c| (c.id.as_str(), c.state.as_deref())).collect();
+    let card_state: HashMap<&str, Option<&str>> = cards
+        .iter()
+        .map(|c| (c.id.as_str(), c.state.as_deref()))
+        .collect();
     let issue_has_open_pr: HashMap<String, bool> = links_by_issue
         .iter()
         .map(|(issue_id, prs)| {
             let has_open = prs.iter().any(|pr_id| {
-                !matches!(card_state.get(pr_id.as_str()), Some(Some("merged")) | Some(Some("closed")))
+                !matches!(
+                    card_state.get(pr_id.as_str()),
+                    Some(Some("merged")) | Some(Some("closed"))
+                )
             });
             (issue_id.clone(), has_open)
         })
@@ -268,7 +312,9 @@ pub fn board_list_impl(conn: &Connection) -> AppResult<Vec<BoardCardWithExtras>>
         for row in rows {
             let (owner, name, number, review_id) = row?;
             if let (Some(owner), Some(name)) = (owner, name) {
-                open_reviews.entry((format!("{owner}/{name}"), number)).or_insert(review_id);
+                open_reviews
+                    .entry((format!("{owner}/{name}"), number))
+                    .or_insert(review_id);
             }
         }
     }
@@ -314,9 +360,11 @@ pub fn board_list(db: State<Db>) -> AppResult<Vec<BoardCardWithExtras>> {
 #[tauri::command]
 pub fn board_tracked_ids(db: State<Db>) -> AppResult<Vec<String>> {
     let conn = db.0.lock().unwrap();
-    let mut stmt =
-        conn.prepare("SELECT id FROM board_card WHERE discarded_at IS NULL AND archived_at IS NULL")?;
-    let rows = stmt.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
+    let mut stmt = conn
+        .prepare("SELECT id FROM board_card WHERE discarded_at IS NULL AND archived_at IS NULL")?;
+    let rows = stmt
+        .query_map([], |r| r.get(0))?
+        .collect::<rusqlite::Result<_>>()?;
     Ok(rows)
 }
 
@@ -325,14 +373,19 @@ pub fn board_tracked_ids(db: State<Db>) -> AppResult<Vec<String>> {
 /// (lane-less) result for archived/discarded cards, which `board_list_impl`
 /// excludes.
 pub fn board_show_impl(conn: &Connection, card_id: &str) -> AppResult<BoardCardWithExtras> {
-    if let Some(found) = board_list_impl(conn)?.into_iter().find(|c| c.card.id == card_id) {
+    if let Some(found) = board_list_impl(conn)?
+        .into_iter()
+        .find(|c| c.card.id == card_id)
+    {
         return Ok(found);
     }
     let card = card_row(conn, card_id)?;
     let meta = board_meta_list_impl(conn, card_id)?;
     let linked_issue_ids: Vec<String> = {
         let mut stmt = conn.prepare("SELECT issue_id FROM board_link WHERE pr_id = ?1")?;
-        let rows = stmt.query_map(params![card_id], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
+        let rows = stmt
+            .query_map(params![card_id], |r| r.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
         rows
     };
     let inherited_meta = linked_issue_ids
@@ -369,7 +422,12 @@ pub fn board_card_for_pr_impl(
 }
 
 #[tauri::command]
-pub fn board_card_for_pr(owner: String, name: String, number: i64, db: State<Db>) -> AppResult<Option<BoardCardWithExtras>> {
+pub fn board_card_for_pr(
+    owner: String,
+    name: String,
+    number: i64,
+    db: State<Db>,
+) -> AppResult<Option<BoardCardWithExtras>> {
     let conn = db.0.lock().unwrap();
     board_card_for_pr_impl(&conn, &owner, &name, number)
 }
@@ -379,7 +437,12 @@ pub fn board_card_for_pr(owner: String, name: String, number: i64, db: State<Db>
 // ---------------------------------------------------------------------------
 
 /// A card's own GitHub node id for a given `owner/name#number`, if tracked.
-pub fn find_card_id(conn: &Connection, owner: &str, name: &str, number: i64) -> AppResult<Option<String>> {
+pub fn find_card_id(
+    conn: &Connection,
+    owner: &str,
+    name: &str,
+    number: i64,
+) -> AppResult<Option<String>> {
     let repo = format!("{owner}/{name}");
     conn.query_row(
         &format!("SELECT id FROM {CARD_VIEW} WHERE repo = ?1 COLLATE NOCASE AND number = ?2"),
@@ -445,7 +508,11 @@ pub(crate) fn refetch_card(db: &Db, owner: &str, name: &str, number: i64) -> App
 }
 
 #[tauri::command]
-pub async fn board_pr_set_auto_merge(card_id: String, enable: bool, db: State<'_, Db>) -> AppResult<()> {
+pub async fn board_pr_set_auto_merge(
+    card_id: String,
+    enable: bool,
+    db: State<'_, Db>,
+) -> AppResult<()> {
     run_pr_action(&db, &card_id, crate::gh::auto_merge_args(enable))
 }
 
@@ -456,20 +523,36 @@ pub async fn board_pr_squash_merge(card_id: String, db: State<'_, Db>) -> AppRes
 
 #[tauri::command]
 pub async fn board_pr_set_draft(card_id: String, draft: bool, db: State<'_, Db>) -> AppResult<()> {
-    let args: &[&str] = if draft { &["ready", "--undo"] } else { &["ready"] };
+    let args: &[&str] = if draft {
+        &["ready", "--undo"]
+    } else {
+        &["ready"]
+    };
     run_pr_action(&db, &card_id, args)
 }
 
 #[tauri::command]
-pub async fn board_pr_update_branch(card_id: String, rebase: bool, db: State<'_, Db>) -> AppResult<()> {
-    let args: &[&str] = if rebase { &["update-branch", "--rebase"] } else { &["update-branch"] };
+pub async fn board_pr_update_branch(
+    card_id: String,
+    rebase: bool,
+    db: State<'_, Db>,
+) -> AppResult<()> {
+    let args: &[&str] = if rebase {
+        &["update-branch", "--rebase"]
+    } else {
+        &["update-branch"]
+    };
     run_pr_action(&db, &card_id, args)
 }
 
 /// Rerun every workflow run of the PR's head commit that has a failing check
 /// (only its failed jobs when `failed_only`). Returns how many runs restarted.
 #[tauri::command]
-pub async fn board_pr_rerun_ci(card_id: String, failed_only: bool, db: State<'_, Db>) -> AppResult<u32> {
+pub async fn board_pr_rerun_ci(
+    card_id: String,
+    failed_only: bool,
+    db: State<'_, Db>,
+) -> AppResult<u32> {
     let (owner, name, number) = pr_card_coords(&db, &card_id)?;
     let runs = crate::gh::failing_workflow_runs(&owner, &name, number)?;
     if runs.is_empty() {
@@ -486,7 +569,12 @@ pub async fn board_pr_rerun_ci(card_id: String, failed_only: bool, db: State<'_,
 /// A card's id for `owner/repo#number`, but only if it's currently visible on
 /// the board (not discarded/archived) — used to detect duplicates before
 /// tracking a PR from the "+ Track" dialog.
-fn tracked_card_id(conn: &Connection, owner: &str, name: &str, number: i64) -> AppResult<Option<String>> {
+fn tracked_card_id(
+    conn: &Connection,
+    owner: &str,
+    name: &str,
+    number: i64,
+) -> AppResult<Option<String>> {
     let repo = format!("{owner}/{name}");
     conn.query_row(
         &format!(
@@ -509,14 +597,19 @@ pub fn board_track_pr_impl(db: &Db, reference: &str) -> AppResult<String> {
     {
         let conn = db.0.lock().unwrap();
         if tracked_card_id(&conn, &owner, &name, number)?.is_some() {
-            return Err(AppError::Other(format!("{owner}/{name}#{number} is already tracked on the board")));
+            return Err(AppError::Other(format!(
+                "{owner}/{name}#{number} is already tracked on the board"
+            )));
         }
     }
     let node = mirror::fetch::resolve_pr(&owner, &name, number)?;
     crate::commands::inbox::cached_or_fetch_viewer(db)?;
     let conn = db.0.lock().unwrap();
     track_node(&conn, &node, &now(), true)?;
-    conn.execute("UPDATE board_card SET archived_at = NULL WHERE id = ?1", params![node.id])?;
+    conn.execute(
+        "UPDATE board_card SET archived_at = NULL WHERE id = ?1",
+        params![node.id],
+    )?;
     Ok(node.id)
 }
 
@@ -549,7 +642,10 @@ pub fn board_discard_impl(conn: &Connection, card_id: &str) -> AppResult<()> {
     if card_row(conn, card_id)?.is_mine {
         return Err(AppError::Other("your own PRs can't be discarded".into()));
     }
-    conn.execute("UPDATE board_card SET discarded_at = ?1 WHERE id = ?2", params![now(), card_id])?;
+    conn.execute(
+        "UPDATE board_card SET discarded_at = ?1 WHERE id = ?2",
+        params![now(), card_id],
+    )?;
     // Discarded means "not interested": it lands in the Inbox archive.
     crate::commands::inbox::set_inbox_state(conn, card_id, "archived", Some("discarded"))?;
     Ok(())
@@ -567,7 +663,9 @@ pub fn board_link_pr_impl(db: &Db, issue_id: &str, pr_reference: &str) -> AppRes
     let (owner, name, number) = board::parse_ref(pr_reference)?;
     let node = mirror::fetch::resolve(&owner, &name, number)?;
     if !node.is_pr() {
-        return Err(AppError::Other("that reference is an issue, not a PR".into()));
+        return Err(AppError::Other(
+            "that reference is an issue, not a PR".into(),
+        ));
     }
     crate::commands::inbox::cached_or_fetch_viewer(db)?;
     let conn = db.0.lock().unwrap();
@@ -580,7 +678,11 @@ pub fn board_link_pr_impl(db: &Db, issue_id: &str, pr_reference: &str) -> AppRes
 }
 
 #[tauri::command]
-pub async fn board_link_pr(issue_id: String, pr_reference: String, db: State<'_, Db>) -> AppResult<()> {
+pub async fn board_link_pr(
+    issue_id: String,
+    pr_reference: String,
+    db: State<'_, Db>,
+) -> AppResult<()> {
     board_link_pr_impl(&db, &issue_id, &pr_reference)
 }
 
@@ -592,7 +694,9 @@ pub fn board_unlink_impl(conn: &Connection, issue_id: &str, pr_id: &str) -> AppR
         params![issue_id, pr_id],
     )?;
     if affected == 0 {
-        return Err(AppError::Other("only manually-added links can be removed".into()));
+        return Err(AppError::Other(
+            "only manually-added links can be removed".into(),
+        ));
     }
     Ok(())
 }
@@ -626,7 +730,10 @@ pub fn board_archive_done(older_than_days: i64, db: State<Db>) -> AppResult<usiz
 }
 
 #[tauri::command]
-pub fn board_monitor_log(limit: i64, db: State<Db>) -> AppResult<Vec<crate::board_monitor::MonitorLogEntry>> {
+pub fn board_monitor_log(
+    limit: i64,
+    db: State<Db>,
+) -> AppResult<Vec<crate::board_monitor::MonitorLogEntry>> {
     let conn = db.0.lock().unwrap();
     crate::board_monitor::recent(&conn, limit)
 }
@@ -637,17 +744,39 @@ pub fn board_monitor_log(limit: i64, db: State<Db>) -> AppResult<Vec<crate::boar
 
 /// Open the PR card's review: its unpublished one, else its latest published one, else a new draft.
 #[tauri::command]
-pub async fn board_open_review(card_id: String, base_paths: Vec<String>, db: State<'_, Db>) -> AppResult<Review> {
+pub async fn board_open_review(
+    card_id: String,
+    base_paths: Vec<String>,
+    db: State<'_, Db>,
+) -> AppResult<Review> {
     let (owner, name, number) = pr_card_coords(&db, &card_id)?;
-    crate::commands::review::create_review_for_pr_impl(&db, &owner, &name, number, &base_paths, true)
+    crate::commands::review::create_review_for_pr_impl(
+        &db,
+        &owner,
+        &name,
+        number,
+        &base_paths,
+        true,
+    )
 }
 
 /// Open the PR card's review (as `board_open_review`), ensure its chat/edit
 /// worktree exists, then open VSCode on it.
 #[tauri::command]
-pub async fn board_open_vscode(card_id: String, base_paths: Vec<String>, db: State<'_, Db>) -> AppResult<()> {
+pub async fn board_open_vscode(
+    card_id: String,
+    base_paths: Vec<String>,
+    db: State<'_, Db>,
+) -> AppResult<()> {
     let (owner, name, number) = pr_card_coords(&db, &card_id)?;
-    let review = crate::commands::review::create_review_for_pr_impl(&db, &owner, &name, number, &base_paths, true)?;
+    let review = crate::commands::review::create_review_for_pr_impl(
+        &db,
+        &owner,
+        &name,
+        number,
+        &base_paths,
+        true,
+    )?;
     let worktree_path = crate::commands::chat::ensure_chat_worktree(review.id, db).await?;
     crate::commands::worktree::open_in_vscode(worktree_path, None, None)
 }
@@ -663,7 +792,14 @@ pub async fn board_open_shell(
     db: State<'_, Db>,
 ) -> AppResult<()> {
     let (owner, name, number) = pr_card_coords(&db, &card_id)?;
-    let review = crate::commands::review::create_review_for_pr_impl(&db, &owner, &name, number, &base_paths, true)?;
+    let review = crate::commands::review::create_review_for_pr_impl(
+        &db,
+        &owner,
+        &name,
+        number,
+        &base_paths,
+        true,
+    )?;
     let worktree_path = crate::commands::chat::ensure_chat_worktree(review.id, db).await?;
     crate::terminal::open_shell(
         host,
@@ -689,20 +825,38 @@ pub async fn board_open_agent(
     db: State<'_, Db>,
 ) -> AppResult<()> {
     let (owner, name, number) = pr_card_coords(&db, &card_id)?;
-    let review = crate::commands::review::create_review_for_pr_impl(&db, &owner, &name, number, &base_paths, true)?;
+    let review = crate::commands::review::create_review_for_pr_impl(
+        &db,
+        &owner,
+        &name,
+        number,
+        &base_paths,
+        true,
+    )?;
     let worktree_path = crate::commands::chat::ensure_chat_worktree(review.id, db.clone()).await?;
     let live = crate::commands::sessions::live_session_ids();
     let (harness, resume) = {
         let conn = db.0.lock().unwrap();
         let harness = crate::ai::sessions_harness(&conn, harness.as_deref())?;
-        let resume = crate::commands::sessions::resumable_card_session(&conn, &card_id, &live, harness.id())?;
+        let resume = crate::commands::sessions::resumable_card_session(
+            &conn,
+            &card_id,
+            &live,
+            harness.id(),
+        )?;
         (harness, resume)
     };
-    let argv = crate::ai::argv_of(harness, &crate::ai::Interactive {
-        session: resume.as_deref().map_or(crate::ai::SessionMode::Ephemeral, crate::ai::SessionMode::Resume),
-        system_prompt_file: None,
-        system_prompt_mode: crate::ai::SystemPromptMode::Append,
-    })?;
+    let argv = crate::ai::argv_of(
+        harness,
+        &crate::ai::Interactive {
+            session: resume.as_deref().map_or(
+                crate::ai::SessionMode::Ephemeral,
+                crate::ai::SessionMode::Resume,
+            ),
+            system_prompt_file: None,
+            system_prompt_mode: crate::ai::SystemPromptMode::Append,
+        },
+    )?;
     crate::terminal::open_session(
         host,
         tmux_target,
@@ -721,7 +875,9 @@ pub async fn board_open_agent(
 fn validate_meta_kind(kind: &str) -> AppResult<()> {
     match kind {
         "file" | "link" | "note" | "claude_session" => Ok(()),
-        other => Err(AppError::Other(format!("invalid metadata kind '{other}' (expected file, link, note or claude_session)"))),
+        other => Err(AppError::Other(format!(
+            "invalid metadata kind '{other}' (expected file, link, note or claude_session)"
+        ))),
     }
 }
 
@@ -753,8 +909,12 @@ pub fn board_meta_add_session(
          VALUES (?1, 'ai_session', ?2, ?3, ?4, ?5)",
         params![card_id, session_id, cwd, now(), harness],
     )?;
-    conn.query_row("SELECT * FROM board_meta WHERE id = ?1", params![conn.last_insert_rowid()], BoardMetaRow::from_row)
-        .map_err(Into::into)
+    conn.query_row(
+        "SELECT * FROM board_meta WHERE id = ?1",
+        params![conn.last_insert_rowid()],
+        BoardMetaRow::from_row,
+    )
+    .map_err(Into::into)
 }
 
 /// Attach a metadata item to a card. Adding the same `claude_session` value
@@ -817,7 +977,15 @@ pub fn board_meta_add(
     db: State<Db>,
 ) -> AppResult<BoardMetaRow> {
     let conn = db.0.lock().unwrap();
-    board_meta_add_impl(&conn, &card_id, &kind, &value, tag.as_deref(), label.as_deref(), cwd.as_deref())
+    board_meta_add_impl(
+        &conn,
+        &card_id,
+        &kind,
+        &value,
+        tag.as_deref(),
+        label.as_deref(),
+        cwd.as_deref(),
+    )
 }
 
 pub fn board_meta_update_impl(
@@ -828,13 +996,22 @@ pub fn board_meta_update_impl(
     label: Option<&str>,
 ) -> AppResult<()> {
     if let Some(v) = value {
-        conn.execute("UPDATE board_meta SET value = ?1 WHERE id = ?2", params![v, id])?;
+        conn.execute(
+            "UPDATE board_meta SET value = ?1 WHERE id = ?2",
+            params![v, id],
+        )?;
     }
     if let Some(t) = tag {
-        conn.execute("UPDATE board_meta SET tag = ?1 WHERE id = ?2", params![t, id])?;
+        conn.execute(
+            "UPDATE board_meta SET tag = ?1 WHERE id = ?2",
+            params![t, id],
+        )?;
     }
     if let Some(l) = label {
-        conn.execute("UPDATE board_meta SET label = ?1 WHERE id = ?2", params![l, id])?;
+        conn.execute(
+            "UPDATE board_meta SET label = ?1 WHERE id = ?2",
+            params![l, id],
+        )?;
     }
     Ok(())
 }
@@ -848,7 +1025,13 @@ pub fn board_meta_update(
     db: State<Db>,
 ) -> AppResult<()> {
     let conn = db.0.lock().unwrap();
-    board_meta_update_impl(&conn, id, value.as_deref(), tag.as_deref(), label.as_deref())
+    board_meta_update_impl(
+        &conn,
+        id,
+        value.as_deref(),
+        tag.as_deref(),
+        label.as_deref(),
+    )
 }
 
 pub fn board_meta_delete_impl(conn: &Connection, id: i64) -> AppResult<()> {
@@ -864,16 +1047,22 @@ pub fn board_meta_delete(id: i64, db: State<Db>) -> AppResult<()> {
 
 /// A card's metadata, oldest first (for `cr board meta list`).
 pub fn board_meta_list_impl(conn: &Connection, card_id: &str) -> AppResult<Vec<BoardMetaRow>> {
-    let mut stmt = conn.prepare("SELECT * FROM board_meta WHERE card_id = ?1 ORDER BY created_at")?;
-    let rows = stmt.query_map(params![card_id], BoardMetaRow::from_row)?.collect::<rusqlite::Result<_>>()?;
+    let mut stmt =
+        conn.prepare("SELECT * FROM board_meta WHERE card_id = ?1 ORDER BY created_at")?;
+    let rows = stmt
+        .query_map(params![card_id], BoardMetaRow::from_row)?
+        .collect::<rusqlite::Result<_>>()?;
     Ok(rows)
 }
 
 /// Distinct tags already used, for the tag autocomplete.
 pub fn board_meta_tags_impl(conn: &Connection) -> AppResult<Vec<String>> {
-    let mut stmt =
-        conn.prepare("SELECT DISTINCT tag FROM board_meta WHERE tag IS NOT NULL AND tag != '' ORDER BY tag")?;
-    let rows = stmt.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
+    let mut stmt = conn.prepare(
+        "SELECT DISTINCT tag FROM board_meta WHERE tag IS NOT NULL AND tag != '' ORDER BY tag",
+    )?;
+    let rows = stmt
+        .query_map([], |r| r.get(0))?
+        .collect::<rusqlite::Result<_>>()?;
     Ok(rows)
 }
 
@@ -912,15 +1101,30 @@ mod tests {
         let conn = open_memory();
         seed_card(&conn, "i1", "owner/repo", 1, "issue");
         let claude = board_meta_add_session(&conn, "i1", "claude", "c1", Some("/x")).unwrap();
-        assert_eq!((claude.kind.as_str(), claude.session_harness()), ("claude_session", Some("claude")));
+        assert_eq!(
+            (claude.kind.as_str(), claude.session_harness()),
+            ("claude_session", Some("claude"))
+        );
         let oc = board_meta_add_session(&conn, "i1", "opencode", "o1", None).unwrap();
-        assert_eq!((oc.kind.as_str(), oc.session_harness()), ("ai_session", Some("opencode")));
-        assert_eq!(board_meta_add_session(&conn, "i1", "opencode", "o1", None).unwrap().id, oc.id);
+        assert_eq!(
+            (oc.kind.as_str(), oc.session_harness()),
+            ("ai_session", Some("opencode"))
+        );
+        assert_eq!(
+            board_meta_add_session(&conn, "i1", "opencode", "o1", None)
+                .unwrap()
+                .id,
+            oc.id
+        );
         assert!(oc.is_session() && claude.is_session());
         // The public kind validation still only takes the kinds a user can add by hand.
         assert!(board_meta_add_impl(&conn, "i1", "ai_session", "x", None, None, None).is_err());
         // A pre-existing claude_session row without a harness reads as Claude's.
-        let legacy = board_meta_list_impl(&conn, "i1").unwrap().into_iter().find(|m| m.id == claude.id).unwrap();
+        let legacy = board_meta_list_impl(&conn, "i1")
+            .unwrap()
+            .into_iter()
+            .find(|m| m.id == claude.id)
+            .unwrap();
         assert_eq!(legacy.harness, None);
         assert_eq!(legacy.session_harness(), Some("claude"));
     }
@@ -928,8 +1132,11 @@ mod tests {
     #[test]
     fn unsynced_card_renders_as_a_placeholder() {
         let conn = open_memory();
-        conn.execute("INSERT INTO board_card (id, type, tracked_at) VALUES ('PR_x', 'pr', 'now')", [])
-            .unwrap();
+        conn.execute(
+            "INSERT INTO board_card (id, type, tracked_at) VALUES ('PR_x', 'pr', 'now')",
+            [],
+        )
+        .unwrap();
         let cards = board_list_impl(&conn).unwrap();
         assert_eq!(cards.len(), 1);
         assert_eq!(cards[0].card.title, "(not synced yet)");
@@ -940,22 +1147,32 @@ mod tests {
     fn is_mine_follows_the_cached_viewer() {
         let conn = open_memory();
         seed_card(&conn, "pr1", "owner/repo", 1, "pr");
-        conn.execute("UPDATE gh_pr SET author_login = 'me'", []).unwrap();
+        conn.execute("UPDATE gh_pr SET author_login = 'me'", [])
+            .unwrap();
         assert!(!card_row(&conn, "pr1").unwrap().is_mine);
         crate::commands::inbox::set_meta(&conn, "viewer_login", "me").unwrap();
         assert!(card_row(&conn, "pr1").unwrap().is_mine);
-        assert!(board_discard_impl(&conn, "pr1").is_err(), "own PRs can't be discarded");
+        assert!(
+            board_discard_impl(&conn, "pr1").is_err(),
+            "own PRs can't be discarded"
+        );
     }
 
     #[test]
     fn discarding_a_card_archives_its_inbox_entry_and_tracking_takes_it_out_of_new() {
         let conn = open_memory();
         seed_card(&conn, "pr1", "owner/repo", 1, "pr");
-        conn.execute("INSERT INTO inbox_entry (id, type, first_seen_at) VALUES ('pr1', 'pr', 't')", []).unwrap();
+        conn.execute(
+            "INSERT INTO inbox_entry (id, type, first_seen_at) VALUES ('pr1', 'pr', 't')",
+            [],
+        )
+        .unwrap();
         let state = |conn: &Connection| -> (String, Option<String>) {
-            conn.query_row("SELECT state, archive_cause FROM inbox_entry WHERE id = 'pr1'", [], |r| {
-                Ok((r.get(0)?, r.get(1)?))
-            })
+            conn.query_row(
+                "SELECT state, archive_cause FROM inbox_entry WHERE id = 'pr1'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
             .unwrap()
         };
         assert_eq!(state(&conn).0, "new");
@@ -980,10 +1197,18 @@ mod tests {
         seed_card(&conn, "issue8", "owner/repo", 8, "issue");
         seed_card(&conn, "pr_branch", "owner/repo", 20, "pr");
         seed_card(&conn, "pr_closes", "owner/repo", 21, "pr");
-        conn.execute("UPDATE gh_issue SET state = 'open'", []).unwrap();
-        conn.execute("UPDATE gh_pr SET head_ref = 'pbq/issue-7' WHERE node_id = 'pr_branch'", []).unwrap();
-        conn.execute("UPDATE gh_pr SET closing_issue_ids = '[\"issue8\"]' WHERE node_id = 'pr_closes'", [])
+        conn.execute("UPDATE gh_issue SET state = 'open'", [])
             .unwrap();
+        conn.execute(
+            "UPDATE gh_pr SET head_ref = 'pbq/issue-7' WHERE node_id = 'pr_branch'",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE gh_pr SET closing_issue_ids = '[\"issue8\"]' WHERE node_id = 'pr_closes'",
+            [],
+        )
+        .unwrap();
         conn.execute("INSERT INTO board_link (issue_id, pr_id, source) VALUES ('issue8', 'pr_branch', 'auto')", [])
             .unwrap();
 
@@ -999,7 +1224,10 @@ mod tests {
         links.sort();
         assert_eq!(
             links,
-            vec![("issue7".into(), "pr_branch".into()), ("issue8".into(), "pr_closes".into())],
+            vec![
+                ("issue7".into(), "pr_branch".into()),
+                ("issue8".into(), "pr_closes".into())
+            ],
             "stale auto link dropped, branch + closing-ref links rebuilt"
         );
     }
@@ -1015,7 +1243,9 @@ mod tests {
     #[test]
     fn board_card_for_pr_returns_none_when_untracked() {
         let conn = open_memory();
-        assert!(board_card_for_pr_impl(&conn, "owner", "repo", 1).unwrap().is_none());
+        assert!(board_card_for_pr_impl(&conn, "owner", "repo", 1)
+            .unwrap()
+            .is_none());
     }
 
     #[test]
@@ -1024,7 +1254,9 @@ mod tests {
         seed_card(&conn, "pr1", "owner/repo", 42, "pr");
         seed_meta(&conn, "pr1", "a note");
 
-        let found = board_card_for_pr_impl(&conn, "owner", "repo", 42).unwrap().unwrap();
+        let found = board_card_for_pr_impl(&conn, "owner", "repo", 42)
+            .unwrap()
+            .unwrap();
         assert_eq!(found.card.id, "pr1");
         assert_eq!(found.meta.len(), 1);
     }
@@ -1040,10 +1272,15 @@ mod tests {
             [],
         )
         .unwrap();
-        conn.execute("UPDATE board_card SET discarded_at = 'now' WHERE id = 'pr1'", [])
-            .unwrap();
+        conn.execute(
+            "UPDATE board_card SET discarded_at = 'now' WHERE id = 'pr1'",
+            [],
+        )
+        .unwrap();
 
-        let found = board_card_for_pr_impl(&conn, "owner", "repo", 2).unwrap().unwrap();
+        let found = board_card_for_pr_impl(&conn, "owner", "repo", 2)
+            .unwrap()
+            .unwrap();
         assert_eq!(found.card.id, "pr1");
         assert!(found.card.discarded_at.is_some());
         assert_eq!(found.inherited_meta.len(), 1);
@@ -1082,7 +1319,10 @@ mod tests {
         let conn = open_memory();
         seed_card(&conn, "pr1", "owner/repo", 42, "pr");
 
-        assert_eq!(tracked_card_id(&conn, "owner", "repo", 42).unwrap(), Some("pr1".to_string()));
+        assert_eq!(
+            tracked_card_id(&conn, "owner", "repo", 42).unwrap(),
+            Some("pr1".to_string())
+        );
     }
 
     #[test]
@@ -1090,10 +1330,16 @@ mod tests {
         let conn = open_memory();
         seed_card(&conn, "pr1", "owner/repo", 42, "pr");
         seed_card(&conn, "pr2", "owner/repo", 43, "pr");
-        conn.execute("UPDATE board_card SET discarded_at = 'now' WHERE id = 'pr1'", [])
-            .unwrap();
-        conn.execute("UPDATE board_card SET archived_at = 'now' WHERE id = 'pr2'", [])
-            .unwrap();
+        conn.execute(
+            "UPDATE board_card SET discarded_at = 'now' WHERE id = 'pr1'",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE board_card SET archived_at = 'now' WHERE id = 'pr2'",
+            [],
+        )
+        .unwrap();
 
         assert_eq!(tracked_card_id(&conn, "owner", "repo", 42).unwrap(), None);
         assert_eq!(tracked_card_id(&conn, "owner", "repo", 43).unwrap(), None);

@@ -46,7 +46,10 @@ fn clip(s: &str, max: usize) -> String {
 
 /// One line per open card, grouped by repo; returns (snapshot, open card ids).
 pub fn build_snapshot(cards: &[BoardCardWithExtras], now: DateTime<Utc>) -> (String, Vec<String>) {
-    let number_by_id: HashMap<&str, i64> = cards.iter().map(|c| (c.card.id.as_str(), c.card.number)).collect();
+    let number_by_id: HashMap<&str, i64> = cards
+        .iter()
+        .map(|c| (c.card.id.as_str(), c.card.number))
+        .collect();
     let mut by_repo: BTreeMap<&str, Vec<String>> = BTreeMap::new();
     let mut done_recent: Vec<String> = Vec::new();
     let mut open_ids: Vec<String> = Vec::new();
@@ -58,7 +61,12 @@ pub fn build_snapshot(cards: &[BoardCardWithExtras], now: DateTime<Utc>) -> (Str
         }
         let is_open = card.state.as_deref().is_none_or(|s| s == "open");
         if !is_open {
-            if card.closed_at.as_deref().and_then(|t| days_since(t, now)).is_some_and(|d| d <= 7) {
+            if card
+                .closed_at
+                .as_deref()
+                .and_then(|t| days_since(t, now))
+                .is_some_and(|d| d <= 7)
+            {
                 done_recent.push(format!("{}#{}", short_repo(&card.repo), card.number));
             }
             continue;
@@ -66,7 +74,11 @@ pub fn build_snapshot(cards: &[BoardCardWithExtras], now: DateTime<Utc>) -> (Str
         open_ids.push(card.id.clone());
 
         let mut f: Vec<String> = Vec::new();
-        f.push(format!("{} #{}", if card.typ == "pr" { "PR" } else { "ISSUE" }, card.number));
+        f.push(format!(
+            "{} #{}",
+            if card.typ == "pr" { "PR" } else { "ISSUE" },
+            card.number
+        ));
         f.push(c.lane.clone().unwrap_or_else(|| "has_pr".into()));
         if card.typ == "pr" {
             if card.is_mine {
@@ -93,7 +105,9 @@ pub fn build_snapshot(cards: &[BoardCardWithExtras], now: DateTime<Utc>) -> (Str
             if card.auto_merge.is_some() {
                 f.push("auto_merge".into());
             }
-            if card.mergeable.as_deref() == Some("CONFLICTING") && card.merge_state_status.as_deref() != Some("DIRTY") {
+            if card.mergeable.as_deref() == Some("CONFLICTING")
+                && card.merge_state_status.as_deref() != Some("DIRTY")
+            {
                 f.push("conflicts".into());
             }
             if let Some(n) = card.pending_threads.filter(|n| *n > 0) {
@@ -116,7 +130,12 @@ pub fn build_snapshot(cards: &[BoardCardWithExtras], now: DateTime<Utc>) -> (Str
             let key = if card.typ == "pr" { "issue" } else { "prs" };
             f.push(format!("{key}={}", linked.join(",")));
         }
-        let mut tags: Vec<&str> = c.meta.iter().chain(c.inherited_meta.iter()).filter_map(|m| m.tag.as_deref()).collect();
+        let mut tags: Vec<&str> = c
+            .meta
+            .iter()
+            .chain(c.inherited_meta.iter())
+            .filter_map(|m| m.tag.as_deref())
+            .collect();
         tags.sort_unstable();
         tags.dedup();
         if !tags.is_empty() {
@@ -126,11 +145,19 @@ pub fn build_snapshot(cards: &[BoardCardWithExtras], now: DateTime<Utc>) -> (Str
         if sessions > 0 {
             f.push(format!("sess={sessions}"));
         }
-        for note in c.meta.iter().filter(|m| m.kind == "note" && !m.value.trim().is_empty()).take(2) {
+        for note in c
+            .meta
+            .iter()
+            .filter(|m| m.kind == "note" && !m.value.trim().is_empty())
+            .take(2)
+        {
             f.push(format!("note=\"{}\"", clip(&note.value, 80)));
         }
         f.push(format!("\"{}\"", clip(&card.title, 90)));
-        by_repo.entry(card.repo.as_str()).or_default().push(f.join(" "));
+        by_repo
+            .entry(card.repo.as_str())
+            .or_default()
+            .push(f.join(" "));
     }
 
     let mut out = format!(
@@ -188,12 +215,23 @@ pub async fn board_overview_generate(
     db: State<'_, Db>,
 ) -> AppResult<BoardOverview> {
     let routine = crate::commands::routines::builtin(&db, "board_overview")?;
-    let ctx = crate::routines::context::ContextRef { kind: "board".into(), id: String::new(), base_paths: vec![] };
-    let run = crate::commands::routines::launch(&app, &routine, &ctx, "", model.as_deref().unwrap_or(""))?;
+    let ctx = crate::routines::context::ContextRef {
+        kind: "board".into(),
+        id: String::new(),
+        base_paths: vec![],
+    };
+    let run = crate::commands::routines::launch(
+        &app,
+        &routine,
+        &ctx,
+        "",
+        model.as_deref().unwrap_or(""),
+    )?;
     let run = tauri::async_runtime::spawn_blocking({
         let app = app.clone();
         move || loop {
-            let current = crate::routines::manager::get_run(&app.state::<Db>().0.lock().unwrap(), run.id)?;
+            let current =
+                crate::routines::manager::get_run(&app.state::<Db>().0.lock().unwrap(), run.id)?;
             if !matches!(current.status.as_str(), "queued" | "running") {
                 return Ok::<_, AppError>(current);
             }
@@ -203,9 +241,10 @@ pub async fn board_overview_generate(
     .await
     .map_err(|e| AppError::Other(format!("overview task failed: {e}")))??;
     if !matches!(run.status.as_str(), "ok" | "needs_attention") {
-        return Err(AppError::Other(
-            run.error.unwrap_or_else(|| format!("the overview run ended: {}", run.status)),
-        ));
+        return Err(AppError::Other(run.error.unwrap_or_else(|| {
+            format!("the overview run ended: {}", run.status)
+        })));
     }
-    load(&db.0.lock().unwrap())?.ok_or_else(|| AppError::Other("the overview run produced nothing".into()))
+    load(&db.0.lock().unwrap())?
+        .ok_or_else(|| AppError::Other("the overview run produced nothing".into()))
 }

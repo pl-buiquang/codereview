@@ -17,7 +17,9 @@ struct Setup {
 fn setup() -> Setup {
     let dir = tempfile::tempdir().unwrap();
     let db = WorkerDb::open(&dir.path().join("worker.db")).unwrap();
-    let (run, _) = db.insert_run("k", "claude", "", "{}", dir.path(), 60).unwrap();
+    let (run, _) = db
+        .insert_run("k", "claude", "", "{}", dir.path(), 60)
+        .unwrap();
     let ctx = json!({
         "cards": [{"card": {"repo": "acme/widgets", "number": 3, "title": "Fix it"}, "lane": "in_progress",
                    "meta": [{"id": 1, "kind": "note", "value": "remember"}]}],
@@ -52,7 +54,18 @@ fn stderr(o: &Output) -> String {
 fn board_and_focus_writes_and_notify_are_recorded_as_ops() {
     let s = setup();
     for args in [
-        vec!["board", "meta", "add", "acme/widgets#3", "--kind", "note", "--value", "hi", "--tag", "plan"],
+        vec![
+            "board",
+            "meta",
+            "add",
+            "acme/widgets#3",
+            "--kind",
+            "note",
+            "--value",
+            "hi",
+            "--tag",
+            "plan",
+        ],
         vec!["board", "link", "card-1", "acme/widgets#9"],
         vec!["board", "meta", "rm", "4"],
         vec!["notify", "all done", "--title", "Run"],
@@ -62,13 +75,37 @@ fn board_and_focus_writes_and_notify_are_recorded_as_ops() {
     }
     let plan = s.dir.path().join("plan.json");
     std::fs::write(&plan, r#"{"summary":"s","hunks":[]}"#).unwrap();
-    let o = cr(&s, &["--json", "focus", "set", "12", "--file", plan.to_str().unwrap(), "--level", "focus"]);
+    let o = cr(
+        &s,
+        &[
+            "--json",
+            "focus",
+            "set",
+            "12",
+            "--file",
+            plan.to_str().unwrap(),
+            "--level",
+            "focus",
+        ],
+    );
     assert!(o.status.success(), "{}", stderr(&o));
-    assert_eq!(serde_json::from_str::<Value>(&stdout(&o)).unwrap()["opId"], format!("{}:5", s.run));
+    assert_eq!(
+        serde_json::from_str::<Value>(&stdout(&o)).unwrap()["opId"],
+        format!("{}:5", s.run)
+    );
 
     let ops = s.db.outbox_after(s.run, 0).unwrap();
     let types: Vec<&str> = ops.iter().map(|o| o.op_type.as_str()).collect();
-    assert_eq!(types, vec!["board_meta_add", "board_link", "board_meta_rm", "notify", "focus_set"]);
+    assert_eq!(
+        types,
+        vec![
+            "board_meta_add",
+            "board_link",
+            "board_meta_rm",
+            "notify",
+            "focus_set"
+        ]
+    );
     assert_eq!(ops[0].args["reference"], "acme/widgets#3");
     assert_eq!(ops[0].args["tag"], "plan");
     assert_eq!(ops[1].args["issue_id"], "card-1");
@@ -76,8 +113,18 @@ fn board_and_focus_writes_and_notify_are_recorded_as_ops() {
     assert_eq!(ops[4].args["plan"]["summary"], "s");
     // op ids are unique and stable: the same list comes back on a second read
     let ids: Vec<String> = ops.iter().map(|o| o.op_id.clone()).collect();
-    assert_eq!(ids.iter().collect::<std::collections::BTreeSet<_>>().len(), 5);
-    assert_eq!(s.db.outbox_after(s.run, 0).unwrap().iter().map(|o| o.op_id.clone()).collect::<Vec<_>>(), ids);
+    assert_eq!(
+        ids.iter().collect::<std::collections::BTreeSet<_>>().len(),
+        5
+    );
+    assert_eq!(
+        s.db.outbox_after(s.run, 0)
+            .unwrap()
+            .iter()
+            .map(|o| o.op_id.clone())
+            .collect::<Vec<_>>(),
+        ids
+    );
     assert!(!Path::new(&s.dir.path().join("must-not-exist.db")).exists());
 }
 
@@ -86,28 +133,64 @@ fn reads_are_answered_from_the_snapshot() {
     let s = setup();
     let o = cr(&s, &["board", "show", "acme/widgets#3"]);
     assert!(o.status.success(), "{}", stderr(&o));
-    assert_eq!(serde_json::from_str::<Value>(&stdout(&o)).unwrap()["card"]["title"], "Fix it");
+    assert_eq!(
+        serde_json::from_str::<Value>(&stdout(&o)).unwrap()["card"]["title"],
+        "Fix it"
+    );
     let o = cr(&s, &["board", "meta", "list", "acme/widgets#3"]);
-    assert_eq!(serde_json::from_str::<Value>(&stdout(&o)).unwrap()[0]["value"], "remember");
+    assert_eq!(
+        serde_json::from_str::<Value>(&stdout(&o)).unwrap()[0]["value"],
+        "remember"
+    );
     let o = cr(&s, &["board", "list", "--lane", "in_progress"]);
-    assert_eq!(serde_json::from_str::<Value>(&stdout(&o)).unwrap().as_array().unwrap().len(), 1);
+    assert_eq!(
+        serde_json::from_str::<Value>(&stdout(&o))
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
     let o = cr(&s, &["board", "list", "--lane", "done"]);
-    assert!(serde_json::from_str::<Value>(&stdout(&o)).unwrap().as_array().unwrap().is_empty());
+    assert!(serde_json::from_str::<Value>(&stdout(&o))
+        .unwrap()
+        .as_array()
+        .unwrap()
+        .is_empty());
     let o = cr(&s, &["focus", "show", "12"]);
-    assert_eq!(serde_json::from_str::<Value>(&stdout(&o)).unwrap()["focus"]["status"], "ready");
+    assert_eq!(
+        serde_json::from_str::<Value>(&stdout(&o)).unwrap()["focus"]["status"],
+        "ready"
+    );
     let o = cr(&s, &["board", "show", "acme/widgets#99"]);
     assert!(!o.status.success());
-    assert!(stderr(&o).contains("not in this remote run's context snapshot"), "{}", stderr(&o));
-    assert!(s.db.outbox_after(s.run, 0).unwrap().is_empty(), "reads record nothing");
+    assert!(
+        stderr(&o).contains("not in this remote run's context snapshot"),
+        "{}",
+        stderr(&o)
+    );
+    assert!(
+        s.db.outbox_after(s.run, 0).unwrap().is_empty(),
+        "reads record nothing"
+    );
 }
 
 #[test]
 fn other_commands_fail_with_a_clear_message() {
     let s = setup();
-    for (args, name) in [(vec!["list"], "list"), (vec!["sync"], "sync"), (vec!["board", "sync"], "board sync"), (vec!["focus", "hunks", "1"], "focus hunks")] {
+    for (args, name) in [
+        (vec!["list"], "list"),
+        (vec!["sync"], "sync"),
+        (vec!["board", "sync"], "board sync"),
+        (vec!["focus", "hunks", "1"], "focus hunks"),
+    ] {
         let o = cr(&s, &args);
         assert!(!o.status.success(), "{args:?}");
-        assert!(stderr(&o).contains(&format!("`cr {name}` is not available in a remote run")), "{args:?}: {}", stderr(&o));
+        assert!(
+            stderr(&o).contains(&format!("`cr {name}` is not available in a remote run")),
+            "{args:?}: {}",
+            stderr(&o)
+        );
     }
 }
 

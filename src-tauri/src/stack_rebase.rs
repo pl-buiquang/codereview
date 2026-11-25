@@ -72,7 +72,9 @@ fn remote_ref(branch: &str) -> String {
 }
 
 fn rev(repo: &Path, spec: &str) -> Option<String> {
-    run_git(repo, &["rev-parse", "--verify", "-q", spec]).ok().map(|s| s.trim().to_string())
+    run_git(repo, &["rev-parse", "--verify", "-q", spec])
+        .ok()
+        .map(|s| s.trim().to_string())
 }
 
 fn is_ancestor(repo: &Path, a: &str, b: &str) -> bool {
@@ -89,7 +91,13 @@ fn count(repo: &Path, range: &str) -> u32 {
 /// Replays `from..origin/<branch>` onto `onto`; returns the new tip. `replay`
 /// only reports refs under `refs/heads/`, so the result is read back through a
 /// scratch `--ref` name (print mode writes nothing). An empty range yields `onto`.
-fn replay(repo: &Path, onto: &str, from: &str, branch: &str, commits: u32) -> Result<String, String> {
+fn replay(
+    repo: &Path,
+    onto: &str,
+    from: &str,
+    branch: &str,
+    commits: u32,
+) -> Result<String, String> {
     let range = format!("{from}..{}", remote_ref(branch));
     let scratch = "refs/heads/cr-stack-rebase";
     let out = run_git(repo, &["replay", "--ref-action=print", "--ref", scratch, "--onto", onto, &range])
@@ -105,17 +113,27 @@ fn replay(repo: &Path, onto: &str, from: &str, branch: &str, commits: u32) -> Re
         (Some(sha), _) => Ok(sha.to_string()),
         (None, 0) => Ok(onto.to_string()),
         // Never guess a tip: pushing `onto` here would drop the branch's commits.
-        (None, _) => Err(format!("{branch}: git replay returned no result for {commits} commits")),
+        (None, _) => Err(format!(
+            "{branch}: git replay returned no result for {commits} commits"
+        )),
     }
 }
 
 /// Why this worktree can't be moved, if it can't.
 fn worktree_blocker(wt: &Path) -> Option<String> {
-    let dirty = run_git(wt, &["status", "--porcelain"]).map(|s| !s.trim().is_empty()).unwrap_or(true);
+    let dirty = run_git(wt, &["status", "--porcelain"])
+        .map(|s| !s.trim().is_empty())
+        .unwrap_or(true);
     if dirty {
         return Some("has uncommitted changes".into());
     }
-    for marker in ["rebase-merge", "rebase-apply", "MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD"] {
+    for marker in [
+        "rebase-merge",
+        "rebase-apply",
+        "MERGE_HEAD",
+        "CHERRY_PICK_HEAD",
+        "REVERT_HEAD",
+    ] {
         if let Ok(p) = run_git(wt, &["rev-parse", "--git-path", marker]) {
             let p = PathBuf::from(p.trim());
             let p = if p.is_absolute() { p } else { wt.join(p) };
@@ -139,15 +157,23 @@ fn local_copy(
     };
     // A local branch strictly behind origin is safe: the new tip comes from origin.
     if local != origin_sha && !is_ancestor(repo, &local, origin_sha) {
-        return Err(format!("{branch}: has local commits that aren't on origin — push or drop them first"));
+        return Err(format!(
+            "{branch}: has local commits that aren't on origin — push or drop them first"
+        ));
     }
-    match worktrees.iter().find(|w| w.branch.as_deref() == Some(branch)) {
+    match worktrees
+        .iter()
+        .find(|w| w.branch.as_deref() == Some(branch))
+    {
         None => Ok(LocalCopy::Branch { sha: local }),
         Some(w) => {
             if let Some(why) = worktree_blocker(Path::new(&w.path)) {
                 return Err(format!("{branch}: worktree {} {why}", w.display_path));
             }
-            Ok(LocalCopy::Worktree { path: w.path.clone(), sha: local })
+            Ok(LocalCopy::Worktree {
+                path: w.path.clone(),
+                sha: local,
+            })
         }
     }
 }
@@ -204,7 +230,9 @@ pub fn plan(repo: &Path, trunk: &str, branches: &[String]) -> Result<Plan, Vec<S
     let mut plans: Vec<BranchPlan> = Vec::new();
     for (k, b) in branches.iter().enumerate() {
         let (parent_old, parent_new) = if k == 0 {
-            let Some(base) = run_git(repo, &["merge-base", &trunk_sha, &olds[0]]).ok().map(|s| s.trim().to_string())
+            let Some(base) = run_git(repo, &["merge-base", &trunk_sha, &olds[0]])
+                .ok()
+                .map(|s| s.trim().to_string())
             else {
                 return Err(vec![format!("{b} shares no history with origin/{trunk}")]);
             };
@@ -218,9 +246,18 @@ pub fn plan(repo: &Path, trunk: &str, branches: &[String]) -> Result<Plan, Vec<S
         } else {
             replay(repo, &parent_new, &parent_old, b, commits).map_err(|e| vec![e])?
         };
-        plans.push(BranchPlan { branch: b.clone(), old: olds[k].clone(), new, commits, local: locals[k].clone() });
+        plans.push(BranchPlan {
+            branch: b.clone(),
+            old: olds[k].clone(),
+            new,
+            commits,
+            local: locals[k].clone(),
+        });
     }
-    Ok(Plan { trunk: trunk.to_string(), branches: plans })
+    Ok(Plan {
+        trunk: trunk.to_string(),
+        branches: plans,
+    })
 }
 
 /// Pushes every changed branch atomically (a lease per branch), then moves the
@@ -228,12 +265,21 @@ pub fn plan(repo: &Path, trunk: &str, branches: &[String]) -> Result<Plan, Vec<S
 pub fn apply(repo: &Path, plan: &Plan) -> AppResult<ApplyReport> {
     let changed: Vec<&BranchPlan> = plan.branches.iter().filter(|b| b.changed()).collect();
     if changed.is_empty() {
-        return Ok(ApplyReport { pushed: vec![], moved_local: vec![], skipped_local: vec![] });
+        return Ok(ApplyReport {
+            pushed: vec![],
+            moved_local: vec![],
+            skipped_local: vec![],
+        });
     }
 
-    let leases: Vec<String> =
-        changed.iter().map(|b| format!("--force-with-lease=refs/heads/{}:{}", b.branch, b.old)).collect();
-    let specs: Vec<String> = changed.iter().map(|b| format!("{}:refs/heads/{}", b.new, b.branch)).collect();
+    let leases: Vec<String> = changed
+        .iter()
+        .map(|b| format!("--force-with-lease=refs/heads/{}:{}", b.branch, b.old))
+        .collect();
+    let specs: Vec<String> = changed
+        .iter()
+        .map(|b| format!("{}:refs/heads/{}", b.new, b.branch))
+        .collect();
     let mut args: Vec<&str> = vec!["push", "--atomic"];
     args.extend(leases.iter().map(String::as_str));
     args.push("origin");
@@ -245,18 +291,34 @@ pub fn apply(repo: &Path, plan: &Plan) -> AppResult<ApplyReport> {
     for b in &changed {
         let ok = match &b.local {
             LocalCopy::None => continue,
-            LocalCopy::Branch { sha } => {
-                run_git(repo, &["update-ref", &format!("refs/heads/{}", b.branch), &b.new, sha]).is_ok()
-            }
+            LocalCopy::Branch { sha } => run_git(
+                repo,
+                &[
+                    "update-ref",
+                    &format!("refs/heads/{}", b.branch),
+                    &b.new,
+                    sha,
+                ],
+            )
+            .is_ok(),
             LocalCopy::Worktree { path, sha } => {
                 let wt = Path::new(path);
-                let still_there = rev(wt, "HEAD").as_deref() == Some(sha.as_str()) && worktree_blocker(wt).is_none();
+                let still_there = rev(wt, "HEAD").as_deref() == Some(sha.as_str())
+                    && worktree_blocker(wt).is_none();
                 still_there && run_git(wt, &["reset", "--keep", &b.new]).is_ok()
             }
         };
-        if ok { moved.push(b.branch.clone()) } else { skipped.push(b.branch.clone()) }
+        if ok {
+            moved.push(b.branch.clone())
+        } else {
+            skipped.push(b.branch.clone())
+        }
     }
-    Ok(ApplyReport { pushed: changed.iter().map(|b| b.branch.clone()).collect(), moved_local: moved, skipped_local: skipped })
+    Ok(ApplyReport {
+        pushed: changed.iter().map(|b| b.branch.clone()).collect(),
+        moved_local: moved,
+        skipped_local: skipped,
+    })
 }
 
 pub fn refusal_error(reasons: &[String]) -> AppError {
@@ -272,11 +334,22 @@ mod tests {
     fn git(dir: &Path, args: &[&str]) -> String {
         let out = Command::new("git")
             .current_dir(dir)
-            .args(["-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false"])
+            .args([
+                "-c",
+                "user.email=t@t",
+                "-c",
+                "user.name=t",
+                "-c",
+                "commit.gpgsign=false",
+            ])
             .args(args)
             .output()
             .unwrap();
-        assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        assert!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
         String::from_utf8_lossy(&out.stdout).trim().to_string()
     }
 
@@ -298,8 +371,26 @@ mod tests {
         let origin = tmp.path().join("origin.git");
         let work = tmp.path().join("work");
         let clone = tmp.path().join("clone");
-        git(tmp.path(), &["init", "-q", "--bare", "-b", "main", origin.to_str().unwrap()]);
-        git(tmp.path(), &["clone", "-q", origin.to_str().unwrap(), work.to_str().unwrap()]);
+        git(
+            tmp.path(),
+            &[
+                "init",
+                "-q",
+                "--bare",
+                "-b",
+                "main",
+                origin.to_str().unwrap(),
+            ],
+        );
+        git(
+            tmp.path(),
+            &[
+                "clone",
+                "-q",
+                origin.to_str().unwrap(),
+                work.to_str().unwrap(),
+            ],
+        );
         git(&work, &["checkout", "-qb", "main"]);
         commit(&work, "base", "1");
         git(&work, &["push", "-q", "origin", "main"]);
@@ -311,12 +402,28 @@ mod tests {
         git(&work, &["checkout", "-q", "main"]);
         commit(&work, "m", "1");
         git(&work, &["push", "-q", "origin", "main"]);
-        git(tmp.path(), &["clone", "-q", origin.to_str().unwrap(), clone.to_str().unwrap()]);
+        git(
+            tmp.path(),
+            &[
+                "clone",
+                "-q",
+                origin.to_str().unwrap(),
+                clone.to_str().unwrap(),
+            ],
+        );
         // `git replay` writes commits from the code under test, which gets no `-c` identity.
-        for (k, v) in [("user.email", "t@t"), ("user.name", "t"), ("commit.gpgsign", "false")] {
+        for (k, v) in [
+            ("user.email", "t@t"),
+            ("user.name", "t"),
+            ("commit.gpgsign", "false"),
+        ] {
             git(&clone, &["config", k, v]);
         }
-        Fixture { _tmp: tmp, origin, clone }
+        Fixture {
+            _tmp: tmp,
+            origin,
+            clone,
+        }
     }
 
     fn stack() -> Vec<String> {
@@ -332,7 +439,10 @@ mod tests {
         assert_eq!(report.pushed, vec!["a", "b"]);
         let main = git(&f.origin, &["rev-parse", "main"]);
         assert_eq!(git(&f.origin, &["merge-base", "main", "b"]), main);
-        assert_eq!(git(&f.origin, &["rev-parse", "b~1"]), git(&f.origin, &["rev-parse", "a"]));
+        assert_eq!(
+            git(&f.origin, &["rev-parse", "b~1"]),
+            git(&f.origin, &["rev-parse", "a"])
+        );
         // A second run has nothing to do.
         git(&f.clone, &["fetch", "-q", "origin"]);
         assert!(super::plan(&f.clone, "main", &stack()).unwrap().is_noop());
@@ -343,12 +453,29 @@ mod tests {
         let f = fixture();
         git(&f.clone, &["branch", "a", "origin/a"]);
         let wt = f.clone.parent().unwrap().join("wt-b");
-        git(&f.clone, &["worktree", "add", "-q", "-b", "b", wt.to_str().unwrap(), "origin/b"]);
+        git(
+            &f.clone,
+            &[
+                "worktree",
+                "add",
+                "-q",
+                "-b",
+                "b",
+                wt.to_str().unwrap(),
+                "origin/b",
+            ],
+        );
         let plan = plan(&f.clone, "main", &stack()).unwrap();
         let report = apply(&f.clone, &plan).unwrap();
         assert_eq!(report.moved_local, vec!["a", "b"]);
-        assert_eq!(git(&wt, &["rev-parse", "HEAD"]), git(&f.origin, &["rev-parse", "b"]));
-        assert_eq!(git(&f.clone, &["rev-parse", "a"]), git(&f.origin, &["rev-parse", "a"]));
+        assert_eq!(
+            git(&wt, &["rev-parse", "HEAD"]),
+            git(&f.origin, &["rev-parse", "b"])
+        );
+        assert_eq!(
+            git(&f.clone, &["rev-parse", "a"]),
+            git(&f.origin, &["rev-parse", "a"])
+        );
         assert!(git(&wt, &["status", "--porcelain"]).is_empty());
     }
 
@@ -356,7 +483,18 @@ mod tests {
     fn dirty_worktree_is_refused() {
         let f = fixture();
         let wt = f.clone.parent().unwrap().join("wt-b");
-        git(&f.clone, &["worktree", "add", "-q", "-b", "b", wt.to_str().unwrap(), "origin/b"]);
+        git(
+            &f.clone,
+            &[
+                "worktree",
+                "add",
+                "-q",
+                "-b",
+                "b",
+                wt.to_str().unwrap(),
+                "origin/b",
+            ],
+        );
         fs::write(wt.join("b"), "edited").unwrap();
         let reasons = plan(&f.clone, "main", &stack()).unwrap_err();
         assert!(reasons[0].contains("uncommitted"), "{reasons:?}");

@@ -22,23 +22,24 @@
 //! Auth stays in Codex (`codex login`); the app stores nothing.
 
 use std::collections::HashMap;
-use std::sync::Mutex;
 use std::io::{BufRead as _, Read as _, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::Mutex;
 
 use serde_json::Value;
 
 use super::opencode::{
-    message, next_field, normalize_path, now_ms, parse_etime, proc_argv, proc_cwd, run_with_timeout, PROBE_TIMEOUT,
-    START_SLACK_MS,
+    message, next_field, normalize_path, now_ms, parse_etime, proc_argv, proc_cwd,
+    run_with_timeout, PROBE_TIMEOUT, START_SLACK_MS,
 };
 use super::{
-    Access, AgentSession, Caps, Event, FinalResult, Harness, Interactive, OneShot, RunAcc, SessionMode, StreamRun, TurnResult,
+    Access, AgentSession, Caps, Event, FinalResult, Harness, Interactive, OneShot, RunAcc,
+    SessionMode, StreamRun, TurnResult,
 };
 use crate::ai_usage;
-use crate::run_usage::{self, RunUsage};
 use crate::error::{AppError, AppResult};
+use crate::run_usage::{self, RunUsage};
 
 pub struct Codex;
 
@@ -57,7 +58,12 @@ fn nonce() -> &'static str {
     N.get_or_init(|| {
         use std::hash::{BuildHasher, Hasher};
         let mut h = std::collections::hash_map::RandomState::new().build_hasher();
-        h.write_u128(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0));
+        h.write_u128(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0),
+        );
         h.write_u32(std::process::id());
         format!("{:016x}", h.finish())
     })
@@ -94,7 +100,12 @@ impl Harness for Codex {
             reports_cost: false,
             replaces_system_prompt: false,
             // Unlike opencode, a real read-only mode: the OS sandbox denies every write.
-            access_levels: vec![Access::Default, Access::ReadOnly, Access::Edit, Access::Full],
+            access_levels: vec![
+                Access::Default,
+                Access::ReadOnly,
+                Access::Edit,
+                Access::Full,
+            ],
             pins_session_id: false,
         }
     }
@@ -104,7 +115,10 @@ impl Harness for Codex {
     }
 
     fn version(&self) -> Option<String> {
-        let out = Command::new(crate::tools::codex_bin()).arg("--version").output().ok()?;
+        let out = Command::new(crate::tools::codex_bin())
+            .arg("--version")
+            .output()
+            .ok()?;
         let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
         let text = text.strip_prefix("codex-cli ").unwrap_or(&text).to_string();
         (out.status.success() && !text.is_empty()).then_some(text)
@@ -131,39 +145,63 @@ impl Harness for Codex {
         let mut tag = req.usage_tag.clone();
         tag.model = req.model.to_string();
         let error = result.as_ref().err().map(|e| e.to_string());
-        ai_usage::record(&tag, &started_at, started.elapsed().as_millis() as i64, &usage, error.as_deref());
+        ai_usage::record(
+            &tag,
+            &started_at,
+            started.elapsed().as_millis() as i64,
+            &usage,
+            error.as_deref(),
+        );
         result
     }
 
     fn spawn(&self, run: StreamRun<'_>) -> AppResult<Child> {
         let mut cmd = command(&run.req)?;
-        cmd.stdin(Stdio::piped()).stdout(Stdio::from(run.stdout)).stderr(Stdio::from(run.stderr));
+        cmd.stdin(Stdio::piped())
+            .stdout(Stdio::from(run.stdout))
+            .stderr(Stdio::from(run.stderr));
         #[cfg(unix)]
         {
             use std::os::unix::process::CommandExt;
             cmd.process_group(0);
         }
-        cmd.spawn().map_err(|e| AppError::Other(format!("failed to spawn codex: {e}")))
+        cmd.spawn()
+            .map_err(|e| AppError::Other(format!("failed to spawn codex: {e}")))
     }
 
     fn parse_line(&self, line: &str) -> (String, Option<Value>) {
         match serde_json::from_str::<Value>(line) {
-            Ok(v) => (v.get("type").and_then(Value::as_str).unwrap_or("unknown").to_string(), Some(v)),
+            Ok(v) => (
+                v.get("type")
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown")
+                    .to_string(),
+                Some(v),
+            ),
             Err(_) => ("raw".to_string(), None),
         }
     }
 
     fn normalize(&self, line: &str) -> Vec<Event> {
         let Ok(v) = serde_json::from_str::<Value>(line) else {
-            return vec![Event::Other { kind: "raw".into(), raw: Value::String(line.trim_end().to_string()) }];
+            return vec![Event::Other {
+                kind: "raw".into(),
+                raw: Value::String(line.trim_end().to_string()),
+            }];
         };
         let kind = v.get("type").and_then(Value::as_str).unwrap_or("unknown");
         let item = v.get("item");
-        let item_kind = item.and_then(|i| i.get("type")).and_then(Value::as_str).unwrap_or_default();
+        let item_kind = item
+            .and_then(|i| i.get("type"))
+            .and_then(Value::as_str)
+            .unwrap_or_default();
         let mut events = Vec::new();
         match (kind, item_kind) {
             ("item.completed", "agent_message") => {
-                let text = item.and_then(|i| i.get("text")).and_then(Value::as_str).unwrap_or_default();
+                let text = item
+                    .and_then(|i| i.get("text"))
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
                 if !text.trim().is_empty() {
                     events.push(Event::Text(text.to_string()));
                 }
@@ -176,9 +214,16 @@ impl Harness for Codex {
                 });
             }
             ("item.completed", "command_execution") => {
-                let ok = item.and_then(|i| i.get("exit_code")).and_then(Value::as_i64) == Some(0)
+                let ok = item
+                    .and_then(|i| i.get("exit_code"))
+                    .and_then(Value::as_i64)
+                    == Some(0)
                     && item_str(item, "status") != "failed";
-                events.push(Event::ToolResult { id: item_str(item, "id"), ok, text: item_str(item, "aggregated_output") });
+                events.push(Event::ToolResult {
+                    id: item_str(item, "id"),
+                    ok,
+                    text: item_str(item, "aggregated_output"),
+                });
             }
             ("item.started", "file_change") => {
                 events.push(Event::ToolCall {
@@ -195,10 +240,17 @@ impl Harness for Codex {
                 });
             }
             ("turn.completed", _) => {
-                events.push(Event::Final { ok: true, text: String::new(), usage: usage_of(v.get("usage")) });
+                events.push(Event::Final {
+                    ok: true,
+                    text: String::new(),
+                    usage: usage_of(v.get("usage")),
+                });
             }
             ("turn.failed", _) => {
-                let message = v.pointer("/error/message").and_then(Value::as_str).filter(|m| !m.is_empty());
+                let message = v
+                    .pointer("/error/message")
+                    .and_then(Value::as_str)
+                    .filter(|m| !m.is_empty());
                 events.push(Event::Final {
                     ok: false,
                     text: message.unwrap_or("codex reported an error").to_string(),
@@ -210,8 +262,15 @@ impl Harness for Codex {
         // Everything else (thread and turn starts, reasoning, warnings, the top-level `error` line
         // that `turn.failed` follows, unknown types) stays as `other`.
         if events.is_empty() {
-            let kind = if item_kind.is_empty() { kind } else { item_kind };
-            events.push(Event::Other { kind: kind.to_string(), raw: v });
+            let kind = if item_kind.is_empty() {
+                kind
+            } else {
+                item_kind
+            };
+            events.push(Event::Other {
+                kind: kind.to_string(),
+                raw: v,
+            });
         }
         events
     }
@@ -222,7 +281,8 @@ impl Harness for Codex {
 
     fn step_usage(&self, line: &str) -> Option<RunUsage> {
         let v = serde_json::from_str::<Value>(line).ok()?;
-        (v.get("type").and_then(Value::as_str) == Some("turn.completed")).then(|| usage_of(v.get("usage")))
+        (v.get("type").and_then(Value::as_str) == Some("turn.completed"))
+            .then(|| usage_of(v.get("usage")))
     }
 
     fn session_of_line(&self, line: &str) -> Option<String> {
@@ -230,13 +290,19 @@ impl Harness for Codex {
         if v.get("type").and_then(Value::as_str) != Some("thread.started") {
             return None;
         }
-        v.get("thread_id").and_then(Value::as_str).filter(|t| !t.is_empty()).map(String::from)
+        v.get("thread_id")
+            .and_then(Value::as_str)
+            .filter(|t| !t.is_empty())
+            .map(String::from)
     }
 
     #[cfg(unix)]
     fn is_own_process(&self, pid: i32, _session_id: Option<&str>) -> bool {
         // The session id is Codex's own, not the one the run was started under: only the command is checked.
-        let Ok(out) = Command::new("ps").args(["-o", "command=", "-p", &pid.to_string()]).output() else {
+        let Ok(out) = Command::new("ps")
+            .args(["-o", "command=", "-p", &pid.to_string()])
+            .output()
+        else {
             return false;
         };
         let cmd = String::from_utf8_lossy(&out.stdout);
@@ -269,11 +335,13 @@ impl Harness for Codex {
     fn context_file_note(&self, opts: &Interactive<'_>) -> Option<String> {
         opts.system_prompt_file?;
         Some(if opening_prompt(opts).is_some() {
-            "Codex has no system prompt flag: the context was passed as the opening prompt".to_string()
+            "Codex has no system prompt flag: the context was passed as the opening prompt"
+                .to_string()
         } else if matches!(opts.session, SessionMode::New(_) | SessionMode::Ephemeral) {
             "context file skipped: it is empty or could not be read".to_string()
         } else {
-            "context file skipped: Codex can only take it as the opening prompt of a new session".to_string()
+            "context file skipped: Codex can only take it as the opening prompt of a new session"
+                .to_string()
         })
     }
 
@@ -309,13 +377,23 @@ impl Harness for Codex {
 
     fn settings_args(&self, settings: &Value) -> Vec<String> {
         let mut args = Vec::new();
-        if let Some(mode) = settings.get("sandbox").and_then(Value::as_str).map(str::trim).filter(|m| SANDBOXES.contains(m)) {
+        if let Some(mode) = settings
+            .get("sandbox")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|m| SANDBOXES.contains(m))
+        {
             args.push(mark_sandbox(mode));
         }
         if settings.get("allow_full").and_then(Value::as_bool) == Some(true) {
             args.push(mark_full());
         }
-        for a in settings.get("extra_args").and_then(Value::as_array).into_iter().flatten() {
+        for a in settings
+            .get("extra_args")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
             if let Some(a) = a.as_str() {
                 args.push(a.to_string());
             }
@@ -328,27 +406,45 @@ impl Harness for Codex {
 /// file is readable and not blank. `interactive_argv` and `context_file_note` both go through it, so
 /// the note always matches the argv.
 fn opening_prompt(opts: &Interactive<'_>) -> Option<String> {
-    let (file, SessionMode::New(_) | SessionMode::Ephemeral) = (opts.system_prompt_file?, opts.session) else { return None };
-    std::fs::read_to_string(file).ok().filter(|t| !t.trim().is_empty())
+    let (file, SessionMode::New(_) | SessionMode::Ephemeral) =
+        (opts.system_prompt_file?, opts.session)
+    else {
+        return None;
+    };
+    std::fs::read_to_string(file)
+        .ok()
+        .filter(|t| !t.trim().is_empty())
 }
 
 /// The listed model ids of `codex debug models` (JSON `{"models":[{"slug","visibility","priority"}]}`), best first.
 pub(crate) fn parse_models(json: &str) -> Vec<String> {
-    let Ok(v) = serde_json::from_str::<Value>(json) else { return Vec::new() };
+    let Ok(v) = serde_json::from_str::<Value>(json) else {
+        return Vec::new();
+    };
     let mut models: Vec<(i64, String)> = v
         .get("models")
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
         .filter(|m| m.get("visibility").and_then(Value::as_str) == Some("list"))
-        .filter_map(|m| Some((m.get("priority").and_then(Value::as_i64).unwrap_or(i64::MAX), m.get("slug")?.as_str()?.to_string())))
+        .filter_map(|m| {
+            Some((
+                m.get("priority")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(i64::MAX),
+                m.get("slug")?.as_str()?.to_string(),
+            ))
+        })
         .collect();
     models.sort();
     models.into_iter().map(|(_, slug)| slug).collect()
 }
 
 fn item_str(item: Option<&Value>, key: &str) -> String {
-    item.and_then(|i| i.get(key)).and_then(Value::as_str).unwrap_or_default().to_string()
+    item.and_then(|i| i.get(key))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string()
 }
 
 /// `add path` lines of a `file_change` item.
@@ -357,7 +453,13 @@ fn changes_text(changes: Option<&Value>) -> String {
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
-        .map(|c| format!("{} {}", c.get("kind").and_then(Value::as_str).unwrap_or("change"), c.get("path").and_then(Value::as_str).unwrap_or("")))
+        .map(|c| {
+            format!(
+                "{} {}",
+                c.get("kind").and_then(Value::as_str).unwrap_or("change"),
+                c.get("path").and_then(Value::as_str).unwrap_or("")
+            )
+        })
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -365,7 +467,11 @@ fn changes_text(changes: Option<&Value>) -> String {
 /// The usage of a `usage` object (a `turn.completed` line, or a rollout's `total_token_usage`).
 /// Codex counts cached tokens inside `input_tokens`; here they are apart, like Claude's.
 fn usage_of(u: Option<&Value>) -> RunUsage {
-    let n = |k: &str| u.and_then(|u| u.get(k)).and_then(Value::as_i64).unwrap_or(0);
+    let n = |k: &str| {
+        u.and_then(|u| u.get(k))
+            .and_then(Value::as_i64)
+            .unwrap_or(0)
+    };
     let cached = n("cached_input_tokens");
     RunUsage {
         num_turns: 1,
@@ -390,7 +496,10 @@ fn minus(mut a: RunUsage, b: &RunUsage) -> RunUsage {
 /// The sandbox flags and config keys `extra_args` may not carry: the access level and the profile's
 /// `sandbox` / `allow_full` settings decide the sandbox, nothing else.
 const FORBIDDEN_FLAGS: &[(&str, &str)] = &[
-    ("--dangerously-bypass-approvals-and-sandbox", "--dangerously-bypass-approvals-and-sandbox"),
+    (
+        "--dangerously-bypass-approvals-and-sandbox",
+        "--dangerously-bypass-approvals-and-sandbox",
+    ),
     ("--yolo", "--yolo"),
     ("--full-auto", "--full-auto"),
     ("-s", "--sandbox"),
@@ -407,7 +516,10 @@ const FORBIDDEN_FLAGS: &[(&str, &str)] = &[
     ("--disable", "--disable"),
     // Approval and trust machinery, the working tree, and rule / user-config loading.
     ("--approve-for-me", "--approve-for-me"),
-    ("--dangerously-bypass-hook-trust", "--dangerously-bypass-hook-trust"),
+    (
+        "--dangerously-bypass-hook-trust",
+        "--dangerously-bypass-hook-trust",
+    ),
     ("--worktree", "--worktree"),
     ("--ignore-rules", "--ignore-rules"),
     ("--ignore-user-config", "--ignore-user-config"),
@@ -481,12 +593,22 @@ fn forbidden_extra(args: &[String]) -> Option<String> {
         }
         // `-sread-only`, `-awhatever`: a short flag with its value attached.
         if !a.starts_with("--") {
-            if let Some((_, name)) = FORBIDDEN_FLAGS.iter().find(|(f, _)| f.len() == 2 && a.len() > 2 && a.starts_with(f)) {
+            if let Some((_, name)) = FORBIDDEN_FLAGS
+                .iter()
+                .find(|(f, _)| f.len() == 2 && a.len() > 2 && a.starts_with(f))
+            {
                 return Some(name.to_string());
             }
         }
-        if flag == "-c" || flag == "--config" || (!a.starts_with("--") && a.starts_with("-c") && a.len() > 2) {
-            let kv = match (attached, a.strip_prefix("-c").filter(|r| !r.is_empty() && !a.starts_with("--"))) {
+        if flag == "-c"
+            || flag == "--config"
+            || (!a.starts_with("--") && a.starts_with("-c") && a.len() > 2)
+        {
+            let kv = match (
+                attached,
+                a.strip_prefix("-c")
+                    .filter(|r| !r.is_empty() && !a.starts_with("--")),
+            ) {
                 (Some(v), _) => Some(v),
                 (None, Some(r)) => Some(r.trim_start_matches('=')),
                 _ => it.next(),
@@ -494,7 +616,11 @@ fn forbidden_extra(args: &[String]) -> Option<String> {
             if kv.is_some_and(forbidden_config) {
                 return Some(format!(
                     "{flag} {} (only these -c keys are allowed: {})",
-                    kv.unwrap_or_default().split('=').next().unwrap_or("").trim(),
+                    kv.unwrap_or_default()
+                        .split('=')
+                        .next()
+                        .unwrap_or("")
+                        .trim(),
                     ALLOWED_CONFIG_KEYS.join(", ")
                 ));
             }
@@ -513,7 +639,18 @@ enum ExtraCheck<'a> {
 
 /// Credential and system roots `--add-dir` may not name or sit beneath. Relative to the home dir.
 const HOME_DENY: &[&str] = &[".ssh", ".gnupg", ".aws", ".config", ".codex", ".claude"];
-const SYSTEM_DENY: &[&str] = &["/etc", "/usr", "/bin", "/sbin", "/boot", "/proc", "/sys", "/dev", "/private/etc", "/private/var/db"];
+const SYSTEM_DENY: &[&str] = &[
+    "/etc",
+    "/usr",
+    "/bin",
+    "/sbin",
+    "/boot",
+    "/proc",
+    "/sys",
+    "/dev",
+    "/private/etc",
+    "/private/var/db",
+];
 
 /// `p` with `.` and `..` resolved lexically; `None` when a `..` climbs above the root.
 fn lexical_normalize(p: &Path) -> Option<PathBuf> {
@@ -572,8 +709,13 @@ fn add_dir_problem(raw: &str, check: ExtraCheck<'_>, home: Option<&Path>) -> Opt
     }
     // The kernel resolves `..` through symlinks (`<link>/..` is the link target's parent), so a
     // lexical collapse would check a different directory than the one Codex gets.
-    if path.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
-        return Some(format!("parent-directory components (`..`) are not allowed: give the absolute path ({raw})"));
+    if path
+        .components()
+        .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
+        return Some(format!(
+            "parent-directory components (`..`) are not allowed: give the absolute path ({raw})"
+        ));
     }
     let Some(norm) = lexical_normalize(path) else {
         return Some("the path is not a plain absolute path".into());
@@ -607,8 +749,10 @@ fn add_dir_problem(raw: &str, check: ExtraCheck<'_>, home: Option<&Path>) -> Opt
         }
     }
     if let ExtraCheck::Run(cwd) = check {
-        let cwd_norm = lexical_normalize(&std::path::absolute(cwd).unwrap_or_else(|_| cwd.to_path_buf()));
-        let cwd_canon = canonical_or_normalized(&cwd_norm.clone().unwrap_or_else(|| cwd.to_path_buf()));
+        let cwd_norm =
+            lexical_normalize(&std::path::absolute(cwd).unwrap_or_else(|_| cwd.to_path_buf()));
+        let cwd_canon =
+            canonical_or_normalized(&cwd_norm.clone().unwrap_or_else(|| cwd.to_path_buf()));
         if cwd_canon.starts_with(&canon) || cwd_norm.is_some_and(|c| c.starts_with(&canon)) {
             return Some("it is the working directory or one of its ancestors".into());
         }
@@ -681,7 +825,9 @@ fn plan(req: &OneShot<'_>) -> AppResult<(&'static str, Vec<String>)> {
         // The default is the strictest: nothing is written unless the request says so.
         Access::Default | Access::ReadOnly | Access::Native(_) => "read-only",
     };
-    let mode = chosen.filter(|c| rank(c) < rank(derived)).unwrap_or(derived);
+    let mode = chosen
+        .filter(|c| rank(c) < rank(derived))
+        .unwrap_or(derived);
     if mode == "danger-full-access" && !allow_full {
         return Err(AppError::Other(
             "this Codex profile does not allow full access (no sandbox): set \"allow_full\": true in its settings, or use a lower access level".into(),
@@ -709,19 +855,30 @@ pub(crate) fn command(req: &OneShot<'_>) -> AppResult<Command> {
     if resume.is_some() {
         cmd.arg("resume");
     }
-    cmd.args(["--json", "--skip-git-repo-check", "-c", "approval_policy=\"never\""]);
+    cmd.args([
+        "--json",
+        "--skip-git-repo-check",
+        "-c",
+        "approval_policy=\"never\"",
+    ]);
     if matches!(req.session, SessionMode::Ephemeral) {
         cmd.arg("--ephemeral");
     }
     if !req.model.is_empty() {
         cmd.arg("--model").arg(req.model);
     }
-    if let Some(effort) = req.effort.filter(|e| !e.is_empty() && e.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')) {
-        cmd.arg("-c").arg(format!("model_reasoning_effort={}", toml_str(effort)));
+    if let Some(effort) = req.effort.filter(|e| {
+        !e.is_empty()
+            && e.chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    }) {
+        cmd.arg("-c")
+            .arg(format!("model_reasoning_effort={}", toml_str(effort)));
     }
     // `exec resume` takes neither `-s` nor `--add-dir`: the same settings go in as config overrides.
     if resume.is_some() {
-        cmd.arg("-c").arg(format!("sandbox_mode={}", toml_str(mode)));
+        cmd.arg("-c")
+            .arg(format!("sandbox_mode={}", toml_str(mode)));
     } else {
         cmd.args(["--sandbox", mode]);
     }
@@ -729,8 +886,15 @@ pub(crate) fn command(req: &OneShot<'_>) -> AppResult<Command> {
     // written; in a read-only sandbox everything is readable already.
     if mode == "workspace-write" && !req.extra_dirs.is_empty() {
         if resume.is_some() {
-            let roots: Vec<String> = req.extra_dirs.iter().map(|d| toml_str(&d.to_string_lossy())).collect();
-            cmd.arg("-c").arg(format!("sandbox_workspace_write.writable_roots=[{}]", roots.join(",")));
+            let roots: Vec<String> = req
+                .extra_dirs
+                .iter()
+                .map(|d| toml_str(&d.to_string_lossy()))
+                .collect();
+            cmd.arg("-c").arg(format!(
+                "sandbox_workspace_write.writable_roots=[{}]",
+                roots.join(",")
+            ));
         } else {
             for d in &req.extra_dirs {
                 cmd.arg("--add-dir").arg(d);
@@ -749,10 +913,24 @@ pub(crate) fn command(req: &OneShot<'_>) -> AppResult<Command> {
     Ok(cmd)
 }
 
-fn execute(cmd: &mut Command, message: &str, before: &RunUsage) -> (AppResult<TurnResult>, RunUsage) {
-    let mut child = match cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn() {
+fn execute(
+    cmd: &mut Command,
+    message: &str,
+    before: &RunUsage,
+) -> (AppResult<TurnResult>, RunUsage) {
+    let mut child = match cmd
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+    {
         Ok(c) => c,
-        Err(e) => return (Err(AppError::Chat(format!("failed to spawn codex: {e}"))), RunUsage::default()),
+        Err(e) => {
+            return (
+                Err(AppError::Chat(format!("failed to spawn codex: {e}"))),
+                RunUsage::default(),
+            )
+        }
     };
     if let Some(mut stdin) = child.stdin.take() {
         // A process that exited early closes the pipe: its output and stderr say why, so go on and
@@ -761,15 +939,28 @@ fn execute(cmd: &mut Command, message: &str, before: &RunUsage) -> (AppResult<Tu
             if e.kind() != std::io::ErrorKind::BrokenPipe {
                 let _ = child.kill();
                 let _ = child.wait();
-                return (Err(AppError::Chat(format!("failed to write prompt: {e}"))), RunUsage::default());
+                return (
+                    Err(AppError::Chat(format!("failed to write prompt: {e}"))),
+                    RunUsage::default(),
+                );
             }
         }
     }
     let output = match child.wait_with_output() {
         Ok(o) => o,
-        Err(e) => return (Err(AppError::Chat(format!("codex process error: {e}"))), RunUsage::default()),
+        Err(e) => {
+            return (
+                Err(AppError::Chat(format!("codex process error: {e}"))),
+                RunUsage::default(),
+            )
+        }
     };
-    interpret(&String::from_utf8_lossy(&output.stdout), &String::from_utf8_lossy(&output.stderr), output.status.code().unwrap_or(-1), before)
+    interpret(
+        &String::from_utf8_lossy(&output.stdout),
+        &String::from_utf8_lossy(&output.stderr),
+        output.status.code().unwrap_or(-1),
+        before,
+    )
 }
 
 /// The stderr of `codex exec` without its noise: the stdin notice and the MCP transport errors of
@@ -778,14 +969,21 @@ pub(crate) fn clean_stderr(stderr: &str) -> String {
     stderr
         .lines()
         .map(str::trim)
-        .filter(|l| !l.is_empty() && !l.starts_with("Reading additional input") && !l.contains("rmcp::"))
+        .filter(|l| {
+            !l.is_empty() && !l.starts_with("Reading additional input") && !l.contains("rmcp::")
+        })
         .collect::<Vec<_>>()
         .join("\n")
 }
 
 /// Turn the finished output of `codex exec --json` into the run result and its usage. `before` is
 /// what the thread had used already (a resumed thread reports its total).
-pub(crate) fn interpret(stdout: &str, stderr: &str, exit_code: i32, before: &RunUsage) -> (AppResult<TurnResult>, RunUsage) {
+pub(crate) fn interpret(
+    stdout: &str,
+    stderr: &str,
+    exit_code: i32,
+    before: &RunUsage,
+) -> (AppResult<TurnResult>, RunUsage) {
     let h = Codex;
     let mut acc = RunAcc::default();
     let mut fin: Option<FinalResult> = None;
@@ -798,7 +996,11 @@ pub(crate) fn interpret(stdout: &str, stderr: &str, exit_code: i32, before: &Run
     }
     let Some(mut fin) = fin else {
         let stderr = clean_stderr(stderr);
-        let message = if stderr.is_empty() { format!("codex exited {exit_code} without a result") } else { stderr };
+        let message = if stderr.is_empty() {
+            format!("codex exited {exit_code} without a result")
+        } else {
+            stderr
+        };
         return (Err(AppError::Chat(message)), RunUsage::default());
     };
     fin.usage = minus(fin.usage, before);
@@ -820,7 +1022,10 @@ pub(crate) fn interpret(stdout: &str, stderr: &str, exit_code: i32, before: &Run
 
 /// `$CODEX_HOME` or `~/.codex`.
 fn codex_home() -> Option<PathBuf> {
-    std::env::var_os("CODEX_HOME").map(PathBuf::from).filter(|p| p.is_absolute()).or_else(|| dirs::home_dir().map(|h| h.join(".codex")))
+    std::env::var_os("CODEX_HOME")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .or_else(|| dirs::home_dir().map(|h| h.join(".codex")))
 }
 
 /// The header (first line) of a `rollout-<time>-<id>.jsonl` session log.
@@ -838,7 +1043,9 @@ struct Rollout {
 impl Rollout {
     /// A log some interactive Codex client wrote (not a `codex exec` run, which is no TUI's).
     fn interactive(&self) -> bool {
-        self.originator != "codex_exec" && self.originator != "Codex Desktop" && self.source != "exec"
+        self.originator != "codex_exec"
+            && self.originator != "Codex Desktop"
+            && self.source != "exec"
     }
 }
 
@@ -849,25 +1056,58 @@ fn parse_rollout_meta(first_line: &str) -> Option<Rollout> {
         return None;
     }
     let p = v.get("payload")?;
-    let s = |k: &str| p.get(k).and_then(Value::as_str).unwrap_or_default().to_string();
-    let id = p.get("id").or_else(|| p.get("session_id")).and_then(Value::as_str)?.to_string();
-    Some(Rollout { id, cwd: s("cwd"), originator: s("originator"), source: s("source"), updated: 0 })
+    let s = |k: &str| {
+        p.get(k)
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string()
+    };
+    let id = p
+        .get("id")
+        .or_else(|| p.get("session_id"))
+        .and_then(Value::as_str)?
+        .to_string();
+    Some(Rollout {
+        id,
+        cwd: s("cwd"),
+        originator: s("originator"),
+        source: s("source"),
+        updated: 0,
+    })
 }
 
 /// The header of the log at `path` (read up to 1 MiB of its first line), with its mtime.
 fn read_rollout(path: &Path) -> Option<Rollout> {
     let file = std::fs::File::open(path).ok()?;
-    let mtime = file.metadata().ok()?.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_millis() as i64;
+    let mtime = file
+        .metadata()
+        .ok()?
+        .modified()
+        .ok()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_millis() as i64;
     let mut line = String::new();
-    std::io::BufReader::new(file.take(1 << 20)).read_line(&mut line).ok()?;
-    parse_rollout_meta(&line).map(|r| Rollout { updated: mtime, ..r })
+    std::io::BufReader::new(file.take(1 << 20))
+        .read_line(&mut line)
+        .ok()?;
+    parse_rollout_meta(&line).map(|r| Rollout {
+        updated: mtime,
+        ..r
+    })
 }
 
 /// The newest `limit` `YYYY/MM/DD` directories under `sessions/`, newest first. Walks years, then
 /// months, then days lazily, so an old archive is never listed past the cap.
 fn day_dirs(sessions: &Path, limit: usize) -> Vec<PathBuf> {
     let sub = |p: &Path| -> Vec<PathBuf> {
-        let mut v: Vec<PathBuf> = std::fs::read_dir(p).into_iter().flatten().flatten().map(|e| e.path()).filter(|p| p.is_dir()).collect();
+        let mut v: Vec<PathBuf> = std::fs::read_dir(p)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.is_dir())
+            .collect();
         v.sort();
         v.reverse();
         v
@@ -893,7 +1133,13 @@ const RECENT_DAYS: usize = 7;
 fn recent_rollouts(sessions: &Path, since_ms: i64) -> Vec<Rollout> {
     day_dirs(sessions, RECENT_DAYS)
         .into_iter()
-        .flat_map(|d| std::fs::read_dir(d).into_iter().flatten().flatten().map(|e| e.path()))
+        .flat_map(|d| {
+            std::fs::read_dir(d)
+                .into_iter()
+                .flatten()
+                .flatten()
+                .map(|e| e.path())
+        })
         .filter(|p| p.extension().is_some_and(|e| e == "jsonl"))
         .filter_map(|p| read_rollout(&p))
         .filter(|r| r.updated >= since_ms)
@@ -907,7 +1153,14 @@ const MAX_DAY_DIRS: usize = 400;
 fn find_rollout_path(sessions: &Path, id: &str) -> Option<PathBuf> {
     let suffix = format!("-{id}.jsonl");
     day_dirs(sessions, MAX_DAY_DIRS).into_iter().find_map(|d| {
-        std::fs::read_dir(d).ok()?.flatten().map(|e| e.path()).find(|p| p.file_name().is_some_and(|n| n.to_string_lossy().ends_with(&suffix)))
+        std::fs::read_dir(d)
+            .ok()?
+            .flatten()
+            .map(|e| e.path())
+            .find(|p| {
+                p.file_name()
+                    .is_some_and(|n| n.to_string_lossy().ends_with(&suffix))
+            })
     })
 }
 
@@ -918,11 +1171,19 @@ fn rollout_cache() -> &'static Mutex<HashMap<String, PathBuf>> {
 }
 
 fn cached_rollout_path(sessions: &Path, id: &str) -> Option<PathBuf> {
-    if let Some(p) = rollout_cache().lock().unwrap().get(id).filter(|p| p.is_file()) {
+    if let Some(p) = rollout_cache()
+        .lock()
+        .unwrap()
+        .get(id)
+        .filter(|p| p.is_file())
+    {
         return Some(p.clone());
     }
     let found = find_rollout_path(sessions, id)?;
-    rollout_cache().lock().unwrap().insert(id.to_string(), found.clone());
+    rollout_cache()
+        .lock()
+        .unwrap()
+        .insert(id.to_string(), found.clone());
     Some(found)
 }
 
@@ -944,14 +1205,25 @@ fn read_tail(path: &Path) -> std::io::Result<String> {
 /// that could not be told (no log, unreadable, no `token_count`): zero usage would otherwise look real.
 fn thread_usage(id: &str) -> (RunUsage, Option<String>) {
     let Some(path) = codex_home().and_then(|h| cached_rollout_path(&h.join("sessions"), id)) else {
-        return (RunUsage::default(), Some("usage before this turn unknown: the session log was not found".into()));
+        return (
+            RunUsage::default(),
+            Some("usage before this turn unknown: the session log was not found".into()),
+        );
     };
     match read_tail(&path) {
         Ok(t) => match last_total_usage(&t) {
             Some(u) => (u, None),
-            None => (RunUsage::default(), Some("usage before this turn unknown: no token count in the session log".into())),
+            None => (
+                RunUsage::default(),
+                Some("usage before this turn unknown: no token count in the session log".into()),
+            ),
         },
-        Err(e) => (RunUsage::default(), Some(format!("usage before this turn unknown: the session log is unreadable ({e})"))),
+        Err(e) => (
+            RunUsage::default(),
+            Some(format!(
+                "usage before this turn unknown: the session log is unreadable ({e})"
+            )),
+        ),
     }
 }
 
@@ -997,20 +1269,69 @@ struct Tui {
 /// so `codex exec …` or `codex app-server` is never taken for an interactive session. `resume` and
 /// `fork` are TUIs and handled apart.
 const SUBCOMMANDS: &[&str] = &[
-    "agents", "exec", "e", "review", "login", "logout", "mcp", "mcp-server", "plugin", "app-server", "remote-control",
-    "completion", "update", "doctor", "sandbox", "debug", "apply", "a", "queue", "archive", "delete", "migrate-rollouts",
-    "migrate-nfs-db", "unarchive", "cloud", "exec-server", "features", "help",
+    "agents",
+    "exec",
+    "e",
+    "review",
+    "login",
+    "logout",
+    "mcp",
+    "mcp-server",
+    "plugin",
+    "app-server",
+    "remote-control",
+    "completion",
+    "update",
+    "doctor",
+    "sandbox",
+    "debug",
+    "apply",
+    "a",
+    "queue",
+    "archive",
+    "delete",
+    "migrate-rollouts",
+    "migrate-nfs-db",
+    "unarchive",
+    "cloud",
+    "exec-server",
+    "features",
+    "help",
 ];
 
 /// Flags that take their value as the next argument. Anything else starting with `-` is a switch.
 const VALUE_FLAGS: &[&str] = &[
-    "-c", "--config", "--enable", "--disable", "--remote", "--remote-auth-token-env", "-m", "--model", "--local-provider",
-    "-p", "--profile", "-s", "--sandbox", "-a", "--ask-for-approval", "-C", "--cd", "--add-dir", "--thread-source",
+    "-c",
+    "--config",
+    "--enable",
+    "--disable",
+    "--remote",
+    "--remote-auth-token-env",
+    "-m",
+    "--model",
+    "--local-provider",
+    "-p",
+    "--profile",
+    "-s",
+    "--sandbox",
+    "-a",
+    "--ask-for-approval",
+    "-C",
+    "--cd",
+    "--add-dir",
+    "--thread-source",
     "--cyber-access-program",
 ];
 
 fn looks_like_uuid(s: &str) -> bool {
-    s.len() == 36 && s.bytes().enumerate().all(|(i, b)| if matches!(i, 8 | 13 | 18 | 23) { b == b'-' } else { b.is_ascii_hexdigit() })
+    s.len() == 36
+        && s.bytes().enumerate().all(|(i, b)| {
+            if matches!(i, 8 | 13 | 18 | 23) {
+                b == b'-'
+            } else {
+                b.is_ascii_hexdigit()
+            }
+        })
 }
 
 /// `(session id, --cd directory)` of a codex command line when it is an interactive TUI (no
@@ -1032,7 +1353,10 @@ fn parse_tui_args(argv: &[String]) -> Option<(Option<String>, Option<String>)> {
             "-C" | "--cd" => dir = it.next().map(String::from),
             // `-i` takes several files; with `resume` a uuid after them is still the session.
             "-i" | "--image" => {
-                while it.next_if(|v| !(v.starts_with('-') || resume && looks_like_uuid(v))).is_some() {}
+                while it
+                    .next_if(|v| !(v.starts_with('-') || resume && looks_like_uuid(v)))
+                    .is_some()
+                {}
             }
             _ if VALUE_FLAGS.contains(&a) => {
                 it.next();
@@ -1078,10 +1402,22 @@ fn parse_tuis(
             let (session, dir) = parse_tui_args(&argv)?;
             let base = normalize_path(&cwd_of(pid)?);
             let cwd = dir
-                .map(|d| if d.starts_with('/') { normalize_path(&d) } else { normalize_path(&format!("{base}/{d}")) })
+                .map(|d| {
+                    if d.starts_with('/') {
+                        normalize_path(&d)
+                    } else {
+                        normalize_path(&format!("{base}/{d}"))
+                    }
+                })
                 .filter(|d| is_dir(d))
                 .unwrap_or(base);
-            Some(Tui { pid, tty: (tty != "?" && tty != "??").then(|| tty.to_string()), cwd, session, started_ms })
+            Some(Tui {
+                pid,
+                tty: (tty != "?" && tty != "??").then(|| tty.to_string()),
+                cwd,
+                session,
+                started_ms,
+            })
         })
         .collect()
 }
@@ -1110,7 +1446,10 @@ fn match_tuis(
         waiting_for: None,
         agent_view: None,
         name: titles.get(id).cloned(),
-        cwd: r.map(|r| r.cwd.clone()).filter(|d| !d.is_empty()).unwrap_or_else(|| t.cwd.clone()),
+        cwd: r
+            .map(|r| r.cwd.clone())
+            .filter(|d| !d.is_empty())
+            .unwrap_or_else(|| t.cwd.clone()),
         git_branch: None,
         repo: None,
         tmux: None,
@@ -1134,7 +1473,11 @@ fn match_tuis(
             }
             let found = recent
                 .iter()
-                .filter(|r| r.interactive() && normalize_path(&r.cwd) == t.cwd && r.updated >= t.started_ms - START_SLACK_MS)
+                .filter(|r| {
+                    r.interactive()
+                        && normalize_path(&r.cwd) == t.cwd
+                        && r.updated >= t.started_ms - START_SLACK_MS
+                })
                 .filter(|r| !out.iter().any(|o| o.session_id == r.id))
                 .max_by_key(|r| r.updated);
             if let Some(r) = found {
@@ -1150,8 +1493,16 @@ fn match_tuis(
 fn live_tuis() -> Vec<Tui> {
     let mut ps = Command::new("ps");
     ps.args(["-eo", "pid=,tty=,etime=,args="]);
-    let Some(out) = run_with_timeout(&mut ps, PROBE_TIMEOUT) else { return Vec::new() };
-    parse_tuis(&out, proc_argv, proc_cwd, |d| Path::new(d).is_dir(), now_ms())
+    let Some(out) = run_with_timeout(&mut ps, PROBE_TIMEOUT) else {
+        return Vec::new();
+    };
+    parse_tuis(
+        &out,
+        proc_argv,
+        proc_cwd,
+        |d| Path::new(d).is_dir(),
+        now_ms(),
+    )
 }
 
 /// The working directories of the running Codex TUIs, with no session lookup: what the worktree GC
@@ -1167,9 +1518,13 @@ fn live_sessions_now() -> Vec<AgentSession> {
     if tuis.is_empty() {
         return Vec::new();
     }
-    let Some(home) = codex_home() else { return Vec::new() };
+    let Some(home) = codex_home() else {
+        return Vec::new();
+    };
     let sessions = home.join("sessions");
-    let titles = std::fs::read_to_string(home.join("session_index.jsonl")).map(|t| parse_titles(&t)).unwrap_or_default();
+    let titles = std::fs::read_to_string(home.join("session_index.jsonl"))
+        .map(|t| parse_titles(&t))
+        .unwrap_or_default();
     match_tuis(
         &tuis,
         |since| recent_rollouts(&sessions, since),
@@ -1220,7 +1575,9 @@ mod tests {
     }
 
     fn argv(cmd: &Command) -> Vec<String> {
-        cmd.get_args().map(|a| a.to_string_lossy().into_owned()).collect()
+        cmd.get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect()
     }
 
     fn strs(a: &[&str]) -> Vec<String> {
@@ -1235,9 +1592,19 @@ mod tests {
         assert_eq!(events[0]["events"][0]["type"], "other");
         assert_eq!(events[0]["events"][0]["kind"], "thread.started");
         assert_eq!(events[1]["events"][0]["kind"], "turn.started");
-        assert_eq!(events[2]["events"][0], serde_json::json!({ "type": "text", "text": "ok" }));
+        assert_eq!(
+            events[2]["events"][0],
+            serde_json::json!({ "type": "text", "text": "ok" })
+        );
         let fin = &events[3]["events"][0];
-        assert_eq!((fin["type"].as_str(), fin["ok"].as_bool(), fin["text"].as_str()), (Some("final"), Some(true), Some("")));
+        assert_eq!(
+            (
+                fin["type"].as_str(),
+                fin["ok"].as_bool(),
+                fin["text"].as_str()
+            ),
+            (Some("final"), Some(true), Some(""))
+        );
         assert_eq!(fin["usage"]["input_tokens"], 20832);
         assert_eq!(fin["usage"]["output_tokens"], 5);
         assert_eq!(fin["usage"]["cost_usd"], 0.0);
@@ -1247,10 +1614,24 @@ mod tests {
     fn a_command_is_a_tool_call_then_its_result() {
         let events: Vec<Value> = TOOL.lines().map(norm).collect();
         let call = &events[3]["events"][0];
-        assert_eq!((call["type"].as_str(), call["name"].as_str(), call["id"].as_str()), (Some("tool_call"), Some("command"), Some("item_1")));
+        assert_eq!(
+            (
+                call["type"].as_str(),
+                call["name"].as_str(),
+                call["id"].as_str()
+            ),
+            (Some("tool_call"), Some("command"), Some("item_1"))
+        );
         assert_eq!(call["input"]["command"], "/bin/bash -lc 'cat note.txt'");
         let result = &events[4]["events"][0];
-        assert_eq!((result["type"].as_str(), result["id"].as_str(), result["ok"].as_bool()), (Some("tool_result"), Some("item_1"), Some(true)));
+        assert_eq!(
+            (
+                result["type"].as_str(),
+                result["id"].as_str(),
+                result["ok"].as_bool()
+            ),
+            (Some("tool_result"), Some("item_1"), Some(true))
+        );
         assert_eq!(result["text"], "hello\n");
         assert_eq!(events[5]["events"][0]["text"], "hello");
     }
@@ -1259,17 +1640,29 @@ mod tests {
     fn a_failed_command_is_a_failed_result() {
         let line = r#"{"type":"item.completed","item":{"id":"item_3","type":"command_execution","command":"false","aggregated_output":"","exit_code":1,"status":"failed"}}"#;
         let ev = norm(line);
-        assert_eq!((ev["events"][0]["type"].as_str(), ev["events"][0]["ok"].as_bool()), (Some("tool_result"), Some(false)));
+        assert_eq!(
+            (
+                ev["events"][0]["type"].as_str(),
+                ev["events"][0]["ok"].as_bool()
+            ),
+            (Some("tool_result"), Some(false))
+        );
     }
 
     #[test]
     fn a_file_change_is_a_call_and_a_result_listing_the_paths() {
         let events: Vec<Value> = FILE_CHANGE.lines().map(norm).collect();
         let call = &events[3]["events"][0];
-        assert_eq!((call["type"].as_str(), call["name"].as_str()), (Some("tool_call"), Some("file_change")));
+        assert_eq!(
+            (call["type"].as_str(), call["name"].as_str()),
+            (Some("tool_call"), Some("file_change"))
+        );
         assert_eq!(call["input"]["changes"][0]["kind"], "add");
         let result = &events[4]["events"][0];
-        assert_eq!((result["ok"].as_bool(), result["text"].as_str()), (Some(true), Some("add /work/repo/hi.txt")));
+        assert_eq!(
+            (result["ok"].as_bool(), result["text"].as_str()),
+            (Some(true), Some("add /work/repo/hi.txt"))
+        );
     }
 
     #[test]
@@ -1280,25 +1673,50 @@ mod tests {
         assert_eq!(events[1]["events"][0]["kind"], "error");
         assert_eq!(events[3]["events"][0]["type"], "other");
         let fin = &events[4]["events"][0];
-        assert_eq!((fin["type"].as_str(), fin["ok"].as_bool()), (Some("final"), Some(false)));
-        assert!(fin["text"].as_str().unwrap().contains("not supported"), "{fin}");
+        assert_eq!(
+            (fin["type"].as_str(), fin["ok"].as_bool()),
+            (Some("final"), Some(false))
+        );
+        assert!(
+            fin["text"].as_str().unwrap().contains("not supported"),
+            "{fin}"
+        );
     }
 
     #[test]
     fn unknown_and_unparseable_lines_degrade_to_other() {
         let ev = norm(r#"{"type":"turn.something_new","x":1}"#);
-        assert_eq!((ev["events"][0]["type"].as_str(), ev["events"][0]["kind"].as_str()), (Some("other"), Some("turn.something_new")));
-        let ev = norm(r#"{"type":"item.completed","item":{"id":"i","type":"reasoning","text":"hm"}}"#);
+        assert_eq!(
+            (
+                ev["events"][0]["type"].as_str(),
+                ev["events"][0]["kind"].as_str()
+            ),
+            (Some("other"), Some("turn.something_new"))
+        );
+        let ev =
+            norm(r#"{"type":"item.completed","item":{"id":"i","type":"reasoning","text":"hm"}}"#);
         assert_eq!(ev["events"][0]["kind"], "reasoning");
         let ev = norm("not json");
-        assert_eq!((ev["events"][0]["type"].as_str(), ev["events"][0]["kind"].as_str()), (Some("other"), Some("raw")));
-        assert_eq!(Codex.parse_line("{\"type\":\"turn.started\"}").0, "turn.started");
+        assert_eq!(
+            (
+                ev["events"][0]["type"].as_str(),
+                ev["events"][0]["kind"].as_str()
+            ),
+            (Some("other"), Some("raw"))
+        );
+        assert_eq!(
+            Codex.parse_line("{\"type\":\"turn.started\"}").0,
+            "turn.started"
+        );
         assert_eq!(Codex.parse_line("nope").0, "raw");
     }
 
     #[test]
     fn the_session_id_comes_from_the_first_event() {
-        assert_eq!(Codex.session_of_line(OK.lines().next().unwrap()).as_deref(), Some("01a1c0c8-7a1e-72a3-8ac2-10437c764cba"));
+        assert_eq!(
+            Codex.session_of_line(OK.lines().next().unwrap()).as_deref(),
+            Some("01a1c0c8-7a1e-72a3-8ac2-10437c764cba")
+        );
         assert_eq!(Codex.session_of_line(OK.lines().nth(1).unwrap()), None);
         assert_eq!(Codex.session_of_line("junk"), None);
     }
@@ -1306,7 +1724,15 @@ mod tests {
     #[test]
     fn cached_tokens_are_counted_apart_from_the_input() {
         let u = Codex.step_usage(RESUME.lines().last().unwrap()).unwrap();
-        assert_eq!((u.input_tokens, u.cache_read_tokens, u.output_tokens, u.num_turns), (62752 - 20736, 20736, 87, 1));
+        assert_eq!(
+            (
+                u.input_tokens,
+                u.cache_read_tokens,
+                u.output_tokens,
+                u.num_turns
+            ),
+            (62752 - 20736, 20736, 87, 1)
+        );
         assert!(Codex.step_usage(OK.lines().next().unwrap()).is_none());
     }
 
@@ -1317,19 +1743,39 @@ mod tests {
         let (res, usage) = interpret(TOOL, "", 0, &RunUsage::default());
         let turn = res.unwrap();
         assert_eq!(turn.text, "hello");
-        assert_eq!(turn.session_id.as_deref(), Some("01a1c0c8-adaa-7f93-b946-36ec1d2c8260"));
-        assert_eq!((turn.input_tokens, turn.output_tokens, turn.cost_usd), (41790, 82, 0.0));
-        assert_eq!((usage.input_tokens, usage.output_tokens, usage.num_turns), (41790, 82, 1));
-        assert_eq!(usage.session_id.as_deref(), Some("01a1c0c8-adaa-7f93-b946-36ec1d2c8260"));
+        assert_eq!(
+            turn.session_id.as_deref(),
+            Some("01a1c0c8-adaa-7f93-b946-36ec1d2c8260")
+        );
+        assert_eq!(
+            (turn.input_tokens, turn.output_tokens, turn.cost_usd),
+            (41790, 82, 0.0)
+        );
+        assert_eq!(
+            (usage.input_tokens, usage.output_tokens, usage.num_turns),
+            (41790, 82, 1)
+        );
+        assert_eq!(
+            usage.session_id.as_deref(),
+            Some("01a1c0c8-adaa-7f93-b946-36ec1d2c8260")
+        );
     }
 
     #[test]
     fn a_resumed_turn_is_charged_only_what_it_added() {
-        let before = last_total_usage(&TOKENS.lines().take(2).collect::<Vec<_>>().join("\n")).unwrap();
+        let before =
+            last_total_usage(&TOKENS.lines().take(2).collect::<Vec<_>>().join("\n")).unwrap();
         assert_eq!(before.input_tokens + before.cache_read_tokens, 41790);
         let (res, usage) = interpret(RESUME, "", 0, &before);
         assert!(res.is_ok());
-        assert_eq!((usage.input_tokens, usage.cache_read_tokens, usage.output_tokens), (20962 - 20736, 20736, 5));
+        assert_eq!(
+            (
+                usage.input_tokens,
+                usage.cache_read_tokens,
+                usage.output_tokens
+            ),
+            (20962 - 20736, 20736, 5)
+        );
     }
 
     #[test]
@@ -1349,7 +1795,12 @@ mod tests {
     fn without_a_result_the_cleaned_stderr_is_the_error() {
         let (res, _) = interpret("", NOISE, 1, &RunUsage::default());
         let msg = res.unwrap_err().to_string();
-        assert!(msg.contains("no rollout found") && !msg.contains("rmcp") && !msg.contains("Reading additional"), "{msg}");
+        assert!(
+            msg.contains("no rollout found")
+                && !msg.contains("rmcp")
+                && !msg.contains("Reading additional"),
+            "{msg}"
+        );
         let (res, _) = interpret("", "", 3, &RunUsage::default());
         assert!(res.unwrap_err().to_string().contains("exited 3"));
     }
@@ -1368,7 +1819,10 @@ mod tests {
         }
         let fin = fin.unwrap();
         assert_eq!((fin.is_error, fin.text.as_deref()), (false, Some("hello")));
-        assert_eq!(fin.usage.session_id.as_deref(), Some("01a1c0c8-adaa-7f93-b946-36ec1d2c8260"));
+        assert_eq!(
+            fin.usage.session_id.as_deref(),
+            Some("01a1c0c8-adaa-7f93-b946-36ec1d2c8260")
+        );
         assert_eq!(fin.usage.input_tokens, 41790);
     }
 
@@ -1381,7 +1835,17 @@ mod tests {
         assert_eq!(cmd.get_current_dir(), Some(cwd));
         assert_eq!(
             argv(&cmd),
-            strs(&["exec", "--json", "--skip-git-repo-check", "-c", "approval_policy=\"never\"", "--ephemeral", "--sandbox", "read-only", "-"])
+            strs(&[
+                "exec",
+                "--json",
+                "--skip-git-repo-check",
+                "-c",
+                "approval_policy=\"never\"",
+                "--ephemeral",
+                "--sandbox",
+                "read-only",
+                "-"
+            ])
         );
     }
 
@@ -1402,15 +1866,30 @@ mod tests {
         assert_eq!(sandbox(Access::ReadOnly, &[]).unwrap(), "read-only");
         assert_eq!(sandbox(Access::Edit, &[]).unwrap(), "workspace-write");
         // the profile's sandbox can lower the access-derived mode ...
-        assert_eq!(sandbox(Access::Edit, &sb("read-only")).unwrap(), "read-only");
-        assert_eq!(sandbox(Access::Full, &[full(), sb("workspace-write")].concat()).unwrap(), "workspace-write");
+        assert_eq!(
+            sandbox(Access::Edit, &sb("read-only")).unwrap(),
+            "read-only"
+        );
+        assert_eq!(
+            sandbox(Access::Full, &[full(), sb("workspace-write")].concat()).unwrap(),
+            "workspace-write"
+        );
         // ... and never raise it
-        assert_eq!(sandbox(Access::ReadOnly, &sb("workspace-write")).unwrap(), "read-only");
-        assert_eq!(sandbox(Access::Edit, &[full(), sb("danger-full-access")].concat()).unwrap(), "workspace-write");
+        assert_eq!(
+            sandbox(Access::ReadOnly, &sb("workspace-write")).unwrap(),
+            "read-only"
+        );
+        assert_eq!(
+            sandbox(Access::Edit, &[full(), sb("danger-full-access")].concat()).unwrap(),
+            "workspace-write"
+        );
         // full access means no sandbox: only when the profile says so
         let err = sandbox(Access::Full, &[]).unwrap_err().to_string();
         assert!(err.contains("allow_full"), "{err}");
-        assert_eq!(sandbox(Access::Full, &full()).unwrap(), "danger-full-access");
+        assert_eq!(
+            sandbox(Access::Full, &full()).unwrap(),
+            "danger-full-access"
+        );
     }
 
     #[cfg(unix)]
@@ -1432,12 +1911,30 @@ mod tests {
         symlink(&home, &link).unwrap();
         let s = |p: &Path| p.to_string_lossy().to_string();
 
-        let ok = [s(&wt), s(&repo.join(".git")), s(&plain), format!("{}/./plain", s(&t))];
+        let ok = [
+            s(&wt),
+            s(&repo.join(".git")),
+            s(&plain),
+            format!("{}/./plain", s(&t)),
+        ];
         for v in &ok {
-            for args in [vec!["--add-dir".to_string(), v.clone()], vec![format!("--add-dir={v}")]] {
-                assert!(check_extra(&args, ExtraCheck::Save).is_ok(), "save refused {args:?}");
-                assert!(check_extra(&args, ExtraCheck::Run(&cwd)).is_ok(), "run refused {args:?}");
-                for session in [SessionMode::Ephemeral, SessionMode::New("s"), SessionMode::Resume("01a1c0c8-adaa-7f93-b946-36ec1d2c8260")] {
+            for args in [
+                vec!["--add-dir".to_string(), v.clone()],
+                vec![format!("--add-dir={v}")],
+            ] {
+                assert!(
+                    check_extra(&args, ExtraCheck::Save).is_ok(),
+                    "save refused {args:?}"
+                );
+                assert!(
+                    check_extra(&args, ExtraCheck::Run(&cwd)).is_ok(),
+                    "run refused {args:?}"
+                );
+                for session in [
+                    SessionMode::Ephemeral,
+                    SessionMode::New("s"),
+                    SessionMode::Resume("01a1c0c8-adaa-7f93-b946-36ec1d2c8260"),
+                ] {
                     let mut req = request(&cwd);
                     req.session = session;
                     req.extra_args = args.clone();
@@ -1474,9 +1971,18 @@ mod tests {
             "/private/var/db/x".to_string(),
         ];
         for v in &bad {
-            for args in [vec!["--add-dir".to_string(), v.clone()], vec![format!("--add-dir={v}")]] {
-                assert!(check_extra(&args, ExtraCheck::Save).is_err(), "save accepted {args:?}");
-                for session in [SessionMode::Ephemeral, SessionMode::Resume("01a1c0c8-adaa-7f93-b946-36ec1d2c8260")] {
+            for args in [
+                vec!["--add-dir".to_string(), v.clone()],
+                vec![format!("--add-dir={v}")],
+            ] {
+                assert!(
+                    check_extra(&args, ExtraCheck::Save).is_err(),
+                    "save accepted {args:?}"
+                );
+                for session in [
+                    SessionMode::Ephemeral,
+                    SessionMode::Resume("01a1c0c8-adaa-7f93-b946-36ec1d2c8260"),
+                ] {
                     let mut req = request(&cwd);
                     req.session = session;
                     req.extra_args = args.clone();
@@ -1487,8 +1993,14 @@ mod tests {
         // The working directory and its ancestors are refused at run time only.
         for v in [&cwd, &repo, &t] {
             let args = vec!["--add-dir".to_string(), s(v)];
-            assert!(check_extra(&args, ExtraCheck::Save).is_ok(), "save refused {args:?}");
-            assert!(check_extra(&args, ExtraCheck::Run(&cwd)).is_err(), "run accepted {args:?}");
+            assert!(
+                check_extra(&args, ExtraCheck::Save).is_ok(),
+                "save refused {args:?}"
+            );
+            assert!(
+                check_extra(&args, ExtraCheck::Run(&cwd)).is_err(),
+                "run accepted {args:?}"
+            );
         }
         // A missing value is an error.
         assert!(check_extra(&strs(&["--add-dir"]), ExtraCheck::Save).is_err());
@@ -1521,13 +2033,25 @@ mod tests {
         let phys = fake_home.display().to_string();
         assert!(add_dir_problem(&phys, ExtraCheck::Save, Some(&fake_home)).is_some());
         // Mid-path and `/x/..` forms.
-        for raw in [format!("{}/a/b/../c", t.display()), "/x/..".to_string(), "/..".to_string()] {
-            assert!(add_dir_problem(&raw, ExtraCheck::Save, Some(&fake_home)).is_some(), "{raw}");
+        for raw in [
+            format!("{}/a/b/../c", t.display()),
+            "/x/..".to_string(),
+            "/..".to_string(),
+        ] {
+            assert!(
+                add_dir_problem(&raw, ExtraCheck::Save, Some(&fake_home)).is_some(),
+                "{raw}"
+            );
         }
         // A linked worktree's git dir still passes.
         let wt = t.join("repo/.git/worktrees/x");
         std::fs::create_dir_all(&wt).unwrap();
-        assert!(add_dir_problem(&wt.display().to_string(), ExtraCheck::Save, Some(&fake_home)).is_none());
+        assert!(add_dir_problem(
+            &wt.display().to_string(),
+            ExtraCheck::Save,
+            Some(&fake_home)
+        )
+        .is_none());
     }
 
     #[test]
@@ -1561,7 +2085,10 @@ mod tests {
             &["-c", "\"sandbox_workspace_write\".network_access=true"],
             &["-c", "sandbox_workspace_write . 'network_access'=true"],
             &["-c", "profiles.x.sandbox_mode=\"danger-full-access\""],
-            &["-c", "profiles.\"x\".\"sandbox_mode\"=\"danger-full-access\""],
+            &[
+                "-c",
+                "profiles.\"x\".\"sandbox_mode\"=\"danger-full-access\"",
+            ],
             &["-c", "profile=\"x\""],
             &["-c", "default_permissions=\":workspace\""],
             &["-c", "permissions.x.filesystem.\":root\"=\"write\""],
@@ -1592,22 +2119,41 @@ mod tests {
             &["--cr-allow-full=guess"],
             &["--cr-sandbox=danger-full-access"],
         ];
-        for session in [SessionMode::Ephemeral, SessionMode::Resume("01a1c0c8-adaa-7f93-b946-36ec1d2c8260")] {
+        for session in [
+            SessionMode::Ephemeral,
+            SessionMode::Resume("01a1c0c8-adaa-7f93-b946-36ec1d2c8260"),
+        ] {
             for args in bad {
                 let mut req = request(cwd);
                 req.session = session;
                 req.extra_args = strs(args);
-                let err = command(&req).err().unwrap_or_else(|| panic!("{args:?} was accepted")).to_string();
-                assert!(err.contains("extra_args may not contain"), "{args:?}: {err}");
+                let err = command(&req)
+                    .err()
+                    .unwrap_or_else(|| panic!("{args:?} was accepted"))
+                    .to_string();
+                assert!(
+                    err.contains("extra_args may not contain"),
+                    "{args:?}: {err}"
+                );
             }
         }
         // harmless flags and other config keys still pass
         for ok in [
             &["--color", "never", "-c", "model_verbosity=\"low\""][..],
-            &["-c", "\"model\"=\"o3\"", "--config", " model_reasoning_summary = \"auto\"", "-cmodel_reasoning_effort=\"low\""],
+            &[
+                "-c",
+                "\"model\"=\"o3\"",
+                "--config",
+                " model_reasoning_summary = \"auto\"",
+                "-cmodel_reasoning_effort=\"low\"",
+            ],
             &["--config=personality=\"friendly\""],
         ] {
-            for session in [SessionMode::Ephemeral, SessionMode::New("s"), SessionMode::Resume("01a1c0c8-adaa-7f93-b946-36ec1d2c8260")] {
+            for session in [
+                SessionMode::Ephemeral,
+                SessionMode::New("s"),
+                SessionMode::Resume("01a1c0c8-adaa-7f93-b946-36ec1d2c8260"),
+            ] {
                 let mut req = request(cwd);
                 req.session = session;
                 req.extra_args = strs(ok);
@@ -1641,7 +2187,8 @@ mod tests {
         let mut req = request(cwd);
         req.access = Access::Full;
         // typed by hand in extra_args: refused, not honoured
-        req.extra_args = Codex.settings_args(&serde_json::json!({ "extra_args": ["--cr-allow-full"] }));
+        req.extra_args =
+            Codex.settings_args(&serde_json::json!({ "extra_args": ["--cr-allow-full"] }));
         assert!(command(&req).is_err());
         req.extra_args = Codex.settings_args(&serde_json::json!({ "allow_full": true }));
         assert!(command(&req).is_ok());
@@ -1663,9 +2210,24 @@ mod tests {
         assert_eq!(
             args,
             strs(&[
-                "exec", "--json", "--skip-git-repo-check", "-c", "approval_policy=\"never\"", "--model", "gpt-5.6-sol", "-c",
-                "model_reasoning_effort=\"low\"", "--sandbox", "workspace-write", "--add-dir", "/skills", "--add-dir",
-                "/scratch dir", "--color", "never", "-"
+                "exec",
+                "--json",
+                "--skip-git-repo-check",
+                "-c",
+                "approval_policy=\"never\"",
+                "--model",
+                "gpt-5.6-sol",
+                "-c",
+                "model_reasoning_effort=\"low\"",
+                "--sandbox",
+                "workspace-write",
+                "--add-dir",
+                "/skills",
+                "--add-dir",
+                "/scratch dir",
+                "--color",
+                "never",
+                "-"
             ])
         );
         assert!(!args.contains(&"app-uuid".to_string()));
@@ -1676,7 +2238,9 @@ mod tests {
         let cwd = Path::new("/w");
         let mut req = request(cwd);
         req.extra_dirs = vec![Path::new("/skills")];
-        assert!(!argv(&command(&req).unwrap()).iter().any(|a| a.contains("/skills")));
+        assert!(!argv(&command(&req).unwrap())
+            .iter()
+            .any(|a| a.contains("/skills")));
     }
 
     #[test]
@@ -1690,12 +2254,23 @@ mod tests {
         assert_eq!(
             args,
             strs(&[
-                "exec", "resume", "--json", "--skip-git-repo-check", "-c", "approval_policy=\"never\"", "-c",
-                "sandbox_mode=\"workspace-write\"", "-c", "sandbox_workspace_write.writable_roots=[\"/skills\"]",
-                "01a1c0c8-adaa-7f93-b946-36ec1d2c8260", "-"
+                "exec",
+                "resume",
+                "--json",
+                "--skip-git-repo-check",
+                "-c",
+                "approval_policy=\"never\"",
+                "-c",
+                "sandbox_mode=\"workspace-write\"",
+                "-c",
+                "sandbox_workspace_write.writable_roots=[\"/skills\"]",
+                "01a1c0c8-adaa-7f93-b946-36ec1d2c8260",
+                "-"
             ])
         );
-        assert!(!args.iter().any(|a| a == "--sandbox" || a == "--ephemeral" || a == "--add-dir"));
+        assert!(!args
+            .iter()
+            .any(|a| a == "--sandbox" || a == "--ephemeral" || a == "--add-dir"));
     }
 
     #[test]
@@ -1722,12 +2297,24 @@ mod tests {
         assert!(caps.sessions && caps.resume && caps.streaming && caps.interactive_tui);
         assert!(!caps.fork && !caps.tool_allowlist && !caps.reports_cost && !caps.pins_session_id);
         // the run engine therefore puts the system prompt in front of a streamed run's prompt
-        assert!(!caps.replaces_system_prompt && !crate::ai::opencode::OpenCode.caps().replaces_system_prompt);
-        let needs = |access, tools, tool_allowlist| Needs { access, tools, tool_allowlist };
+        assert!(
+            !caps.replaces_system_prompt
+                && !crate::ai::opencode::OpenCode.caps().replaces_system_prompt
+        );
+        let needs = |access, tools, tool_allowlist| Needs {
+            access,
+            tools,
+            tool_allowlist,
+        };
         check_caps(&Codex, "r", &needs(Access::ReadOnly, true, false)).unwrap();
         check_caps(&Codex, "r", &needs(Access::Full, true, false)).unwrap();
-        let err = check_caps(&Codex, "“Babysit”", &needs(Access::Edit, true, true)).unwrap_err().to_string();
-        assert!(err.contains("a tool allowlist") && err.contains("Codex"), "{err}");
+        let err = check_caps(&Codex, "“Babysit”", &needs(Access::Edit, true, true))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("a tool allowlist") && err.contains("Codex"),
+            "{err}"
+        );
     }
 
     #[test]
@@ -1739,25 +2326,53 @@ mod tests {
             vec![mark_sandbox("workspace-write"), mark_full(), "--color".into(), "never".into()]
         );
         // unknown sandboxes and a false allow_full are ignored
-        assert!(h.settings_args(&serde_json::json!({ "sandbox": "yolo", "allow_full": false })).is_empty());
+        assert!(h
+            .settings_args(&serde_json::json!({ "sandbox": "yolo", "allow_full": false }))
+            .is_empty());
     }
 
     #[test]
     fn models_are_the_listed_ones_best_first() {
         assert_eq!(
             parse_models(MODELS),
-            ["gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol", "gpt-6.1-terra", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5"]
+            [
+                "gpt-6.1-sol",
+                "gpt-6-astra",
+                "gpt-6-sol",
+                "gpt-6-luna",
+                "gpt-5.6-sol",
+                "gpt-6.1-terra",
+                "gpt-5.6-terra",
+                "gpt-5.6-luna",
+                "gpt-5.5"
+            ]
         );
         assert!(parse_models("garbage").is_empty());
     }
 
     #[test]
     fn interactive_argv_resumes_by_id_and_cannot_pin_or_fork() {
-        let opts = |session| Interactive { session, system_prompt_file: None, system_prompt_mode: SystemPromptMode::Append };
-        assert_eq!(Codex.interactive_argv(&opts(SessionMode::Ephemeral)), Some(strs(&["codex"])));
-        assert_eq!(Codex.interactive_argv(&opts(SessionMode::New("app-id"))), Some(strs(&["codex"])));
-        assert_eq!(Codex.interactive_argv(&opts(SessionMode::Resume("abc"))), Some(strs(&["codex", "resume", "abc"])));
-        assert_eq!(Codex.interactive_argv(&opts(SessionMode::Fork("abc"))), None);
+        let opts = |session| Interactive {
+            session,
+            system_prompt_file: None,
+            system_prompt_mode: SystemPromptMode::Append,
+        };
+        assert_eq!(
+            Codex.interactive_argv(&opts(SessionMode::Ephemeral)),
+            Some(strs(&["codex"]))
+        );
+        assert_eq!(
+            Codex.interactive_argv(&opts(SessionMode::New("app-id"))),
+            Some(strs(&["codex"]))
+        );
+        assert_eq!(
+            Codex.interactive_argv(&opts(SessionMode::Resume("abc"))),
+            Some(strs(&["codex", "resume", "abc"]))
+        );
+        assert_eq!(
+            Codex.interactive_argv(&opts(SessionMode::Fork("abc"))),
+            None
+        );
     }
 
     #[test]
@@ -1766,14 +2381,37 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("ctx.md");
         std::fs::write(&file, "- issue 12\nfix it").unwrap();
-        let opts = |session| Interactive { session, system_prompt_file: Some(&file), system_prompt_mode: SystemPromptMode::Append };
+        let opts = |session| Interactive {
+            session,
+            system_prompt_file: Some(&file),
+            system_prompt_mode: SystemPromptMode::Append,
+        };
         let new = opts(SessionMode::New("x"));
-        assert_eq!(Codex.interactive_argv(&new), Some(strs(&["codex", "--", "- issue 12\nfix it"])));
-        assert!(Codex.context_file_note(&new).unwrap().contains("opening prompt"));
+        assert_eq!(
+            Codex.interactive_argv(&new),
+            Some(strs(&["codex", "--", "- issue 12\nfix it"]))
+        );
+        assert!(Codex
+            .context_file_note(&new)
+            .unwrap()
+            .contains("opening prompt"));
         let resume = opts(SessionMode::Resume("abc"));
-        assert_eq!(Codex.interactive_argv(&resume), Some(strs(&["codex", "resume", "abc"])));
-        assert!(Codex.context_file_note(&resume).unwrap().contains("skipped"));
-        assert_eq!(Codex.context_file_note(&Interactive { session: SessionMode::New("x"), system_prompt_file: None, system_prompt_mode: SystemPromptMode::Append }), None);
+        assert_eq!(
+            Codex.interactive_argv(&resume),
+            Some(strs(&["codex", "resume", "abc"]))
+        );
+        assert!(Codex
+            .context_file_note(&resume)
+            .unwrap()
+            .contains("skipped"));
+        assert_eq!(
+            Codex.context_file_note(&Interactive {
+                session: SessionMode::New("x"),
+                system_prompt_file: None,
+                system_prompt_mode: SystemPromptMode::Append
+            }),
+            None
+        );
         std::fs::remove_dir_all(dir).ok();
     }
 
@@ -1782,12 +2420,22 @@ mod tests {
     #[test]
     fn a_log_header_gives_id_cwd_and_who_wrote_it() {
         let tui = parse_rollout_meta(META_TUI).unwrap();
-        assert_eq!((tui.id.as_str(), tui.cwd.as_str(), tui.originator.as_str()), ("01a1c0cb-03cb-76a1-8d70-dfea848b0904", "/work/repo", "codex-tui"));
+        assert_eq!(
+            (tui.id.as_str(), tui.cwd.as_str(), tui.originator.as_str()),
+            (
+                "01a1c0cb-03cb-76a1-8d70-dfea848b0904",
+                "/work/repo",
+                "codex-tui"
+            )
+        );
         assert!(tui.interactive());
         let exec = parse_rollout_meta(META_EXEC).unwrap();
         assert_eq!(exec.originator, "codex_exec");
         assert!(!exec.interactive());
-        assert!(parse_rollout_meta("{\"type\":\"event_msg\"}").is_none() && parse_rollout_meta("junk").is_none());
+        assert!(
+            parse_rollout_meta("{\"type\":\"event_msg\"}").is_none()
+                && parse_rollout_meta("junk").is_none()
+        );
     }
 
     #[test]
@@ -1805,18 +2453,41 @@ mod tests {
     fn only_interactive_codex_commands_are_tuis() {
         let some = |s: &[&str]| parse_tui_args(&a(s));
         assert_eq!(some(&["codex"]), Some((None, None)));
-        assert_eq!(some(&["/home/u/.codex/bin/codex", "-m", "gpt-5.6-sol", "-C", "/x"]), Some((None, Some("/x".into()))));
+        assert_eq!(
+            some(&["/home/u/.codex/bin/codex", "-m", "gpt-5.6-sol", "-C", "/x"]),
+            Some((None, Some("/x".into())))
+        );
         assert_eq!(some(&["codex", "--cd=/y"]), Some((None, Some("/y".into()))));
         // an opening prompt, even one that looks like a subcommand, is not read as one
         assert_eq!(some(&["codex", "fix the exec bug"]), Some((None, None)));
-        assert_eq!(some(&["codex", "-c", "exec=1", "login now"]), Some((None, None)));
+        assert_eq!(
+            some(&["codex", "-c", "exec=1", "login now"]),
+            Some((None, None))
+        );
         let id = "01a1c0cb-03cb-76a1-8d70-dfea848b0904";
-        assert_eq!(some(&["codex", "resume", id]), Some((Some(id.into()), None)));
-        assert_eq!(some(&["codex", "-s", "read-only", "resume", id, "go on"]), Some((Some(id.into()), None)));
+        assert_eq!(
+            some(&["codex", "resume", id]),
+            Some((Some(id.into()), None))
+        );
+        assert_eq!(
+            some(&["codex", "-s", "read-only", "resume", id, "go on"]),
+            Some((Some(id.into()), None))
+        );
         assert_eq!(some(&["codex", "resume", "--last"]), Some((None, None)));
-        assert_eq!(some(&["codex", "resume", "my-thread-name"]), Some((None, None)));
+        assert_eq!(
+            some(&["codex", "resume", "my-thread-name"]),
+            Some((None, None))
+        );
         assert_eq!(some(&["codex", "fork", id]), Some((None, None)));
-        for sub in ["exec", "app-server", "mcp-server", "login", "review", "sandbox", "e"] {
+        for sub in [
+            "exec",
+            "app-server",
+            "mcp-server",
+            "login",
+            "review",
+            "sandbox",
+            "e",
+        ] {
             assert_eq!(some(&["codex", sub]), None, "{sub}");
         }
         assert_eq!(some(&["codex", "-m", "exec", "exec"]), None);
@@ -1828,11 +2499,26 @@ mod tests {
     fn images_and_a_trailing_cd_do_not_hide_the_session_or_directory() {
         let some = |s: &[&str]| parse_tui_args(&a(s));
         let id = "01a1c0cb-03cb-76a1-8d70-dfea848b0904";
-        assert_eq!(some(&["codex", "resume", "-i", "a.png", "b.png", id]), Some((Some(id.into()), None)));
-        assert_eq!(some(&["codex", "resume", "--image", "a.png", id, "-C", "/x"]), Some((Some(id.into()), Some("/x".into()))));
-        assert_eq!(some(&["codex", "-i", "a.png", "-C", "/x"]), Some((None, Some("/x".into()))));
-        assert_eq!(some(&["codex", "do it", "-C", "/x"]), Some((None, Some("/x".into()))));
-        assert_eq!(some(&["codex", "resume", id, "go on", "--cd=/y"]), Some((Some(id.into()), Some("/y".into()))));
+        assert_eq!(
+            some(&["codex", "resume", "-i", "a.png", "b.png", id]),
+            Some((Some(id.into()), None))
+        );
+        assert_eq!(
+            some(&["codex", "resume", "--image", "a.png", id, "-C", "/x"]),
+            Some((Some(id.into()), Some("/x".into())))
+        );
+        assert_eq!(
+            some(&["codex", "-i", "a.png", "-C", "/x"]),
+            Some((None, Some("/x".into())))
+        );
+        assert_eq!(
+            some(&["codex", "do it", "-C", "/x"]),
+            Some((None, Some("/x".into())))
+        );
+        assert_eq!(
+            some(&["codex", "resume", id, "go on", "--cd=/y"]),
+            Some((Some(id.into()), Some("/y".into())))
+        );
         assert_eq!(some(&["codex", "do it", "exec"]), Some((None, None)));
     }
 
@@ -1865,30 +2551,79 @@ mod tests {
             _ => None,
         };
         let tuis = parse_tuis(ps, |_| None, cwd, |d| d == "/work/c/rel", 1_000_000);
-        assert_eq!(tuis.iter().map(|t| t.pid).collect::<Vec<_>>(), [101, 103, 106]);
-        assert_eq!((tuis[0].cwd.as_str(), tuis[0].tty.as_deref(), tuis[0].started_ms, tuis[0].session.clone()), ("/work/a", Some("pts/3"), 1_000_000 - 300_000, None));
-        assert_eq!(tuis[1].session.as_deref(), Some("01a1c0cb-03cb-76a1-8d70-dfea848b0904"));
-        assert_eq!((tuis[2].cwd.as_str(), tuis[2].tty.as_deref()), ("/work/c/rel", None));
+        assert_eq!(
+            tuis.iter().map(|t| t.pid).collect::<Vec<_>>(),
+            [101, 103, 106]
+        );
+        assert_eq!(
+            (
+                tuis[0].cwd.as_str(),
+                tuis[0].tty.as_deref(),
+                tuis[0].started_ms,
+                tuis[0].session.clone()
+            ),
+            ("/work/a", Some("pts/3"), 1_000_000 - 300_000, None)
+        );
+        assert_eq!(
+            tuis[1].session.as_deref(),
+            Some("01a1c0cb-03cb-76a1-8d70-dfea848b0904")
+        );
+        assert_eq!(
+            (tuis[2].cwd.as_str(), tuis[2].tty.as_deref()),
+            ("/work/c/rel", None)
+        );
     }
 
     fn tui(pid: i64, cwd: &str, session: Option<&str>, started_ms: i64) -> Tui {
-        Tui { pid, tty: Some("pts/1".into()), cwd: cwd.into(), session: session.map(String::from), started_ms }
+        Tui {
+            pid,
+            tty: Some("pts/1".into()),
+            cwd: cwd.into(),
+            session: session.map(String::from),
+            started_ms,
+        }
     }
 
     fn rollout(id: &str, cwd: &str, originator: &str, updated: i64) -> Rollout {
-        Rollout { id: id.into(), cwd: cwd.into(), originator: originator.into(), source: "vscode".into(), updated }
+        Rollout {
+            id: id.into(),
+            cwd: cwd.into(),
+            originator: originator.into(),
+            source: "vscode".into(),
+            updated,
+        }
     }
 
     #[test]
     fn a_resumed_tui_is_reported_on_its_id_even_without_a_log() {
         let titles = parse_titles("{\"id\":\"s1\",\"thread_name\":\"Fix the bug\"}");
         let found = rollout("s1", "/work/a", "codex-tui", 5_000);
-        let out = match_tuis(&[tui(1, "/work/a", Some("s1"), 1_000), tui(2, "/work/z", Some("s9"), 2_000)], |_| Vec::new(), |id| (id == "s1").then(|| found.clone()), &titles);
+        let out = match_tuis(
+            &[
+                tui(1, "/work/a", Some("s1"), 1_000),
+                tui(2, "/work/z", Some("s9"), 2_000),
+            ],
+            |_| Vec::new(),
+            |id| (id == "s1").then(|| found.clone()),
+            &titles,
+        );
         assert_eq!(out.len(), 2);
         let s1 = out.iter().find(|s| s.session_id == "s1").unwrap();
-        assert_eq!((s1.harness.as_str(), s1.name.as_deref(), s1.updated_at, s1.pid, s1.live), ("codex", Some("Fix the bug"), 5_000, Some(1), true));
+        assert_eq!(
+            (
+                s1.harness.as_str(),
+                s1.name.as_deref(),
+                s1.updated_at,
+                s1.pid,
+                s1.live
+            ),
+            ("codex", Some("Fix the bug"), 5_000, Some(1), true)
+        );
         let s9 = out.iter().find(|s| s.session_id == "s9").unwrap();
-        assert_eq!((s9.cwd.as_str(), s9.name.clone(), s9.updated_at), ("/work/z", None, 2_000));
+        assert_eq!(
+            (s9.cwd.as_str(), s9.name.clone(), s9.updated_at),
+            ("/work/z", None, 2_000)
+        );
     }
 
     #[test]
@@ -1901,8 +2636,18 @@ mod tests {
             rollout("mine1", "/work/a", "codex-tui", 3_000),
             rollout("mine2", "/work/a", "codex-tui", 4_000),
         ];
-        let out = match_tuis(&[tui(1, "/work/a", None, 2_000)], |_| logs.clone(), |_| None, &HashMap::new());
-        assert_eq!(out.iter().map(|s| s.session_id.as_str()).collect::<Vec<_>>(), ["mine2"]);
+        let out = match_tuis(
+            &[tui(1, "/work/a", None, 2_000)],
+            |_| logs.clone(),
+            |_| None,
+            &HashMap::new(),
+        );
+        assert_eq!(
+            out.iter()
+                .map(|s| s.session_id.as_str())
+                .collect::<Vec<_>>(),
+            ["mine2"]
+        );
         assert_eq!(out[0].updated_at, 4_000);
     }
 
@@ -1910,16 +2655,42 @@ mod tests {
     fn an_unpinned_tui_without_a_log_yet_or_sharing_its_directory_is_left_out() {
         let logs = vec![rollout("x", "/work/a", "codex-tui", 3_000)];
         // started after the only log was written: no session yet
-        assert!(match_tuis(&[tui(1, "/work/a", None, 10_000)], |_| logs.clone(), |_| None, &HashMap::new()).is_empty());
+        assert!(match_tuis(
+            &[tui(1, "/work/a", None, 10_000)],
+            |_| logs.clone(),
+            |_| None,
+            &HashMap::new()
+        )
+        .is_empty());
         // two unpinned TUIs in one directory: can't tell which is whose
-        assert!(match_tuis(&[tui(1, "/work/a", None, 1_000), tui(2, "/work/a", None, 1_500)], |_| logs.clone(), |_| None, &HashMap::new()).is_empty());
+        assert!(match_tuis(
+            &[
+                tui(1, "/work/a", None, 1_000),
+                tui(2, "/work/a", None, 1_500)
+            ],
+            |_| logs.clone(),
+            |_| None,
+            &HashMap::new()
+        )
+        .is_empty());
     }
 
     #[test]
     fn a_log_taken_by_a_pinned_tui_is_not_given_to_an_unpinned_one() {
-        let logs = vec![rollout("pinned", "/work/a", "codex-tui", 4_000), rollout("free", "/work/a", "codex-tui", 3_000)];
+        let logs = vec![
+            rollout("pinned", "/work/a", "codex-tui", 4_000),
+            rollout("free", "/work/a", "codex-tui", 3_000),
+        ];
         let by_id = |id: &str| logs.iter().find(|r| r.id == id).cloned();
-        let out = match_tuis(&[tui(1, "/work/a", Some("pinned"), 1_000), tui(2, "/work/a", None, 2_000)], |_| logs.clone(), by_id, &HashMap::new());
+        let out = match_tuis(
+            &[
+                tui(1, "/work/a", Some("pinned"), 1_000),
+                tui(2, "/work/a", None, 2_000),
+            ],
+            |_| logs.clone(),
+            by_id,
+            &HashMap::new(),
+        );
         let mut ids: Vec<_> = out.iter().map(|s| (s.session_id.as_str(), s.pid)).collect();
         ids.sort();
         assert_eq!(ids, [("free", Some(2)), ("pinned", Some(1))]);
@@ -1931,8 +2702,16 @@ mod tests {
         let day = root.join("2026/11/09");
         std::fs::create_dir_all(&day).unwrap();
         let id = "01a1c0cb-03cb-76a1-8d70-dfea848b0904";
-        std::fs::write(day.join(format!("rollout-2026-11-09T15-51-32-{id}.jsonl")), format!("{META_TUI}{{\"type\":\"event_msg\"}}\n")).unwrap();
-        std::fs::write(day.join("rollout-2026-11-09T15-50-14-xx.jsonl"), "garbage\n").unwrap();
+        std::fs::write(
+            day.join(format!("rollout-2026-11-09T15-51-32-{id}.jsonl")),
+            format!("{META_TUI}{{\"type\":\"event_msg\"}}\n"),
+        )
+        .unwrap();
+        std::fs::write(
+            day.join("rollout-2026-11-09T15-50-14-xx.jsonl"),
+            "garbage\n",
+        )
+        .unwrap();
         std::fs::write(day.join("notes.txt"), "x").unwrap();
         let path = find_rollout_path(&root, id).unwrap();
         let r = read_rollout(&path).unwrap();

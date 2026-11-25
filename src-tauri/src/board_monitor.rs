@@ -74,13 +74,17 @@ pub fn candidates(conn: &Connection) -> AppResult<Vec<Candidate>> {
            AND discarded_at IS NULL AND archived_at IS NULL
            AND auto_merge IS NOT NULL AND review_decision = 'APPROVED'"
     ))?;
-    let cards = stmt.query_map([], BoardCardRow::from_row)?.collect::<rusqlite::Result<Vec<_>>>()?;
+    let cards = stmt
+        .query_map([], BoardCardRow::from_row)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(cards
         .into_iter()
         .filter_map(|c| {
             let (owner, name) = c.repo.split_once('/')?;
-            let babysat =
-                crate::routines::babysit_active(conn, &crate::routines::context::pr_key(owner, name, c.number));
+            let babysat = crate::routines::babysit_active(
+                conn,
+                &crate::routines::context::pr_key(owner, name, c.number),
+            );
             Some(Candidate {
                 owner: owner.to_string(),
                 name: name.to_string(),
@@ -114,7 +118,13 @@ pub fn record(conn: &Connection, actions: &[MonitorAction]) -> AppResult<()> {
     }
     let at = Utc::now().to_rfc3339();
     for a in actions {
-        let line = format!("[monitor] {} {}#{}: {}", a.kind.as_str(), a.repo, a.number, a.detail);
+        let line = format!(
+            "[monitor] {} {}#{}: {}",
+            a.kind.as_str(),
+            a.repo,
+            a.number,
+            a.detail
+        );
         match a.kind {
             ActionKind::Updated | ActionKind::Reran => log::info!("{line}"),
             ActionKind::GaveUp | ActionKind::Error => crate::logging::warn(&line),
@@ -164,9 +174,15 @@ fn act(c: &Candidate, kind: ActionKind, detail: impl Into<String>) -> MonitorAct
     }
 }
 
-fn check(c: &Candidate, floors: &mut CapFloors, reset: bool, actions: &mut Vec<MonitorAction>) -> AppResult<bool> {
+fn check(
+    c: &Candidate,
+    floors: &mut CapFloors,
+    reset: bool,
+    actions: &mut Vec<MonitorAction>,
+) -> AppResult<bool> {
     let repo = format!("{}/{}", c.owner, c.name);
-    if c.merge_state_status.as_deref() == Some("BEHIND") && c.viewer_can_update_branch && !c.stacked {
+    if c.merge_state_status.as_deref() == Some("BEHIND") && c.viewer_can_update_branch && !c.stacked
+    {
         gh::update_pr_branch(&c.owner, &c.name, c.number, false)?;
         actions.push(act(c, ActionKind::Updated, "branch updated"));
         return Ok(true);
@@ -183,10 +199,18 @@ fn check(c: &Candidate, floors: &mut CapFloors, reset: bool, actions: &mut Vec<M
         let floor = floors.get(&run.run_id).copied().unwrap_or(0);
         if attempt - floor < MAX_ATTEMPTS {
             gh::rerun_run(&repo, run.run_id, true)?;
-            actions.push(act(c, ActionKind::Reran, format!("{} (attempt {attempt})", run.workflow)));
+            actions.push(act(
+                c,
+                ActionKind::Reran,
+                format!("{} (attempt {attempt})", run.workflow),
+            ));
             touched = true;
         } else {
-            actions.push(act(c, ActionKind::GaveUp, format!("{} failed {attempt} times", run.workflow)));
+            actions.push(act(
+                c,
+                ActionKind::GaveUp,
+                format!("{} failed {attempt} times", run.workflow),
+            ));
         }
     }
     Ok(touched)
@@ -218,7 +242,10 @@ pub fn run(db: &Db, floors: &mut CapFloors, reset: bool) -> AppResult<Round> {
         }
     }
     record(&db.0.lock().unwrap(), &actions)?;
-    Ok(Round { actions, watched: candidates.len() })
+    Ok(Round {
+        actions,
+        watched: candidates.len(),
+    })
 }
 
 #[cfg(test)]
@@ -242,11 +269,19 @@ mod tests {
             params![id],
         )
         .unwrap();
-        conn.execute("INSERT INTO board_card (id, type, tracked_at) VALUES (?1, 'pr', 'now')", params![id]).unwrap();
+        conn.execute(
+            "INSERT INTO board_card (id, type, tracked_at) VALUES (?1, 'pr', 'now')",
+            params![id],
+        )
+        .unwrap();
     }
 
     fn ids(conn: &Connection) -> Vec<String> {
-        candidates(conn).unwrap().into_iter().map(|c| c.card_id).collect()
+        candidates(conn)
+            .unwrap()
+            .into_iter()
+            .map(|c| c.card_id)
+            .collect()
     }
 
     #[test]
@@ -255,7 +290,14 @@ mod tests {
         seed_pr(&conn, "pr1", 1);
         let found = candidates(&conn).unwrap();
         assert_eq!(found.len(), 1);
-        assert_eq!((found[0].owner.as_str(), found[0].name.as_str(), found[0].number), ("owner", "repo", 1));
+        assert_eq!(
+            (
+                found[0].owner.as_str(),
+                found[0].name.as_str(),
+                found[0].number
+            ),
+            ("owner", "repo", 1)
+        );
         assert_eq!(found[0].merge_state_status.as_deref(), Some("BEHIND"));
         assert!(ci_failing(&found[0]));
     }
@@ -263,15 +305,46 @@ mod tests {
     #[test]
     fn skips_prs_the_monitor_must_not_touch() {
         let conn = open_memory();
-        for (i, id) in ["draft", "closed", "discarded", "archived", "no_auto", "unapproved"].iter().enumerate() {
+        for (i, id) in [
+            "draft",
+            "closed",
+            "discarded",
+            "archived",
+            "no_auto",
+            "unapproved",
+        ]
+        .iter()
+        .enumerate()
+        {
             seed_pr(&conn, id, i as i64 + 10);
         }
-        conn.execute("UPDATE gh_pr SET is_draft = 1 WHERE node_id = 'draft'", []).unwrap();
-        conn.execute("UPDATE gh_pr SET state = 'closed' WHERE node_id = 'closed'", []).unwrap();
-        conn.execute("UPDATE board_card SET discarded_at = 'now' WHERE id = 'discarded'", []).unwrap();
-        conn.execute("UPDATE board_card SET archived_at = 'now' WHERE id = 'archived'", []).unwrap();
-        conn.execute("UPDATE gh_pr_status SET auto_merge_method = NULL WHERE pr_id = 'no_auto'", []).unwrap();
-        conn.execute("UPDATE gh_pr SET review_decision = 'REVIEW_REQUIRED' WHERE node_id = 'unapproved'", []).unwrap();
+        conn.execute("UPDATE gh_pr SET is_draft = 1 WHERE node_id = 'draft'", [])
+            .unwrap();
+        conn.execute(
+            "UPDATE gh_pr SET state = 'closed' WHERE node_id = 'closed'",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE board_card SET discarded_at = 'now' WHERE id = 'discarded'",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE board_card SET archived_at = 'now' WHERE id = 'archived'",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE gh_pr_status SET auto_merge_method = NULL WHERE pr_id = 'no_auto'",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE gh_pr SET review_decision = 'REVIEW_REQUIRED' WHERE node_id = 'unapproved'",
+            [],
+        )
+        .unwrap();
         seed_pr(&conn, "ok", 1);
         assert_eq!(ids(&conn), vec!["ok".to_string()]);
     }
@@ -296,7 +369,10 @@ mod tests {
         let all = recent(&conn, 1000).unwrap();
         assert_eq!(all.len() as i64, LOG_KEEP);
         assert_eq!(all[0].number, LOG_KEEP + 5);
-        assert_eq!((all[0].kind.as_str(), all[0].detail.as_str()), ("reran", "ci (attempt 505)"));
+        assert_eq!(
+            (all[0].kind.as_str(), all[0].detail.as_str()),
+            ("reran", "ci (attempt 505)")
+        );
         assert_eq!(recent(&conn, 3).unwrap().len(), 3);
     }
 
@@ -304,7 +380,8 @@ mod tests {
     fn stacked_prs_are_flagged() {
         let conn = open_memory();
         seed_pr(&conn, "pr1", 1);
-        conn.execute("UPDATE gh_pr_status SET stack_number = 5", []).unwrap();
+        conn.execute("UPDATE gh_pr_status SET stack_number = 5", [])
+            .unwrap();
         assert!(candidates(&conn).unwrap()[0].stacked);
     }
 }

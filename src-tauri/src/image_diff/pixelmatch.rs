@@ -41,8 +41,18 @@ fn rgb2q(r: f64, g: f64, b: f64) -> f64 {
 /// Perceptual distance of pixel `k` of `img1` and pixel `m` of `img2`, negative when `img1` is the
 /// lighter one, as in pixelmatch (`y_only` returns just the brightness difference).
 fn color_delta(img1: &[u8], img2: &[u8], k: usize, m: usize, y_only: bool) -> f64 {
-    let (mut r1, mut g1, mut b1, a1) = (img1[k] as f64, img1[k + 1] as f64, img1[k + 2] as f64, img1[k + 3] as f64);
-    let (mut r2, mut g2, mut b2, a2) = (img2[m] as f64, img2[m + 1] as f64, img2[m + 2] as f64, img2[m + 3] as f64);
+    let (mut r1, mut g1, mut b1, a1) = (
+        img1[k] as f64,
+        img1[k + 1] as f64,
+        img1[k + 2] as f64,
+        img1[k + 3] as f64,
+    );
+    let (mut r2, mut g2, mut b2, a2) = (
+        img2[m] as f64,
+        img2[m + 1] as f64,
+        img2[m + 2] as f64,
+        img2[m + 3] as f64,
+    );
     if a1 == a2 && r1 == r2 && g1 == g2 && b1 == b2 {
         return 0.0;
     }
@@ -129,8 +139,10 @@ fn antialiased(img: &[u8], x1: usize, y1: usize, w: usize, h: usize, img2: &[u8]
     if min == 0.0 || max == 0.0 {
         return false;
     }
-    (has_many_siblings(img, min_xy.0, min_xy.1, w, h) && has_many_siblings(img2, min_xy.0, min_xy.1, w, h))
-        || (has_many_siblings(img, max_xy.0, max_xy.1, w, h) && has_many_siblings(img2, max_xy.0, max_xy.1, w, h))
+    (has_many_siblings(img, min_xy.0, min_xy.1, w, h)
+        && has_many_siblings(img2, min_xy.0, min_xy.1, w, h))
+        || (has_many_siblings(img, max_xy.0, max_xy.1, w, h)
+            && has_many_siblings(img2, max_xy.0, max_xy.1, w, h))
 }
 
 /// Compare two RGBA images of the same `w`×`h`.
@@ -167,7 +179,12 @@ pub fn compare(img1: &[u8], img2: &[u8], w: usize, h: usize) -> Compared {
             }
         }
     }
-    Compared { changed, anti_aliased, diff, mask }
+    Compared {
+        changed,
+        anti_aliased,
+        diff,
+        mask,
+    }
 }
 
 #[cfg(test)]
