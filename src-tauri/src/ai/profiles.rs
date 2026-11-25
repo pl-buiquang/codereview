@@ -214,7 +214,7 @@ pub fn save(conn: &mut Connection, input: AiProfileInput) -> AppResult<AiProfile
     }
     let settings = serde_json::to_string(&input.settings).unwrap_or_else(|_| "{}".into());
     let model = input.model.trim().to_string();
-    let now = chrono::Utc::now().to_rfc3339();
+    let now = crate::clock::now_rfc3339();
 
     let tx = conn.transaction()?;
     let id = match input.id {
@@ -482,7 +482,7 @@ pub fn import_legacy_models(conn: &mut Connection, chat: &str, overview: &str) -
         return Ok(false);
     }
     let (chat, overview) = (chat.trim(), overview.trim());
-    let now = chrono::Utc::now().to_rfc3339();
+    let now = crate::clock::now_rfc3339();
     let tx = conn.transaction()?;
     if !chat.is_empty() {
         tx.execute(

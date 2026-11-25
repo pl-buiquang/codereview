@@ -214,7 +214,7 @@ pub fn unseen_runs(conn: &Connection) -> AppResult<Vec<RoutineRun>> {
 
 /// Mark finished runs seen: one run, or (`None`) every run. Idempotent; active runs are left alone.
 pub fn mark_runs_seen(conn: &Connection, run_id: Option<i64>) -> AppResult<usize> {
-    let now = chrono::Utc::now().to_rfc3339();
+    let now = crate::clock::now_rfc3339();
     let n = conn.execute(
         "UPDATE routine_run SET seen_at = ?1
           WHERE seen_at IS NULL AND ended_at IS NOT NULL AND (?2 IS NULL OR id = ?2)",
@@ -302,7 +302,7 @@ pub fn set_routine_settings(conn: &Connection, s: &RoutineSettings) -> AppResult
 }
 
 pub(super) fn now() -> String {
-    chrono::Utc::now().to_rfc3339()
+    crate::clock::now_rfc3339()
 }
 
 #[derive(Serialize, Clone)]

@@ -199,7 +199,7 @@ fn build(dir: &Path, manifest: &Manifest, raw: RawReport) -> AppResult<Report> {
     }
     Ok(Report {
         summary: raw.summary.trim().to_string(),
-        generated_at: chrono::Utc::now().to_rfc3339(),
+        generated_at: crate::clock::now_rfc3339(),
         findings,
         dropped,
     })

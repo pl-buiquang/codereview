@@ -1,6 +1,5 @@
 use std::path::Path;
 
-use chrono::Utc;
 use rusqlite::{params, Connection, OptionalExtension};
 use tauri::State;
 
@@ -36,7 +35,7 @@ fn upsert_repository(
     remote_name: Option<String>,
     default_branch: Option<String>,
 ) -> AppResult<Repository> {
-    let now = Utc::now().to_rfc3339();
+    let now = crate::clock::now_rfc3339();
     conn.execute(
         "INSERT INTO repository (local_path, remote_owner, remote_name, default_branch, added_at, registered_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?5)
@@ -76,7 +75,7 @@ pub fn add_repository_impl(conn: &Connection, path: &str) -> AppResult<Repositor
                 "UPDATE repository SET local_path = ?1, default_branch = ?2,
                      registered_at = COALESCE(registered_at, ?3)
                  WHERE id = ?4",
-                params![path, default_branch, Utc::now().to_rfc3339(), id],
+                params![path, default_branch, crate::clock::now_rfc3339(), id],
             )?;
             return get_repository(conn, id);
         }
@@ -191,7 +190,7 @@ pub fn link_local_path(repo_id: i64, path: String, db: State<Db>) -> AppResult<R
     let conn = db.0.lock().unwrap();
     conn.execute(
         "UPDATE repository SET local_path = ?1, registered_at = COALESCE(registered_at, ?2) WHERE id = ?3",
-        params![path, Utc::now().to_rfc3339(), repo_id],
+        params![path, crate::clock::now_rfc3339(), repo_id],
     )?;
     get_repository(&conn, repo_id)
 }

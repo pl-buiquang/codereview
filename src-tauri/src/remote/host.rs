@@ -139,7 +139,7 @@ pub fn save(conn: &Connection, input: HostInput) -> AppResult<Host> {
         input.ssh_target.trim().to_string(),
         input.remote_endpoint.trim().to_string(),
     );
-    let now = chrono::Utc::now().to_rfc3339();
+    let now = crate::clock::now_rfc3339();
     let taken = |e: rusqlite::Error| match e {
         rusqlite::Error::SqliteFailure(f, _)
             if f.code == rusqlite::ErrorCode::ConstraintViolation =>
@@ -239,7 +239,7 @@ pub fn delete(conn: &Connection, id: i64) -> AppResult<()> {
 pub fn record_seen(conn: &Connection, id: i64, protocol: i64, version: &str) {
     let _ = conn.execute(
         "UPDATE host SET last_seen = ?2, last_protocol = ?3, last_version = ?4 WHERE id = ?1",
-        params![id, chrono::Utc::now().to_rfc3339(), protocol, version],
+        params![id, crate::clock::now_rfc3339(), protocol, version],
     );
 }
 

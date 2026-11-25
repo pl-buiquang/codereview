@@ -400,7 +400,7 @@ fn run(app: &AppHandle, req: &Request, cancel: &AtomicBool) {
                 pin: inputs.pin,
                 base_sha: inputs.base_sha,
                 head_sha: inputs.head_sha,
-                generated_at: chrono::Utc::now().to_rfc3339(),
+                generated_at: crate::clock::now_rfc3339(),
                 preview_width: PREVIEW_WIDTH,
                 auto: req.auto,
                 files,

@@ -1,7 +1,6 @@
 use std::fs;
 use std::path::Path;
 
-use chrono::Utc;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::Deserialize;
 use tauri::State;
@@ -41,7 +40,7 @@ pub fn export_review_impl(
     fs::write(dest_path, content)?;
     conn.execute(
         "UPDATE review SET last_exported_at = ?1 WHERE id = ?2",
-        params![Utc::now().to_rfc3339(), review_id],
+        params![crate::clock::now_rfc3339(), review_id],
     )?;
     Ok(())
 }
@@ -85,7 +84,7 @@ pub fn export_vscode_review(review_id: i64, db: State<Db>) -> AppResult<String> 
     )?;
     conn.execute(
         "UPDATE review SET last_exported_at = ?1 WHERE id = ?2",
-        params![Utc::now().to_rfc3339(), review_id],
+        params![crate::clock::now_rfc3339(), review_id],
     )?;
     Ok(dest.to_string_lossy().into_owned())
 }
@@ -169,7 +168,7 @@ fn find_or_create_repo(conn: &Connection, label: &str) -> AppResult<i64> {
         if let Some(id) = existing {
             return Ok(id);
         }
-        let ts = Utc::now().to_rfc3339();
+        let ts = crate::clock::now_rfc3339();
         conn.execute(
             "INSERT INTO repository (local_path, remote_owner, remote_name, added_at) VALUES (NULL, ?1, ?2, ?3)",
             params![owner, name, ts],
@@ -186,7 +185,7 @@ fn find_or_create_repo(conn: &Connection, label: &str) -> AppResult<i64> {
     if let Some(id) = existing {
         return Ok(id);
     }
-    let ts = Utc::now().to_rfc3339();
+    let ts = crate::clock::now_rfc3339();
     conn.execute(
         "INSERT INTO repository (local_path, added_at) VALUES (?1, ?2)",
         params![label, ts],
@@ -195,7 +194,7 @@ fn find_or_create_repo(conn: &Connection, label: &str) -> AppResult<i64> {
 }
 
 fn import_review_impl(conn: &Connection, payload: ImportPayload) -> AppResult<Review> {
-    let ts = Utc::now().to_rfc3339();
+    let ts = crate::clock::now_rfc3339();
 
     let repo_id = find_or_create_repo(conn, payload.repo.as_deref().unwrap_or("imported"))?;
 

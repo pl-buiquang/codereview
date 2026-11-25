@@ -496,7 +496,7 @@ impl Defaults {
 
 /// Insert the built-in routines that don't exist yet. Existing rows (possibly edited) are left alone.
 pub fn seed(conn: &Connection) -> AppResult<()> {
-    let now = chrono::Utc::now().to_rfc3339();
+    let now = crate::clock::now_rfc3339();
     for d in DEFAULTS {
         // The old Claude columns are still written (not read) so a rollback keeps working.
         conn.execute(
@@ -687,7 +687,7 @@ pub fn reset(conn: &Connection, id: i64) -> AppResult<Routine> {
             serde_json::to_string(d.allowed_tools).unwrap_or_else(|_| "[]".into()),
             serde_json::to_string(d.extra_args).unwrap_or_else(|_| "[]".into()),
             d.timeout_min,
-            chrono::Utc::now().to_rfc3339(),
+            crate::clock::now_rfc3339(),
             d.kind(),
             access_for_permission_mode(d.permission_mode),
             d.overrides_json(),
@@ -841,7 +841,7 @@ fn check_profile(conn: &Connection, profile_id: Option<i64>) -> AppResult<()> {
 pub fn save(conn: &Connection, input: RoutineInput) -> AppResult<Routine> {
     check_profile(conn, input.profile_id)?;
     let timeout = input.timeout_min.clamp(1, 24 * 60);
-    let now = chrono::Utc::now().to_rfc3339();
+    let now = crate::clock::now_rfc3339();
 
     // System routines: the handler owns everything but the profile, model, timeout and enabled flag.
     if let Some(id) = input.id {
@@ -1035,7 +1035,7 @@ mod tests {
     #[test]
     fn adopts_a_user_made_row_with_a_shipped_key() {
         let conn = open_memory();
-        let now = chrono::Utc::now().to_rfc3339();
+        let now = crate::clock::now_rfc3339();
         conn.execute(
             "INSERT INTO routine (key, name, context_type, prompt_template, system_prompt, needs_worktree, builtin, created_at, updated_at)
              VALUES ('address-small-issue', 'Draft PR (small issue)', 'issue', 'old', 'old text', 0, 0, ?1, ?1)",

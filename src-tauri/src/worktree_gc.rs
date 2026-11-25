@@ -888,7 +888,7 @@ pub fn run(
         started.elapsed().as_millis()
     );
     let report = GcReport {
-        ran_at: chrono::Utc::now().to_rfc3339(),
+        ran_at: crate::clock::now_rfc3339(),
         repos: reports,
         actions,
     };

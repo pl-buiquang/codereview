@@ -2,7 +2,6 @@
 //! rebuild the frontend DTOs, and GC. Callers hold the DB lock; nothing here
 //! touches the network.
 
-use chrono::Utc;
 use rusqlite::{params, Connection, OptionalExtension};
 
 use super::fetch::{Actor, Node};
@@ -476,7 +475,7 @@ pub fn reset(conn: &Connection) -> AppResult<()> {
 /// Delete mirror rows nothing references that haven't synced in 30 days, then
 /// auto-added repositories nothing refers to any more. Returns rows deleted.
 pub fn gc(conn: &Connection) -> AppResult<usize> {
-    let cutoff = (Utc::now() - chrono::Duration::days(GC_AFTER_DAYS)).to_rfc3339();
+    let cutoff = crate::clock::rfc3339(crate::clock::now() - crate::clock::days(GC_AFTER_DAYS));
     let mut n = conn.execute(
         "DELETE FROM gh_pr WHERE fetched_at < ?1
            AND node_id NOT IN (SELECT id FROM inbox_entry)
@@ -631,7 +630,7 @@ mod tests {
         }
         conn.execute(
             "UPDATE gh_pr SET fetched_at = ?1 WHERE node_id = 'PR_fresh'",
-            params![Utc::now().to_rfc3339()],
+            params![crate::clock::now_rfc3339()],
         )
         .unwrap();
         conn.execute(

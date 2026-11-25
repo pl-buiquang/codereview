@@ -138,7 +138,7 @@ fn store_scan(
     prune_others: bool,
 ) -> AppResult<()> {
     let tx = conn.transaction()?;
-    let now = chrono::Utc::now().to_rfc3339();
+    let now = crate::clock::now_rfc3339();
     if prune_others {
         let ids: Vec<i64> = caches.iter().map(|c| c.repo_id).collect();
         let ph = vec!["?"; ids.len()].join(",");
@@ -431,7 +431,7 @@ fn resolve_prs(
     if nodes.is_empty() {
         return (facts(known), refreshed);
     }
-    let ts = chrono::Utc::now().to_rfc3339();
+    let ts = crate::clock::now_rfc3339();
     let written = (|| -> AppResult<()> {
         let mut conn = db.0.lock().unwrap();
         let tx = conn.transaction()?;

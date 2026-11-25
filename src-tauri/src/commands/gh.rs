@@ -20,7 +20,7 @@ pub fn list_prs(repo_id: i64, db: State<Db>) -> AppResult<Vec<gh::PrSummary>> {
 }
 
 fn now() -> String {
-    chrono::Utc::now().to_rfc3339()
+    crate::clock::now_rfc3339()
 }
 
 /// The Review's live fetches land in the mirror too, so Inbox and Board follow.

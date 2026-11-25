@@ -2,7 +2,7 @@
 //! timestamp format of the usage log. Kept free of Tauri so the run engine, the harnesses and
 //! `cr worker` can use it without the app's usage log (`ai_usage`).
 
-use chrono::{DateTime, SecondsFormat, Utc};
+use crate::clock::Timestamp;
 
 /// What a run is for. `feature` is a stable key the Usage section groups by.
 #[derive(Clone)]
@@ -84,10 +84,29 @@ pub struct RunUsage {
 }
 
 /// Fixed-width UTC timestamp, so `started_at` strings compare chronologically.
-pub fn stamp(t: DateTime<Utc>) -> String {
-    t.to_rfc3339_opts(SecondsFormat::Millis, true)
+pub fn stamp(t: Timestamp) -> String {
+    t.strftime("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()
 }
 
 pub fn now_stamp() -> String {
-    stamp(Utc::now())
+    stamp(crate::clock::now())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stamp_is_fixed_width_millis() {
+        let t = |s: &str| s.parse::<Timestamp>().unwrap();
+        assert_eq!(stamp(t("2026-11-25T10:12:23Z")), "2026-11-25T10:12:23.000Z");
+        assert_eq!(
+            stamp(t("2026-11-25T10:12:23.758226Z")),
+            "2026-11-25T10:12:23.758Z"
+        );
+        assert_eq!(
+            stamp(t("2026-11-25T12:12:23.5+02:00")),
+            "2026-11-25T10:12:23.500Z"
+        );
+    }
 }

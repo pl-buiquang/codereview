@@ -202,10 +202,8 @@ pub struct SyncEngine {
 
 /// How long ago an RFC 3339 timestamp was, as an `Instant`.
 fn instant_of(ts: Option<String>) -> Option<Instant> {
-    let at = chrono::DateTime::parse_from_rfc3339(&ts?).ok()?;
-    let ago = (chrono::Utc::now() - at.with_timezone(&chrono::Utc))
-        .to_std()
-        .ok()?;
+    let at = crate::clock::parse_rfc3339(&ts?)?;
+    let ago = crate::clock::age(at, crate::clock::now())?;
     Instant::now().checked_sub(ago)
 }
 
@@ -514,8 +512,7 @@ impl SyncEngine {
                 }
                 Err(e) => {
                     crate::logging::warn(&format!("[sync] monitor failed: {e}"));
-                    self.state().last_error =
-                        Some((e.to_string(), chrono::Utc::now().to_rfc3339()));
+                    self.state().last_error = Some((e.to_string(), crate::clock::now_rfc3339()));
                     self.emit_status();
                     error = Some(e.to_string());
                 }
@@ -661,7 +658,7 @@ impl SyncEngine {
                         "[sync] {:?} {:?} sync failed: {e}",
                         req.scope, req.mode
                     ));
-                    s.last_error = Some((e.to_string(), chrono::Utc::now().to_rfc3339()));
+                    s.last_error = Some((e.to_string(), crate::clock::now_rfc3339()));
                 }
             }
         }

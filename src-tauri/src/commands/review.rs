@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use chrono::Utc;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
 use tauri::State;
@@ -22,7 +21,7 @@ use crate::git;
 use crate::provider::provider_for;
 
 fn now() -> String {
-    Utc::now().to_rfc3339()
+    crate::clock::now_rfc3339()
 }
 
 /// A target with a PR's title and refs read from the mirror; the target's own

@@ -7,7 +7,6 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use chrono::Utc;
 use rusqlite::{params, Connection};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
@@ -143,7 +142,7 @@ pub fn pre_launch(
     match routine.handler.as_deref() {
         Some("overview") => {
             let conn = db.0.lock().unwrap();
-            let (_, ids) = overview::build_snapshot(&board_list_impl(&conn)?, Utc::now());
+            let (_, ids) = overview::build_snapshot(&board_list_impl(&conn)?, crate::clock::now());
             if ids.is_empty() {
                 return Err(AppError::Other("no open cards on the board".into()));
             }
@@ -283,7 +282,7 @@ pub fn prepare(app: &AppHandle, routine: &Routine, run: &RoutineRun) -> AppResul
             let (snapshot, ids) = {
                 let db = app.state::<Db>();
                 let conn = db.0.lock().unwrap();
-                overview::build_snapshot(&board_list_impl(&conn)?, Utc::now())
+                overview::build_snapshot(&board_list_impl(&conn)?, crate::clock::now())
             };
             if ids.is_empty() {
                 return Err(AppError::Other("no open cards on the board".into()));
@@ -406,7 +405,7 @@ pub fn finish(
                        output_tokens = excluded.output_tokens, cost_usd = excluded.cost_usd, card_ids = excluded.card_ids",
                     params![
                         text,
-                        Utc::now().to_rfc3339(),
+                        crate::clock::now_rfc3339(),
                         (!model.is_empty()).then_some(model),
                         ids.len() as i64,
                         usage.input_tokens,

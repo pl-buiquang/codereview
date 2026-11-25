@@ -6,6 +6,7 @@ mod avatar;
 pub mod board;
 pub mod board_monitor;
 pub mod claude_sessions;
+pub mod clock;
 pub mod cmd_deadline;
 pub mod commands;
 mod cr_install;

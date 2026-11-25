@@ -11,8 +11,6 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
 
-use chrono::Utc;
-
 /// Log files roll over to `.old` past this size rather than growing unbounded.
 const MAX_LOG_BYTES: u64 = 5 * 1024 * 1024;
 
@@ -72,7 +70,7 @@ impl log::Log for FileLogger {
         let _ = writeln!(
             file,
             "{} [{}] {}: {}",
-            Utc::now().to_rfc3339(),
+            crate::clock::now_rfc3339(),
             record.level(),
             record.target(),
             record.args()

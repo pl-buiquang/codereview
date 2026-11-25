@@ -5,7 +5,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::OnceLock;
 
-use chrono::{DateTime, Duration, Local, NaiveDateTime, TimeZone, Utc};
+use jiff::{civil, ZonedDateTime};
 use rusqlite::{params, Connection};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -199,29 +199,22 @@ pub struct AiRun {
 }
 
 /// Lower bound (inclusive) of a range; `None` means all time.
-fn range_since(range: &str, now: DateTime<Local>) -> AppResult<Option<DateTime<Local>>> {
+fn range_since(range: &str, now: &ZonedDateTime) -> AppResult<Option<ZonedDateTime>> {
     Ok(Some(match range {
         "all" => return Ok(None),
-        "today" => {
-            let midnight = now
-                .date_naive()
-                .and_hms_opt(0, 0, 0)
-                .expect("valid midnight");
-            // A DST gap can make local midnight nonexistent; fall back to 24h ago.
-            Local
-                .from_local_datetime(&midnight)
-                .earliest()
-                .unwrap_or(now - Duration::hours(24))
-        }
-        "7d" => now - Duration::days(7),
-        "30d" => now - Duration::days(30),
+        // A DST gap at midnight starts the day at the first instant after the gap.
+        "today" => now
+            .start_of_day()
+            .unwrap_or_else(|_| now.saturating_sub(crate::clock::days(1))),
+        "7d" => now.saturating_sub(crate::clock::days(7)),
+        "30d" => now.saturating_sub(crate::clock::days(30)),
         other => return Err(AppError::Other(format!("unknown usage range `{other}`"))),
     }))
 }
 
 /// Lower bound (inclusive) of a range, as a `started_at` stamp; `None` means all time.
-pub fn range_start(range: &str, now: DateTime<Local>) -> AppResult<Option<String>> {
-    Ok(range_since(range, now)?.map(|since| stamp(since.with_timezone(&Utc))))
+pub fn range_start(range: &str, now: &ZonedDateTime) -> AppResult<Option<String>> {
+    Ok(range_since(range, now)?.map(|since| stamp(since.timestamp())))
 }
 
 fn totals_at(r: &rusqlite::Row, i: usize) -> rusqlite::Result<UsageTotals> {
@@ -358,7 +351,7 @@ pub struct SessionUsageSummary {
 /// a cost; it is in range when that summary's local `date` is at or after `since`.
 pub fn session_summary(
     sessions: &HashMap<String, Vec<SessionSummary>>,
-    since: Option<NaiveDateTime>,
+    since: Option<civil::DateTime>,
 ) -> SessionUsageSummary {
     let mut out = SessionUsageSummary::default();
     let mut models: BTreeMap<&str, UsageTotals> = BTreeMap::new();
@@ -370,7 +363,7 @@ pub fn session_summary(
             continue;
         };
         if let Some(since) = since {
-            let at = date.and_then(|d| NaiveDateTime::parse_from_str(d, "%Y-%m-%d %H:%M").ok());
+            let at = date.and_then(|d| civil::DateTime::strptime("%Y-%m-%d %H:%M", d).ok());
             if at.is_none_or(|at| at < since) {
                 continue;
             }
@@ -407,7 +400,7 @@ pub fn session_summary(
 
 #[tauri::command]
 pub fn session_usage_summary(range: String, summary_dir: String) -> AppResult<SessionUsageSummary> {
-    let since = range_since(&range, Local::now())?.map(|d| d.naive_local());
+    let since = range_since(&range, &ZonedDateTime::now())?.map(|d| d.datetime());
     let dir = summary_dir.trim();
     if dir.is_empty() {
         return Ok(SessionUsageSummary::default());
@@ -420,7 +413,7 @@ pub fn session_usage_summary(range: String, summary_dir: String) -> AppResult<Se
 
 #[tauri::command]
 pub fn ai_usage_summary(range: String, db: State<Db>) -> AppResult<AiUsageSummary> {
-    let since = range_start(&range, Local::now())?;
+    let since = range_start(&range, &ZonedDateTime::now())?;
     let conn = db.0.lock().unwrap();
     Ok(summary(&conn, since.as_deref())?)
 }
@@ -432,7 +425,7 @@ pub fn ai_usage_runs(
     limit: Option<i64>,
     db: State<Db>,
 ) -> AppResult<Vec<AiRun>> {
-    let since = range_start(&range, Local::now())?;
+    let since = range_start(&range, &ZonedDateTime::now())?;
     let conn = db.0.lock().unwrap();
     Ok(runs(
         &conn,
@@ -611,17 +604,19 @@ mod tests {
 
     #[test]
     fn range_start_bounds() {
-        let now = Local.with_ymd_and_hms(2026, 10, 20, 15, 30, 0).unwrap();
-        assert_eq!(range_start("all", now).unwrap(), None);
-        let today = range_start("today", now).unwrap().unwrap();
-        let midnight = Local
-            .with_ymd_and_hms(2026, 10, 20, 0, 0, 0)
-            .unwrap()
-            .with_timezone(&Utc);
-        assert_eq!(today, stamp(midnight));
-        let week = range_start("7d", now).unwrap().unwrap();
-        assert_eq!(week, stamp((now - Duration::days(7)).with_timezone(&Utc)));
-        assert!(range_start("yesterday", now).is_err());
+        let local = |h| {
+            civil::date(2026, 10, 20)
+                .at(h, 30 * (h / 15), 0, 0)
+                .to_zoned_datetime(jiff::tz::TimeZone::system())
+                .unwrap()
+        };
+        let now = local(15);
+        assert_eq!(range_start("all", &now).unwrap(), None);
+        let today = range_start("today", &now).unwrap().unwrap();
+        assert_eq!(today, stamp(local(0).timestamp()));
+        let week = range_start("7d", &now).unwrap().unwrap();
+        assert_eq!(week, stamp(now.timestamp() - crate::clock::days(7)));
+        assert!(range_start("yesterday", &now).is_err());
     }
 
     #[test]
@@ -662,7 +657,7 @@ mod tests {
         let all = session_summary(&sessions, None);
         assert_eq!((all.totals.runs, all.totals.cost_usd), (2, 5.0));
         assert_eq!(all.by_model[0].model, "opus");
-        let since = NaiveDateTime::parse_from_str("2026-10-15 00:00", "%Y-%m-%d %H:%M").unwrap();
+        let since = civil::date(2026, 10, 15).at(0, 0, 0, 0);
         let recent = session_summary(&sessions, Some(since));
         assert_eq!(
             (

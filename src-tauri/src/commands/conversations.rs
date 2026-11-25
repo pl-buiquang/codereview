@@ -5,7 +5,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use chrono::{DateTime, Utc};
+use crate::clock::Timestamp;
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
@@ -218,10 +218,8 @@ pub struct ConversationList {
     pub facets: ConversationFacets,
 }
 
-fn ts(s: &str) -> Option<DateTime<Utc>> {
-    DateTime::parse_from_rfc3339(s)
-        .ok()
-        .map(|t| t.with_timezone(&Utc))
+fn ts(s: &str) -> Option<Timestamp> {
+    crate::clock::parse_rfc3339(s)
 }
 
 struct SubjectRow {
@@ -294,7 +292,7 @@ struct Meta {
 
 struct Ctx {
     viewer: Option<String>,
-    baseline: Option<DateTime<Utc>>,
+    baseline: Option<Timestamp>,
     bot_logins: HashSet<String>,
     db_bots: HashSet<String>,
 }
@@ -317,7 +315,7 @@ impl Ctx {
         }
     }
 
-    fn unread(&self, seen: Option<DateTime<Utc>>, metas: &[Meta]) -> usize {
+    fn unread(&self, seen: Option<Timestamp>, metas: &[Meta]) -> usize {
         metas
             .iter()
             .filter(|m| {
@@ -337,7 +335,7 @@ fn facts_of(
     ctx: &Ctx,
     subject_mine: bool,
     subject_involved: bool,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Facts {
     // (author login, bot?, body, review approving?) of every comment, oldest first.
     let comments: Vec<(Option<String>, bool, &str, bool)> = match &c.thread {
@@ -389,7 +387,7 @@ fn facts_of(
         i_commented: comments.iter().any(|x| is_me(&x.0)),
         subject_involved,
         approvals_only: c.kind == "discussion" && !humans.is_empty() && humans.iter().all(|x| x.3),
-        age_days: ts(&c.last_comment_at).map(|t| now.signed_duration_since(t).num_days()),
+        age_days: ts(&c.last_comment_at).map(|t| now.duration_since(t).as_secs() / 86_400),
     }
 }
 
@@ -532,7 +530,7 @@ pub fn list_conversations_impl(
         }
     }
 
-    let now = Utc::now();
+    let now = crate::clock::now();
     let mut rule_hits: HashMap<String, usize> = HashMap::new();
     for c in &mut all {
         let facts = facts_of(
@@ -632,7 +630,7 @@ pub fn set_pinned_impl(
     conn.execute(
         "INSERT INTO conversation_state (id, subject_id, pinned_at) VALUES (?1, ?2, ?3)
          ON CONFLICT(id) DO UPDATE SET pinned_at = excluded.pinned_at",
-        params![id, subject_id, pinned.then(|| Utc::now().to_rfc3339())],
+        params![id, subject_id, pinned.then(crate::clock::now_rfc3339)],
     )?;
     Ok(())
 }
@@ -645,7 +643,7 @@ pub fn set_seen_impl(
 ) -> AppResult<()> {
     let seen_at = seen_at
         .map(str::to_string)
-        .unwrap_or_else(|| Utc::now().to_rfc3339());
+        .unwrap_or_else(crate::clock::now_rfc3339);
     conn.execute(
         "INSERT INTO conversation_state (id, subject_id, last_seen_at) VALUES (?1, ?2, ?3)
          ON CONFLICT(id) DO UPDATE SET last_seen_at = excluded.last_seen_at",
@@ -703,7 +701,7 @@ pub(crate) fn refresh_discussion(app: &AppHandle, db: &Db, subject_id: &str) -> 
             subject_id,
             updated_at.as_deref(),
             &d.into_comments(),
-            &Utc::now().to_rfc3339(),
+            &crate::clock::now_rfc3339(),
         )?;
     }
     crate::commands::gh::notify_mirror(app, subject_id);

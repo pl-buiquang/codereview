@@ -1,7 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
-use chrono::Utc;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -493,7 +492,7 @@ pub struct PlanHunk {
 }
 
 fn now() -> String {
-    Utc::now().to_rfc3339()
+    crate::clock::now_rfc3339()
 }
 
 fn validate_level(level: &str) -> AppResult<()> {

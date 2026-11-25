@@ -287,7 +287,7 @@ impl WorkerDb {
     /// still preparing them. Deletes them and returns their ids so the caller can sweep their scratch.
     pub fn purge_stale_preparing(&self, ttl: Duration) -> Vec<i64> {
         let cutoff = crate::run_usage::stamp(
-            chrono::Utc::now() - chrono::Duration::from_std(ttl).unwrap_or_default(),
+            crate::clock::now() - crate::clock::SignedDuration::try_from(ttl).unwrap_or_default(),
         );
         let conn = self.0.lock().unwrap();
         let ids: Vec<i64> = conn
@@ -547,7 +547,8 @@ impl RunStore for WorkerStore {
     fn active_count(&self) -> AppResult<usize> {
         // A `preparing` row that outlived its request does not take a slot of the queue.
         let cutoff = crate::run_usage::stamp(
-            chrono::Utc::now() - chrono::Duration::from_std(PREPARING_TTL).unwrap_or_default(),
+            crate::clock::now()
+                - crate::clock::SignedDuration::try_from(PREPARING_TTL).unwrap_or_default(),
         );
         let fresh: i64 = self.db.0.lock().unwrap().query_row(
             "SELECT COUNT(*) FROM worker_run WHERE status = 'preparing' AND updated_at >= ?1",
@@ -657,9 +658,9 @@ impl RunStore for WorkerStore {
     /// never while its outbox has unacknowledged ops, so no op is lost.
     fn prune(&self, _keep: i64) {
         let cutoff = crate::run_usage::stamp(
-            chrono::Utc::now()
-                - chrono::Duration::from_std(self.retention)
-                    .unwrap_or_else(|_| chrono::Duration::days(14)),
+            crate::clock::now()
+                - crate::clock::SignedDuration::try_from(self.retention)
+                    .unwrap_or_else(|_| crate::clock::days(14)),
         );
         let _ = self.exec(
             "DELETE FROM worker_run WHERE status NOT IN ('preparing', 'queued', 'running')
@@ -770,7 +771,7 @@ mod tests {
             "a retry still finds its run"
         );
         // 30 days later the first one is past the retention (an unacked op still protects a run)
-        let long_ago = crate::run_usage::stamp(chrono::Utc::now() - chrono::Duration::days(30));
+        let long_ago = crate::run_usage::stamp(crate::clock::now() - crate::clock::days(30));
         db.0.lock()
             .unwrap()
             .execute(

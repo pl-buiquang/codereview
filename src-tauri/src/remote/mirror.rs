@@ -96,7 +96,7 @@ pub fn store_event(conn: &Connection, run_id: i64, e: &StreamEvent) -> bool {
     let inserted = conn
         .execute(
             "INSERT OR IGNORE INTO routine_run_event (run_id, seq, ts, kind, json, norm) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![run_id, e.seq, chrono::Utc::now().to_rfc3339(), e.kind, json, norm],
+            params![run_id, e.seq, crate::clock::now_rfc3339(), e.kind, json, norm],
         )
         .unwrap_or(0)
         > 0;
@@ -157,7 +157,7 @@ pub fn finish_local(
                 "UPDATE routine_run SET status = ?2, ended_at = ?3, result_text = ?4, error = ?5, cost_usd = ?6, num_turns = ?7,
                         session_id = COALESCE(?8, session_id)
                  WHERE id = ?1 AND status IN ('queued', 'running')",
-                params![run_id, status, chrono::Utc::now().to_rfc3339(), (!text.is_empty()).then_some(text), error, usage.cost_usd, usage.num_turns, usage.session_id],
+                params![run_id, status, crate::clock::now_rfc3339(), (!text.is_empty()).then_some(text), error, usage.cost_usd, usage.num_turns, usage.session_id],
             )
             .unwrap_or(0);
         if changed == 0 {
@@ -173,12 +173,8 @@ pub fn finish_local(
     };
     let elapsed = started_at
         .as_deref()
-        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
-        .map(|t| {
-            (chrono::Utc::now() - t.with_timezone(&chrono::Utc))
-                .to_std()
-                .unwrap_or_default()
-        })
+        .and_then(crate::clock::parse_rfc3339)
+        .map(|t| crate::clock::age(t, crate::clock::now()).unwrap_or_default())
         .unwrap_or_default();
     let fin = Finished {
         status,
@@ -471,7 +467,7 @@ mod tests {
         conn.execute(
             "INSERT INTO routine_run (routine_id, context_type, context_key, context_json, status, queued_at, started_at, host_id, remote_run_id)
              VALUES (?1, 'pr', 'a', '{}', 'running', 'n', ?2, 1, ?3)",
-            params![rid, chrono::Utc::now().to_rfc3339(), created.id],
+            params![rid, crate::clock::now_rfc3339(), created.id],
         )
         .unwrap();
         let run_id = conn.last_insert_rowid();

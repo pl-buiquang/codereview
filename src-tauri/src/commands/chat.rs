@@ -1,7 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use chrono::Utc;
 use rusqlite::{params, OptionalExtension};
 use serde::Serialize;
 use tauri::State;
@@ -17,7 +16,7 @@ use crate::run_usage::RunTag;
 use crate::worktree;
 
 fn now() -> String {
-    Utc::now().to_rfc3339()
+    crate::clock::now_rfc3339()
 }
 
 /// Generate a UUID v4 without an external crate. Uses microsecond timestamp +

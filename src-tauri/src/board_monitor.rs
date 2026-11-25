@@ -3,7 +3,6 @@
 //! rerunning failed CI (GitHub does the merge itself). Free of Tauri so the
 //! scheduler and a future `cr` one-shot can both drive it.
 
-use chrono::Utc;
 use rusqlite::{params, Connection};
 use serde::Serialize;
 
@@ -116,7 +115,7 @@ pub fn record(conn: &Connection, actions: &[MonitorAction]) -> AppResult<()> {
     if actions.is_empty() {
         return Ok(());
     }
-    let at = Utc::now().to_rfc3339();
+    let at = crate::clock::now_rfc3339();
     for a in actions {
         let line = format!(
             "[monitor] {} {}#{}: {}",

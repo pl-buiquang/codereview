@@ -3,7 +3,6 @@
 
 use std::collections::HashMap;
 
-use chrono::Utc;
 use rusqlite::{params, params_from_iter, Connection, OptionalExtension};
 use serde::Serialize;
 use tauri::State;
@@ -15,7 +14,7 @@ use crate::inbox::{self, ViewerInfo};
 use crate::mirror::Node;
 
 fn now() -> String {
-    Utc::now().to_rfc3339()
+    crate::clock::now_rfc3339()
 }
 
 // ---------------------------------------------------------------------------
@@ -239,10 +238,8 @@ pub(crate) fn cached_viewer(conn: &Connection) -> Option<ViewerInfo> {
     let cached_at = get_meta(conn, "viewer_cached_at")?;
     let login = get_meta(conn, "viewer_login")?;
     let teams_json = get_meta(conn, "viewer_team_slugs_json")?;
-    let cached_ms = chrono::DateTime::parse_from_rfc3339(&cached_at)
-        .ok()?
-        .timestamp_millis();
-    let now_ms = Utc::now().timestamp_millis();
+    let cached_ms = crate::clock::millis(crate::clock::parse_rfc3339(&cached_at)?);
+    let now_ms = crate::clock::millis(crate::clock::now());
     if now_ms - cached_ms < inbox::VIEWER_TTL_MS {
         let team_slugs: Vec<String> = serde_json::from_str(&teams_json).ok()?;
         Some(ViewerInfo { login, team_slugs })

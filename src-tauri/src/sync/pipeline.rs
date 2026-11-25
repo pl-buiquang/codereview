@@ -6,7 +6,7 @@
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
-use chrono::{DateTime, Utc};
+use crate::clock::{SignedDuration, Timestamp};
 use rusqlite::{params_from_iter, Connection};
 
 use super::{inflight, MirrorUpdated, Mode, Scope, SyncReport, SyncRequest};
@@ -22,11 +22,11 @@ const THREADS_CONCURRENCY: usize = 8;
 const FETCH_CONCURRENCY: usize = 4;
 /// Resolving or unresolving a thread does not bump the PR's `updatedAt`, so an
 /// unchanged PR still gets its threads refetched once this old.
-pub const THREADS_MAX_AGE: chrono::Duration = chrono::Duration::minutes(15);
+pub const THREADS_MAX_AGE: SignedDuration = SignedDuration::from_mins(15);
 const FULL_FETCH_MIN_INTERVAL: Duration = Duration::from_secs(30);
 
 fn now() -> String {
-    Utc::now().to_rfc3339()
+    crate::clock::now_rfc3339()
 }
 
 fn placeholders(n: usize) -> String {
@@ -448,12 +448,12 @@ pub fn threads_need_fetch(
     updated_at: &str,
     has_count: bool,
     fetched_at: Option<&str>,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> bool {
-    let fetched = fetched_at.and_then(|t| DateTime::parse_from_rfc3339(t).ok());
+    let fetched = fetched_at.and_then(crate::clock::parse_rfc3339);
     !has_count
         || stored_updated_at != Some(updated_at)
-        || fetched.is_none_or(|t| now.signed_duration_since(t) >= THREADS_MAX_AGE)
+        || fetched.is_none_or(|t| now.duration_since(t) >= THREADS_MAX_AGE)
 }
 
 /// Fetch the threads facet (and so the pending-threads badge) of the open
@@ -479,7 +479,7 @@ fn sync_threads(db: &Db, scope: Scope, mode: Mode, visible: &HashSet<&str>) -> A
     );
     fn split(
         rows: Vec<Row>,
-        started: DateTime<Utc>,
+        started: Timestamp,
         force_all: bool,
         visible: &HashSet<&str>,
     ) -> Vec<Job> {
@@ -507,7 +507,7 @@ fn sync_threads(db: &Db, scope: Scope, mode: Mode, visible: &HashSet<&str>) -> A
             .collect()
     }
 
-    let started = Utc::now();
+    let started = crate::clock::now();
     let jobs: Vec<Job> = {
         let conn = db.0.lock().unwrap();
         let mut jobs = Vec::new();
@@ -579,7 +579,7 @@ fn sync_threads(db: &Db, scope: Scope, mode: Mode, visible: &HashSet<&str>) -> A
     let n = results.len();
     {
         let conn = db.0.lock().unwrap();
-        let ts = started.to_rfc3339();
+        let ts = crate::clock::rfc3339(started);
         for (id, threads) in results {
             // A failed fetch keeps the previous count rather than writing 0.
             if let Some(threads) = threads {
@@ -596,16 +596,16 @@ fn sync_threads(db: &Db, scope: Scope, mode: Mode, visible: &HashSet<&str>) -> A
 // Notifications + discussions (Inbox Conversations tab)
 // ---------------------------------------------------------------------------
 
-const NOTIFICATIONS_MAX_AGE: chrono::Duration = chrono::Duration::minutes(10);
-const NOTIFICATIONS_FIRST_LOOKBACK: chrono::Duration = chrono::Duration::days(14);
+const NOTIFICATIONS_MAX_AGE: SignedDuration = SignedDuration::from_mins(10);
+const NOTIFICATIONS_FIRST_LOOKBACK: SignedDuration = crate::clock::days(14);
 /// Subjects resolved per run, newest first (the first run can see hundreds).
 const NOTIFICATIONS_RESOLVE_LIMIT: usize = 150;
 const NOTIF_FETCHED_KEY: &str = "notifications_fetched_at";
 
 fn notifications_stale(conn: &Connection) -> bool {
     inbox_cmd::get_meta(conn, NOTIF_FETCHED_KEY)
-        .and_then(|t| DateTime::parse_from_rfc3339(&t).ok())
-        .is_none_or(|t| Utc::now().signed_duration_since(t) >= NOTIFICATIONS_MAX_AGE)
+        .and_then(|t| crate::clock::parse_rfc3339(&t))
+        .is_none_or(|t| crate::clock::now().duration_since(t) >= NOTIFICATIONS_MAX_AGE)
 }
 
 /// `(node id, fetched_at)` of a PR/issue the mirror already knows.
@@ -649,10 +649,10 @@ fn sync_notifications(db: &Db) -> AppResult<Vec<String>> {
             .ok()
             .flatten();
         newest
-            .and_then(|t| DateTime::parse_from_rfc3339(&t).ok())
-            .map(|t| (t - chrono::Duration::minutes(1)).with_timezone(&Utc))
-            .unwrap_or_else(|| Utc::now() - NOTIFICATIONS_FIRST_LOOKBACK)
-            .format("%Y-%m-%dT%H:%M:%SZ")
+            .and_then(|t| crate::clock::parse_rfc3339(&t))
+            .map(|t| t - SignedDuration::from_mins(1))
+            .unwrap_or_else(|| crate::clock::now() - NOTIFICATIONS_FIRST_LOOKBACK)
+            .strftime("%Y-%m-%dT%H:%M:%SZ")
             .to_string()
     };
     let excluded = super::exclude::ExcludedRepos::load(&db.0.lock().unwrap());
@@ -970,8 +970,8 @@ mod tests {
 
     #[test]
     fn threads_skipped_only_when_unchanged_counted_and_recent() {
-        let now = Utc::now();
-        let recent = now.to_rfc3339();
+        let now = crate::clock::now();
+        let recent = crate::clock::rfc3339(now);
         let recent = Some(recent.as_str());
         assert!(!threads_need_fetch(Some("t1"), "t1", true, recent, now));
         assert!(

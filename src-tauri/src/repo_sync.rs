@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use chrono::{DateTime, Utc};
+use crate::clock::Timestamp;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
 
@@ -60,17 +60,15 @@ pub fn state(conn: &Connection, repo_id: i64) -> AppResult<RepoSyncState> {
         .unwrap_or_default())
 }
 
-fn older_than(ts: Option<&str>, age: Duration, now: DateTime<Utc>) -> bool {
-    let Some(at) = ts.and_then(|t| DateTime::parse_from_rfc3339(t).ok()) else {
+fn older_than(ts: Option<&str>, age: Duration, now: Timestamp) -> bool {
+    let Some(at) = ts.and_then(crate::clock::parse_rfc3339) else {
         return true;
     };
-    (now - at.with_timezone(&Utc))
-        .to_std()
-        .is_ok_and(|elapsed| elapsed >= age)
+    crate::clock::age(at, now).is_some_and(|elapsed| elapsed >= age)
 }
 
 /// A fetch can be skipped when the last one succeeded less than `min_interval` ago.
-fn is_fresh(state: &RepoSyncState, min_interval: Duration, now: DateTime<Utc>) -> bool {
+fn is_fresh(state: &RepoSyncState, min_interval: Duration, now: Timestamp) -> bool {
     state.last_fetch_error.is_none()
         && !older_than(state.last_fetch_at.as_deref(), min_interval, now)
 }
@@ -102,7 +100,7 @@ pub fn fetch_repo(db: &Db, repo_id: i64, min_interval: Duration) -> AppResult<Fe
     };
     let path =
         PathBuf::from(path.ok_or_else(|| AppError::Other("fetch requires a local clone".into()))?);
-    let started = Utc::now();
+    let started = crate::clock::now();
     if is_fresh(&before, min_interval, started) {
         log::debug!(target: "fetch", "repo {repo_id}: skipped, last fetch {:?} is fresh (< {min_interval:?})", before.last_fetch_at);
         return Ok(FetchResult {
@@ -125,7 +123,7 @@ pub fn fetch_repo(db: &Db, repo_id: i64, min_interval: Duration) -> AppResult<Fe
         );
     let default_branch = check_branch.then(|| remote_default_branch(&path)).flatten();
 
-    let now = Utc::now().to_rfc3339();
+    let now = crate::clock::now_rfc3339();
     let error = result.as_ref().err().map(|e| e.to_string());
     let conn = db.0.lock().unwrap();
     conn.execute(
@@ -174,7 +172,7 @@ pub fn record_local_change(conn: &Connection, repo_id: i64) -> AppResult<()> {
     conn.execute(
         "INSERT INTO repo_sync (repo_id, last_local_change_at) VALUES (?1, ?2)
          ON CONFLICT(repo_id) DO UPDATE SET last_local_change_at = excluded.last_local_change_at",
-        params![repo_id, Utc::now().to_rfc3339()],
+        params![repo_id, crate::clock::now_rfc3339()],
     )?;
     Ok(())
 }
@@ -242,8 +240,10 @@ mod tests {
 
     #[test]
     fn freshness_requires_recent_success() {
-        let now = Utc::now();
-        let recent = Some((now - chrono::Duration::seconds(10)).to_rfc3339());
+        let now = crate::clock::now();
+        let recent = Some(crate::clock::rfc3339(
+            now - crate::clock::SignedDuration::from_secs(10),
+        ));
         let min = Duration::from_secs(60);
         let ok = RepoSyncState {
             last_fetch_at: recent.clone(),

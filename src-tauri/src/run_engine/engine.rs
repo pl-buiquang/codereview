@@ -417,12 +417,8 @@ impl RunEngine {
             let spent = run
                 .started_at
                 .as_deref()
-                .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
-                .and_then(|t| {
-                    (chrono::Utc::now() - t.with_timezone(&chrono::Utc))
-                        .to_std()
-                        .ok()
-                })
+                .and_then(crate::clock::parse_rfc3339)
+                .and_then(|t| crate::clock::age(t, crate::clock::now()))
                 .unwrap_or_default();
             let left = timeout.saturating_sub(spent);
             self.inner.lock().unwrap().live.insert(

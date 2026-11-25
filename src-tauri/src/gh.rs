@@ -1725,8 +1725,8 @@ fn check_bucket(state: Option<&str>) -> CheckBucket {
 }
 
 fn duration_secs(start: Option<&str>, end: Option<&str>) -> Option<i64> {
-    let parse = |s: &str| chrono::DateTime::parse_from_rfc3339(s).ok();
-    let secs = (parse(end?)? - parse(start?)?).num_seconds();
+    let parse = crate::clock::parse_rfc3339;
+    let secs = parse(end?)?.duration_since(parse(start?)?).as_secs();
     (secs >= 0).then_some(secs)
 }
 

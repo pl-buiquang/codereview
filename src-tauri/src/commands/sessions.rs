@@ -220,7 +220,7 @@ pub async fn generate_live_session_summary(
             .into_iter()
             .find(|s| s.session_id == session_id)
             .ok_or_else(|| AppError::Other("this session is not running".into()))?;
-        let warm = chrono::Utc::now().timestamp_millis() - session.updated_at < FORK_MAX_AGE_MS;
+        let warm = crate::clock::millis(crate::clock::now()) - session.updated_at < FORK_MAX_AGE_MS;
         if fork && warm {
             if let Ok(turn) = run_fork_summary(harness, &session, &instructions) {
                 return Ok((turn, "fork", session.session_id));
@@ -232,7 +232,7 @@ pub async fn generate_live_session_summary(
     .await
     .map_err(|e| AppError::Other(format!("summary task failed: {e}")))??;
     let (title, body) = session_summaries::split_title(&turn.text);
-    let generated_at = chrono::Utc::now().to_rfc3339();
+    let generated_at = crate::clock::now_rfc3339();
     let model = (mode == "extract" && !stored_model.is_empty()).then_some(stored_model);
     let conn = db.0.lock().unwrap();
     conn.execute(

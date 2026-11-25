@@ -1667,7 +1667,9 @@ mod tests {
             .unwrap();
         std::fs::create_dir_all(srv.state.scratch(stale)).unwrap();
         std::fs::write(srv.state.scratch(stale).join("x"), "x").unwrap();
-        let old = crate::run_usage::stamp(chrono::Utc::now() - chrono::Duration::minutes(10));
+        let old = crate::run_usage::stamp(
+            crate::clock::now() - crate::clock::SignedDuration::from_mins(10),
+        );
         srv.state
             .db
             .0

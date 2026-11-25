@@ -54,12 +54,9 @@ fn progress(conn: &Connection, run_id: i64, op_id: &str, retry_after: Duration) 
         Ok(Some((true, _, _))) => Progress::Applied,
         Ok(Some((false, attempts, _))) if attempts >= MAX_ATTEMPTS => Progress::GivenUp,
         Ok(Some((false, _, at))) => {
-            let last = chrono::DateTime::parse_from_rfc3339(&at)
-                .map(|t| t.with_timezone(&chrono::Utc))
-                .unwrap_or_default();
-            let due = (chrono::Utc::now() - last)
-                .to_std()
-                .map_or(true, |age| age >= retry_after);
+            let last = crate::clock::parse_rfc3339(&at).unwrap_or_default();
+            let due =
+                crate::clock::age(last, crate::clock::now()).is_none_or(|age| age >= retry_after);
             Progress::Failing { due }
         }
         Err(e) => {
@@ -71,7 +68,7 @@ fn progress(conn: &Connection, run_id: i64, op_id: &str, retry_after: Duration) 
 }
 
 fn record(conn: &Connection, run_id: i64, op_id: &str, result: &AppResult<()>) {
-    let now = chrono::Utc::now().to_rfc3339();
+    let now = crate::clock::now_rfc3339();
     let written = match result {
         Ok(()) => conn.execute(
             "INSERT INTO remote_applied_op (run_id, op_id, applied_at, error, attempts) VALUES (?1, ?2, ?3, NULL, 1)

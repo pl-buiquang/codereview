@@ -4,7 +4,6 @@
 
 use std::collections::HashMap;
 
-use chrono::Utc;
 use rusqlite::{params, Connection, OptionalExtension};
 use tauri::State;
 
@@ -15,7 +14,7 @@ use crate::error::{AppError, AppResult};
 use crate::mirror::{self, Node};
 
 fn now() -> String {
-    Utc::now().to_rfc3339()
+    crate::clock::now_rfc3339()
 }
 
 // ---------------------------------------------------------------------------
@@ -710,7 +709,7 @@ pub fn board_unlink(issue_id: String, pr_id: String, db: State<Db>) -> AppResult
 /// Archive (purge) Done cards whose PR closed/merged more than `older_than_days`
 /// ago. Archiving is permanent in v1 — there is no restore UI yet.
 pub fn board_archive_done_impl(conn: &Connection, older_than_days: i64) -> AppResult<usize> {
-    let cutoff = (Utc::now() - chrono::Duration::days(older_than_days)).to_rfc3339();
+    let cutoff = crate::clock::rfc3339(crate::clock::now() - crate::clock::days(older_than_days));
     let n = conn.execute(
         &format!(
             "UPDATE board_card SET archived_at = ?1 WHERE id IN (

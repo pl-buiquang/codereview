@@ -3,7 +3,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use chrono::{DateTime, Utc};
+use crate::clock::Timestamp;
 use rusqlite::{Connection, OptionalExtension};
 use serde::Serialize;
 use tauri::{Manager, State};
@@ -25,10 +25,8 @@ pub struct BoardOverview {
     pub cost_usd: Option<f64>,
 }
 
-fn days_since(ts: &str, now: DateTime<Utc>) -> Option<i64> {
-    DateTime::parse_from_rfc3339(ts)
-        .ok()
-        .map(|t| (now - t.with_timezone(&Utc)).num_days().max(0))
+fn days_since(ts: &str, now: Timestamp) -> Option<i64> {
+    crate::clock::parse_rfc3339(ts).map(|t| (now.duration_since(t).as_secs() / 86_400).max(0))
 }
 
 fn short_repo(repo: &str) -> &str {
@@ -45,7 +43,7 @@ fn clip(s: &str, max: usize) -> String {
 }
 
 /// One line per open card, grouped by repo; returns (snapshot, open card ids).
-pub fn build_snapshot(cards: &[BoardCardWithExtras], now: DateTime<Utc>) -> (String, Vec<String>) {
+pub fn build_snapshot(cards: &[BoardCardWithExtras], now: Timestamp) -> (String, Vec<String>) {
     let number_by_id: HashMap<&str, i64> = cards
         .iter()
         .map(|c| (c.card.id.as_str(), c.card.number))
@@ -162,7 +160,7 @@ pub fn build_snapshot(cards: &[BoardCardWithExtras], now: DateTime<Utc>) -> (Str
 
     let mut out = format!(
         "NOW {} · {} open cards · {} repos\n",
-        now.format("%Y-%m-%d"),
+        now.strftime("%Y-%m-%d"),
         open_ids.len(),
         by_repo.len()
     );
