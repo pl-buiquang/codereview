@@ -37,6 +37,9 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
+    /// Print this cr's version and the database it resolves (`--db`, else `CODEREVIEW_DB`, else
+    /// the app-data default), without opening it
+    Info,
     /// List reviews, optionally filtered by repo
     List {
         /// Filter to a specific repository ID
@@ -633,6 +636,11 @@ fn main() {
     codereview_lib::path_env::ensure_login_path();
     tools::init();
 
+    if let Cmd::Info = cli.cmd {
+        print_info(cli.db.as_deref(), cli.json);
+        return;
+    }
+
     // Inside a remote run `cr` never touches a database: writes go to the run's outbox and reads
     // come from its context snapshot (ADR 0007).
     if let Some(remote) = RemoteRun::from_env() {
@@ -839,8 +847,43 @@ fn run_remote(remote: &RemoteRun, name: &str, cmd: Cmd, json: bool) -> AppResult
     }
 }
 
+/// `cr info`: the version and the database this invocation would use, and why.
+fn print_info(db_flag: Option<&str>, json: bool) {
+    // clap folds CODEREVIEW_DB into `--db`; tell the two apart for the report.
+    let env_db = std::env::var("CODEREVIEW_DB").ok();
+    let source = match (db_flag, &env_db) {
+        (Some(f), Some(e)) if f == e => "CODEREVIEW_DB",
+        (Some(_), _) => "--db",
+        (None, _) => "default",
+    };
+    let db = resolve_db_path(db_flag);
+    let build = if cfg!(debug_assertions) {
+        "debug"
+    } else {
+        "release"
+    };
+    if json {
+        let v = serde_json::json!({
+            "version": env!("CODEREVIEW_VERSION"),
+            "build": build,
+            "db": db,
+            "db_source": source,
+            "db_exists": db.exists(),
+        });
+        println!("{v}");
+    } else {
+        println!("cr {} ({build} build)", env!("CODEREVIEW_VERSION"));
+        println!(
+            "db: {} ({source}{})",
+            db.display(),
+            if db.exists() { "" } else { ", not created yet" }
+        );
+    }
+}
+
 fn run(cmd: Cmd, json: bool, db: &Db) -> AppResult<()> {
     match cmd {
+        Cmd::Info => unreachable!("handled before the database is opened"),
         #[cfg(all(feature = "worker", unix))]
         Cmd::Worker(_) => unreachable!("handled before the database is opened"),
         Cmd::Notify { .. } => {
