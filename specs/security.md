@@ -32,9 +32,9 @@ Implemented for 0.1.2:
   dependencies, audits the Rust lockfile with warnings treated as failures, and
   scans full fetched Git history with redacted Gitleaks output. Scanner failures
   fail the workflow; they are not treated as clean results.
-- Only the two named GTK3 advisories below, and the yanked-crate check (see
-  "yanked zip"), are temporarily excepted. CI refuses to use these exceptions
-  after 2026-12-09 until they are reviewed explicitly.
+- Only the GTK3 advisories and the lockfile-only `chrono` advisory below are
+  temporarily excepted. CI refuses to use these exceptions after 2026-12-09
+  until they are reviewed explicitly.
 - Dependabot checks npm, Cargo, and Actions weekly. Coupled React and Vitest
   packages are grouped. Updates still require review and passing CI.
 - Third-party Actions are pinned to commit SHAs; Gitleaks is pinned to a release
@@ -150,28 +150,22 @@ gate when both exceptions are gone; any extension must update the rationale and
 deadline here, in the audit config, and in the security workflow together. New
 advisories must fail CI rather than being folded into these exceptions.
 
-## P2: re-enable the yanked-crate check (zip)
+## P2: lockfile-only `chrono` (RUSTSEC-2026-0543)
 
 Status: open. Review deadline: **2026-12-09**.
 
-Every `zip` 4.x and 5.x release is yanked, and `tauri-plugin-updater` (2.14, the
-latest 2.x) requires `zip ^4` for Windows `.zip` and Linux AppImage update
-extraction. No compatible non-yanked version exists, and cargo-audit can't
-exempt a single crate, so `[yanked] enabled = false` is set in `.cargo/audit.toml`.
-RustSec advisories are still enforced, except RUSTSEC-2026-0367/0368/0369/0429 (`zip`
-4.6.1 `extract()` issues, fixed only in zip >=9): the updater is the sole consumer
-and only extracts archives from our own minisign-verified releases. Same deadline.
+`chrono` is flagged unmaintained, with no patched version. The app replaced it
+with `jiff` (`src-tauri/src/clock.rs`), and `cargo tree -i chrono --target all
+--all-features` finds no path to it, so it is not compiled. It stays in
+`Cargo.lock` only as an optional dependency of `serde_with`, reached through
+`tauri-utils`, and `cargo audit` reads the lockfile. Remove the exception once
+`chrono` drops out of `Cargo.lock`.
 
-GitHub Dependabot alerts #57 (critical, GHSA-m665-v7pm-7grj, zip cloaking), #58 and
-#59 (zip <9) are the same class and were dismissed as tolerable risk on 2026-10-31.
-Reachability: `zip` is compiled only on Windows (updater `extract_zip`), runs only after
-the minisign signature check, and our releases ship `x64-setup.exe`, not a `.zip`. An
-attacker would need the updater signing key, which already allows shipping any
-installer. Dependabot alert #54 (glib 0.18.5, RUSTSEC-2024-0429) is dismissed for the
-GTK3 pin documented above. Re-check all four when the review deadline arrives.
+## Resolved: yanked `zip` (2026-11-25)
 
-Remove the `[yanked]` section once the updater moves to a non-yanked `zip`
-(`cargo update -p tauri-plugin-updater`, then check `cargo audit`).
+`tauri-plugin-updater` 2.14.1 moved to `zip` 9, which fixed
+RUSTSEC-2026-0367/0368/0369/0429/0545/0548. Those exceptions were removed and the
+yanked-crate check is enabled again.
 
 ## P2: signing and release verification
 
