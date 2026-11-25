@@ -23,6 +23,17 @@ pub fn log_filename() -> &'static str {
     }
 }
 
+/// The app-data directory name: the bundle identifier, with the `.dev` suffix
+/// `pnpm tauri dev` overlays (`tauri.dev.conf.json`) in a debug build, so a
+/// debug `cr` finds the same database as the dev app.
+fn app_dir_name() -> &'static str {
+    if cfg!(debug_assertions) {
+        "com.codereview.app.dev"
+    } else {
+        "com.codereview.app"
+    }
+}
+
 pub fn resolve_db_path(cli_override: Option<&str>) -> PathBuf {
     if let Some(p) = cli_override {
         return PathBuf::from(p);
@@ -36,7 +47,9 @@ pub fn resolve_db_path(cli_override: Option<&str>) -> PathBuf {
 #[cfg(target_os = "macos")]
 pub fn app_data_dir() -> PathBuf {
     let home = std::env::var("HOME").expect("HOME not set");
-    PathBuf::from(home).join("Library/Application Support/com.codereview.app")
+    PathBuf::from(home)
+        .join("Library/Application Support")
+        .join(app_dir_name())
 }
 
 #[cfg(target_os = "linux")]
@@ -45,11 +58,11 @@ pub fn app_data_dir() -> PathBuf {
         let home = std::env::var("HOME").expect("HOME not set");
         format!("{home}/.local/share")
     });
-    PathBuf::from(data).join("com.codereview.app")
+    PathBuf::from(data).join(app_dir_name())
 }
 
 #[cfg(target_os = "windows")]
 pub fn app_data_dir() -> PathBuf {
     let appdata = std::env::var("APPDATA").expect("APPDATA not set");
-    PathBuf::from(appdata).join("com.codereview.app")
+    PathBuf::from(appdata).join(app_dir_name())
 }

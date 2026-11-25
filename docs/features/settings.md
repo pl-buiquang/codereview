@@ -123,7 +123,7 @@ One SQLite database in the OS app-data directory, shared by the app and the [`cr
 | Linux | `$XDG_DATA_HOME/com.codereview.app/` (default `~/.local/share/com.codereview.app/`) |
 | Windows | `%APPDATA%\com.codereview.app\` |
 
-- Release builds use `codereview.db` (and `codereview.log`); debug builds, including `pnpm tauri dev`, use `codereview-dev.db` (and `codereview-dev.log`) so development never touches your real data. The dev app also has its own bundle identifier (`com.codereview.app.dev`), and the app resolves its data directory from that identifier, so the dev database sits in `com.codereview.app.dev/`, not beside the release one.
+- Release builds use `codereview.db` (and `codereview.log`); debug builds, including `pnpm tauri dev`, use `codereview-dev.db` (and `codereview-dev.log`) so development never touches your real data. The dev app also has its own bundle identifier (`com.codereview.app.dev`), and the app resolves its data directory from that identifier, so the dev database sits in `com.codereview.app.dev/`, not beside the release one. A debug `cr` (`src-tauri/target/debug/cr`) resolves the same `com.codereview.app.dev/` directory.
 - `cr` always looks in `com.codereview.app/` (use `--db <path>` or `CODEREVIEW_DB` to point it at another file, e.g. the dev database).
 - `settings.json` (the preferences mirror) lives in the same directory as the app's database.
 - Schema: `repository → target (local | github_pr) → review → comment`; GitHub facts live in a separate mirror. Migrations are append-only.

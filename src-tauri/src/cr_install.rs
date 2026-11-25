@@ -60,9 +60,15 @@ impl CrInstallResult {
 /// app never downgrades it). A sidecar whose version differs from this app's is
 /// never copied.
 ///
-/// Silent no-op when the sidecar is not bundled (dev mode) or already installed.
+/// Silent no-op in debug builds, when the sidecar is not bundled, or when already installed.
 /// Returns Some(result) when there is something to tell the user.
 pub fn maybe_install() -> Option<CrInstallResult> {
+    // A debug build (`pnpm tauri dev`) has cargo's own debug `cr` next to it in
+    // target/debug, which is not a bundled sidecar: copying it would replace the
+    // user's `cr` with a dev build that reads the dev database.
+    if cfg!(debug_assertions) {
+        return None;
+    }
     let exe = std::env::current_exe().ok()?;
     let bin_dir = exe.parent()?;
 

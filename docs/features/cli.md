@@ -24,7 +24,7 @@ The app bundles `cr` as a sidecar and installs it on launch ([`cr_install.rs`](.
 2. `~/.cargo/bin` (or `$CARGO_HOME/bin`) if it exists;
 3. `~/.local/bin/cr` (macOS/Linux; may need adding to `PATH`) or `%LOCALAPPDATA%\CodeReview\bin\cr.exe` (Windows).
 
-Versions are compared with `cr --version`. The copy is skipped when the installed `cr` reports the same version, or a newer one, so launching an older app never downgrades it. A sidecar whose version differs from the app's own is never copied: the app shows a "reinstall the app" toast instead. Nothing happens in dev builds (no sidecar). Every install, update or skip-with-reason is shown as a toast and logged to `codereview.log`.
+Versions are compared with `cr --version`. The copy is skipped when the installed `cr` reports the same version, or a newer one, so launching an older app never downgrades it. A sidecar whose version differs from the app's own is never copied: the app shows a "reinstall the app" toast instead. Nothing happens in debug builds (`pnpm tauri dev`): cargo's debug `cr` sits next to the dev app but is not a sidecar, and is never copied. Every install, update or skip-with-reason is shown as a toast and logged to `codereview.log`.
 
 From a source checkout instead:
 
