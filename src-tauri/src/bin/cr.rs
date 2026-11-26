@@ -6,7 +6,9 @@ use std::sync::Mutex;
 use clap::{Parser, Subcommand};
 
 use codereview_lib::board;
-use codereview_lib::commands::{board as board_cmd, export, focus, inbox, repo, review};
+use codereview_lib::commands::{
+    board as board_cmd, export, focus, inbox, repo, review, stack_rebase as stack_cmd,
+};
 use codereview_lib::db::{self, Db};
 use codereview_lib::db_path::resolve_db_path;
 use codereview_lib::error::{AppError, AppResult};
@@ -129,6 +131,11 @@ enum Cmd {
         #[command(subcommand)]
         action: BoardAction,
     },
+    /// PR stack operations
+    Stack {
+        #[command(subcommand)]
+        action: StackAction,
+    },
     /// Sync the GitHub mirror (Inbox + Board): discovery, then refetch what changed
     Sync {
         /// Refetch everything, ignoring change keys; also fetches every local clone
@@ -165,6 +172,22 @@ struct WorkerArgs {
     /// Show the unit and whether the daemon answers
     #[arg(long)]
     status: bool,
+}
+
+#[derive(Subcommand)]
+enum StackAction {
+    /// Rebase a PR's whole stack onto its trunk (children onto their updated parents) and push it
+    /// atomically; refuses, changing nothing, on a conflict or a branch it can't move safely
+    Restack {
+        /// GitHub URL or owner/repo#n of any PR of the stack
+        reference: Option<String>,
+        /// Resolve the PR from the current repo + branch instead
+        #[arg(long)]
+        here: bool,
+        /// Only print what would change
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -881,6 +904,67 @@ fn print_info(db_flag: Option<&str>, json: bool) {
     }
 }
 
+fn run_stack(action: StackAction, json: bool, db: &Db) -> AppResult<()> {
+    let StackAction::Restack {
+        reference,
+        here,
+        dry_run,
+    } = action;
+    let (owner, name, number) = board::parse_ref(&resolve_reference(reference, here)?)?;
+    let card_id = {
+        let conn = db.0.lock().unwrap();
+        board_cmd::find_card_id(&conn, &owner, &name, number)?.ok_or_else(|| {
+            AppError::Other(format!(
+                "{owner}/{name}#{number} isn't tracked on the board"
+            ))
+        })?
+    };
+    if dry_run {
+        let preview = stack_cmd::preview_stack(db, &card_id)?;
+        if json {
+            println!("{}", serde_json::to_string_pretty(&preview)?);
+        } else if !preview.ok {
+            return Err(AppError::Other(preview.reasons.join("\n")));
+        } else {
+            let trunk = preview.trunk.as_deref().unwrap_or("?");
+            if preview.noop {
+                println!("Already on top of {trunk}: nothing to restack");
+            } else {
+                println!("Would restack onto {trunk} (bottom first):");
+            }
+            for b in &preview.branches {
+                println!(
+                    "  #{} {} — {} commit(s){}",
+                    b.number,
+                    b.branch,
+                    b.commits,
+                    if b.changed { ", rebased" } else { "" }
+                );
+            }
+        }
+        return Ok(());
+    }
+    let result = stack_cmd::rebase_stack(db, &card_id)?;
+    let r = &result.report;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&result)?);
+    } else if r.pushed.is_empty() {
+        println!("Already on top of its trunk: nothing to restack");
+    } else {
+        println!("Pushed: {}", r.pushed.join(", "));
+        if !r.moved_local.is_empty() {
+            println!("Moved local copies: {}", r.moved_local.join(", "));
+        }
+        if !r.skipped_local.is_empty() {
+            println!(
+                "Left behind (changed meanwhile): {}",
+                r.skipped_local.join(", ")
+            );
+        }
+    }
+    Ok(())
+}
+
 fn run(cmd: Cmd, json: bool, db: &Db) -> AppResult<()> {
     match cmd {
         Cmd::Info => unreachable!("handled before the database is opened"),
@@ -1516,6 +1600,7 @@ fn run(cmd: Cmd, json: bool, db: &Db) -> AppResult<()> {
         }
 
         Cmd::Board { action } => run_board(action, json, db)?,
+        Cmd::Stack { action } => run_stack(action, json, db)?,
         Cmd::Sync { full, light } => {
             let mode = if full {
                 Mode::Full

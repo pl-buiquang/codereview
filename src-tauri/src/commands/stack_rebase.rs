@@ -208,13 +208,9 @@ fn compute(ctx: &StackCtx) -> (Result<Plan, Vec<String>>, Option<String>) {
 
 /// Dry run: fetches, then reports whether (and how) the stack would be rebased.
 /// Changes nothing.
-#[tauri::command]
-pub async fn board_stack_rebase_preview(
-    card_id: String,
-    db: State<'_, Db>,
-) -> AppResult<StackRebasePreview> {
-    let ctx = load_stack(&db, &card_id)?;
-    repo_sync::fetch_repo(&db, ctx.repo_id, Duration::ZERO)?;
+pub fn preview_stack(db: &Db, card_id: &str) -> AppResult<StackRebasePreview> {
+    let ctx = load_stack(db, card_id)?;
+    repo_sync::fetch_repo(db, ctx.repo_id, Duration::ZERO)?;
     let (plan, trunk) = compute(&ctx);
     Ok(preview_of(&ctx, plan, trunk))
 }
@@ -222,25 +218,37 @@ pub async fn board_stack_rebase_preview(
 /// Rebases the whole stack onto its trunk, pushes it atomically and moves the
 /// local branches. Re-plans from fresh GitHub + git state first, and refuses
 /// (changing nothing) if anything no longer qualifies.
+pub fn rebase_stack(db: &Db, card_id: &str) -> AppResult<StackRebaseResult> {
+    let ctx = load_stack(db, card_id)?;
+    for e in &ctx.entries {
+        refetch_card(db, &ctx.owner, &ctx.name, e.number)?;
+    }
+    repo_sync::fetch_repo(db, ctx.repo_id, Duration::ZERO)?;
+    let ctx = load_stack(db, card_id)?;
+    let (plan, _) = compute(&ctx);
+    let plan = plan.map_err(|r| stack_rebase::refusal_error(&r))?;
+    let report = stack_rebase::apply(&ctx.path, &plan)?;
+    repo_sync::fetch_repo(db, ctx.repo_id, Duration::ZERO)?;
+    for e in &ctx.entries {
+        refetch_card(db, &ctx.owner, &ctx.name, e.number)?;
+    }
+    Ok(StackRebaseResult { report })
+}
+
+#[tauri::command]
+pub async fn board_stack_rebase_preview(
+    card_id: String,
+    db: State<'_, Db>,
+) -> AppResult<StackRebasePreview> {
+    preview_stack(&db, &card_id)
+}
+
 #[tauri::command]
 pub async fn board_stack_rebase(
     card_id: String,
     db: State<'_, Db>,
 ) -> AppResult<StackRebaseResult> {
-    let ctx = load_stack(&db, &card_id)?;
-    for e in &ctx.entries {
-        refetch_card(&db, &ctx.owner, &ctx.name, e.number)?;
-    }
-    repo_sync::fetch_repo(&db, ctx.repo_id, Duration::ZERO)?;
-    let ctx = load_stack(&db, &card_id)?;
-    let (plan, _) = compute(&ctx);
-    let plan = plan.map_err(|r| stack_rebase::refusal_error(&r))?;
-    let report = stack_rebase::apply(&ctx.path, &plan)?;
-    repo_sync::fetch_repo(&db, ctx.repo_id, Duration::ZERO)?;
-    for e in &ctx.entries {
-        refetch_card(&db, &ctx.owner, &ctx.name, e.number)?;
-    }
-    Ok(StackRebaseResult { report })
+    rebase_stack(&db, &card_id)
 }
 
 #[cfg(test)]

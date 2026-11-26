@@ -111,6 +111,7 @@ cr comment publish-replies 12
 | `cr board meta add <ref> \| --here --kind file\|link\|note\|claude_session --value <v> [--tag <t>] [--label <l>] [--cwd <dir>] [--track]` | Attach metadata. `--track` tracks the card first if needed; `--value` may be omitted for a note that has a `--tag` |
 | `cr board meta list <ref> \| --here` | A card's metadata |
 | `cr board meta rm <id>` | Delete a metadata item |
+| `cr stack restack <ref> \| --here [--dry-run]` | The board's *Rebase stack…* from the shell: rebase the PR's whole stack onto its trunk and push it atomically. `--dry-run` prints what would change. Not available in a remote run |
 
 ```bash
 cr sync --light
