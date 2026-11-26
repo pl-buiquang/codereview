@@ -74,8 +74,12 @@ the waiting sessions (its tooltip lists both). A run stays unseen until you sele
 
 ## Babysit and stacked PRs
 
-On a stacked PR, Babysit restacks the whole stack whenever it updates its PR (the bottom behind its trunk,
-merge conflicts, a pushed fix) with `cr stack restack`, the board's all-or-nothing *Rebase stack…*. When that
+On a stacked PR, Babysit owns the CI of the whole stack, whichever PR of it you launch it from: its goal holds
+only when every open PR of the stack is green, up to date and conflict-free. It works bottom first and fixes a
+real failure in the PR whose changes caused it (the lowest PR where it fails), in a temporary checkout when that
+is not the PR it was launched on. The board monitor leaves every PR of a babysat stack alone.
+It restacks the whole stack after every update (the bottom behind its trunk, merge conflicts, a pushed fix) with
+`cr stack restack`, the board's all-or-nothing *Rebase stack…*. When that
 conflicts, or on a remote host, it rebases the branches by hand, resolving only simple conflicts, and pushes
 them in one atomic push; otherwise it stops with NEEDS_ATTENTION.
 

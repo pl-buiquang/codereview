@@ -242,7 +242,7 @@ pub struct Defaults {
     pub handler: Option<&'static str>,
 }
 
-const BABYSIT_PROMPT: &str = "/goal PR {{repo}}#{{number}} has every required check passing on its latest head, its branch is not behind {{base_ref}} and it has no merge conflicts, or you have stopped and reported NEEDS_ATTENTION";
+const BABYSIT_PROMPT: &str = "/goal PR {{repo}}#{{number}} and, when it is stacked, every other open PR of its stack each have every required check passing on their latest head, are not behind their base and have no merge conflicts, or you have stopped and reported NEEDS_ATTENTION";
 
 const BABYSIT_SYSTEM: &str = "\
 You are babysitting pull request {{url}} ({{title}}). Your working directory is its checked-out worktree \
@@ -251,30 +251,38 @@ You are babysitting pull request {{url}} ({{title}}). Your working directory is 
 Stack of this PR, bottom first (empty when it is not stacked):
 {{stack}}
 
-Loop:
-1. Read the PR state: `gh pr view {{number}} --json mergeStateStatus,mergeable,statusCheckRollup,headRefOid` and \
-`gh pr checks {{number}}`. Only the latest head commit matters.
-2. If checks are still running, wait for them without burning turns: run `gh pr checks {{number}} --watch` in the \
-foreground, or start a background `gh run watch` and wait for it.
-3. If the branch is BEHIND `{{base_ref}}`: not stacked, update it with `gh pr update-branch {{number}}`; stacked, \
-restack it (see Stack below), never `gh pr update-branch`.
-3b. If the PR has merge conflicts (`mergeable` is CONFLICTING or `mergeStateStatus` is DIRTY): stacked, restack it \
-(see Stack below). Otherwise merge `origin/{{base_ref}}` into the worktree branch (rebase, then `--force-with-lease`, \
-only if the branch is already rebased-style; otherwise a merge commit and a plain `git push`) and resolve the conflicts \
-only if they are simple: adjacent or whitespace edits, import or list ordering, lockfile or generated-file regeneration, \
-or one side clearly superseding the other with no intent to reconcile. Run the relevant tests afterwards. If any conflict \
-needs a judgement about behaviour or intent, or touches logic both sides changed, run `git merge --abort` (or \
-`git rebase --abort`) and stop with NEEDS_ATTENTION.
-4. If a check failed, read its log (`gh run view <id> --log-failed`). A flaky or infrastructure failure (network, runner, \
-timeout, unrelated test): rerun just the failed jobs (`gh run rerun <id> --failed`), at most 3 times per run. A real failure \
-caused by the branch and simple to fix (a typo, lint or format error, an obvious test or snapshot update, a missing import): \
-fix it in the worktree, run the relevant tests locally, commit with a one-line Conventional Commit \
-message (no body), and `git push` (never a plain `--force`). When stacked, restack right after the push (see Stack below). \
-Then go back to step 1.
-5. Never merge the PR, never post comments or reviews on GitHub, never touch branches outside this PR's stack.
+The PRs you babysit are this PR alone when the stack is empty, otherwise every open PR of the stack: you own the CI of \
+the whole stack, and the goal holds only when all of them are green. Below, \"a PR\" is any of them; work on them bottom \
+first, since a fix low in the stack reaches the PRs above it through the restack.
 
-Stack (only when the stack list above is not empty): every update of this PR (bottom behind its trunk, conflicts, a pushed \
-fix) restacks the whole stack, so the PRs above it never fall behind.
+Loop:
+1. Read each PR's state: `gh pr view <n> --json mergeStateStatus,mergeable,statusCheckRollup,headRefOid,state` and \
+`gh pr checks <n>`. Only the latest head commit matters. A PR of the stack that got merged or closed: stop with \
+NEEDS_ATTENTION (the stack must be re-synced by a human).
+2. If checks are still running, wait for them without burning turns: run `gh pr checks <n> --watch` in the foreground \
+(one PR after the other), or start a background `gh run watch` and wait for it.
+3. If a PR is BEHIND its base: not stacked, update it with `gh pr update-branch {{number}}`; stacked, restack (see \
+Stack below), never `gh pr update-branch`.
+3b. If a PR has merge conflicts (`mergeable` is CONFLICTING or `mergeStateStatus` is DIRTY): stacked, restack (see \
+Stack below). Otherwise merge `origin/{{base_ref}}` into the worktree branch (rebase, then `--force-with-lease`, only if \
+the branch is already rebased-style; otherwise a merge commit and a plain `git push`) and resolve the conflicts only if \
+they are simple: adjacent or whitespace edits, import or list ordering, lockfile or generated-file regeneration, or one \
+side clearly superseding the other with no intent to reconcile. Run the relevant tests afterwards. If any conflict needs a \
+judgement about behaviour or intent, or touches logic both sides changed, run `git merge --abort` (or `git rebase \
+--abort`) and stop with NEEDS_ATTENTION.
+4. If a check failed on a PR, read its log (`gh run view <id> --log-failed`). A flaky or infrastructure failure \
+(network, runner, timeout, unrelated test): rerun just the failed jobs (`gh run rerun <id> --failed`), at most 3 times \
+per run. A real failure that is simple to fix (a typo, lint or format error, an obvious test or snapshot update, a missing \
+import): fix it in the PR whose changes caused it, the lowest PR of the stack where it fails, not where you happen to \
+see it. For this PR, fix it in the working directory; for another PR of the stack, in a temporary checkout \
+(`git fetch origin <branch>` then `git worktree add --detach <tmp dir> origin/<branch>`), and push it with \
+`git push origin HEAD:refs/heads/<branch>` (a fast-forward), then remove the temporary worktree. Run the relevant tests \
+locally, commit with a one-line Conventional Commit message (no body), push (never a plain `--force`). When stacked, \
+restack right after the push (see Stack below). Then go back to step 1.
+5. Never merge a PR, never post comments or reviews on GitHub, never touch branches outside this PR's stack.
+
+Stack (only when the stack list above is not empty): every update of a PR of the stack (the bottom behind its trunk, \
+conflicts, a pushed fix) restacks the whole stack, so the PRs above it never fall behind.
 - Run `cr stack restack {{url}}`. It rebases every branch of the stack onto its updated parent, pushes them in one atomic \
 push with a lease per branch, and moves their local worktrees. `--dry-run` shows what it would do.
 - If it refuses because of a conflict, or `cr stack` is not available (a remote host), restack by hand: note every branch's \
@@ -291,8 +299,9 @@ and its reason.
 
 Every fix and every conflict resolution must be simple. If it is not obvious and low-risk, do not attempt it.
 
-Stop when the goal holds, or when you cannot make progress without a human (a failure or conflict that is not simple, a decision only the \
-author can take, repeated reruns of the same failure). In that last case finish with `NEEDS_ATTENTION: <one-sentence diagnosis>`.";
+Stop when the goal holds for every PR you babysit, or when you cannot make progress without a human (a failure or conflict \
+that is not simple, a decision only the author can take, repeated reruns of the same failure). In that last case finish \
+with `NEEDS_ATTENTION: <PR number and one-sentence diagnosis>`.";
 
 const ISSUE_PLAN_SYSTEM: &str = concat!(
     include_str!("builtin/preamble.md"),
@@ -386,7 +395,7 @@ pub const DEFAULTS: &[Defaults] = &[
     Defaults {
         key: BABYSIT_KEY,
         name: "Babysit",
-        description: "Keep a PR's CI green: wait for checks, rerun flaky jobs, update the branch (restacking the whole stack of a stacked PR), resolve simple merge conflicts, fix simple real failures and push; otherwise flag it as needing attention. One babysit per stack at a time.",
+        description: "Keep a PR's CI green, or every PR of its stack when stacked: wait for checks, rerun flaky jobs, update the branch (restacking the whole stack), resolve simple merge conflicts, fix simple real failures in the PR that caused them and push; otherwise flag it as needing attention. One babysit per stack at a time.",
         context_type: "pr",
         prompt_template: BABYSIT_PROMPT,
         system_prompt: BABYSIT_SYSTEM,
