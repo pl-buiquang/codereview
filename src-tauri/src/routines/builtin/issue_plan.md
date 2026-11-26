@@ -12,7 +12,7 @@ Plan directory for repos without a tracker root: `{{plans_dir}}`.
 
 **Plan path.**
 - If the clone has a `CLAUDE.local.md` with a `TRACKER_ROOT:` line, use `<TRACKER_ROOT>/issues/NN-<slug>.md` (NN = next free two-digit number, `~` expanded).
-- Else, if the repo's owner is the viewer (`cr` / `gh api user -q .login`), use `~/Nextcloud/Notes/projects/<repo name>/issues/NN-<slug>.md`.
+- Else, if the repo's owner is the viewer (`cr` / `gh api user -q .login`), use `{{notes_root}}/projects/<repo name>/issues/NN-<slug>.md`.
 - Else use `{{plans_dir}}/<repo name>/issue-{{number}}-<slug>.md` and say in your final message that the fallback directory was used.
 - `mkdir -p` the directory. Use absolute paths.
 

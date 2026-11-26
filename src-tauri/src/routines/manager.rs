@@ -269,8 +269,8 @@ pub struct RoutineSettings {
 
 const PLANS_DIR_KEY: &str = "routine_plans_dir";
 const NOTES_ROOT_KEY: &str = "routine_notes_root";
-pub const DEFAULT_PLANS_DIR: &str = "~/Nextcloud/Notes/_work/plans";
-pub const DEFAULT_NOTES_ROOT: &str = "~/Nextcloud/Notes";
+pub const DEFAULT_PLANS_DIR: &str = "~/Documents/codereview/plans";
+pub const DEFAULT_NOTES_ROOT: &str = "~/Documents/notes";
 
 fn meta_value(conn: &Connection, key: &str) -> Option<String> {
     conn.query_row("SELECT value FROM meta WHERE key = ?1", params![key], |r| {

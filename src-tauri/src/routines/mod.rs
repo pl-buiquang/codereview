@@ -1146,6 +1146,7 @@ mod tests {
             "url",
             "title",
             "plans_dir",
+            "notes_root",
             "head_ref",
             "base_ref",
             "worktree",

@@ -281,11 +281,12 @@ pub fn resolve(app: &AppHandle, routine: &Routine, r: &ContextRef) -> AppResult<
     } else {
         String::new()
     };
-    let plans_dir = crate::commands::repo::expand_home(
-        &manager::routine_settings(&db.0.lock().unwrap()).plans_dir,
-    );
+    let settings = manager::routine_settings(&db.0.lock().unwrap());
+    let plans_dir = crate::commands::repo::expand_home(&settings.plans_dir);
+    let notes_root = crate::commands::repo::expand_home(&settings.notes_root);
     let vars = vec![
         ("plans_dir".to_string(), plans_dir),
+        ("notes_root".to_string(), notes_root),
         ("repo".to_string(), facts.repo.clone()),
         ("number".to_string(), facts.number.clone()),
         ("url".to_string(), facts.url.clone()),
@@ -350,12 +351,13 @@ pub fn resolve_remote(
     let db = app.state::<Db>();
     let facts = gather(app, routine, r, false)?;
     let workspace = workspace_for(routine, &facts)?;
-    let plans_dir = crate::commands::repo::expand_home(
-        &manager::routine_settings(&db.0.lock().unwrap()).plans_dir,
-    );
+    let settings = manager::routine_settings(&db.0.lock().unwrap());
+    let plans_dir = crate::commands::repo::expand_home(&settings.plans_dir);
+    let notes_root = crate::commands::repo::expand_home(&settings.notes_root);
     let here = "the current directory (a checkout on the remote host)";
     let vars = vec![
         ("plans_dir".to_string(), plans_dir),
+        ("notes_root".to_string(), notes_root),
         ("repo".to_string(), facts.repo.clone()),
         ("number".to_string(), facts.number.clone()),
         ("url".to_string(), facts.url.clone()),
@@ -559,9 +561,6 @@ mod tests {
 
     #[test]
     fn pr_key_is_case_insensitive() {
-        assert_eq!(
-            pr_key("Cardiologs", "Back", 12),
-            pr_key("cardiologs", "back", 12)
-        );
+        assert_eq!(pr_key("Acme", "Back", 12), pr_key("acme", "back", 12));
     }
 }

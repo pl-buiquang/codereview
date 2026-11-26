@@ -41,7 +41,7 @@ A ticket in the notes vault's tracker format: frontmatter (`type`,
 Problem, Analysis, Approach, Steps, Test seams, Risks / side effects, Open questions, Comments.
 
 - Location: `<TRACKER_ROOT>/issues/NN-slug.md` when the repo's `CLAUDE.local.md` sets `TRACKER_ROOT`;
-  `~/Nextcloud/Notes/projects/<repo>/issues/` for your own repos; else
+  `<Notes root>/projects/<repo>/issues/` for your own repos; else
   `<Plans directory>/<repo>/issue-<n>-slug.md`.
 - Link: a `file` item tagged `plan` on the issue card (`cr board meta add <url> --kind file --tag plan`).
   Nothing is posted to GitHub. PR cards inherit it from their issue.
@@ -67,10 +67,12 @@ the waiting sessions (its tooltip lists both). A run stays unseen until you sele
 
 ### Settings (Sessions → Config)
 
-- **Plans directory**: fallback location for plans, available to routines as `{{plans_dir}}`.
-- **Notes root**: the only tree outside the clone that **Plan issue** may write to.
+- **Plans directory**: fallback location for plans, available to routines as `{{plans_dir}}`. Default
+  `~/Documents/codereview/plans`.
+- **Notes root**: the only tree outside the clone that **Plan issue** may write to, available as
+  `{{notes_root}}`. Default `~/Documents/notes`.
 
 ## Prompt placeholders
 
-`{{repo}} {{number}} {{url}} {{title}} {{head_ref}} {{base_ref}} {{worktree}} {{review_id}} {{plans_dir}}`.
+`{{repo}} {{number}} {{url}} {{title}} {{head_ref}} {{base_ref}} {{worktree}} {{review_id}} {{plans_dir}} {{notes_root}}`.
 Unknown placeholders are left as written. Handler routines may add more.
