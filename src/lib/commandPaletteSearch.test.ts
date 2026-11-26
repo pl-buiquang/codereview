@@ -18,7 +18,7 @@ const card = (id: string, repo: string, number: number, type: "pr" | "issue" = "
 const repo = (id: number, owner: string, name: string, friendly: string | null = null) =>
   ({ id, remote_owner: owner, remote_name: name, local_path: `/p/${name}`, friendly_name: friendly }) as Repository;
 
-const repos = [repo(1, "acme", "cardiologs-front"), repo(2, "acme", "back", "Backend")];
+const repos = [repo(1, "acme", "widgets-front"), repo(2, "acme", "back", "Backend")];
 
 const reviews = [review(1, "acme/front", 12), review(2, "acme/back", 12)];
 const cards = [card("C1", "acme/front", 12), card("C2", "acme/back", 40, "issue")];
@@ -31,10 +31,10 @@ describe("searchPalette", () => {
   });
 
   it("matches by GitHub owner/name when the repo has a friendly name", () => {
-    const named = [review(7, "acme/cardiologs-front", 99, "front")];
-    const r = searchPalette("https://github.com/acme/cardiologs-front/pull/99", named, []);
+    const named = [review(7, "acme/widgets-front", 99, "front")];
+    const r = searchPalette("https://github.com/acme/widgets-front/pull/99", named, []);
     expect(r).toEqual([expect.objectContaining({ kind: "review", reviewId: 7 })]);
-    const typed = searchPalette("front 99", named, [repo(1, "acme", "cardiologs-front", "front")]);
+    const typed = searchPalette("front 99", named, [repo(1, "acme", "widgets-front", "front")]);
     expect(typed.some((x) => x.kind === "create-pr")).toBe(false);
   });
 

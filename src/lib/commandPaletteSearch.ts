@@ -43,11 +43,6 @@ const MAX_CREATES = 3;
 const MAX_REPOS = 5;
 const DEFAULT_RECENT = 5;
 
-// "cardiologs-front" → "front"; "front" → "front"
-function shortName(remote_name: string): string {
-  return remote_name.replace(/^cardiologs-/, "");
-}
-
 function buildSearchText(s: ReviewSummary): string {
   const parts = [s.target.title, s.repo_label];
   if (s.target.github_pr_number != null) {
@@ -56,7 +51,6 @@ function buildSearchText(s: ReviewSummary): string {
   const repoName = s.repo_label.split("/")[1];
   if (repoName) {
     parts.push(repoName);
-    parts.push(shortName(repoName));
   }
   return parts.join(" ").toLowerCase();
 }
@@ -66,7 +60,7 @@ function matchRepos(tokens: string[], repos: Repository[]): PaletteRepoResult[] 
   for (const repo of repos) {
     const label = repoLabel(repo);
     const parts = [label, repoDisplayName(repo)];
-    if (repo.remote_name) parts.push(shortName(repo.remote_name));
+    if (repo.remote_name) parts.push(repo.remote_name);
     const text = parts.join(" ").toLowerCase();
     if (!tokens.every((t) => text.includes(t))) continue;
     out.push({ kind: "repo", repoId: repo.id, title: repoDisplayName(repo), repoLabel: label });
@@ -182,7 +176,7 @@ export function searchPalette(
     for (const repo of repos) {
       if (!repo.remote_owner || !repo.remote_name) continue;
       const rn = repo.remote_name.toLowerCase();
-      if (!rn.includes(word) && !shortName(rn).includes(word)) continue;
+      if (!rn.includes(word)) continue;
       const label = `${repo.remote_owner}/${repo.remote_name}`;
       if (existing.has(`${label}#${num}`.toLowerCase())) continue;
       createResults.push({
