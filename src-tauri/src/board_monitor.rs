@@ -32,7 +32,7 @@ pub struct Candidate {
     pub viewer_can_update_branch: bool,
     pub ci_status: Option<String>,
     pub stacked: bool,
-    /// A running babysit routine owns this PR's CI: count it, don't act on it.
+    /// A running babysit routine owns this PR's CI (on it or on its stack): count it, don't act on it.
     pub babysat: bool,
 }
 
@@ -83,7 +83,11 @@ pub fn candidates(conn: &Connection) -> AppResult<Vec<Candidate>> {
             let babysat = crate::routines::babysit_active(
                 conn,
                 &crate::routines::context::pr_key(owner, name, c.number),
-            );
+            ) || (c.stack_number.is_some()
+                && crate::routines::guards::babysat_sibling(conn, owner, name, c.number)
+                    .ok()
+                    .flatten()
+                    .is_some());
             Some(Candidate {
                 owner: owner.to_string(),
                 name: name.to_string(),
@@ -373,6 +377,35 @@ mod tests {
             ("reran", "ci (attempt 505)")
         );
         assert_eq!(recent(&conn, 3).unwrap().len(), 3);
+    }
+
+    #[test]
+    fn a_babysit_on_the_stack_owns_every_pr_of_it() {
+        let conn = open_memory();
+        crate::routines::seed(&conn).unwrap();
+        for (id, n) in [("pr1", 1), ("pr2", 2), ("pr3", 3)] {
+            seed_pr(&conn, id, n);
+        }
+        conn.execute(
+            "UPDATE gh_pr_status SET stack_number = 5, stack_position = 1 WHERE pr_id IN ('pr1', 'pr2')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO routine_run (routine_id, context_type, context_key, context_json, status, queued_at)
+             SELECT id, 'pr', ?1, '{}', 'running', 'now' FROM routine WHERE key = ?2",
+            params![
+                crate::routines::context::pr_key("owner", "repo", 1),
+                crate::routines::BABYSIT_KEY
+            ],
+        )
+        .unwrap();
+        let babysat: Vec<(i64, bool)> = candidates(&conn)
+            .unwrap()
+            .into_iter()
+            .map(|c| (c.number, c.babysat))
+            .collect();
+        assert_eq!(babysat, vec![(1, true), (2, true), (3, false)]);
     }
 
     #[test]

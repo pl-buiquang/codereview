@@ -58,15 +58,23 @@ fn one_babysit_per_stack(
     let Some((owner, name, number)) = parse_pr_key(&light.key) else {
         return Ok(None);
     };
-    for sibling in stack_siblings(conn, owner, name, number)? {
-        if babysit_active(conn, &pr_key(owner, name, sibling)) {
-            return Ok(Some(format!(
-                "{} is already running on {owner}/{name}#{sibling}, in the same stack. Stop it first: two babysits would race to restack the same branches.",
-                routine.name
-            )));
-        }
-    }
-    Ok(None)
+    Ok(babysat_sibling(conn, owner, name, number)?.map(|sibling| {
+        format!(
+            "{} is already running on {owner}/{name}#{sibling}, in the same stack. Stop it first: two babysits would race to restack the same branches.",
+            routine.name
+        )
+    }))
+}
+
+pub fn babysat_sibling(
+    conn: &Connection,
+    owner: &str,
+    name: &str,
+    number: i64,
+) -> AppResult<Option<i64>> {
+    Ok(stack_siblings(conn, owner, name, number)?
+        .into_iter()
+        .find(|&n| babysit_active(conn, &pr_key(owner, name, n))))
 }
 
 #[cfg(test)]
