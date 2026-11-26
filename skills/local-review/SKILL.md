@@ -86,7 +86,7 @@ If no arguments are provided, ask the user (AskUserQuestion) which target and la
 
 The `cr` binary must be installed. If `cr` is not found on PATH:
 ```bash
-cargo install --path ~/projects/codereview/src-tauri --bin cr
+cargo install --path <skill dir>/../../src-tauri --bin cr
 ```
 
 The instruction files live next to this file. Agents read them, you do not (except `codex.md` §1–3):

@@ -16,7 +16,7 @@ freeform metadata — plan/spec files, links, notes, and Claude Code session
 pointers — shown as attachments on the card. All of this goes through the `cr`
 CLI; there is no other way to write it.
 
-If `cr` is not on PATH: `cargo install --path ~/projects/codereview/src-tauri --bin cr`.
+If `cr` is not on PATH: `cargo install --path <skill dir>/../../src-tauri --bin cr`.
 
 ## Resolving the card
 

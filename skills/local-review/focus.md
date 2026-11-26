@@ -14,7 +14,7 @@ The review already exists. Its id is `RID` (the id given to you, or the one the 
 Don't create or open reviews here. Don't pass `--level` to `cr focus set` unless the caller
 tells you to: the user controls the display level in the app at any time, independent of generation.
 
-If `cr` is not on PATH: `cargo install --path ~/projects/codereview/src-tauri --bin cr`.
+If `cr` is not on PATH: `cargo install --path <skill dir>/../../src-tauri --bin cr`.
 
 ## Step 1: Gather
 

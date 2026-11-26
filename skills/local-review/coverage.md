@@ -42,21 +42,15 @@ For each unit, search `WT` (Grep/Glob, never run e2e):
   `*_test.go`, `#[cfg(test)]` modules, `src-tauri/tests/`. Follow one level of callers: a test of the
   caller that drives the changed branch counts as `indirect`.
 - **E2E**: the repo's own e2e suites (`playwright.config.*` → its `testDir`, `e2e/`, `cypress/`) plus the
-  known e2e map below. Match by route, page/component name, `data-testid`, API path or user-visible text
+  cross-repo suites below. Match by route, page/component name, `data-testid`, API path or user-visible text
   that the unit renders or serves.
 
-### Known e2e map
+### Cross-repo e2e suites
 
-E2E suites that live outside the PR's repo. Read them from the existing clone; never clone. If the clone
-is missing, note `e2e: <repo> clone missing` and score e2e from the same repo only.
-
-| PR repo | Also search | What it covers |
-|---|---|---|
-| `cardiologs-back` / `back` | `~/projects/front/playwright/test/` | API endpoints and jobs driven through the Holter UI |
-| `cardiologs-front` / `front` | `~/projects/front/playwright/test/` (its own) | Holter app, login portal, min2 |
-| `e2e-lib` | its consumers: `~/projects/front/playwright/test/`, `~/projects/platane/playwright/tests/`, `~/projects/resting/playwright/tests/` | shared Playwright fixtures and helpers |
-
-Unknown repo: same repo only. Edit this table when a repo gets its own e2e suite elsewhere.
+E2E suites that live outside the PR's repo are listed in the `## E2E suites` section of the per-repo notes
+file the user's CLAUDE.md points to. Read them from the existing clone; never clone. If the clone is
+missing, note `e2e: <repo> clone missing` and score e2e from the same repo only. No such section: same
+repo only.
 
 ### Classify
 
