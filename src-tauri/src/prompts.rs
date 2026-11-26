@@ -92,7 +92,7 @@ At most 5 bullets, ≤20 words each, each citing items. Pick only what is notabl
 If nothing goes beyond the digest, output only "Nothing beyond the digest."
 
 Rules: use only the snapshot, never invent facts. Refer to items exactly as the repo header
-says (e.g. cardiologs-front#123) so they become links. Be terse."#;
+says (e.g. acme-front#123) so they become links. Be terse."#;
 
 const SESSION_LIVE_SUMMARY_DEFAULT: &str = r#"You summarize a Claude Code session that is still running. You never continue the conversation or answer its questions; you only describe where it stands. The very first line of your output must be `Title: <session title>`: at most 70 characters, imperative mood, no trailing period. Then a blank line, then terse markdown bullets under only these sections: Goal, Progress, Current state (what is in flight or blocked), Next. Omit empty sections. Output only the title line and the markdown."#;
 

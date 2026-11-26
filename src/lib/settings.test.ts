@@ -49,7 +49,7 @@ describe("useSettingsStore", () => {
     s.setDefaultViewType("unified");
     s.setDefaultThreeDot(false);
     s.setBotLogins("dependabot, renovate");
-    s.setRepoStripPrefixes("philips-internal/cardiologs-");
+    s.setRepoStripPrefixes("megacorp/widgets-");
     s.setAutoSync("on_focus");
     s.setDiscoveryIntervalMin(30);
     const n = useSettingsStore.getState();
@@ -59,7 +59,7 @@ describe("useSettingsStore", () => {
     expect(n.defaultViewType).toBe("unified");
     expect(n.defaultThreeDot).toBe(false);
     expect(n.botLogins).toBe("dependabot, renovate");
-    expect(n.repoStripPrefixes).toBe("philips-internal/cardiologs-");
+    expect(n.repoStripPrefixes).toBe("megacorp/widgets-");
     expect(n.autoSync).toBe("on_focus");
     expect(n.discoveryIntervalMin).toBe(30);
   });
@@ -265,8 +265,8 @@ describe("settings migration from v2+", () => {
 
 describe("parseRepoStripPrefixes", () => {
   it("splits on commas, trims, and drops empties (case preserved)", () => {
-    expect(parseRepoStripPrefixes(" philips-internal/Cardiologs- , acme/ ")).toEqual([
-      "philips-internal/Cardiologs-",
+    expect(parseRepoStripPrefixes(" megacorp/Widgets- , acme/ ")).toEqual([
+      "megacorp/Widgets-",
       "acme/",
     ]);
     expect(parseRepoStripPrefixes("")).toEqual([]);
@@ -276,7 +276,7 @@ describe("parseRepoStripPrefixes", () => {
 
 describe("stripRepoPrefix", () => {
   it("strips the first matching prefix (order significant, case-sensitive)", () => {
-    expect(stripRepoPrefix("philips-internal/cardiologs-back", ["philips-internal/cardiologs-"]))
+    expect(stripRepoPrefix("megacorp/widgets-back", ["megacorp/widgets-"]))
       .toEqual({ display: "back", stripped: true });
     // First match wins even if a later prefix would also match.
     expect(stripRepoPrefix("acme/web", ["acme/", "acme/w"])).toEqual({

@@ -13,7 +13,7 @@ import { Icon } from "./icons";
 const REF_RE = /(?<![\w/[#-])((?:[\w.-]+\/)?[\w.-]+)#(\d+)\b/g;
 const CARD_HREF = "#card=";
 
-// Models abbreviate repo names (cardiologs-front → front), so the number is the
+// Models abbreviate repo names (widgets-front → front), so the number is the
 // primary key and the repo ref only disambiguates.
 function findCard(cards: BoardCard[], repoRef: string, number: number): BoardCard | undefined {
   const candidates = cards.filter((c) => c.number === number);

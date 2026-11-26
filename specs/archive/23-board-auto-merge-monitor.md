@@ -115,7 +115,7 @@ No DB migration is needed.
 
 ## Skill removal
 - In the `claude-config` repo (`~/scratch/claude-config`), `git rm -r skills/approved-pr-monitor` and commit (`chore(skills): remove approved-pr-monitor`).
-- Leave `~/Nextcloud/Notes/_work/approved-pr-watchlist.txt`, `approved-pr-monitor.md` and `.approved-pr-monitor.json` in place, and tell the user about them. Any watchlist PRs should be tracked on the board instead (its "Track" dialog).
+- Leave `approved-pr-watchlist.txt`, `approved-pr-monitor.md` and `.approved-pr-monitor.json` in place, and tell the user about them. Any watchlist PRs should be tracked on the board instead (its "Track" dialog).
 
 ## Verification
 - `cargo clippy` and `cargo test --manifest-path src-tauri/Cargo.toml` (covers the failing-run parser and `board_monitor::candidates`).

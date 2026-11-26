@@ -3,7 +3,7 @@ import { buildTranscript, cardContextKey, claudeOptions, formatDuration, prConte
 
 describe("context keys", () => {
   it("lowercases the repo like the backend does", () => {
-    expect(prContextKey("Cardiologs/Back", 12)).toBe("pr:cardiologs/back#12");
+    expect(prContextKey("Acme/Back", 12)).toBe("pr:acme/back#12");
     expect(cardContextKey({ type: "issue", repo: "O/N", number: 3 })).toBe("issue:o/n#3");
     expect(cardContextKey({ type: "pr", repo: "O/N", number: 3 })).toBe("pr:o/n#3");
   });

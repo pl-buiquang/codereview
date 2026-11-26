@@ -20,7 +20,7 @@ desktop app.
 
 ```bash
 # 1. Create a review for the PR (prints the review ID)
-cr create pr cardiologs back 1234
+cr create pr acme widgets 1234
 
 # 2. Dump the diff so the AI can read it
 cr diff <review-id>

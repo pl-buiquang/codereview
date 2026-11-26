@@ -13,7 +13,7 @@ describe("linkCardRefs", () => {
   });
 
   it("matches abbreviated repo names by number", () => {
-    const more = [...cards, card("C", "acme/cardiologs-front", 12)];
+    const more = [...cards, card("C", "acme/widgets-front", 12)];
     expect(linkCardRefs("front#7", cards)).toBe("[front#7](#card=B)");
     expect(linkCardRefs("front#12", more)).toBe("[front#12](#card=C)");
   });

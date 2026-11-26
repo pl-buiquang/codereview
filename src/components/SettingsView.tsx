@@ -607,7 +607,7 @@ function GeneralSection() {
           <input
             className="input"
             value={sessionSummaryDir}
-            placeholder="~/Nextcloud/Notes/_work/sessions"
+            placeholder="~/notes/sessions"
             onChange={(e) => setSessionSummaryDir(e.target.value)}
           />
         </label>
@@ -703,7 +703,7 @@ function GeneralSection() {
           <input
             type="text"
             className="input"
-            placeholder="philips-internal/cardiologs-"
+            placeholder="acme/widgets-"
             value={repoStripPrefixes}
             onChange={(e) => setRepoStripPrefixes(e.target.value)}
           />

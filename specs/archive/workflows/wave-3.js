@@ -11,7 +11,7 @@ export const meta = {
   ],
 }
 
-const REPO = '/Users/pbuiquang/projects/codereview'
+const REPO = '~/projects/codereview'
 
 const COMMON = `
 You are an implementation agent working in an ISOLATED GIT WORKTREE of the repo (your working directory — confirm with \`git rev-parse --show-toplevel\` and use that as your root; it is NOT ${REPO}, never edit files under ${REPO} directly).

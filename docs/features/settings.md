@@ -73,7 +73,7 @@ Two lists of globs, one per line (`#` starts a comment), used to classify change
 | Setting | Default | What it does |
 |---|---|---|
 | Bot logins | empty | Comma-separated GitHub logins treated as bots (case-insensitive; GitHub's own bot account type is also used) |
-| Strip repo prefixes | empty | Comma-separated prefixes removed from repo names in the inbox, e.g. `philips-internal/cardiologs-`. Hovering shows the full `owner/name` |
+| Strip repo prefixes | empty | Comma-separated prefixes removed from repo names in the inbox, e.g. `acme/widgets-`. Hovering shows the full `owner/name` |
 
 ### Backup
 
