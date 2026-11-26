@@ -28,11 +28,15 @@ Neither agent edits anything or calls `cr comment`; they only write their findin
      use their own repo.
   2. Issue references (`#123`, `Closes #45`) in the commit messages (`git -C <checkout> log <base>..<head> --format=%B`).
   3. A path the caller gave, or a file under `specs/`, `docs/` or `.scratch/` matching the branch name.
+     Also the issue tracker: a ticket under the `TRACKER_ROOT` named in the per-repo notes file (see
+     Standards sources) whose `branch:` frontmatter is the head branch, then its `parent` spec.
   4. None: write `{"skipped": "no spec available", "findings": []}` and stop. Do not guess a spec from the diff.
 - **Standards sources (Standards agent)**: every file that documents how code is written, read from the
   checkout: `CLAUDE.md`, `AGENTS.md`, `CONTRIBUTING.md`, `CODING_STANDARDS.md`, style guides under `docs/`,
-  and lint/format configs (only to know what tooling already enforces). If the checkout has none, the smell
-  baseline below is the only standard.
+  and lint/format configs (only to know what tooling already enforces). Also the `## Review standards`
+  section of the per-repo notes file the user's CLAUDE.md points to, when there is one: its rules count
+  as documented standards. If none of these
+  exist, the smell baseline below is the only standard.
 
 ## 3. Briefs
 
@@ -48,14 +52,14 @@ Neither agent edits anything or calls `cr comment`; they only write their findin
 Smell baseline (Fowler, *Refactoring* ch. 3). Each reads *what it is* → *how to fix*:
 
 - **Mysterious Name**: a function, variable or type whose name doesn't reveal what it does or holds. → rename it; if no honest name comes, the design is murky.
-- **Duplicated Code**: the same logic shape appears in more than one hunk or file of the change. → extract the shared shape.
+- **Duplicated Code**: the same logic shape appears in more than one hunk or file of the change, or the change re-implements a service, query, helper or builder that already exists in the repo (grep the checkout). → extract the shared shape, or call the existing one.
 - **Feature Envy**: a method that reaches into another object's data more than its own. → move it onto the data it envies.
 - **Data Clumps**: the same few fields or params keep travelling together. → bundle them into one type.
 - **Primitive Obsession**: a primitive or string standing in for a domain concept. → give the concept its own small type.
 - **Repeated Switches**: the same `switch`/`if` cascade on the same type recurs across the change. → polymorphism, or one shared map.
 - **Shotgun Surgery**: one logical change forces scattered edits across many files. → gather what changes together into one module.
 - **Divergent Change**: one file or module is edited for several unrelated reasons. → split so each module changes for one reason.
-- **Speculative Generality**: abstraction, parameters or hooks added for needs the spec doesn't have. → delete it.
+- **Speculative Generality**: abstraction, parameters, hooks, guards, fallbacks or options added for needs the spec doesn't have, or for a case that can't happen today. → delete it.
 - **Message Chains**: long `a.b().c().d()` navigation the caller shouldn't depend on. → hide the walk behind one method.
 - **Middle Man**: a class or function that mostly delegates onward. → call the real target directly.
 - **Refused Bequest**: a subclass or implementer that ignores or overrides most of what it inherits. → composition instead of inheritance.

@@ -10,6 +10,7 @@ Inputs (each optional):
 | File | From | Content |
 |---|---|---|
 | `standards.json`, `spec.json` | Standards / Spec agents | `{"skipped": null \| "reason", "findings": [...]}`, see `critique.md` §4 |
+| `readiness.json` | Readiness agent (own PRs) | same format, see `readiness.md` |
 | `codex.json` | Codex run | the companion's JSON payload (parse as below) |
 | `codex-skipped.txt` | orchestrator | why Codex was skipped or failed |
 | `coverage.json` | Coverage agent | `{"skipped", "score", "summary_line", "focus_areas", "units", "findings"}`, see `coverage.md` §7 |
@@ -31,9 +32,10 @@ Convert each layer's findings to one shape:
 | Codex adversarial | `payload.result.findings`; drop `confidence < 0.3`; `line = line_start`, `fix = recommendation`, `ref = "confidence <n>"` | its own `severity` | `ai:codex` |
 | Spec | `findings` | `wrong` → high, `missing` → medium, `scope-creep` → low | `ai:review` |
 | Standards | `findings` | `violation` (documented rule) → medium, `smell` → low | `ai:review` |
+| Readiness | `findings` | `stack`, `body-drift`, `out-of-scope` → medium; `vocabulary`, `sibling-spec` → low | `ai:review` |
 | Coverage | `findings` | `refactor-risk` → high, `test-changed` → medium, `untested`/`weak-test` → medium on a `review`/`critical` hunk, low elsewhere | `ai:coverage` |
 
-Source labels: `codex`, `spec`, `standards`, `coverage`.
+Source labels: `codex`, `spec`, `standards`, `readiness`, `coverage`.
 
 - **Codex**: `payload.result` holds `verdict` (`approve` | `needs-attention`), `summary`, `findings`,
   `next_steps`. If it is null (see `payload.parseError`), record "codex returned unparseable output" and put
@@ -62,7 +64,7 @@ findings.
 Merge each group into one finding:
 
 - `severity`: the highest in the group.
-- `sources`: all of them, ordered codex, spec, standards, coverage.
+- `sources`: all of them, ordered codex, spec, standards, readiness, coverage.
 - `tag`: from the first source in the order `ai:codex` > `ai:review` > `ai:coverage`.
 - `body`: the clearest body, plus one line per other source if it adds something.
 - `fix`: the most concrete fix. Coverage's test to write stays as `**Test to add:**`.
@@ -78,7 +80,7 @@ touched: unedited, unresolved, without replies; focus notes are never removed):
 cr comment prune RID --tag ai:review --tag ai:codex --tag ai:coverage    # only the tags of layers that ran
 ```
 
-Pass `--tag ai:review` when Standards or Spec ran, `--tag ai:codex` when Codex ran (adversarial),
+Pass `--tag ai:review` when Standards, Spec or Readiness ran, `--tag ai:codex` when Codex ran (adversarial),
 `--tag ai:coverage` when Coverage ran. A layer that was skipped or failed keeps its old comments: don't pass
 its tag.
 
@@ -149,6 +151,7 @@ layer's worst finding:
 ```
 ## Standards   — N findings. Worst: …          (or "skipped: …")
 ## Spec        — N findings. Worst: …          (or "no spec available")
+## Readiness   — N findings. Worst: …          (own PRs only; body findings are report-only)
 ## Codex       — verdict needs-attention|approve. <Codex summary>   (or "skipped: …")
 ## Coverage    — N/100 (unit U, e2e E, measured M% | measured skipped: …), <band>, <change_kind>.
                  Focus: <focus_areas, one per line>     (or "skipped: …")

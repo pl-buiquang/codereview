@@ -66,7 +66,8 @@ reported; the rest continue.
 
 - `--focus [--level focus|thorough|critical]` — tier every hunk with explanation notes (what **Generate
   focus** does in the app); see `focus.md`. Always re-plans.
-- `--critique` — Standards + Spec agents; see `critique.md`
+- `--critique` — Standards + Spec agents, plus the Readiness agent on your own PRs; see `critique.md`
+  and `readiness.md`
 - `--codex[=adversarial|native] ["focus text"]` — Codex review of the checkout; see `codex.md`
 - `--coverage` — how well unit and e2e tests cover the change: a 0–100 score, focus areas, a comment per
   gap and raised tiers on untested hunks; see `coverage.md`. Measured mode. Needs a checkout.
@@ -89,7 +90,7 @@ cargo install --path ~/projects/codereview/src-tauri --bin cr
 ```
 
 The instruction files live next to this file. Agents read them, you do not (except `codex.md` §1–3):
-`explain.md`, `focus.md`, `critique.md`, `codex.md`, `coverage.md`, `merge.md`, `reply.md`. Pass the skill directory
+`explain.md`, `focus.md`, `critique.md`, `readiness.md`, `codex.md`, `coverage.md`, `merge.md`, `reply.md`. Pass the skill directory
 (the directory of this SKILL.md) in every brief.
 
 ## Workflow
@@ -178,6 +179,8 @@ Send **one message** containing all of:
 - A focus to generate (Step 1e, or `--focus`): the **Focus agent**.
 - `--coverage` (or depth `normal`/`advanced`): the **Coverage agent**.
 - `--critique` (or any depth): the **Standards agent** and the **Spec agent**.
+- `--critique` (or any depth) on a PR that is mine (author = `gh api user --jq .login`; branch mode is
+  always mine): the **Readiness agent**.
 - `--with-replies`: the **Reply agent**.
 
 Every agent is `Agent` with `subagent_type: general-purpose` and a self-contained brief. Common header
@@ -196,6 +199,8 @@ Then per agent:
 - **Standards agent** / **Spec agent**: "Read `<dir>/critique.md`; you are the Standards (Spec) agent." It
   gathers its own sources, writes `/tmp/cr-RID/standards.json` (`spec.json`), and reports only the finding
   count and its worst finding.
+- **Readiness agent**: "Read `<dir>/readiness.md`." It writes `/tmp/cr-RID/readiness.json` and reports
+  only the finding count and its worst finding.
 - **Coverage agent**: "Read `<dir>/coverage.md`." Plus: "Focus: generated in this run", "Focus: reused" or
   "Focus: none (tier hunks yourself)", and "Coverage mode: static" (depth `normal`) or
   "Coverage mode: measured" (depth `advanced`, explicit `--coverage`).
@@ -207,7 +212,7 @@ Then per agent:
 Wait for the background Codex run (you are notified; non-zero exit → write `codex failed: <first line of
 stderr>` to `/tmp/cr-RID/codex-skipped.txt`) and for the agents. Then launch one fresh **Merge agent**
 (common header, plus the flags and depth, whether the focus was generated, reused or is absent, and which of
-`standards.json`, `spec.json`, `codex.json`, `codex-skipped.txt`, `coverage.json` exist):
+`standards.json`, `spec.json`, `readiness.json`, `codex.json`, `codex-skipped.txt`, `coverage.json` exist):
 "Read `<dir>/merge.md`." It normalizes severities, deduplicates across layers, prunes the previous run's
 findings, posts, and raises focus tiers. It returns a report of at most 250 words.
 
