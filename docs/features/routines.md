@@ -72,7 +72,23 @@ the waiting sessions (its tooltip lists both). A run stays unseen until you sele
 - **Notes root**: the only tree outside the clone that **Plan issue** may write to, available as
   `{{notes_root}}`. Default `~/Documents/notes`.
 
+## Babysit and stacked PRs
+
+On a stacked PR, Babysit restacks the whole stack whenever it updates its PR (the bottom behind its trunk,
+merge conflicts, a pushed fix) with `cr stack restack`, the board's all-or-nothing *Rebase stack…*. When that
+conflicts, or on a remote host, it rebases the branches by hand, resolving only simple conflicts, and pushes
+them in one atomic push; otherwise it stops with NEEDS_ATTENTION.
+
+Only one Babysit runs per stack: launching it on a PR whose stack already has one queued or running is
+refused, and the launch modal shows why. These rules are **launch guards** (`routines/guards.rs`), checked
+for local and remote runs alike.
+
+A Babysit you edited, or one seeded before this change, keeps its old prompt: **Reset** it to get the
+stack instructions.
+
 ## Prompt placeholders
 
-`{{repo}} {{number}} {{url}} {{title}} {{head_ref}} {{base_ref}} {{worktree}} {{review_id}} {{plans_dir}} {{notes_root}}`.
+`{{repo}} {{number}} {{url}} {{title}} {{head_ref}} {{base_ref}} {{stack}} {{worktree}} {{review_id}} {{plans_dir}} {{notes_root}}`.
+`{{stack}}` lists a stacked PR's stack bottom first (`#11 feat-a (on main)`, one line per PR, this one
+marked `(this PR)`); it is empty otherwise.
 Unknown placeholders are left as written. Handler routines may add more.

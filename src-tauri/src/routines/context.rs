@@ -253,6 +253,35 @@ fn gather(app: &AppHandle, routine: &Routine, r: &ContextRef, local: bool) -> Ap
     Ok(facts)
 }
 
+fn stack_text(conn: &Connection, f: &Facts) -> AppResult<String> {
+    let (Some((owner, name)), Ok(number)) = (
+        f.github_repo.as_deref().and_then(|r| r.split_once('/')),
+        f.number.parse::<i64>(),
+    ) else {
+        return Ok(String::new());
+    };
+    let mut stmt = conn.prepare(
+        "SELECT o.number, COALESCE(o.head_ref, ''), COALESCE(o.base_ref, '') FROM gh_pr p
+         JOIN repository r ON r.id = p.repo_id
+         JOIN gh_pr_status s ON s.pr_id = p.node_id
+         JOIN gh_pr o ON o.repo_id = p.repo_id
+         JOIN gh_pr_status os ON os.pr_id = o.node_id AND os.stack_number = s.stack_number
+         WHERE r.remote_owner = ?1 COLLATE NOCASE AND r.remote_name = ?2 COLLATE NOCASE
+           AND p.number = ?3 AND s.stack_number IS NOT NULL
+         ORDER BY os.stack_position",
+    )?;
+    let lines = stmt
+        .query_map(params![owner, name, number], |r| {
+            let n: i64 = r.get(0)?;
+            let head: String = r.get(1)?;
+            let base: String = r.get(2)?;
+            let this = if n == number { " (this PR)" } else { "" };
+            Ok(format!("#{n} {head} (on {base}){this}"))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(lines.join("\n"))
+}
+
 pub fn resolve(app: &AppHandle, routine: &Routine, r: &ContextRef) -> AppResult<Resolved> {
     let db = app.state::<Db>();
     let facts = gather(app, routine, r, true)?;
@@ -281,6 +310,7 @@ pub fn resolve(app: &AppHandle, routine: &Routine, r: &ContextRef) -> AppResult<
     } else {
         String::new()
     };
+    let stack = stack_text(&db.0.lock().unwrap(), &facts)?;
     let settings = manager::routine_settings(&db.0.lock().unwrap());
     let plans_dir = crate::commands::repo::expand_home(&settings.plans_dir);
     let notes_root = crate::commands::repo::expand_home(&settings.notes_root);
@@ -293,6 +323,7 @@ pub fn resolve(app: &AppHandle, routine: &Routine, r: &ContextRef) -> AppResult<
         ("title".to_string(), facts.title.clone()),
         ("head_ref".to_string(), facts.head_ref.clone()),
         ("base_ref".to_string(), facts.base_ref.clone()),
+        ("stack".to_string(), stack),
         ("worktree".to_string(), worktree),
         (
             "review_id".to_string(),
@@ -351,6 +382,7 @@ pub fn resolve_remote(
     let db = app.state::<Db>();
     let facts = gather(app, routine, r, false)?;
     let workspace = workspace_for(routine, &facts)?;
+    let stack = stack_text(&db.0.lock().unwrap(), &facts)?;
     let settings = manager::routine_settings(&db.0.lock().unwrap());
     let plans_dir = crate::commands::repo::expand_home(&settings.plans_dir);
     let notes_root = crate::commands::repo::expand_home(&settings.notes_root);
@@ -364,6 +396,7 @@ pub fn resolve_remote(
         ("title".to_string(), facts.title.clone()),
         ("head_ref".to_string(), facts.head_ref.clone()),
         ("base_ref".to_string(), facts.base_ref.clone()),
+        ("stack".to_string(), stack),
         (
             "worktree".to_string(),
             if routine.needs_worktree {
@@ -557,6 +590,36 @@ mod tests {
             let err = workspace_for(&r, &f).unwrap_err().to_string();
             assert!(err.contains("can't run on a remote host"), "{err}");
         }
+    }
+
+    #[test]
+    fn stack_lists_the_prs_bottom_first_and_marks_this_one() {
+        let conn = crate::db::open_memory();
+        let repo_id = crate::mirror::store::ensure_repo(&conn, "acme", "widgets", "now").unwrap();
+        for (n, pos, head, base, stack) in [
+            (12, 2, "b", "a", Some(4)),
+            (11, 1, "a", "main", Some(4)),
+            (13, 1, "x", "main", None),
+        ] {
+            conn.execute(
+                "INSERT INTO gh_pr (node_id, repo_id, number, title, url, gh_updated_at, fetched_at, head_ref, base_ref)
+                 VALUES (?1, ?2, ?3, 't', 'u', 'now', 'now', ?4, ?5)",
+                params![format!("pr{n}"), repo_id, n, head, base],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO gh_pr_status (pr_id, stack_number, stack_position, fetched_at) VALUES (?1, ?2, ?3, 'now')",
+                params![format!("pr{n}"), stack, pos],
+            )
+            .unwrap();
+        }
+        let text = |n: &str| stack_text(&conn, &facts("pr", Some("Acme/Widgets"), n, "")).unwrap();
+        assert_eq!(text("12"), "#11 a (on main)\n#12 b (on a) (this PR)");
+        assert_eq!(text("13"), "");
+        assert_eq!(
+            stack_text(&conn, &facts("board", None, "", "")).unwrap(),
+            ""
+        );
     }
 
     #[test]

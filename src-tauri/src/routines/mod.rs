@@ -248,26 +248,46 @@ const BABYSIT_SYSTEM: &str = "\
 You are babysitting pull request {{url}} ({{title}}). Your working directory is its checked-out worktree \
 ({{worktree}}), on branch `{{head_ref}}` (base `{{base_ref}}`). Keep going until the goal holds.
 
+Stack of this PR, bottom first (empty when it is not stacked):
+{{stack}}
+
 Loop:
 1. Read the PR state: `gh pr view {{number}} --json mergeStateStatus,mergeable,statusCheckRollup,headRefOid` and \
 `gh pr checks {{number}}`. Only the latest head commit matters.
 2. If checks are still running, wait for them without burning turns: run `gh pr checks {{number}} --watch` in the \
 foreground, or start a background `gh run watch` and wait for it.
-3. If the branch is BEHIND `{{base_ref}}`, update it: `gh pr update-branch {{number}}`. If the PR is part of a stack \
-(use the gh-stack skill), rebase it on its parent instead; `git push --force-with-lease` is allowed only after such a rebase.
-3b. If the PR has merge conflicts (`mergeable` is CONFLICTING or `mergeStateStatus` is DIRTY), merge or rebase \
-`origin/{{base_ref}}` into the worktree branch (rebase, then `--force-with-lease`, only if the branch is already rebased-style \
-or part of a stack; otherwise a merge commit and a plain `git push`) and resolve the conflicts only if they are simple: \
-adjacent or whitespace edits, import or list ordering, lockfile or generated-file regeneration, or one side clearly \
-superseding the other with no intent to reconcile. Run the relevant tests afterwards. If any conflict needs a judgement \
-about behaviour or intent, or touches logic both sides changed, run `git merge --abort` (or `git rebase --abort`) and stop \
-with NEEDS_ATTENTION.
+3. If the branch is BEHIND `{{base_ref}}`: not stacked, update it with `gh pr update-branch {{number}}`; stacked, \
+restack it (see Stack below), never `gh pr update-branch`.
+3b. If the PR has merge conflicts (`mergeable` is CONFLICTING or `mergeStateStatus` is DIRTY): stacked, restack it \
+(see Stack below). Otherwise merge `origin/{{base_ref}}` into the worktree branch (rebase, then `--force-with-lease`, \
+only if the branch is already rebased-style; otherwise a merge commit and a plain `git push`) and resolve the conflicts \
+only if they are simple: adjacent or whitespace edits, import or list ordering, lockfile or generated-file regeneration, \
+or one side clearly superseding the other with no intent to reconcile. Run the relevant tests afterwards. If any conflict \
+needs a judgement about behaviour or intent, or touches logic both sides changed, run `git merge --abort` (or \
+`git rebase --abort`) and stop with NEEDS_ATTENTION.
 4. If a check failed, read its log (`gh run view <id> --log-failed`). A flaky or infrastructure failure (network, runner, \
 timeout, unrelated test): rerun just the failed jobs (`gh run rerun <id> --failed`), at most 3 times per run. A real failure \
 caused by the branch and simple to fix (a typo, lint or format error, an obvious test or snapshot update, a missing import): \
 fix it in the worktree, run the relevant tests locally, commit with a one-line Conventional Commit \
-message (no body), and `git push` (never a plain `--force`). Then go back to step 1.
-5. Never merge the PR, never post comments or reviews on GitHub, never touch other branches.
+message (no body), and `git push` (never a plain `--force`). When stacked, restack right after the push (see Stack below). \
+Then go back to step 1.
+5. Never merge the PR, never post comments or reviews on GitHub, never touch branches outside this PR's stack.
+
+Stack (only when the stack list above is not empty): every update of this PR (bottom behind its trunk, conflicts, a pushed \
+fix) restacks the whole stack, so the PRs above it never fall behind.
+- Run `cr stack restack {{url}}`. It rebases every branch of the stack onto its updated parent, pushes them in one atomic \
+push with a lease per branch, and moves their local worktrees. `--dry-run` shows what it would do.
+- If it refuses because of a conflict, or `cr stack` is not available (a remote host), restack by hand: note every branch's \
+`origin/<branch>` sha first; then bottom-up, rebase each branch that needs it in its own temporary checkout \
+(`git worktree add --detach <tmp dir> origin/<branch>`; this PR's own branch in the working directory) with \
+`git rebase --onto <new parent tip> <fork point>`, where the fork point is the parent's old sha, or \
+`git merge-base origin/<parent> origin/<branch>` when the parent only gained commits. Resolve only simple conflicts, \
+by the rules of step 3b, and run the relevant tests on each branch you resolved. Then push every rebased branch at once: \
+`git push --atomic origin --force-with-lease=<branch>:<old sha> ... <sha>:refs/heads/<branch> ...`, and remove the \
+temporary worktrees. If a conflict is not simple, `git rebase --abort`, push nothing, remove the temporary worktrees and \
+stop with NEEDS_ATTENTION naming the branch.
+- Any other refusal (a closed or merged PR in the stack, no push rights, the stack not synced): stop with NEEDS_ATTENTION \
+and its reason.
 
 Every fix and every conflict resolution must be simple. If it is not obvious and low-risk, do not attempt it.
 
@@ -366,7 +386,7 @@ pub const DEFAULTS: &[Defaults] = &[
     Defaults {
         key: BABYSIT_KEY,
         name: "Babysit",
-        description: "Keep a PR's CI green: wait for checks, rerun flaky jobs, update the branch, resolve simple merge conflicts, fix simple real failures and push; otherwise flag it as needing attention.",
+        description: "Keep a PR's CI green: wait for checks, rerun flaky jobs, update the branch (restacking the whole stack of a stacked PR), resolve simple merge conflicts, fix simple real failures and push; otherwise flag it as needing attention. One babysit per stack at a time.",
         context_type: "pr",
         prompt_template: BABYSIT_PROMPT,
         system_prompt: BABYSIT_SYSTEM,
@@ -1140,7 +1160,7 @@ mod tests {
     }
 
     #[test]
-    fn shipped_issue_prompts_have_no_unknown_placeholders() {
+    fn shipped_issue_and_babysit_prompts_have_no_unknown_placeholders() {
         let known = [
             "repo",
             "number",
@@ -1152,8 +1172,12 @@ mod tests {
             "base_ref",
             "worktree",
             "review_id",
+            "stack",
         ];
-        for d in DEFAULTS.iter().filter(|d| d.context_type == "issue") {
+        for d in DEFAULTS
+            .iter()
+            .filter(|d| d.context_type == "issue" || d.key == BABYSIT_KEY)
+        {
             for text in [d.system_prompt, d.prompt_template] {
                 for part in text.split("{{").skip(1) {
                     let name = part.split("}}").next().unwrap();
