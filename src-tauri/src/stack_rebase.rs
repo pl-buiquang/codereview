@@ -88,6 +88,30 @@ fn count(repo: &Path, range: &str) -> u32 {
         .unwrap_or(0)
 }
 
+fn fork_point(repo: &Path, parent: &str, child: &str) -> Option<String> {
+    if is_ancestor(repo, parent, child) {
+        return Some(parent.to_string());
+    }
+    let fork = run_git(repo, &["merge-base", parent, child])
+        .ok()?
+        .trim()
+        .to_string();
+    let range = format!("{parent}...{child}");
+    let marks = run_git(repo, &["rev-list", "--cherry-mark", "--right-only", &range]).ok()?;
+    if marks.lines().any(|l| l.starts_with('=')) {
+        return None;
+    }
+    let subjects = |tip: &str| -> Option<Vec<String>> {
+        let out = run_git(repo, &["log", "--format=%s", &format!("{fork}..{tip}")]).ok()?;
+        Some(out.lines().map(str::to_string).collect())
+    };
+    let ours = subjects(parent)?;
+    if subjects(child)?.iter().any(|s| ours.contains(s)) {
+        return None;
+    }
+    Some(fork)
+}
+
 /// Replays `from..origin/<branch>` onto `onto`; returns the new tip. `replay`
 /// only reports refs under `refs/heads/`, so the result is read back through a
 /// scratch `--ref` name (print mode writes nothing). An empty range yields `onto`.
@@ -96,13 +120,14 @@ fn replay(
     onto: &str,
     from: &str,
     branch: &str,
+    parent: &str,
     commits: u32,
 ) -> Result<String, String> {
     let range = format!("{from}..{}", remote_ref(branch));
     let scratch = "refs/heads/cr-stack-rebase";
     let out = run_git(repo, &["replay", "--ref-action=print", "--ref", scratch, "--onto", onto, &range])
         .map_err(|e| {
-            format!("{branch}: conflicts when rebased onto its new parent — rebase this stack by hand ({e})")
+            format!("{branch}: conflicts when rebased onto {parent} (fork point {from}) — rebase this stack by hand ({e})")
         })?;
     let prefix = format!("update {scratch} ");
     let new = out
@@ -200,14 +225,19 @@ pub fn plan(repo: &Path, trunk: &str, branches: &[String]) -> Result<Plan, Vec<S
         return Err(vec!["the stack has no branches".into()]);
     }
 
-    // Shape: each branch must already contain its parent's current tip.
+    // Shape: each branch forks from its parent's current tip, or from an older tip the parent only
+    // added commits to since (a fix pushed mid-stack). A rewritten parent is refused.
+    let mut forks = vec![String::new()];
     for k in 1..branches.len() {
-        if !is_ancestor(repo, &olds[k - 1], &olds[k]) {
-            return Err(vec![format!(
-                "{} doesn't contain the tip of {} (it was amended or pushed to separately) — rebase this stack by hand",
-                branches[k],
-                branches[k - 1]
-            )]);
+        match fork_point(repo, &olds[k - 1], &olds[k]) {
+            Some(fork) => forks.push(fork),
+            None => {
+                return Err(vec![format!(
+                    "{} doesn't contain the tip of {} (it was amended or rebased separately) — rebase this stack by hand",
+                    branches[k],
+                    branches[k - 1]
+                )])
+            }
         }
     }
 
@@ -238,13 +268,18 @@ pub fn plan(repo: &Path, trunk: &str, branches: &[String]) -> Result<Plan, Vec<S
             };
             (base, trunk_sha.clone())
         } else {
-            (olds[k - 1].clone(), plans[k - 1].new.clone())
+            (forks[k].clone(), plans[k - 1].new.clone())
         };
         let commits = count(repo, &format!("{parent_old}..{}", olds[k]));
+        let parent = if k == 0 {
+            trunk
+        } else {
+            branches[k - 1].as_str()
+        };
         let new = if parent_old == parent_new {
             olds[k].clone()
         } else {
-            replay(repo, &parent_new, &parent_old, b, commits).map_err(|e| vec![e])?
+            replay(repo, &parent_new, &parent_old, b, parent, commits).map_err(|e| vec![e])?
         };
         plans.push(BranchPlan {
             branch: b.clone(),
@@ -520,8 +555,48 @@ mod tests {
         git(&f.clone, &["fetch", "-q", "origin"]);
         let before = git(&f.origin, &["rev-parse", "a", "b"]);
         let reasons = plan(&f.clone, "main", &stack()).unwrap_err();
-        assert!(reasons[0].contains("conflicts"), "{reasons:?}");
+        assert!(
+            reasons[0].starts_with("a: conflicts when rebased onto main"),
+            "{reasons:?}"
+        );
         assert_eq!(git(&f.origin, &["rev-parse", "a", "b"]), before);
+    }
+
+    #[test]
+    fn commit_pushed_mid_stack_restacks_the_children() {
+        let f = fixture();
+        let work = f.clone.parent().unwrap().join("work");
+        git(&work, &["checkout", "-q", "a"]);
+        commit(&work, "fix", "1");
+        git(&work, &["push", "-q", "origin", "a"]);
+        git(&f.clone, &["fetch", "-q", "origin"]);
+        let plan = plan(&f.clone, "main", &stack()).unwrap();
+        assert_eq!(plan.branches[1].commits, 1);
+        apply(&f.clone, &plan).unwrap();
+        assert_eq!(
+            git(&f.origin, &["rev-parse", "b~1"]),
+            git(&f.origin, &["rev-parse", "a"])
+        );
+        assert_eq!(
+            git(&f.origin, &["log", "--format=%s", "main..b"]),
+            "b\nfix\na"
+        );
+    }
+
+    #[test]
+    fn amended_parent_is_refused() {
+        let f = fixture();
+        let work = f.clone.parent().unwrap().join("work");
+        git(&work, &["checkout", "-q", "a"]);
+        fs::write(work.join("a"), "amended").unwrap();
+        git(&work, &["commit", "-qa", "--amend", "--no-edit"]);
+        git(&work, &["push", "-qf", "origin", "a"]);
+        git(&f.clone, &["fetch", "-q", "origin"]);
+        let reasons = plan(&f.clone, "main", &stack()).unwrap_err();
+        assert!(
+            reasons[0].contains("doesn't contain the tip of a"),
+            "{reasons:?}"
+        );
     }
 
     #[test]

@@ -124,9 +124,10 @@ The card's **PR actions** menu (disabled reasons shown as tooltips):
 - Rebase stack… (stacked PRs): rebases the whole stack onto its trunk locally and all-or-nothing.
   The rebase is computed in memory with `git replay` first; then every changed branch is pushed in
   one atomic push (a `--force-with-lease` per branch), then local branches / clean worktrees are
-  moved to the new tips. Refused, changing nothing, when: a PR is merged/closed, the chain isn't
-  linear, you can't push to a branch, a local copy has unpushed commits, a worktree is dirty or
-  mid-rebase, or a commit conflicts. Rebase those on GitHub / by hand, then Resync worktrees.
+  moved to the new tips. A branch whose parent gained commits since it forked (a fix pushed
+  mid-stack) is replayed from its fork point. Refused, changing nothing, when: a PR is merged/closed,
+  the chain isn't linear, a parent was amended or rebased under its child, you can't push to a branch,
+  a local copy has unpushed commits, a worktree is dirty or mid-rebase, or a commit conflicts. Rebase those on GitHub / by hand, then Resync worktrees.
   Logic: `src-tauri/src/stack_rebase.rs`.
 - Re-run failed jobs / Re-run all jobs (only when CI is failing)
 - Open in terminal (a shell in the PR's worktree), Focus an existing agent session, or open a new
