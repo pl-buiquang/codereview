@@ -8,9 +8,9 @@ use crate::ai::profiles;
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
 use crate::routines::context::{self, ContextRef};
-use crate::routines::handlers;
 use crate::routines::manager::{self, RoutineManager, RoutineRun, RunEvent, RunFilter};
 use crate::routines::{self, Routine, RoutineInput};
+use crate::routines::{guards, handlers};
 
 #[tauri::command]
 pub fn routine_list(db: State<Db>) -> AppResult<Vec<Routine>> {
@@ -37,6 +37,7 @@ pub struct RoutineOption {
     pub routine: Routine,
     /// The routine's queued / running run on this context, if any.
     pub active_run: Option<RoutineRun>,
+    pub blocked: Option<String>,
 }
 
 /// Routines the context satisfies, each with its active run, for the launch modal.
@@ -53,9 +54,11 @@ pub fn routine_list_for_context(
             continue;
         }
         let active_run = manager::active_run(&conn, routine.id, &light.key)?;
+        let blocked = guards::blocked(&conn, &routine, &light)?;
         out.push(RoutineOption {
             routine,
             active_run,
+            blocked,
         });
     }
     Ok(out)
@@ -86,6 +89,7 @@ pub fn launch(
                 routine.name, light.label
             )));
         }
+        guards::check(&db.0.lock().unwrap(), routine, &light)?;
         return app.state::<RoutineManager>().launch_remote(
             app,
             routine,
@@ -113,6 +117,7 @@ pub fn launch(
             routine.name, light.label
         )));
     }
+    guards::check(&db.0.lock().unwrap(), routine, &light)?;
     handlers::pre_launch(app, routine, context, &light, model)?;
     app.state::<RoutineManager>()
         .launch(app, routine, context, &light, note.trim(), model.trim())

@@ -1253,6 +1253,7 @@ export interface RoutineRun {
 export interface RoutineOption {
   routine: Routine;
   active_run: RoutineRun | null;
+  blocked: string | null;
 }
 
 /** Where the Plan routine writes plans for repos without a tracker root, and the vault tree it may write to. */

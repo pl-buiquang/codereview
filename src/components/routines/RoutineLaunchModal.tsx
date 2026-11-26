@@ -54,7 +54,7 @@ export function RoutineLaunchModal({
   });
 
   const list: RoutineOption[] = options.data ?? [];
-  const selected = list.find((o) => o.routine.id === selectedId && !o.active_run) ?? null;
+  const selected = list.find((o) => o.routine.id === selectedId && !o.active_run && !o.blocked) ?? null;
 
   const openLog = (runId: number) => {
     showRoutineRun(runId);
@@ -82,15 +82,15 @@ export function RoutineLaunchModal({
           {!options.isLoading && list.length === 0 && (
             <p className="muted">No routine fits this context. Create one in Sessions → Config.</p>
           )}
-          {list.map(({ routine, active_run }) => (
+          {list.map(({ routine, active_run, blocked }) => (
             <div
               key={routine.id}
-              className={`routine-option${selectedId === routine.id && !active_run ? " selected" : ""}${active_run ? " active" : ""}`}
+              className={`routine-option${selectedId === routine.id && !active_run && !blocked ? " selected" : ""}${active_run ? " active" : ""}`}
             >
               <button
                 type="button"
                 className="routine-option-main"
-                disabled={!!active_run}
+                disabled={!!active_run || !!blocked}
                 aria-pressed={selectedId === routine.id}
                 onClick={() => setSelectedId(routine.id)}
               >
@@ -98,6 +98,7 @@ export function RoutineLaunchModal({
                 {routine.needs_worktree && <span className="badge">worktree</span>}
                 {routine.description && <span className="muted routine-option-desc">{routine.description}</span>}
               </button>
+              {blocked && !active_run && <p className="form-warning">{blocked}</p>}
               {active_run && (
                 <div className="routine-option-run">
                   <RunStatusBadge status={active_run.status} />

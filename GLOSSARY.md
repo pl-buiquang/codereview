@@ -49,6 +49,9 @@ Glossary of domain terms used in this app.
   `system` (every routine with a Rust handler: focus, AI review layers, board overview, issue plan,
   image diff report). System routines run locally and only their profile, model, timeout and
   enabled flag are editable.
+- **Launch guard** — a rule in `routines/guards.rs` that refuses a routine launch because of what
+  else is running (today: one Babysit per PR stack). Checked by the launch command for local and
+  remote runs; its reason is shown in the launch modal.
 - **Run engine** — the Tauri-free queue / process / event machinery behind routine runs
   (`run_engine/`). The host supplies a `RunStore` (where runs and events live) and an `EventSink`
   (what happens on events and when a run finishes); the app and `cr worker` each plug in their own.

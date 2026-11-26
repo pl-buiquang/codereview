@@ -3,6 +3,7 @@
 //! `context` turns a launch reference into prompt variables and a working directory.
 
 pub mod context;
+pub mod guards;
 pub mod handlers;
 pub mod manager;
 pub mod remote_run;

@@ -87,7 +87,7 @@ describe("RoutineLaunchModal", () => {
 
   it("disables Run with an explanation while AI features are off", async () => {
     useSettingsStore.setState({ aiEnabled: false });
-    renderModal([{ routine: routine(), active_run: null }]);
+    renderModal([{ routine: routine(), active_run: null, blocked: null }]);
     const user = userEvent.setup();
 
     await user.click(await screen.findByRole("button", { name: /Babysit/ }));
@@ -98,7 +98,7 @@ describe("RoutineLaunchModal", () => {
 
   it("launches the selected routine with the note", async () => {
     routineLaunch.mockResolvedValue(run({ status: "running" }));
-    const onClose = renderModal([{ routine: routine(), active_run: null }]);
+    const onClose = renderModal([{ routine: routine(), active_run: null, blocked: null }]);
     const user = userEvent.setup();
 
     await user.click(await screen.findByRole("button", { name: /Babysit/ }));
@@ -113,7 +113,7 @@ describe("RoutineLaunchModal", () => {
   });
 
   it("shows the active run instead of allowing a second launch", async () => {
-    renderModal([{ routine: routine(), active_run: run() }]);
+    renderModal([{ routine: routine(), active_run: run(), blocked: null }]);
     const user = userEvent.setup();
 
     expect(await screen.findByText("Running")).toBeInTheDocument();
@@ -125,9 +125,21 @@ describe("RoutineLaunchModal", () => {
     expect(useUIStore.getState().sessionsTab).toBe("routines");
   });
 
+  it("shows a guard's warning and refuses the launch", async () => {
+    const reason = "Babysit is already running on o/n#2, in the same stack.";
+    renderModal([{ routine: routine(), active_run: null, blocked: reason }]);
+    const user = userEvent.setup();
+
+    expect(await screen.findByText(reason)).toBeInTheDocument();
+    const option = screen.getByRole("button", { name: /Babysit/ });
+    expect(option).toBeDisabled();
+    await user.click(option);
+    expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
+  });
+
   it("stops the active run", async () => {
     routineRunStop.mockResolvedValue(undefined);
-    renderModal([{ routine: routine(), active_run: run() }]);
+    renderModal([{ routine: routine(), active_run: run(), blocked: null }]);
     const user = userEvent.setup();
     await user.click(await screen.findByRole("button", { name: "Stop" }));
     await waitFor(() => expect(routineRunStop).toHaveBeenCalled());
