@@ -48,6 +48,24 @@ describe("PrConversationRow", () => {
     expect(screen.getByText("hidden: bot")).toBeInTheDocument();
   });
 
+  it("colors approval and change-request reviews", async () => {
+    const review = (id: string, reviewState: string) => ({ ...c(id, id), kind: "review" as const, reviewState });
+    const { container } = render(
+      <PrConversationRow
+        subject={subject}
+        comments={[review("ok", "APPROVED"), review("ko", "CHANGES_REQUESTED"), c("plain", "plain")]}
+        rules={[]}
+        onChanged={() => {}}
+      />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: /PR conversation/ }));
+    expect([...container.querySelectorAll(".pr-conversation-item")].map((e) => e.className)).toEqual([
+      "pr-conversation-item is-approved",
+      "pr-conversation-item is-changes-requested",
+      "pr-conversation-item",
+    ]);
+  });
+
   it("has no Show all switch when nothing is hidden", () => {
     render(<PrConversationRow subject={subject} comments={[c("bob", "hi")]} rules={[]} onChanged={() => {}} />);
     expect(screen.queryByLabelText("Show all")).toBeNull();

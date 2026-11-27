@@ -54,7 +54,16 @@ export function PrConversationRow({
       {open && (
         <div className="pr-conversation-body">
           {visible.map((c) => (
-            <div key={c.id} className={`pr-conversation-item${c.hiddenBy.length > 0 ? " is-hidden" : ""}`}>
+            <div
+              key={c.id}
+              className={`pr-conversation-item${c.hiddenBy.length > 0 ? " is-hidden" : ""}${
+                c.kind === "review" && c.reviewState === "APPROVED"
+                  ? " is-approved"
+                  : c.kind === "review" && c.reviewState === "CHANGES_REQUESTED"
+                    ? " is-changes-requested"
+                    : ""
+              }`}
+            >
               <DiscussionItem
                 comment={c}
                 subjectId={subject.id}

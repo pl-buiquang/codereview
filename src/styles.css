@@ -1357,6 +1357,12 @@ td.diff-code {
   border-left: 2px solid var(--info-border);
   border-radius: var(--radius-m);
 }
+.pr-conversation-item.is-approved {
+  border-left-color: var(--success);
+}
+.pr-conversation-item.is-changes-requested {
+  border-left-color: var(--danger);
+}
 .pr-conversation-item.is-hidden {
   opacity: 0.75;
 }
