@@ -3174,6 +3174,7 @@ tr.search-current {
 }
 .jump-list {
   flex: 0 0 var(--left-panel-width, 248px);
+  max-width: 60vw;
   min-height: 0;
   overflow: hidden;
   display: flex;

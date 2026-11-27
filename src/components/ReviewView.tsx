@@ -160,6 +160,8 @@ export function flashRow(row: HTMLElement) {
   setTimeout(() => row.classList.remove("def-flash"), 1500);
 }
 
+const panelMaxWidth = () => Math.round(window.innerWidth * 0.6);
+
 export function ReviewView({ reviewId }: { reviewId: number }) {
   const queryClient = useQueryClient();
   const defaultViewType = useSettingsStore((s) => s.defaultViewType);
@@ -176,6 +178,7 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
   const [prDetailsCollapsed, setPrDetailsCollapsed] = useState(true);
   const [leftWidth, setLeftWidth] = useState(248);
   const [rightWidth, setRightWidth] = useState(360);
+  const [maximized, setMaximized] = useState<"left" | "right" | null>(null);
   const [pendingChatMessage, setPendingChatMessage] = useState<string | null>(null);
   const [pendingChatDraft, setPendingChatDraft] = useState<string | null>(null);
   const [typeFilter, setTypeFilter] = useState<"all" | FileCategory>("all");
@@ -262,7 +265,14 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
     detailQuery.data?.review.right_panel_width,
   ]);
 
+  const toggleMaximize = useCallback((side: "left" | "right") => {
+    setMaximized((prev) => (prev === side ? null : side));
+  }, []);
+  const toggleLeftMaximize = useCallback(() => toggleMaximize("left"), [toggleMaximize]);
+  const toggleRightMaximize = useCallback(() => toggleMaximize("right"), [toggleMaximize]);
+
   const toggleSidebar = useCallback(() => {
+    setMaximized((m) => (m === "left" ? null : m));
     setSidebarCollapsed((prev) => {
       const next = !prev;
       api.setSidebarCollapsed(reviewId, next);
@@ -287,6 +297,7 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
   }, [reviewId]);
 
   const toggleChat = useCallback(() => {
+    setMaximized((m) => (m === "right" ? null : m));
     setChatCollapsed((prev) => {
       const next = !prev;
       api.setChatCollapsed(reviewId, next);
@@ -298,18 +309,20 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
     (side: "left" | "right") => (e: React.MouseEvent) => {
       e.preventDefault();
       const startX = e.clientX;
-      const startLeft = leftWidth;
-      const startRight = rightWidth;
+      const panelMax = panelMaxWidth();
+      const startLeft = maximized === "left" ? panelMax : leftWidth;
+      const startRight = maximized === "right" ? panelMax : rightWidth;
+      if (maximized === side) setMaximized(null);
       let finalLeft = startLeft;
       let finalRight = startRight;
 
       const onMove = (ev: MouseEvent) => {
         const delta = ev.clientX - startX;
         if (side === "left") {
-          finalLeft = Math.max(160, Math.min(500, startLeft + delta));
+          finalLeft = Math.max(160, Math.min(panelMaxWidth(), startLeft + delta));
           setLeftWidth(finalLeft);
         } else {
-          finalRight = Math.max(200, Math.min(Math.round(window.innerWidth * 0.6), startRight - delta));
+          finalRight = Math.max(200, Math.min(panelMaxWidth(), startRight - delta));
           setRightWidth(finalRight);
         }
       };
@@ -323,7 +336,7 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
       document.addEventListener("mousemove", onMove);
       document.addEventListener("mouseup", onUp);
     },
-    [reviewId, leftWidth, rightWidth],
+    [reviewId, leftWidth, rightWidth, maximized],
   );
 
   const openChat = useCallback(() => {
@@ -961,8 +974,8 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
       <div
         className="review-body"
         style={{
-          "--left-panel-width": `${leftWidth}px`,
-          "--right-panel-width": `${rightWidth}px`,
+          "--left-panel-width": maximized === "left" ? "60vw" : `${leftWidth}px`,
+          "--right-panel-width": maximized === "right" ? "60vw" : `${rightWidth}px`,
         } as CSSProperties}
       >
         <FileJumpList
@@ -971,6 +984,8 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
           controlRef={jumpListRef}
           paneCollapsed={sidebarCollapsed}
           onToggle={toggleSidebar}
+          maximized={maximized === "left"}
+          onToggleMaximize={toggleLeftMaximize}
           threads={threadsQuery.data ?? []}
           hiddenPaths={focusHiddenPaths}
           typeFilter={typeFilter}
@@ -1088,6 +1103,8 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
           reviewId={reviewId}
           paneCollapsed={chatCollapsed}
           onToggle={toggleChat}
+          maximized={maximized === "right"}
+          onToggleMaximize={toggleRightMaximize}
           pendingMessage={pendingChatMessage}
           onPendingConsumed={() => setPendingChatMessage(null)}
           draftMessage={pendingChatDraft}

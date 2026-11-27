@@ -19,6 +19,8 @@ interface ChatPanelProps {
   reviewId: number;
   paneCollapsed: boolean;
   onToggle: () => void;
+  maximized?: boolean;
+  onToggleMaximize?: () => void;
   /** Message pre-filled from "Send to Chat" in the diff composer. */
   pendingMessage: string | null;
   onPendingConsumed: () => void;
@@ -31,6 +33,8 @@ export function ChatPanel({
   reviewId,
   paneCollapsed,
   onToggle,
+  maximized = false,
+  onToggleMaximize,
   pendingMessage,
   onPendingConsumed,
   draftMessage = null,
@@ -187,6 +191,16 @@ export function ChatPanel({
           >
             <Icon name="x" size={12} />
           </button>
+          {onToggleMaximize && (
+            <button
+              className="btn btn-sm btn-ghost sidebar-toggle"
+              title={maximized ? "Restore panel size" : "Maximize panel"}
+              aria-label={maximized ? "Restore panel size" : "Maximize panel"}
+              onClick={onToggleMaximize}
+            >
+              <Icon name={maximized ? "collapse" : "expand"} size={12} />
+            </button>
+          )}
           <Icon name="bot" size={13} />
           Chat
           {worktreeQuery.data?.branch && (

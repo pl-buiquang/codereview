@@ -72,6 +72,8 @@ export function FileJumpList({
   controlRef,
   paneCollapsed,
   onToggle,
+  maximized = false,
+  onToggleMaximize,
   threads = [],
   hiddenPaths,
   typeFilter,
@@ -85,6 +87,8 @@ export function FileJumpList({
   controlRef?: MutableRefObject<JumpListHandle | null>;
   paneCollapsed?: boolean;
   onToggle?: () => void;
+  maximized?: boolean;
+  onToggleMaximize?: () => void;
   threads?: PrThread[];
   /** Paths focus hides entirely; removed from the list like a type filter. */
   hiddenPaths?: Set<string>;
@@ -514,6 +518,16 @@ export function FileJumpList({
                 }}
               >
                 Context
+              </button>
+            )}
+            {onToggleMaximize && (
+              <button
+                className="btn btn-sm btn-ghost sidebar-toggle"
+                title={maximized ? "Restore panel size" : "Maximize panel"}
+                aria-label={maximized ? "Restore panel size" : "Maximize panel"}
+                onClick={onToggleMaximize}
+              >
+                <Icon name={maximized ? "collapse" : "expand"} size={12} />
               </button>
             )}
             {onToggle && (
