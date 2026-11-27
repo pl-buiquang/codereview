@@ -124,6 +124,7 @@ Write `/tmp/cr-RID/raises.json` and apply it:
 {
   "summary_lines": [
     "Findings: 7 (1 critical, 2 high, 3 medium, 1 low)",
+    "Verdict: request changes (1 critical, 2 high)",
     "<coverage.json summary_line, when coverage ran>"
   ],
   "hunks": [{ "id": "<hunk_id>", "tier": "critical" }]
@@ -144,8 +145,8 @@ Keep the axes separate in the report: deduplication merges comments, it doesn't 
 Never write the review body or verdict (`cr update`): the body is what gets published to GitHub. The summary
 only goes in your report.
 
-Start from the focus summary in `cr focus show RID --json` (no focus on a small PR: one sentence of your
-own on what the change does). Append a section per layer that ran, each with the finding count and that
+Start with the suggested verdict, then the focus summary in `cr focus show RID --json` (no focus on a
+small PR: one sentence of your own on what the change does). Append a section per layer that ran, each with the finding count and that
 layer's worst finding:
 
 ```
@@ -157,9 +158,27 @@ layer's worst finding:
                  Focus: <focus_areas, one per line>     (or "skipped: …")
 ```
 
+### Suggested verdict
+
+One of `approve`, `request changes` or `comment`, from the deduplicated findings of §3 (posted or
+report-only) and the Codex verdict:
+
+| Condition (first match wins) | Verdict |
+|---|---|
+| any `critical` or `high` finding | `request changes` |
+| any `medium` finding, or Codex `needs-attention` with no finding above `low` | `comment` |
+| only `low` findings, or none | `approve` |
+
+Give it as the first line of the summary, with its reason (the counts, or the one finding that decides
+it): `Suggested verdict: request changes (1 critical, 2 high)`. Use the same text after `Verdict:` in
+`summary_lines` (§6). On the user's own PR (the Readiness agent ran), GitHub refuses `approve` and
+`request changes`: say `comment` and add the verdict the rule gave in parentheses, e.g.
+`Suggested verdict: comment (would be request changes: 2 high)`. If every finding layer was skipped or
+failed, say `Suggested verdict: none (no finding layer ran)`.
+
 ## Report (at most 250 words)
 
-The summary from §7, including what exists only in the report: file-less findings, low findings on hidden
+The summary from §7 (suggested verdict first), including what exists only in the report: file-less findings, low findings on hidden
 hunks, the Codex verdict, summary and next steps, raw or native Codex output. Also give:
 
 - comments pruned and comments added per tag, and how many groups §3 merged;

@@ -225,14 +225,16 @@ cr open review RID
 ```
 If it fails (older build), fall back to `open "codereview://review/RID"`.
 
-Tell the user, from the agents' reports only: the review id and the depth or layers used (and why, if
+Tell the user, from the agents' reports only: the **suggested verdict** (approve, request changes or
+comment, with its reason; `merge.md` §7), first; the review id and the depth or layers used (and why, if
 auto); whether the focus was reused, generated or skipped (small PR); comments pruned and added per tag
 (`ai:explain`, `ai:review`, `ai:codex`, `ai:coverage`); the tier counts, the hunks raised and the
 `critical` hunks; with coverage, the score line and the focus areas; any layer skipped or failed and why;
 that the app is open on the review; and the summary (from the agents' reports; it is not saved to the
 review, so nothing is published).
 
-Never set the review body or verdict: the body is what gets published to GitHub. This is an aid, not an approval gate.
+Never set the review body or verdict: the body is what gets published to GitHub. This is an aid, not an
+approval gate: the suggested verdict is for the user to pick in the app, never applied with `cr update`.
 
 ## Reply mode: draft replies to existing GitHub threads
 
