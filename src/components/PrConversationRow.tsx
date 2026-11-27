@@ -52,19 +52,20 @@ export function PrConversationRow({
         )}
       </div>
       {open && (
-        <div className="github-thread pr-conversation-body">
+        <div className="pr-conversation-body">
           {visible.map((c) => (
-            <DiscussionItem
-              key={c.id}
-              comment={c}
-              subjectId={subject.id}
-              onChanged={onChanged}
-              extra={
-                c.hiddenBy.length > 0 ? (
-                  <span className="chip muted">hidden: {c.hiddenBy.map(ruleName).join(", ")}</span>
-                ) : undefined
-              }
-            />
+            <div key={c.id} className={`pr-conversation-item${c.hiddenBy.length > 0 ? " is-hidden" : ""}`}>
+              <DiscussionItem
+                comment={c}
+                subjectId={subject.id}
+                onChanged={onChanged}
+                extra={
+                  c.hiddenBy.length > 0 ? (
+                    <span className="chip muted">hidden: {c.hiddenBy.map(ruleName).join(", ")}</span>
+                  ) : undefined
+                }
+              />
+            </div>
           ))}
           <DiscussionReply subject={subject} onPosted={onChanged} />
         </div>

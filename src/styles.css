@@ -1345,7 +1345,20 @@ td.diff-code {
   cursor: pointer;
 }
 .pr-conversation-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   margin: 0 12px 10px;
+}
+.pr-conversation-item {
+  padding: 8px 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-left: 2px solid var(--info-border);
+  border-radius: var(--radius-m);
+}
+.pr-conversation-item.is-hidden {
+  opacity: 0.75;
 }
 /* PR metadata panel */
 .pr-meta-panel {
