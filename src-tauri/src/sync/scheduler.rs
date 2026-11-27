@@ -77,7 +77,7 @@ impl Default for SyncConfig {
 struct BoardMonitorPayload {
     actions: Vec<crate::board_monitor::MonitorAction>,
     error: Option<String>,
-    /// The last watched PR is gone (merged, closed, auto-merge off): the
+    /// The last watched PR is gone (merged, closed, auto-merge off, given up on): the
     /// frontend turns the monitor off.
     idle: bool,
 }

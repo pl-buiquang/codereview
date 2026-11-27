@@ -219,10 +219,21 @@ fn check(
     Ok(touched)
 }
 
-/// What one pass did, and how many PRs it watched (0 = nothing left to merge).
+/// What one pass did, and how many PRs it still watches (0 = nothing left:
+/// merged, closed, auto-merge off, or given up on).
 pub struct Round {
     pub actions: Vec<MonitorAction>,
     pub watched: usize,
+}
+
+fn watched(candidates: &[Candidate], actions: &[MonitorAction]) -> usize {
+    candidates
+        .iter()
+        .filter(|c| {
+            let mut own = actions.iter().filter(|a| a.card_id == c.card_id).peekable();
+            own.peek().is_none() || !own.all(|a| a.kind == ActionKind::GaveUp)
+        })
+        .count()
 }
 
 /// One pass over the candidates. `gh` calls run unlocked; a per-PR failure is
@@ -246,8 +257,8 @@ pub fn run(db: &Db, floors: &mut CapFloors, reset: bool) -> AppResult<Round> {
     }
     record(&db.0.lock().unwrap(), &actions)?;
     Ok(Round {
+        watched: watched(&candidates, &actions),
         actions,
-        watched: candidates.len(),
     })
 }
 
@@ -406,6 +417,54 @@ mod tests {
             .map(|c| (c.number, c.babysat))
             .collect();
         assert_eq!(babysat, vec![(1, true), (2, true), (3, false)]);
+    }
+
+    fn cand(id: &str, babysat: bool) -> Candidate {
+        Candidate {
+            card_id: id.into(),
+            owner: "owner".into(),
+            name: "repo".into(),
+            number: 1,
+            merge_state_status: None,
+            viewer_can_update_branch: false,
+            ci_status: Some("FAILURE".into()),
+            stacked: false,
+            babysat,
+        }
+    }
+
+    fn kind(id: &str, kind: ActionKind) -> MonitorAction {
+        MonitorAction {
+            card_id: id.into(),
+            repo: "owner/repo".into(),
+            number: 1,
+            kind,
+            detail: String::new(),
+        }
+    }
+
+    #[test]
+    fn prs_only_given_up_on_are_not_watched() {
+        use ActionKind::*;
+        let cands = vec![
+            cand("stuck", false),
+            cand("mixed", false),
+            cand("errored", false),
+            cand("updated", false),
+            cand("quiet", false),
+            cand("babysat", true),
+        ];
+        let actions = vec![
+            kind("stuck", GaveUp),
+            kind("stuck", GaveUp),
+            kind("mixed", GaveUp),
+            kind("mixed", Reran),
+            kind("errored", GaveUp),
+            kind("errored", Error),
+            kind("updated", Updated),
+        ];
+        assert_eq!(watched(&cands, &actions), 5);
+        assert_eq!(watched(&cands[..1], &actions), 0);
     }
 
     #[test]

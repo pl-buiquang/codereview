@@ -623,7 +623,7 @@ export interface MonitorLogEntry {
 export interface BoardMonitorPayload {
   actions: MonitorAction[];
   error: string | null;
-  /** The last watched PR is gone: the monitor turns itself off. */
+  /** The last watched PR is gone or given up on: the monitor turns itself off. */
   idle?: boolean;
 }
 
