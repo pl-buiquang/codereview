@@ -69,6 +69,11 @@ pub async fn set_pr_draft(owner: String, name: String, number: i64, draft: bool)
     provider_for().set_pr_draft(&owner, &name, number, draft)
 }
 
+#[tauri::command]
+pub async fn reopen_pr(owner: String, name: String, number: i64) -> AppResult<()> {
+    provider_for().reopen_pr(&owner, &name, number)
+}
+
 /// Signed image URLs for a comment/review/PR body, for SSO orgs where the
 /// `user-attachments` URLs don't load. `async` for the same reason as `pr_meta`.
 #[tauri::command]

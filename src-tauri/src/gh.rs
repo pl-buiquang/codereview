@@ -1250,6 +1250,19 @@ pub fn set_pr_draft(owner: &str, name: &str, number: i64, draft: bool) -> AppRes
     Ok(())
 }
 
+pub fn reopen_pr(owner: &str, name: &str, number: i64) -> AppResult<()> {
+    let ctx = GhRepo::Remote {
+        owner: owner.to_string(),
+        name: name.to_string(),
+    };
+    let num = number.to_string();
+    let mut args = vec!["pr", "reopen", num.as_str()];
+    let suffix = ctx.pr_args_suffix();
+    args.extend(suffix.iter().map(String::as_str));
+    run_gh(&ctx, &args)?;
+    Ok(())
+}
+
 /// `gh pr merge` args to enable (squash, delete branch) or disable auto-merge.
 pub fn auto_merge_args(enable: bool) -> &'static [&'static str] {
     if enable {

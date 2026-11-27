@@ -1222,6 +1222,31 @@ td.diff-code {
   align-items: center;
   gap: 6px;
 }
+.pr-status-chip {
+  position: relative;
+  display: inline-flex;
+}
+.pr-status-chip-toggle {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  cursor: pointer;
+}
+.pr-status-chip-toggle:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.pr-status-chip .btn-split-menu {
+  left: 0;
+  right: auto;
+  min-width: 180px;
+}
+.pr-status-chip .btn-split-menu button:disabled {
+  color: var(--text-3);
+  cursor: default;
+  background: transparent;
+}
 .head-moved {
   display: flex;
   align-items: center;

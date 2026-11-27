@@ -84,7 +84,7 @@ import { PrMetaPanel, usePrMeta } from "./PrMetaPanel";
 import { ReviewSummaryRow } from "./ReviewSummaryRow";
 import { ReviewSwitcher } from "./ReviewSwitcher";
 import { ImportCommentsDialog } from "./ImportCommentsDialog";
-import { AutoMergeBadge, CiBadge, ReviewDecisionBadge, StatusPill } from "./InboxBadges";
+import { AutoMergeBadge, CiBadge, ReviewDecisionBadge, PrStatusChip } from "./InboxBadges";
 import { Icon } from "./icons";
 import { AgentSessionItems, KebabMenu } from "./KebabMenu";
 import { githubPrUrl } from "../lib/githubUrl";
@@ -1520,6 +1520,34 @@ function ReviewHeader({
     },
   });
 
+  const reopenPr = useMutation({
+    mutationFn: () => {
+      if (owner == null || name == null || prNumber == null) {
+        throw new Error("missing PR identity");
+      }
+      return api.reopenPr(owner, name, prNumber);
+    },
+    onMutate: async () => {
+      const key = ["pr-meta", owner, name, prNumber];
+      await queryClient.cancelQueries({ queryKey: key });
+      const previous = queryClient.getQueryData<PrMeta>(key);
+      if (previous) {
+        queryClient.setQueryData<PrMeta>(key, { ...previous, state: "OPEN" });
+      }
+      return { previous };
+    },
+    onSuccess: () => toast.success("PR reopened"),
+    onError: (e, _vars, context) => {
+      const key = ["pr-meta", owner, name, prNumber];
+      if (context?.previous) queryClient.setQueryData<PrMeta>(key, context.previous);
+      toast.error(`Could not reopen PR:\n${String(e)}`);
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["pr-meta", owner, name, prNumber] });
+      queryClient.invalidateQueries({ queryKey: ["board"] });
+    },
+  });
+
   const updateBranch = useMutation({
     mutationFn: (rebase: boolean) => {
       if (owner == null || name == null || prNumber == null) {
@@ -1780,9 +1808,11 @@ function ReviewHeader({
         <ReviewSwitcher targetId={target.id} currentReviewId={review.id} />
         {isPr && (
           <span className="review-pr-chips">
-            <StatusPill
+            <PrStatusChip
               state={prMetaQuery.data ? prMetaQuery.data.state.toLowerCase() : null}
               isDraft={prMetaQuery.data?.isDraft ?? false}
+              busy={togglePrDraft.isPending}
+              onSetDraft={(draft) => togglePrDraft.mutate(draft)}
             />
             <CiBadge
               state={prMetaQuery.data?.ciState ? prMetaQuery.data.ciState.toLowerCase() : null}
@@ -2084,6 +2114,15 @@ function ReviewHeader({
                     >
                       {approveAndMerge.isPending ? "Approving…" : "🚀 Approve & merge"}
                     </button>
+                    {prMetaQuery.data?.state === "CLOSED" && (
+                      <button
+                        role="menuitem"
+                        disabled={reopenPr.isPending}
+                        onClick={run(() => reopenPr.mutate())}
+                      >
+                        {reopenPr.isPending ? "Reopening…" : "Reopen PR"}
+                      </button>
+                    )}
                     <button
                       role="menuitem"
                       disabled={!prOpen || togglePrDraft.isPending}

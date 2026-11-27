@@ -34,6 +34,7 @@ pub trait ReviewProvider: Send + Sync {
     fn pr_detail(&self, owner: &str, name: &str, number: i64) -> AppResult<PrDetail>;
     /// Flip a PR between draft and ready-for-review.
     fn set_pr_draft(&self, owner: &str, name: &str, number: i64, draft: bool) -> AppResult<()>;
+    fn reopen_pr(&self, owner: &str, name: &str, number: i64) -> AppResult<()>;
     /// Update a PR's head branch from its base (merge, or rebase when `rebase`).
     fn update_pr_branch(&self, owner: &str, name: &str, number: i64, rebase: bool)
         -> AppResult<()>;
@@ -184,6 +185,10 @@ impl ReviewProvider for GithubProvider {
 
     fn set_pr_draft(&self, owner: &str, name: &str, number: i64, draft: bool) -> AppResult<()> {
         gh::set_pr_draft(owner, name, number, draft)
+    }
+
+    fn reopen_pr(&self, owner: &str, name: &str, number: i64) -> AppResult<()> {
+        gh::reopen_pr(owner, name, number)
     }
 
     fn update_pr_branch(

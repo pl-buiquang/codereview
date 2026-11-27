@@ -290,6 +290,8 @@ export const api = {
     invoke<PrMeta | null>("mirror_pr_meta", { owner, name, number }),
   setPrDraft: (owner: string, name: string, number: number, draft: boolean) =>
     invoke<void>("set_pr_draft", { owner, name, number, draft }),
+  reopenPr: (owner: string, name: string, number: number) =>
+    invoke<void>("reopen_pr", { owner, name, number }),
   updatePrBranch: (owner: string, name: string, number: number, rebase: boolean) =>
     invoke<void>("update_pr_branch", { owner, name, number, rebase }),
   setPrAutoMerge: (owner: string, name: string, number: number, enable: boolean) =>

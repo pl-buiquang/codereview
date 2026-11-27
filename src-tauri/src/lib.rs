@@ -396,6 +396,7 @@ pub fn run() {
             commands::gh::pr_meta,
             commands::gh::mirror_pr_meta,
             commands::gh::set_pr_draft,
+            commands::gh::reopen_pr,
             commands::gh::set_pr_label,
             commands::gh::set_pr_reviewer,
             commands::gh::repo_labels,

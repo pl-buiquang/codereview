@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ItemReasonKind } from "../lib/types";
 import { CiChecksPopover, type PrRef } from "./CiChecksPopover";
 import { Icon } from "./icons";
@@ -49,6 +49,62 @@ export function StatusPill({ state, isDraft }: { state: string | null; isDraft: 
   const kind =
     state === "open" ? "badge-open" : state === "merged" ? "badge-pr" : "badge-review";
   return <span className={`badge ${kind}`}>{state}</span>;
+}
+
+export function PrStatusChip({
+  state,
+  isDraft,
+  busy = false,
+  onSetDraft,
+}: {
+  state: string | null;
+  isDraft: boolean;
+  busy?: boolean;
+  onSetDraft: (draft: boolean) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLSpanElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [open]);
+
+  if (state !== "open") return <StatusPill state={state} isDraft={isDraft} />;
+  const pick = (draft: boolean) => () => {
+    setOpen(false);
+    if (draft !== isDraft) onSetDraft(draft);
+  };
+  return (
+    <span ref={ref} className="pr-status-chip">
+      <button
+        className="pr-status-chip-toggle"
+        title="Switch between draft and open"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        disabled={busy}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span className={`badge ${isDraft ? "badge-draft" : "badge-open"}`}>
+          {isDraft ? "draft" : "open"} <Icon name="chev" size={9} />
+        </span>
+      </button>
+      {open && (
+        <div className="btn-split-menu card" role="menu">
+          <button role="menuitem" disabled={isDraft} onClick={pick(true)}>
+            {isDraft ? "✓ " : ""}Draft
+          </button>
+          <button role="menuitem" disabled={!isDraft} onClick={pick(false)}>
+            {!isDraft ? "✓ " : ""}Open (ready for review)
+          </button>
+        </div>
+      )}
+    </span>
+  );
 }
 
 /** The CI chip. With `pr` it becomes a button opening the checks popover. */
