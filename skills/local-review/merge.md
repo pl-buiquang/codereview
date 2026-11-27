@@ -166,8 +166,11 @@ report-only) and the Codex verdict:
 | Condition (first match wins) | Verdict |
 |---|---|
 | any `critical` or `high` finding | `request changes` |
-| any `medium` finding, or Codex `needs-attention` with no finding above `low` | `comment` |
-| only `low` findings, or none | `approve` |
+| any `medium` finding from Standards, Spec or Codex, or Codex `needs-attention` with no finding above `low` | `comment` |
+| otherwise: only `low` findings, `medium` ones from Coverage or Readiness only, or none | `approve` |
+
+A merged group counts as Coverage or Readiness only when every one of its `sources` is. With `approve` and
+such `medium` findings, name them in the reason: `approve (2 medium coverage: untested)`.
 
 Give it as the first line of the summary, with its reason (the counts, or the one finding that decides
 it): `Suggested verdict: request changes (1 critical, 2 high)`. Use the same text after `Verdict:` in
