@@ -1006,12 +1006,6 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
                 queryClient.invalidateQueries({ queryKey: ["reviews"] });
               }}
             />
-          {!readOnly && (
-            <p className="hint muted">
-              Click a line to comment · shift-click another line on the same side to select a range.
-              · press ? for shortcuts
-            </p>
-          )}
           {focusView &&
             (focusView.focus.planned_at == null ||
               focusView.focus.level !== "off" ||
