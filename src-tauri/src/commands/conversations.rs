@@ -104,6 +104,20 @@ impl IgnoreRule {
             || self.approvals_only.is_some()
     }
 
+    fn applies_to_comments(&self) -> bool {
+        self.resolved.is_none()
+            && self.outdated.is_none()
+            && self.kind.as_deref() != Some("thread")
+            && self.subject_closed.is_none()
+            && self.subject_mine.is_none()
+            && self.involved.is_none()
+            && self.i_commented.is_none()
+    }
+
+    fn matches_comment(&self, f: &Facts) -> bool {
+        self.applies_to_comments() && self.matches(f)
+    }
+
     fn matches(&self, f: &Facts) -> bool {
         if !self.has_conditions() {
             return false;
@@ -298,6 +312,19 @@ struct Ctx {
 }
 
 impl Ctx {
+    fn load(conn: &Connection, bot_logins: &[String]) -> AppResult<Self> {
+        Ok(Ctx {
+            viewer: mirror::store::viewer_login(conn).map(|v| v.to_lowercase()),
+            baseline: crate::commands::inbox::get_meta(conn, "conversations_seen_baseline")
+                .and_then(|t| ts(&t)),
+            bot_logins: bot_logins.iter().map(|l| l.to_lowercase()).collect(),
+            db_bots: conn
+                .prepare("SELECT LOWER(login) FROM gh_user WHERE is_bot = 1")?
+                .query_map([], |r| r.get(0))?
+                .collect::<rusqlite::Result<_>>()?,
+        })
+    }
+
     fn is_bot(&self, a: Option<&gh::PrActor>) -> bool {
         let Some(a) = a else { return false };
         let login = a.login.as_deref().map(str::to_lowercase);
@@ -396,16 +423,7 @@ pub fn list_conversations_impl(
     f: &ConversationFilters,
     limit: usize,
 ) -> AppResult<ConversationList> {
-    let ctx = Ctx {
-        viewer: mirror::store::viewer_login(conn).map(|v| v.to_lowercase()),
-        baseline: crate::commands::inbox::get_meta(conn, "conversations_seen_baseline")
-            .and_then(|t| ts(&t)),
-        bot_logins: f.bot_logins.iter().map(|l| l.to_lowercase()).collect(),
-        db_bots: conn
-            .prepare("SELECT LOWER(login) FROM gh_user WHERE is_bot = 1")?
-            .query_map([], |r| r.get(0))?
-            .collect::<rusqlite::Result<_>>()?,
-    };
+    let ctx = Ctx::load(conn, &f.bot_logins)?;
     let state: HashMap<String, (bool, Option<String>)> = conn
         .prepare("SELECT id, pinned_at IS NOT NULL, last_seen_at FROM conversation_state")?
         .query_map([], |r| Ok((r.get(0)?, (r.get(1)?, r.get(2)?))))?
@@ -690,6 +708,93 @@ pub async fn reply_to_discussion(
     refresh_discussion(&app, &db, &subject_id)
 }
 
+/// A PR's top-level comment for the review view, with why it's hidden: `bot`
+/// and/or the ids of the enabled ignore rules matching it alone.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewDiscussionComment {
+    #[serde(flatten)]
+    pub comment: DiscussionComment,
+    pub hidden_by: Vec<String>,
+}
+
+pub fn pr_discussion_impl(
+    conn: &Connection,
+    subject_id: &str,
+    bot_logins: &[String],
+    rules: &[IgnoreRule],
+) -> AppResult<Option<Vec<ReviewDiscussionComment>>> {
+    let Some(comments) = mirror::store::read_discussion(conn, subject_id)? else {
+        return Ok(None);
+    };
+    let ctx = Ctx::load(conn, bot_logins)?;
+    let now = crate::clock::now();
+    let is_me = |a: Option<&gh::PrActor>| matches!((a.and_then(|a| a.login.as_deref()), &ctx.viewer), (Some(l), Some(v)) if l.eq_ignore_ascii_case(v));
+    let out = comments
+        .into_iter()
+        .map(|c| {
+            let is_bot = ctx.is_bot(c.author.as_ref());
+            let facts = Facts {
+                kind: "discussion",
+                resolved: false,
+                outdated: false,
+                last_author: c.author.as_ref().and_then(|a| a.login.clone()),
+                last_is_me: is_me(c.author.as_ref()),
+                last_is_bot: is_bot,
+                last_body: c.body.clone(),
+                subject_closed: false,
+                subject_mine: false,
+                i_commented: false,
+                subject_involved: false,
+                approvals_only: !is_bot
+                    && c.kind == "review"
+                    && c.review_state.as_deref() == Some("APPROVED"),
+                age_days: ts(&c.created_at).map(|t| now.duration_since(t).as_secs() / 86_400),
+            };
+            let mut hidden_by: Vec<String> = Vec::new();
+            if is_bot {
+                hidden_by.push("bot".into());
+            }
+            hidden_by.extend(
+                rules
+                    .iter()
+                    .filter(|r| r.enabled && r.matches_comment(&facts))
+                    .map(|r| r.id.clone()),
+            );
+            ReviewDiscussionComment {
+                comment: c,
+                hidden_by,
+            }
+        })
+        .collect();
+    Ok(Some(out))
+}
+
+/// The PR's top-level comments as last mirrored, shown while `pr_discussion` syncs.
+#[tauri::command]
+pub fn mirror_pr_discussion(
+    subject_id: String,
+    bot_logins: Vec<String>,
+    rules: Vec<IgnoreRule>,
+    db: State<Db>,
+) -> AppResult<Option<Vec<ReviewDiscussionComment>>> {
+    pr_discussion_impl(&db.0.lock().unwrap(), &subject_id, &bot_logins, &rules)
+}
+
+/// Refetch the PR's top-level comments, then read them like `mirror_pr_discussion`.
+/// `async` so the `gh` calls stay off the UI thread.
+#[tauri::command]
+pub async fn pr_discussion(
+    subject_id: String,
+    bot_logins: Vec<String>,
+    rules: Vec<IgnoreRule>,
+    app: AppHandle,
+    db: State<'_, Db>,
+) -> AppResult<Option<Vec<ReviewDiscussionComment>>> {
+    refresh_discussion(&app, &db, &subject_id)?;
+    pr_discussion_impl(&db.0.lock().unwrap(), &subject_id, &bot_logins, &rules)
+}
+
 /// Re-read a subject's discussion facet from GitHub into the mirror and tell the UI.
 pub(crate) fn refresh_discussion(app: &AppHandle, db: &Db, subject_id: &str) -> AppResult<()> {
     let ids = [subject_id.to_string()];
@@ -970,6 +1075,52 @@ mod tests {
             enabled: true,
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn pr_discussion_marks_bots_and_comment_level_rules() {
+        let conn = open_memory();
+        assert!(pr_discussion_impl(&conn, "PR_1", &[], &[])
+            .unwrap()
+            .is_none());
+        let comments = serde_json::json!([
+            { "id": "C1", "kind": "comment", "author": { "login": "github-actions", "__typename": "Bot" }, "body": "validator passed",
+              "createdAt": "2026-01-02T00:00:00Z", "url": "u1" },
+            { "id": "R1", "kind": "review", "reviewState": "CHANGES_REQUESTED", "author": { "login": "bob", "__typename": "User" },
+              "body": "please fix", "createdAt": "2026-01-03T00:00:00Z", "url": "u2" },
+            { "id": "C2", "kind": "comment", "author": { "login": "Sonar", "__typename": "User" }, "body": "quality gate",
+              "createdAt": "2026-01-04T00:00:00Z", "url": "u3" }]);
+        conn.execute("INSERT INTO gh_discussion (subject_id, comments_json, fetched_at) VALUES ('PR_1', ?1, 'now')", params![comments.to_string()]).unwrap();
+        let rules = vec![
+            IgnoreRule {
+                body_contains: Some("gate".into()),
+                ..rule("gate")
+            },
+            IgnoreRule {
+                involved: Some(false),
+                ..rule("not-involved")
+            },
+            IgnoreRule {
+                authors: vec!["bob".into()],
+                enabled: false,
+                ..rule("bob-off")
+            },
+        ];
+        let got = pr_discussion_impl(&conn, "PR_1", &["sonar".into()], &rules)
+            .unwrap()
+            .unwrap();
+        let hidden: Vec<(&str, Vec<String>)> = got
+            .iter()
+            .map(|c| (c.comment.id.as_str(), c.hidden_by.clone()))
+            .collect();
+        assert_eq!(
+            hidden,
+            vec![
+                ("C1", vec!["bot".to_string()]),
+                ("R1", vec![]),
+                ("C2", vec!["bot".to_string(), "gate".to_string()]),
+            ]
+        );
     }
 
     #[test]

@@ -417,6 +417,20 @@ pub fn read_threads(
 
 /// Wipe the mirror (facets cascade). User tables keep their soft refs and show
 /// placeholders until the next sync refetches them.
+pub fn read_discussion(
+    conn: &Connection,
+    subject_id: &str,
+) -> AppResult<Option<Vec<crate::mirror::fetch::DiscussionComment>>> {
+    let json: Option<String> = conn
+        .query_row(
+            "SELECT comments_json FROM gh_discussion WHERE subject_id = ?1",
+            params![subject_id],
+            |r| r.get(0),
+        )
+        .optional()?;
+    Ok(json.map(|s| serde_json::from_str(&s).unwrap_or_default()))
+}
+
 /// Store a subject's discussion facet (top-level comments + review bodies).
 pub fn upsert_discussion(
     conn: &Connection,

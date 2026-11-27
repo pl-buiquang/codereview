@@ -89,7 +89,8 @@ import { Icon } from "./icons";
 import { AgentSessionItems, KebabMenu } from "./KebabMenu";
 import { githubPrUrl } from "../lib/githubUrl";
 import { useDebouncedCallback } from "../lib/useDebouncedCallback";
-import { useAiDisabledReason, useSettingsStore } from "../lib/settings";
+import { parseBotLogins, useAiDisabledReason, useSettingsStore } from "../lib/settings";
+import { PrConversationRow } from "./PrConversationRow";
 import { autoSyncRefetch } from "../lib/sync";
 import { useUIStore } from "../store";
 import {
@@ -367,6 +368,24 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
     enabled: threadsEnabled && isActiveTab,
     queryFn: () => api.prReviewThreads(owner!, name!, prNumber!),
     placeholderData: mirroredThreads.data ?? undefined,
+    staleTime: 30_000,
+    ...autoSyncRefetch(autoSync, 3 * 60_000),
+  });
+  const discussionSubjectId = target?.kind === "github_pr" ? (target.gh_pr_id ?? null) : null;
+  const botLoginsSetting = useSettingsStore((s) => s.botLogins);
+  const discussionBots = useMemo(() => [...parseBotLogins(botLoginsSetting)], [botLoginsSetting]);
+  const discussionRules = useSettingsStore((s) => s.conversationIgnoreRules);
+  const mirroredDiscussion = useQuery({
+    queryKey: ["pr-discussion-mirror", discussionSubjectId, discussionBots, discussionRules],
+    enabled: discussionSubjectId != null,
+    queryFn: () => api.mirrorPrDiscussion(discussionSubjectId!, discussionBots, discussionRules),
+    staleTime: Infinity,
+  });
+  const discussionQuery = useQuery({
+    queryKey: ["pr-discussion", discussionSubjectId, discussionBots, discussionRules],
+    enabled: discussionSubjectId != null && isActiveTab,
+    queryFn: () => api.prDiscussion(discussionSubjectId!, discussionBots, discussionRules),
+    placeholderData: mirroredDiscussion.data ?? undefined,
     staleTime: 30_000,
     ...autoSyncRefetch(autoSync, 3 * 60_000),
   });
@@ -1006,6 +1025,14 @@ export function ReviewView({ reviewId }: { reviewId: number }) {
                 queryClient.invalidateQueries({ queryKey: ["reviews"] });
               }}
             />
+          {discussionSubjectId != null && owner && name && prNumber != null && (discussionQuery.data?.length ?? 0) > 0 && (
+            <PrConversationRow
+              subject={{ id: discussionSubjectId, owner, name, number: prNumber }}
+              comments={discussionQuery.data ?? []}
+              rules={discussionRules}
+              onChanged={() => queryClient.invalidateQueries({ queryKey: ["pr-discussion", discussionSubjectId] })}
+            />
+          )}
           {focusView &&
             (focusView.focus.planned_at == null ||
               focusView.focus.level !== "off" ||

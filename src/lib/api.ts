@@ -39,6 +39,7 @@ import type {
   ConversationFilters,
   ConversationList,
   IgnoreRule,
+  ReviewDiscussionComment,
   InboxMeta,
   PrActor,
   PrLabel,
@@ -378,6 +379,10 @@ export const api = {
   /** Read up to `seenAt` (a conversation's latest comment time); an earlier time marks it unread. */
   setConversationSeen: (id: string, subjectId: string, seenAt: string | null) =>
     invoke<void>("set_conversation_seen", { id, subjectId, seenAt }),
+  mirrorPrDiscussion: (subjectId: string, botLogins: string[], rules: IgnoreRule[]) =>
+    invoke<ReviewDiscussionComment[] | null>("mirror_pr_discussion", { subjectId, botLogins, rules }),
+  prDiscussion: (subjectId: string, botLogins: string[], rules: IgnoreRule[]) =>
+    invoke<ReviewDiscussionComment[] | null>("pr_discussion", { subjectId, botLogins, rules }),
   replyToDiscussion: (subjectId: string, owner: string, name: string, number: number, body: string) =>
     invoke<void>("reply_to_discussion", { subjectId, owner, name, number, body }),
   inboxMeta: () => invoke<InboxMeta>("inbox_meta"),

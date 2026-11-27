@@ -1067,6 +1067,11 @@ export interface DiscussionComment {
   reactions?: ReactionGroup[];
 }
 
+export interface ReviewDiscussionComment extends DiscussionComment {
+  /** `bot` and/or the ids of the enabled ignore rules hiding it. */
+  hiddenBy: string[];
+}
+
 export interface ConversationSubject {
   id: string;
   kind: "pr" | "issue";

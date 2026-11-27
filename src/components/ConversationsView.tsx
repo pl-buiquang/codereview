@@ -8,11 +8,11 @@ import { parseBotLogins, parseRepoBasePaths, useSettingsStore } from "../lib/set
 import { timeAgo } from "../lib/timeAgo";
 import { toast } from "../lib/toast";
 import { EMPTY_CONVERSATION_FILTERS, useUIStore } from "../store";
-import type { Conversation, DiscussionComment } from "../lib/types";
-import { GithubThread, ThreadComment } from "./GithubThread";
+import type { Conversation } from "../lib/types";
+import { GithubThread } from "./GithubThread";
 import { Icon } from "./icons";
 import { FilterRail, MultiFilterList, RailSection } from "./RailFilters";
-import { Composer } from "./ReviewView";
+import { DiscussionItem, DiscussionReply } from "./Discussion";
 import { RepoName } from "./RepoName";
 import { TagFilter } from "./TagFilter";
 
@@ -311,53 +311,13 @@ function HunkSnippet({ path, diffHunk }: { path: string; diffHunk: string }) {
 }
 
 function Discussion({ c, onChanged }: { c: Conversation; onChanged: () => void }) {
-  const [replying, setReplying] = useState(false);
   const { subject } = c;
   return (
     <div className="github-thread">
       {c.comments.map((d) => (
         <DiscussionItem key={d.id} comment={d} subjectId={subject.id} onChanged={onChanged} />
       ))}
-      <div className="github-thread-reply">
-        {!replying ? (
-          <button className="github-thread-action" onClick={() => setReplying(true)}>
-            Comment…
-          </button>
-        ) : (
-          <Composer
-            submitLabel="Comment"
-            onSubmit={async (text) => {
-              try {
-                await api.replyToDiscussion(subject.id, subject.owner, subject.name, subject.number, text);
-                setReplying(false);
-                onChanged();
-              } catch (e) {
-                toast.error(`Comment failed:\n${String(e)}`);
-              }
-            }}
-            onCancel={() => setReplying(false)}
-          />
-        )}
-      </div>
-    </div>
-  );
-}
-
-function DiscussionItem({
-  comment,
-  subjectId,
-  onChanged,
-}: {
-  comment: DiscussionComment;
-  subjectId: string;
-  onChanged: () => void;
-}) {
-  const body = <ThreadComment comment={comment} interactive discussionSubjectId={subjectId} onReacted={onChanged} />;
-  if (comment.kind === "comment") return body;
-  return (
-    <div>
-      <span className="chip">review · {(comment.reviewState ?? "commented").toLowerCase().replace(/_/g, " ")}</span>
-      {body}
+      <DiscussionReply subject={subject} onPosted={onChanged} />
     </div>
   );
 }

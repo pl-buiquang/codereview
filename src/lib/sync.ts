@@ -13,7 +13,7 @@ export const SYNC_STATUS_EVENT = "sync-status";
 export const BOARD_MONITOR_EVENT = "board-monitor";
 
 /** Queries that only read the mirror (SQLite), so invalidating them never
- *  calls GitHub. The Review's live ["pr-meta"] / ["pr-threads"] queries are
+ *  calls GitHub. The Review's live ["pr-meta"] / ["pr-threads"] / ["pr-discussion"] queries are
  *  fetchers themselves and are deliberately not listed. */
 const MIRROR_QUERY_KEYS = [
   ["inbox"],
@@ -26,6 +26,7 @@ const MIRROR_QUERY_KEYS = [
   ["board-card-for-pr"],
   ["pr-meta-mirror"],
   ["pr-threads-mirror"],
+  ["pr-discussion-mirror"],
   ["reviews"],
 ];
 

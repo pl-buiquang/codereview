@@ -422,6 +422,8 @@ pub fn run() {
             commands::conversations::set_conversation_pinned,
             commands::conversations::set_conversation_seen,
             commands::conversations::reply_to_discussion,
+            commands::conversations::mirror_pr_discussion,
+            commands::conversations::pr_discussion,
             commands::inbox::archive_item,
             commands::inbox::forget_item,
             commands::inbox::restore_item,
